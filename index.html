@@ -184,19 +184,19 @@
     <div>
       <div class="section-title">Paint mode</div>
       <div class="mode-toggle">
-        <button id="modeTile" class="active">Tiles</button>
-        <button id="modeActor">Actors</button>
+        <button id="modeTile">Tiles</button>
+        <button id="modeActor" class="active">Actors</button>
         <button id="modeWorld">World</button>
         <button id="modeErase">Erase</button>
       </div>
     </div>
 
-    <div id="tilePropertiesBlock">
+    <div id="tilePropertiesBlock" style="display:none;">
       <div class="section-title">Tile property</div>
       <div class="swatch-row" id="tileSwatches"></div>
     </div>
 
-    <div id="actorPropertiesBlock" style="display:none;">
+    <div id="actorPropertiesBlock">
       <div class="section-title">Temperament (for actors the player runs into)</div>
       <div class="swatch-row" id="actorSwatches"></div>
       <div class="section-title" style="margin-top:10px;">The player (only one)</div>
@@ -211,8 +211,10 @@
       <div class="section-title">World pieces</div>
       <div class="swatch-row" id="worldSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Placed like a tile, but it doesn't do anything on contact — it changes the rules
-        nearby. A gravity piece makes things fall in the tiles below it.
+        Placed like a tile, but it doesn't do anything on contact — it changes the rules for
+        the whole world once dropped anywhere. Gravity makes everything fall. Wrap pieces
+        make an edge loop around to the opposite side instead of stopping you — one for
+        each direction, so you can loop just one axis if you want.
       </div>
     </div>
 
@@ -225,7 +227,8 @@
     </div>
 
     <div id="pixelEditorBlock">
-      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">tile</span></div>
+      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">player</span></div>
+      <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
       <div id="pixelEditor">
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
         <div id="colorRow"></div>
@@ -249,7 +252,7 @@
       <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
       <div id="hud">Score: <span id="scoreVal">0</span></div>
     </div>
-    <canvas id="gameCanvas" width="384" height="288"></canvas>
+    <canvas id="gameCanvas" width="768" height="576"></canvas>
     <div id="dpad">
       <button class="dpad-up" data-dir="up">▲</button>
       <button class="dpad-left" data-dir="left">◀</button>
@@ -266,9 +269,9 @@
   "use strict";
 
   // ============== Grid (authoring) constants ==============
-  const COLS = 12, ROWS = 9, TILE = 16, ART = 8;
-  const ACTOR_INSET = 2;
-  const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, slightly inset from the cell
+  const COLS = 24, ROWS = 18, TILE = 32, ART = 8;
+  const ACTOR_INSET = 5;
+  const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, ~30% margin inside the cell
 
   const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal"];
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
@@ -282,7 +285,6 @@
   };
   const PLAYER_COLOR = "#ffd166";
   const PLAYER_DEF_ID = "player";
-  const GRAVITY_DEF_ID = "gravity";
 
   const PALETTE_COLORS = [
     "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff",
@@ -291,21 +293,20 @@
   ];
 
   // ============== Continuous physics constants ==============
-  const GRAVITY = 1200;          // px/s^2, applied only inside a gravity marker's zone
-  const GRAVITY_RANGE = 7;       // tiles below a marker that stay live — propagates locally,
-                                  // not down the whole column (the v1 prototype's noted follow-up),
-                                  // but wide enough on this 9-row board that a marker near the top
-                                  // still reaches the floor rather than dropping a kid mid-air
-  const JUMP_VELOCITY = -310;    // px/s upward impulse, only while grounded and in a gravity zone
-  const MOVE_ACCEL = 900;        // px/s^2, player/NPC horizontal (and free-roam vertical) accel
-  const MAX_SPEED = 110;         // px/s, player cap
-  const NPC_MAX_SPEED = 80;      // px/s, NPC steering cap — slower than the player, on purpose
-  const NPC_ACCEL = 700;
-  const FRICTION_DECEL = 900;
+  // Tuned to match continuous-motion-test.html's own validated numbers for a 32px tile
+  // (gravity/jump/accel/friction/max-fall come straight from that prototype); everything
+  // else here is the same 2x scale-up from the previous 16px-tile pass.
+  const GRAVITY = 1800;          // px/s^2, on globally once any gravity piece is placed
+  const JUMP_VELOCITY = -620;    // px/s upward impulse, only while grounded and gravity is on
+  const MOVE_ACCEL = 2200;       // px/s^2, player/NPC horizontal (and free-roam vertical) accel
+  const MAX_SPEED = 220;         // px/s, player cap
+  const NPC_MAX_SPEED = 160;     // px/s, NPC steering cap — slower than the player, on purpose
+  const NPC_ACCEL = 1400;
+  const FRICTION_DECEL = 1800;
   const SLIPPERY_FRICTION_MULT = 0.12; // reduced friction while standing on/in a slippery tile
-  const MAX_FALL = 500;
+  const MAX_FALL = 900;
   const BOUNCE_RESTITUTION = 0.82;
-  const HAZARD_KNOCKBACK_SPEED = 190;
+  const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
 
   // ============== State ==============
@@ -315,17 +316,23 @@
   let nextActorDefId = 1;
 
   let board = [];            // ROWS x COLS, each cell = tileDefId or null
-  let gravityMarkers = [];   // [{x,y}] grid cells — the placed world-marker for gravity
+  // Placed world-markers, one array per kind — each just [{x,y}] grid cells. Their effect is
+  // global once any exists (see #5/#6 of the v2.1 patch): a marker is how you discover/place
+  // the rule, not a scope it's confined to.
+  let worldMarkers = { gravity: [], wrapH: [], wrapV: [] };
   let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...}
   let nextActorInstId = 1;
 
   let startPos = { x: 0, y: 0 }; // continuous pixel position
 
-  let paintMode = "tile"; // 'tile' | 'actor' | 'world' | 'erase'
+  // Defaults put the player one click away on a blank canvas — no trip to "actor mode" first.
+  let paintMode = "actor"; // 'tile' | 'actor' | 'world' | 'erase'
   let selectedTileProp = "walkable";
-  let selectedActorKind = "stationary"; // one of TEMPERAMENTS, or "player"
+  let selectedActorKind = "player"; // one of TEMPERAMENTS, or "player"
+  let selectedWorldKind = "gravity"; // 'gravity' | 'wrapH' | 'wrapV'
   let selectedTileDefId = null;
   let selectedActorDefId = null;
+  let selectedPoseKey = "stand"; // 'stand' | 'stride' | 'air' | 'crouch' — only used for posed defs
 
   let currentArt = new Array(ART * ART).fill(null);
   let currentColor = PALETTE_COLORS[2];
@@ -347,27 +354,6 @@
 
   function makeDefaultArt(hex) { return new Array(ART * ART).fill(hex); }
 
-  TILE_PROPS.forEach(prop => {
-    const id = "t" + (nextTileDefId++);
-    tileDefs[id] = { property: prop, art: makeDefaultArt(TILE_COLORS[prop]), name: prop };
-  });
-  TEMPERAMENTS.forEach(temp => {
-    const id = "a" + (nextActorDefId++);
-    actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), name: temp };
-  });
-  actorDefs[PLAYER_DEF_ID] = { temperament: null, art: makeDefaultArt(PLAYER_COLOR), name: "player" };
-
-  function findDefaultTileDef(prop) {
-    return Object.keys(tileDefs).find(id => tileDefs[id].property === prop && tileDefs[id].name === prop);
-  }
-  function findDefaultActorDef(temp) {
-    return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
-  }
-
-  selectedTileDefId = findDefaultTileDef(selectedTileProp);
-  selectedActorDefId = findDefaultActorDef(selectedActorKind);
-  currentArt = tileDefs[selectedTileDefId].art.slice();
-
   // ============== Sprite presets — "grab a piece off a shelf", not a template menu ==============
   // Small hand-authored 8x8 patterns via ASCII rows + a color legend, so they're readable to edit
   // here instead of raw 64-entry hex arrays. Loading one just fills currentArt for whatever's
@@ -379,7 +365,66 @@
     }
     return art;
   }
+
+  // Continuous procedural deformation (skew/scale) reads fine on a blocky sprite but looks
+  // broken on a thin articulated figure — a stick figure skewed along one axis just looks
+  // wrong, not "landed hard." Humanoid presets ship with real hand-drawn poses instead,
+  // switched by physical state (see currentPoseFor()) rather than deformed continuously.
+  const STICK_LEGEND = { M: PLAYER_COLOR, K: "#2b2b2b" };
+  const STICK_POSES = {
+    stand: pat([
+      "..MM....", "..MM....", ".KMMK...", "..MM....",
+      "..MM....", "..MM....", "..M.M...", "..M.M..."
+    ], STICK_LEGEND),
+    stride: pat([
+      "..MM....", "..MM....", "K.MM..K.", ".KMM....",
+      "..MM....", "..MM....", ".M...M..", "M.....M."
+    ], STICK_LEGEND),
+    air: pat([
+      "..MM....", "..MM....", "K..MM..K", "..MM....",
+      "..MM....", "..MMM...", "..M.M...", "........"
+    ], STICK_LEGEND),
+    crouch: pat([
+      "..MM....", "..MM....", "..MM....", ".MMMM...",
+      ".MMMM...", "M.MMM.M.", "M.M.M.M.", "........"
+    ], STICK_LEGEND)
+  };
+
+  // The art currently "active" for a def: its single flat art, or — for a posed def — whichever
+  // pose the editor currently has open (falling back to "stand" if that pose is somehow unset).
+  function activeArtFor(def) {
+    return def.poses ? (def.poses[selectedPoseKey] || def.poses.stand) : def.art;
+  }
+
+  TILE_PROPS.forEach(prop => {
+    const id = "t" + (nextTileDefId++);
+    tileDefs[id] = { property: prop, art: makeDefaultArt(TILE_COLORS[prop]), name: prop };
+  });
+  TEMPERAMENTS.forEach(temp => {
+    const id = "a" + (nextActorDefId++);
+    actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), poses: null, name: temp };
+  });
+  // The player's default look is already the posed stick figure, so placing it with zero
+  // setup already demonstrates real per-pose art, not a flat-color block.
+  actorDefs[PLAYER_DEF_ID] = {
+    temperament: null, art: STICK_POSES.stand.slice(),
+    poses: { stand: STICK_POSES.stand.slice(), stride: STICK_POSES.stride.slice(), air: STICK_POSES.air.slice(), crouch: STICK_POSES.crouch.slice() },
+    name: "player"
+  };
+
+  function findDefaultTileDef(prop) {
+    return Object.keys(tileDefs).find(id => tileDefs[id].property === prop && tileDefs[id].name === prop);
+  }
+  function findDefaultActorDef(temp) {
+    return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
+  }
+
+  selectedTileDefId = findDefaultTileDef(selectedTileProp);
+  selectedActorDefId = selectedActorKind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(selectedActorKind);
+  currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
+
   const SPRITE_PRESETS = [
+    { name: "stick figure", poses: STICK_POSES },
     { name: "player", art: pat([
       "..MMMM..", ".MMMMMM.", "MM.KK.MM", "MMMMMMMM",
       "MMMMMMMM", ".MM..MM.", ".MM..MM.", ".M....M."
@@ -484,7 +529,7 @@
   const gctx = gameCanvas.getContext("2d");
   gameCanvas.width = COLS * TILE;
   gameCanvas.height = ROWS * TILE;
-  const DISPLAY_SCALE = 2;
+  const DISPLAY_SCALE = 1; // board is already 768x576 native at the new 32px tile size
   gameCanvas.style.width = (COLS * TILE * DISPLAY_SCALE) + "px";
   gameCanvas.style.height = (ROWS * TILE * DISPLAY_SCALE) + "px";
 
@@ -580,7 +625,8 @@
     selectedActorKind = kind;
     paintMode = "actor";
     selectedActorDefId = kind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(kind);
-    currentArt = actorDefs[selectedActorDefId].art.slice();
+    selectedPoseKey = "stand";
+    currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
     updateModeButtons();
     renderAll();
   }
@@ -618,24 +664,35 @@
     container.appendChild(sw);
   }
 
+  const WORLD_PIECES = [
+    { kind: "gravity", label: "gravity", glyph: "▼" },
+    { kind: "wrapH", label: "h-wrap", glyph: "↔" },
+    { kind: "wrapV", label: "v-wrap", glyph: "↕" }
+  ];
   function renderWorldSwatches() {
     const container = document.getElementById("worldSwatches");
     container.innerHTML = "";
-    const sw = document.createElement("div");
-    sw.className = "swatch selected"; // only one world piece exists so far — always "selected"
-    sw.style.background = "#2f3140";
-    sw.title = "gravity";
-    const icon = document.createElement("div");
-    icon.style.width = "0"; icon.style.height = "0";
-    icon.style.borderLeft = "9px solid transparent";
-    icon.style.borderRight = "9px solid transparent";
-    icon.style.borderTop = "14px solid " + PLAYER_COLOR;
-    sw.appendChild(icon);
-    const label = document.createElement("div");
-    label.className = "lbl";
-    label.textContent = "gravity";
-    sw.appendChild(label);
-    container.appendChild(sw);
+    WORLD_PIECES.forEach(piece => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedWorldKind === piece.kind ? " selected" : "");
+      sw.style.background = "#2f3140";
+      sw.title = piece.label;
+      const glyph = document.createElement("div");
+      glyph.style.fontSize = "18px";
+      glyph.style.color = PLAYER_COLOR;
+      glyph.textContent = piece.glyph;
+      sw.appendChild(glyph);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = piece.label;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => { selectedWorldKind = piece.kind; renderAll(); });
+      container.appendChild(sw);
+    });
+  }
+
+  function currentSelectedDef() {
+    return paintMode === "actor" ? actorDefs[selectedActorDefId] : (paintMode === "tile" ? tileDefs[selectedTileDefId] : null);
   }
 
   function renderPresetSwatches() {
@@ -647,12 +704,21 @@
       sw.title = preset.name;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), preset.art, ART);
+      drawArtToCtx(c.getContext("2d"), preset.poses ? preset.poses.stand : preset.art, ART);
       sw.appendChild(c);
       sw.addEventListener("click", () => {
-        currentArt = preset.art.slice();
+        const def = currentSelectedDef();
+        if (!def) return;
+        if (preset.poses) {
+          def.poses = { stand: preset.poses.stand.slice(), stride: preset.poses.stride.slice(), air: preset.poses.air.slice(), crouch: preset.poses.crouch.slice() };
+          def.art = def.poses.stand.slice();
+          selectedPoseKey = "stand";
+        } else {
+          def.poses = null; // grabbing a flat-art preset reverts a previously-posed def to simple mode
+          def.art = preset.art.slice();
+        }
+        currentArt = activeArtFor(def).slice();
         renderPixelCanvas();
-        commitArtToActiveDef();
         renderAll();
         log("Grabbed the \"" + preset.name + "\" sprite — keep editing it, or place it as-is.");
       });
@@ -670,6 +736,29 @@
       sw.title = color || "eraser";
       sw.addEventListener("click", () => { currentColor = color; renderColorRow(); });
       row.appendChild(sw);
+    });
+  }
+
+  const POSE_TABS = [
+    { key: "stand", label: "Stand" }, { key: "stride", label: "Stride" },
+    { key: "air", label: "Air" }, { key: "crouch", label: "Crouch" }
+  ];
+  function renderPoseTabs() {
+    const row = document.getElementById("poseTabRow");
+    const def = currentSelectedDef();
+    if (!def || !def.poses) { row.style.display = "none"; row.innerHTML = ""; return; }
+    row.style.display = "flex";
+    row.innerHTML = "";
+    POSE_TABS.forEach(tab => {
+      const btn = document.createElement("button");
+      btn.textContent = tab.label;
+      btn.className = selectedPoseKey === tab.key ? "active" : "";
+      btn.addEventListener("click", () => {
+        selectedPoseKey = tab.key;
+        currentArt = activeArtFor(def).slice();
+        renderAll();
+      });
+      row.appendChild(btn);
     });
   }
 
@@ -696,7 +785,7 @@
   });
   document.getElementById("modeActor").addEventListener("click", () => {
     paintMode = "actor";
-    currentArt = actorDefs[selectedActorDefId].art.slice();
+    currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
     updateModeButtons(); renderAll();
   });
   document.getElementById("modeWorld").addEventListener("click", () => {
@@ -736,8 +825,17 @@
   }
 
   function commitArtToActiveDef() {
-    if (paintMode === "actor") actorDefs[selectedActorDefId].art = currentArt.slice();
-    else if (paintMode === "tile") tileDefs[selectedTileDefId].art = currentArt.slice();
+    if (paintMode === "actor") {
+      const def = actorDefs[selectedActorDefId];
+      if (def.poses) {
+        def.poses[selectedPoseKey] = currentArt.slice();
+        if (selectedPoseKey === "stand") def.art = currentArt.slice();
+      } else {
+        def.art = currentArt.slice();
+      }
+    } else if (paintMode === "tile") {
+      tileDefs[selectedTileDefId].art = currentArt.slice();
+    }
   }
 
   pixelCanvas.addEventListener("mousedown", (e) => { isDrawingPixel = true; paintPixel(e); });
@@ -760,8 +858,12 @@
     const id = board[gy][gx];
     return id ? tileDefs[id] : null;
   }
+  // Board edges act solid by default (a hard boundary hit exactly like a solid tile) — unless
+  // a wrap piece has been placed for that axis, in which case that edge stops blocking at all
+  // and applyWorldWrap() teleports whatever crosses it to the opposite side.
   function tilePropAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return "solid"; // board edges act solid
+    if (gx < 0 || gx >= COLS) return worldMarkers.wrapH.length > 0 ? "walkable" : "solid";
+    if (gy < 0 || gy >= ROWS) return worldMarkers.wrapV.length > 0 ? "walkable" : "solid";
     const t = tileAt(gx, gy);
     return t ? t.property : "walkable";
   }
@@ -778,18 +880,24 @@
     return false;
   }
 
-  function isGravityZoneAt(gx, gy) {
-    for (const m of gravityMarkers) {
-      if (m.x === gx && gy >= m.y && (gy - m.y) <= GRAVITY_RANGE) return true;
+  // Gravity is a placed marker, not a scoped zone: one piece dropped anywhere turns it on for
+  // the whole world (simplified from the earlier per-column-range version — on a board this
+  // size that range was nearly indistinguishable from "everywhere" anyway, so the zone logic
+  // wasn't earning its complexity yet).
+  function gravityOn() { return worldMarkers.gravity.length > 0; }
+
+  // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
+  // relevant once a wrap piece exists for that axis — otherwise that edge is just solid and
+  // resolveAxis() already stopped the actor there.
+  function applyWorldWrap(actor) {
+    if (worldMarkers.wrapH.length > 0) {
+      if (actor.x + actor.w <= 0) actor.x = COLS * TILE;
+      else if (actor.x >= COLS * TILE) actor.x = -actor.w;
     }
-    return false;
-  }
-  function actorCenterCell(actor) {
-    return { gx: Math.floor((actor.x + actor.w / 2) / TILE), gy: Math.floor((actor.y + actor.h / 2) / TILE) };
-  }
-  function isInGravityZone(actor) {
-    const c = actorCenterCell(actor);
-    return isGravityZoneAt(c.gx, c.gy);
+    if (worldMarkers.wrapV.length > 0) {
+      if (actor.y + actor.h <= 0) actor.y = ROWS * TILE;
+      else if (actor.y >= ROWS * TILE) actor.y = -actor.h;
+    }
   }
 
   function overlappedCells(actor) {
@@ -1079,7 +1187,7 @@
       if (Math.abs(actor.vx) < 1) actor.vx = 0;
       if (Math.abs(actor.vy) < 1) actor.vy = 0;
     } else {
-      const inGravity = isInGravityZone(actor);
+      const inGravity = gravityOn();
       let ax = 0, ay = 0, wantsJump = false;
 
       if (actor.isPlayer) {
@@ -1134,6 +1242,7 @@
     resolveAxis(actor, "x");
     actor.y += actor.vy * dt;
     resolveAxis(actor, "y");
+    applyWorldWrap(actor);
 
     // decay physics-driven deformation values
     actor.impactSquash = Math.max(0, actor.impactSquash - dt * 4);
@@ -1178,20 +1287,28 @@
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     board[gy][gx] = selectedTileDefId;
   }
-  function paintGravityAt(gx, gy) {
+  const WORLD_PIECE_MESSAGES = {
+    gravity: "Placed a gravity piece — everything falls now.",
+    wrapH: "Placed a horizontal wrap piece — drift off one side, appear on the other.",
+    wrapV: "Placed a vertical wrap piece — fall off the bottom, appear at the top (or the reverse)."
+  };
+  function paintWorldPieceAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
-    if (!gravityMarkers.some(m => m.x === gx && m.y === gy)) {
-      gravityMarkers.push({ x: gx, y: gy });
-      log("Placed a gravity piece — things below it in this column will fall.");
+    const list = worldMarkers[selectedWorldKind];
+    if (!list.some(m => m.x === gx && m.y === gy)) {
+      list.push({ x: gx, y: gy });
+      log(WORLD_PIECE_MESSAGES[selectedWorldKind]);
     }
   }
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
     if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
-    const beforeLen = gravityMarkers.length;
-    gravityMarkers = gravityMarkers.filter(m => !(m.x === gx && m.y === gy));
-    if (gravityMarkers.length !== beforeLen) return;
+    for (const kind of Object.keys(worldMarkers)) {
+      const beforeLen = worldMarkers[kind].length;
+      worldMarkers[kind] = worldMarkers[kind].filter(m => !(m.x === gx && m.y === gy));
+      if (worldMarkers[kind].length !== beforeLen) return;
+    }
     board[gy][gx] = null;
   }
 
@@ -1280,7 +1397,7 @@
       placeNewActor(px, py);
       return;
     }
-    if (paintMode === "world") { isPaintingBoard = true; paintGravityAt(gx, gy); return; }
+    if (paintMode === "world") { isPaintingBoard = true; paintWorldPieceAt(gx, gy); return; }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
     if (paintMode === "tile") { isPaintingBoard = true; paintTileAt(gx, gy); return; }
   });
@@ -1290,7 +1407,7 @@
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); return; }
     if (!isPaintingBoard) return;
     if (paintMode === "tile") paintTileAt(gx, gy);
-    else if (paintMode === "world") paintGravityAt(gx, gy);
+    else if (paintMode === "world") paintWorldPieceAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
   });
   window.addEventListener("mouseup", () => {
@@ -1311,7 +1428,7 @@
     }
     isPaintingBoard = true;
     if (paintMode === "tile") paintTileAt(gx, gy);
-    else if (paintMode === "world") paintGravityAt(gx, gy);
+    else if (paintMode === "world") paintWorldPieceAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     e.preventDefault();
   }, { passive: false });
@@ -1321,7 +1438,7 @@
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); e.preventDefault(); return; }
     if (isPaintingBoard) {
       if (paintMode === "tile") paintTileAt(gx, gy);
-      else if (paintMode === "world") paintGravityAt(gx, gy);
+      else if (paintMode === "world") paintWorldPieceAt(gx, gy);
       else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     }
     e.preventDefault();
@@ -1356,7 +1473,7 @@
     if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
     initBoard();
     actors = [];
-    gravityMarkers = [];
+    worldMarkers = { gravity: [], wrapH: [], wrapV: [] };
     animState = {};
     tileAnimState = {};
     actorContactCooldown = {};
@@ -1412,42 +1529,47 @@
     for (let x = 0; x <= COLS; x++) { gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke(); }
     for (let y = 0; y <= ROWS; y++) { gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke(); }
 
-    // gravity markers: a small fixed triangle, no zone tint — the falling itself is the only feedback
-    gravityMarkers.forEach(m => {
-      gctx.fillStyle = PLAYER_COLOR;
-      gctx.beginPath();
-      gctx.moveTo(m.x * TILE + TILE / 2, m.y * TILE + 3);
-      gctx.lineTo(m.x * TILE + TILE - 3, m.y * TILE + TILE - 3);
-      gctx.lineTo(m.x * TILE + 3, m.y * TILE + TILE - 3);
-      gctx.closePath();
-      gctx.fill();
-    });
+    drawWorldMarkers();
 
-    gctx.strokeStyle = "rgba(255,209,102,0.7)";
-    gctx.lineWidth = 1.5;
-    gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+    if (isCanvasEmpty()) drawEmptySocketCue(now);
+
+    if (actors.some(a => a.isPlayer)) {
+      gctx.strokeStyle = "rgba(255,209,102,0.7)";
+      gctx.lineWidth = 1.5;
+      gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+    }
 
     actors.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
+      const posed = !!def.poses;
+      const art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
 
-      // physics-driven continuous deformation: lean tracks vx, squash tracks impact speed,
-      // crouch tracks jump-launch magnitude, airborne stretch tracks vy — no fixed sequence,
-      // sampled straight from the actor's current physical state every frame
-      const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
-      const lean = Math.max(-1, Math.min(1, actor.vx / cap)) * 0.18;
-      let sx = 1, sy = 1;
-      if (actor.impactSquash > 0) {
-        if (actor.impactAxis === "y") { sy *= 1 - actor.impactSquash * 0.5; sx *= 1 + actor.impactSquash * 0.3; }
-        else { sx *= 1 - actor.impactSquash * 0.5; sy *= 1 + actor.impactSquash * 0.3; }
-      }
-      if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
-      if (!actor.grounded) {
-        const fall = Math.max(0, Math.min(1, actor.vy / MAX_FALL));
-        sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
+      let t;
+      if (posed) {
+        // Posed humanoids get their state read from which drawn frame is showing, not from
+        // continuous skew/scale — skewing a thin articulated figure just looks broken.
+        t = { sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 };
+      } else {
+        // Physics-driven continuous deformation: lean tracks vx, squash tracks impact speed,
+        // crouch tracks jump-launch magnitude, airborne stretch tracks vy — no fixed sequence,
+        // sampled straight from the actor's current physical state every frame. This is what
+        // reads well on a blocky/blob-shaped sprite specifically.
+        const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
+        const lean = Math.max(-1, Math.min(1, actor.vx / cap)) * 0.18;
+        let sx = 1, sy = 1;
+        if (actor.impactSquash > 0) {
+          if (actor.impactAxis === "y") { sy *= 1 - actor.impactSquash * 0.5; sx *= 1 + actor.impactSquash * 0.3; }
+          else { sx *= 1 - actor.impactSquash * 0.5; sy *= 1 + actor.impactSquash * 0.3; }
+        }
+        if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
+        if (!actor.grounded) {
+          const fall = Math.max(0, Math.min(1, actor.vy / MAX_FALL));
+          sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
+        }
+        t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       }
 
-      let t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       const anim = animState[actor.id];
       if (anim) {
         const sample = sampleRecipe(anim.recipe, now - anim.t);
@@ -1466,7 +1588,7 @@
       gctx.translate(centerX, centerY);
       if (t.rot) gctx.rotate(t.rot);
       gctx.scale(t.sx, t.sy);
-      drawArtScaled(gctx, def.art, -TILE / 2, -TILE / 2, TILE, cell);
+      drawArtScaled(gctx, art, -TILE / 2, -TILE / 2, TILE, cell);
       gctx.restore();
 
       if (actor.isPlayer) {
@@ -1477,12 +1599,63 @@
     });
   }
 
+  // Which hand-drawn pose reads correctly for a posed actor's current physical state —
+  // selected by state, never a timer.
+  function currentPoseFor(actor) {
+    if (!actor.grounded) return "air";
+    if (actor.impactSquash > 0.3 && actor.impactAxis === "y") return "crouch";
+    if (Math.abs(actor.vx) > 15) return "stride";
+    return "stand";
+  }
+
+  function drawWorldMarkers() {
+    worldMarkers.gravity.forEach(m => {
+      gctx.fillStyle = PLAYER_COLOR;
+      gctx.beginPath();
+      gctx.moveTo(m.x * TILE + TILE / 2, m.y * TILE + 5);
+      gctx.lineTo(m.x * TILE + TILE - 5, m.y * TILE + TILE - 5);
+      gctx.lineTo(m.x * TILE + 5, m.y * TILE + TILE - 5);
+      gctx.closePath();
+      gctx.fill();
+    });
+    gctx.fillStyle = PLAYER_COLOR;
+    gctx.font = "bold " + (TILE * 0.6) + "px sans-serif";
+    gctx.textAlign = "center";
+    gctx.textBaseline = "middle";
+    worldMarkers.wrapH.forEach(m => gctx.fillText("↔", m.x * TILE + TILE / 2, m.y * TILE + TILE / 2));
+    worldMarkers.wrapV.forEach(m => gctx.fillText("↕", m.x * TILE + TILE / 2, m.y * TILE + TILE / 2));
+  }
+
+  // Nothing painted or placed yet: a soft pulsing outline at the canvas's center marks where
+  // something can be dropped. No text, no arrow — just a shape, and it's gone the instant
+  // anything exists on the board.
+  function isCanvasEmpty() {
+    if (actors.length > 0) return false;
+    if (worldMarkers.gravity.length || worldMarkers.wrapH.length || worldMarkers.wrapV.length) return false;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x]) return false;
+    return true;
+  }
+  function drawEmptySocketCue(now) {
+    const cx = COLS * TILE / 2, cy = ROWS * TILE / 2;
+    const pulse = 0.35 + 0.25 * Math.sin(now / 450);
+    const r = ACTOR_SIZE * 0.8 + Math.sin(now / 450) * 3;
+    gctx.save();
+    gctx.globalAlpha = pulse;
+    gctx.strokeStyle = PLAYER_COLOR;
+    gctx.lineWidth = 2;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r, 0, Math.PI * 2);
+    gctx.stroke();
+    gctx.restore();
+  }
+
   function renderAll() {
     renderTileSwatches();
     renderActorSwatches();
     renderPlayerSwatch();
     renderWorldSwatches();
     renderPresetSwatches();
+    renderPoseTabs();
     renderPixelCanvas();
   }
 
@@ -1502,28 +1675,6 @@
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-
-  // ============== Seed a tiny starter scene ==============
-  (function seed() {
-    const solidId = findDefaultTileDef("solid");
-    for (let x = 0; x < COLS; x++) { board[0][x] = solidId; board[ROWS - 1][x] = solidId; }
-    for (let y = 0; y < ROWS; y++) { board[y][0] = solidId; board[y][COLS - 1] = solidId; }
-    const player = placeNewActorAt(1, 1, PLAYER_DEF_ID, true);
-    startPos = { x: player.x, y: player.y };
-    log("Ready. Arrow keys move the player. Walk into a wall and watch it stop you.");
-  })();
-
-  function placeNewActorAt(gx, gy, defId, isPlayer) {
-    const actor = {
-      id: nextActorInstId++, defId,
-      x: gx * TILE + (TILE - ACTOR_SIZE) / 2, y: gy * TILE + (TILE - ACTOR_SIZE) / 2,
-      w: ACTOR_SIZE, h: ACTOR_SIZE,
-      vx: 0, vy: 0, grounded: false, isPlayer: !!isPlayer,
-      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0
-    };
-    actors.push(actor);
-    return actor;
-  }
 
 })();
 </script>
