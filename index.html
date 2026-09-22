@@ -296,7 +296,8 @@
   // Tuned to match continuous-motion-test.html's own validated numbers for a 32px tile
   // (gravity/jump/accel/friction/max-fall come straight from that prototype); everything
   // else here is the same 2x scale-up from the previous 16px-tile pass.
-  const GRAVITY = 1800;          // px/s^2, on globally once any gravity piece is placed
+  const GRAVITY = 1450;           // px/s^2, on globally once any gravity piece is placed —
+                                   // slowed slightly from the prototype's own 1800 on playtest feedback
   const JUMP_VELOCITY = -620;    // px/s upward impulse, only while grounded and gravity is on
   const MOVE_ACCEL = 2200;       // px/s^2, player/NPC horizontal (and free-roam vertical) accel
   const MAX_SPEED = 220;         // px/s, player cap
@@ -304,7 +305,7 @@
   const NPC_ACCEL = 1400;
   const FRICTION_DECEL = 1800;
   const SLIPPERY_FRICTION_MULT = 0.12; // reduced friction while standing on/in a slippery tile
-  const MAX_FALL = 900;
+  const MAX_FALL = 750;           // terminal velocity, slowed to match the softer gravity above
   const BOUNCE_RESTITUTION = 0.82;
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
@@ -673,17 +674,19 @@
     const container = document.getElementById("worldSwatches");
     container.innerHTML = "";
     WORLD_PIECES.forEach(piece => {
+      const on = worldMarkers[piece.kind].length > 0;
       const sw = document.createElement("div");
       sw.className = "swatch" + (selectedWorldKind === piece.kind ? " selected" : "");
-      sw.style.background = "#2f3140";
-      sw.title = piece.label;
+      sw.style.background = on ? PLAYER_COLOR : "#2f3140";
+      sw.title = piece.label + (on ? " (on)" : " (off)");
       const glyph = document.createElement("div");
       glyph.style.fontSize = "18px";
-      glyph.style.color = PLAYER_COLOR;
+      glyph.style.color = on ? "#222" : PLAYER_COLOR;
       glyph.textContent = piece.glyph;
       sw.appendChild(glyph);
       const label = document.createElement("div");
       label.className = "lbl";
+      label.style.color = on ? "#222" : "#fff";
       label.textContent = piece.label;
       sw.appendChild(label);
       sw.addEventListener("click", () => { selectedWorldKind = piece.kind; renderAll(); });
@@ -1287,18 +1290,32 @@
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     board[gy][gx] = selectedTileDefId;
   }
-  const WORLD_PIECE_MESSAGES = {
-    gravity: "Placed a gravity piece — everything falls now.",
-    wrapH: "Placed a horizontal wrap piece — drift off one side, appear on the other.",
-    wrapV: "Placed a vertical wrap piece — fall off the bottom, appear at the top (or the reverse)."
+  const WORLD_PIECE_ON_MESSAGES = {
+    gravity: "Gravity on — everything falls now.",
+    wrapH: "Horizontal wrap on — drift off one side, appear on the other.",
+    wrapV: "Vertical wrap on — fall off the bottom, appear at the top (or the reverse)."
   };
-  function paintWorldPieceAt(gx, gy) {
+  const WORLD_PIECE_OFF_MESSAGES = {
+    gravity: "Gravity off.",
+    wrapH: "Horizontal wrap off — that edge is a hard boundary again.",
+    wrapV: "Vertical wrap off — that edge is a hard boundary again."
+  };
+  // Each world piece is a single on/off switch, not a paintable, multi-instance thing like a
+  // tile: since its effect is already global, a second one wouldn't do anything a first one
+  // doesn't. So placing one when the effect is already on turns it back off instead — same
+  // click, same swatch, no trip to Erase mode — and it applies live to whatever's already on
+  // the board, exactly like every other reaction in this toy.
+  function toggleWorldPieceAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const list = worldMarkers[selectedWorldKind];
-    if (!list.some(m => m.x === gx && m.y === gy)) {
+    if (list.length > 0) {
+      worldMarkers[selectedWorldKind] = [];
+      log(WORLD_PIECE_OFF_MESSAGES[selectedWorldKind]);
+    } else {
       list.push({ x: gx, y: gy });
-      log(WORLD_PIECE_MESSAGES[selectedWorldKind]);
+      log(WORLD_PIECE_ON_MESSAGES[selectedWorldKind]);
     }
+    renderWorldSwatches(); // reflect the new on/off state in the palette immediately
   }
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
@@ -1397,7 +1414,9 @@
       placeNewActor(px, py);
       return;
     }
-    if (paintMode === "world") { isPaintingBoard = true; paintWorldPieceAt(gx, gy); return; }
+    // World pieces are a single on/off toggle per click, not a paintable stroke — dragging
+    // across cells with a tile-style gesture would flip the switch back and forth every frame.
+    if (paintMode === "world") { toggleWorldPieceAt(gx, gy); return; }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
     if (paintMode === "tile") { isPaintingBoard = true; paintTileAt(gx, gy); return; }
   });
@@ -1407,7 +1426,6 @@
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); return; }
     if (!isPaintingBoard) return;
     if (paintMode === "tile") paintTileAt(gx, gy);
-    else if (paintMode === "world") paintWorldPieceAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
   });
   window.addEventListener("mouseup", () => {
@@ -1426,9 +1444,9 @@
       e.preventDefault();
       return;
     }
+    if (paintMode === "world") { toggleWorldPieceAt(gx, gy); e.preventDefault(); return; }
     isPaintingBoard = true;
     if (paintMode === "tile") paintTileAt(gx, gy);
-    else if (paintMode === "world") paintWorldPieceAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     e.preventDefault();
   }, { passive: false });
@@ -1438,7 +1456,6 @@
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); e.preventDefault(); return; }
     if (isPaintingBoard) {
       if (paintMode === "tile") paintTileAt(gx, gy);
-      else if (paintMode === "world") paintWorldPieceAt(gx, gy);
       else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     }
     e.preventDefault();
