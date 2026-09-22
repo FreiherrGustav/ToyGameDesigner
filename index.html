@@ -186,8 +186,17 @@
       <div class="mode-toggle">
         <button id="modeTile">Tiles</button>
         <button id="modeActor" class="active">Actors</button>
-        <button id="modeWorld">World</button>
         <button id="modeErase">Erase</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Game rules</div>
+      <div class="swatch-row" id="gameRuleSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        These aren't placed — they just switch on or off for the whole game the moment you
+        click them. Gravity makes everything fall. Wrap makes an edge loop around to the
+        opposite side instead of stopping you — one switch per direction.
       </div>
     </div>
 
@@ -204,17 +213,6 @@
       <div class="hint" style="margin-top:2px;">
         This is the one actor you move. It has no temperament of its own — temperament only
         describes how the <em>other</em> actors react when this one touches them.
-      </div>
-    </div>
-
-    <div id="worldPropertiesBlock" style="display:none;">
-      <div class="section-title">World pieces</div>
-      <div class="swatch-row" id="worldSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Placed like a tile, but it doesn't do anything on contact — it changes the rules for
-        the whole world once dropped anywhere. Gravity makes everything fall. Wrap pieces
-        make an edge loop around to the opposite side instead of stopping you — one for
-        each direction, so you can loop just one axis if you want.
       </div>
     </div>
 
@@ -273,12 +271,12 @@
   const ACTOR_INSET = 5;
   const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, ~30% margin inside the cell
 
-  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal"];
+  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal", "flip"];
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
 
   const TILE_COLORS = {
     walkable: "#4caf50", solid: "#616161", hazard: "#e53935", bouncy: "#ff9800",
-    slippery: "#29b6f6", diggable: "#8d6e63", goal: "#ec407a"
+    slippery: "#29b6f6", diggable: "#8d6e63", goal: "#ec407a", flip: "#3f51b5"
   };
   const TEMPERAMENT_COLORS = {
     stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
@@ -317,20 +315,21 @@
   let nextActorDefId = 1;
 
   let board = [];            // ROWS x COLS, each cell = tileDefId or null
-  // Placed world-markers, one array per kind — each just [{x,y}] grid cells. Their effect is
-  // global once any exists (see #5/#6 of the v2.1 patch): a marker is how you discover/place
-  // the rule, not a scope it's confined to.
-  let worldMarkers = { gravity: [], wrapH: [], wrapV: [] };
+  // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
+  // location stopped carrying any information — only whether one existed mattered. So these
+  // are now plain toggles in the palette, not something placed on the board at all.
+  let gravityEnabled = false;
+  let wrapHEnabled = false;
+  let wrapVEnabled = false;
   let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...}
   let nextActorInstId = 1;
 
   let startPos = { x: 0, y: 0 }; // continuous pixel position
 
   // Defaults put the player one click away on a blank canvas — no trip to "actor mode" first.
-  let paintMode = "actor"; // 'tile' | 'actor' | 'world' | 'erase'
+  let paintMode = "actor"; // 'tile' | 'actor' | 'erase'
   let selectedTileProp = "walkable";
   let selectedActorKind = "player"; // one of TEMPERAMENTS, or "player"
-  let selectedWorldKind = "gravity"; // 'gravity' | 'wrapH' | 'wrapV'
   let selectedTileDefId = null;
   let selectedActorDefId = null;
   let selectedPoseKey = "stand"; // 'stand' | 'stride' | 'air' | 'crouch' — only used for posed defs
@@ -465,7 +464,11 @@
     { name: "goal", art: pat([
       "M.......", "MMMM....", "MMMMMM..", "MMMM....",
       "M.......", "M.......", "M.......", "MMMMMMM."
-    ], { M: "#ec407a" }) }
+    ], { M: "#ec407a" }) },
+    { name: "flip", art: pat([
+      "...M....", "..MMM...", "...M....", "...M....",
+      "...M....", "...M....", "..MMM...", "...M...."
+    ], { M: "#3f51b5" }) }
   ];
 
   // ============== Audio (simple beeps) ==============
@@ -502,7 +505,8 @@
     pop: () => beep(900, 0.1, "sine", 0.2),
     crumble: () => { beep(200, 0.05, "sawtooth", 0.12); setTimeout(() => beep(140, 0.08, "sawtooth", 0.12), 40); setTimeout(() => beep(90, 0.12, "sawtooth", 0.12), 90); },
     celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); },
-    jump: () => beep(400, 0.07, "square", 0.12)
+    jump: () => beep(400, 0.07, "square", 0.12),
+    flip: () => { beep(300, 0.07, "triangle", 0.16); setTimeout(() => beep(600, 0.09, "triangle", 0.16), 70); }
   };
 
   function log(msg) {
@@ -568,6 +572,11 @@
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
       { t: 0.4, sx: 1.1, sy: 0.9, rot: 0.1, ox: 0, oy: 0.05, alpha: 0.7 },
       { t: 1, sx: 0.2, sy: 0.2, rot: 0.4, ox: 0, oy: 0.3, alpha: 0 }
+    ]},
+    gravityFlip: { duration: 300, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 0.7, sy: 0.7, rot: Math.PI, ox: 0, oy: 0, alpha: 1 },
+      { t: 1, sx: 1, sy: 1, rot: Math.PI * 2, ox: 0, oy: 0, alpha: 1 }
     ]}
   };
   function playRecipe(entity, name) { animState[entity.id] = { recipe: name, t: performance.now() }; }
@@ -665,31 +674,38 @@
     container.appendChild(sw);
   }
 
-  const WORLD_PIECES = [
-    { kind: "gravity", label: "gravity", glyph: "▼" },
-    { kind: "wrapH", label: "h-wrap", glyph: "↔" },
-    { kind: "wrapV", label: "v-wrap", glyph: "↕" }
+  // Whole-game rule switches, not placed pieces: each swatch toggles its own state the instant
+  // it's clicked, live, for every actor already on the board — the same way any other reaction
+  // in this toy takes effect on the next frame with no play/edit split.
+  const GAME_RULES = [
+    { key: "gravity", label: "gravity", glyph: "▼", get: () => gravityEnabled, set: (v) => { gravityEnabled = v; } },
+    { key: "wrapH", label: "h-wrap", glyph: "↔", get: () => wrapHEnabled, set: (v) => { wrapHEnabled = v; } },
+    { key: "wrapV", label: "v-wrap", glyph: "↕", get: () => wrapVEnabled, set: (v) => { wrapVEnabled = v; } }
   ];
-  function renderWorldSwatches() {
-    const container = document.getElementById("worldSwatches");
+  function renderGameRuleSwatches() {
+    const container = document.getElementById("gameRuleSwatches");
     container.innerHTML = "";
-    WORLD_PIECES.forEach(piece => {
-      const on = worldMarkers[piece.kind].length > 0;
+    GAME_RULES.forEach(rule => {
+      const on = rule.get();
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedWorldKind === piece.kind ? " selected" : "");
+      sw.className = "swatch";
       sw.style.background = on ? PLAYER_COLOR : "#2f3140";
-      sw.title = piece.label + (on ? " (on)" : " (off)");
+      sw.title = rule.label + (on ? " (on — click to turn off)" : " (off — click to turn on)");
       const glyph = document.createElement("div");
       glyph.style.fontSize = "18px";
       glyph.style.color = on ? "#222" : PLAYER_COLOR;
-      glyph.textContent = piece.glyph;
+      glyph.textContent = rule.glyph;
       sw.appendChild(glyph);
       const label = document.createElement("div");
       label.className = "lbl";
       label.style.color = on ? "#222" : "#fff";
-      label.textContent = piece.label;
+      label.textContent = rule.label;
       sw.appendChild(label);
-      sw.addEventListener("click", () => { selectedWorldKind = piece.kind; renderAll(); });
+      sw.addEventListener("click", () => {
+        rule.set(!on);
+        log(rule.label + (rule.get() ? " on." : " off."));
+        renderGameRuleSwatches();
+      });
       container.appendChild(sw);
     });
   }
@@ -768,12 +784,10 @@
   function updateModeButtons() {
     document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
     document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
-    document.getElementById("modeWorld").classList.toggle("active", paintMode === "world");
     document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
     document.getElementById("tilePropertiesBlock").style.display = paintMode === "tile" ? "block" : "none";
     document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
-    document.getElementById("worldPropertiesBlock").style.display = paintMode === "world" ? "block" : "none";
-    const editingArt = paintMode !== "world" && paintMode !== "erase";
+    const editingArt = paintMode !== "erase";
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
     document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
     if (editingArt) {
@@ -789,10 +803,6 @@
   document.getElementById("modeActor").addEventListener("click", () => {
     paintMode = "actor";
     currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
-    updateModeButtons(); renderAll();
-  });
-  document.getElementById("modeWorld").addEventListener("click", () => {
-    paintMode = "world";
     updateModeButtons(); renderAll();
   });
   document.getElementById("modeErase").addEventListener("click", () => {
@@ -862,11 +872,11 @@
     return id ? tileDefs[id] : null;
   }
   // Board edges act solid by default (a hard boundary hit exactly like a solid tile) — unless
-  // a wrap piece has been placed for that axis, in which case that edge stops blocking at all
-  // and applyWorldWrap() teleports whatever crosses it to the opposite side.
+  // wrap is switched on for that axis, in which case that edge stops blocking at all and
+  // applyWorldWrap() teleports whatever crosses it to the opposite side.
   function tilePropAt(gx, gy) {
-    if (gx < 0 || gx >= COLS) return worldMarkers.wrapH.length > 0 ? "walkable" : "solid";
-    if (gy < 0 || gy >= ROWS) return worldMarkers.wrapV.length > 0 ? "walkable" : "solid";
+    if (gx < 0 || gx >= COLS) return wrapHEnabled ? "walkable" : "solid";
+    if (gy < 0 || gy >= ROWS) return wrapVEnabled ? "walkable" : "solid";
     const t = tileAt(gx, gy);
     return t ? t.property : "walkable";
   }
@@ -883,21 +893,20 @@
     return false;
   }
 
-  // Gravity is a placed marker, not a scoped zone: one piece dropped anywhere turns it on for
-  // the whole world (simplified from the earlier per-column-range version — on a board this
-  // size that range was nearly indistinguishable from "everywhere" anyway, so the zone logic
-  // wasn't earning its complexity yet).
-  function gravityOn() { return worldMarkers.gravity.length > 0; }
+  // Gravity is a single shared switch, not per-actor: the palette toggle sets it once as an
+  // authoring choice, and a `flip` tile can flip the exact same value live during play — both
+  // just read/write this one function's underlying state.
+  function gravityOn() { return gravityEnabled; }
 
   // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
-  // relevant once a wrap piece exists for that axis — otherwise that edge is just solid and
+  // relevant once wrap is switched on for that axis — otherwise that edge is just solid and
   // resolveAxis() already stopped the actor there.
   function applyWorldWrap(actor) {
-    if (worldMarkers.wrapH.length > 0) {
+    if (wrapHEnabled) {
       if (actor.x + actor.w <= 0) actor.x = COLS * TILE;
       else if (actor.x >= COLS * TILE) actor.x = -actor.w;
     }
-    if (worldMarkers.wrapV.length > 0) {
+    if (wrapVEnabled) {
       if (actor.y + actor.h <= 0) actor.y = ROWS * TILE;
       else if (actor.y >= ROWS * TILE) actor.y = -actor.h;
     }
@@ -1106,14 +1115,31 @@
     roundComplete();
   }
 
+  // A `flip` tile is an ordinary painted tile — felt purely on contact, same bucket as goal/
+  // diggable/hazard — but what it does is flip the one shared gravity switch for every actor
+  // in the game, not just the player. Placement is what makes this different from the old
+  // gravity marker: a kid puts one at a deliberate spot, and touching it there is a real
+  // level-design choice, the thing the marker mechanic was reaching for before its effect
+  // went global.
+  function triggerFlip(player) {
+    if (player.flipCooldown > 0) return;
+    player.flipCooldown = 500;
+    gravityEnabled = !gravityEnabled;
+    sounds.flip();
+    playRecipe(player, "gravityFlip");
+    log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
+    renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
+  }
+
   // Player-only contact reactions that aren't part of AABB blocking: hazard, diggable
-  // (crumbles instead of blocking the player), and goal.
+  // (crumbles instead of blocking the player), goal, and flip.
   function checkPlayerTileContacts(player) {
     for (const { cx, cy } of overlappedCells(player)) {
       const prop = tilePropAt(cx, cy);
       if (prop === "hazard") triggerHazard(player);
       else if (prop === "diggable") triggerDig(cx, cy);
       else if (prop === "goal") triggerGoal(player);
+      else if (prop === "flip") triggerFlip(player);
     }
   }
 
@@ -1240,6 +1266,7 @@
 
     if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
     if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
+    if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x");
@@ -1290,42 +1317,10 @@
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     board[gy][gx] = selectedTileDefId;
   }
-  const WORLD_PIECE_ON_MESSAGES = {
-    gravity: "Gravity on — everything falls now.",
-    wrapH: "Horizontal wrap on — drift off one side, appear on the other.",
-    wrapV: "Vertical wrap on — fall off the bottom, appear at the top (or the reverse)."
-  };
-  const WORLD_PIECE_OFF_MESSAGES = {
-    gravity: "Gravity off.",
-    wrapH: "Horizontal wrap off — that edge is a hard boundary again.",
-    wrapV: "Vertical wrap off — that edge is a hard boundary again."
-  };
-  // Each world piece is a single on/off switch, not a paintable, multi-instance thing like a
-  // tile: since its effect is already global, a second one wouldn't do anything a first one
-  // doesn't. So placing one when the effect is already on turns it back off instead — same
-  // click, same swatch, no trip to Erase mode — and it applies live to whatever's already on
-  // the board, exactly like every other reaction in this toy.
-  function toggleWorldPieceAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
-    const list = worldMarkers[selectedWorldKind];
-    if (list.length > 0) {
-      worldMarkers[selectedWorldKind] = [];
-      log(WORLD_PIECE_OFF_MESSAGES[selectedWorldKind]);
-    } else {
-      list.push({ x: gx, y: gy });
-      log(WORLD_PIECE_ON_MESSAGES[selectedWorldKind]);
-    }
-    renderWorldSwatches(); // reflect the new on/off state in the palette immediately
-  }
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
     if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
-    for (const kind of Object.keys(worldMarkers)) {
-      const beforeLen = worldMarkers[kind].length;
-      worldMarkers[kind] = worldMarkers[kind].filter(m => !(m.x === gx && m.y === gy));
-      if (worldMarkers[kind].length !== beforeLen) return;
-    }
     board[gy][gx] = null;
   }
 
@@ -1338,7 +1333,7 @@
       x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
       w: ACTOR_SIZE, h: ACTOR_SIZE,
       vx: 0, vy: 0, grounded: false, isPlayer,
-      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0
+      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0
     };
     actors.push(actor);
     if (isPlayer) startPos = { x: actor.x, y: actor.y };
@@ -1381,11 +1376,12 @@
       for (const { cx, cy } of overlappedCells(actor)) {
         const prop = tilePropAt(cx, cy);
         const key = "c" + cx + "," + cy;
-        if ((prop === "hazard" || prop === "diggable" || prop === "goal") && !dragContactCooldown[key]) {
+        if ((prop === "hazard" || prop === "diggable" || prop === "goal" || prop === "flip") && !dragContactCooldown[key]) {
           dragContactCooldown[key] = 350;
           if (prop === "hazard") { sounds.yelp(); actor.flashTimer = 1; log("Ouch! (dragged onto a hazard tile)"); }
           else if (prop === "diggable") triggerDig(cx, cy);
           else if (prop === "goal") triggerGoal(actor);
+          else if (prop === "flip") triggerFlip(actor);
         }
       }
     }
@@ -1414,9 +1410,6 @@
       placeNewActor(px, py);
       return;
     }
-    // World pieces are a single on/off toggle per click, not a paintable stroke — dragging
-    // across cells with a tile-style gesture would flip the switch back and forth every frame.
-    if (paintMode === "world") { toggleWorldPieceAt(gx, gy); return; }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
     if (paintMode === "tile") { isPaintingBoard = true; paintTileAt(gx, gy); return; }
   });
@@ -1444,7 +1437,6 @@
       e.preventDefault();
       return;
     }
-    if (paintMode === "world") { toggleWorldPieceAt(gx, gy); e.preventDefault(); return; }
     isPaintingBoard = true;
     if (paintMode === "tile") paintTileAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
@@ -1490,7 +1482,6 @@
     if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
     initBoard();
     actors = [];
-    worldMarkers = { gravity: [], wrapH: [], wrapV: [] };
     animState = {};
     tileAnimState = {};
     actorContactCooldown = {};
@@ -1545,8 +1536,6 @@
     gctx.lineWidth = 1;
     for (let x = 0; x <= COLS; x++) { gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke(); }
     for (let y = 0; y <= ROWS; y++) { gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke(); }
-
-    drawWorldMarkers();
 
     if (isCanvasEmpty()) drawEmptySocketCue(now);
 
@@ -1625,30 +1614,12 @@
     return "stand";
   }
 
-  function drawWorldMarkers() {
-    worldMarkers.gravity.forEach(m => {
-      gctx.fillStyle = PLAYER_COLOR;
-      gctx.beginPath();
-      gctx.moveTo(m.x * TILE + TILE / 2, m.y * TILE + 5);
-      gctx.lineTo(m.x * TILE + TILE - 5, m.y * TILE + TILE - 5);
-      gctx.lineTo(m.x * TILE + 5, m.y * TILE + TILE - 5);
-      gctx.closePath();
-      gctx.fill();
-    });
-    gctx.fillStyle = PLAYER_COLOR;
-    gctx.font = "bold " + (TILE * 0.6) + "px sans-serif";
-    gctx.textAlign = "center";
-    gctx.textBaseline = "middle";
-    worldMarkers.wrapH.forEach(m => gctx.fillText("↔", m.x * TILE + TILE / 2, m.y * TILE + TILE / 2));
-    worldMarkers.wrapV.forEach(m => gctx.fillText("↕", m.x * TILE + TILE / 2, m.y * TILE + TILE / 2));
-  }
-
   // Nothing painted or placed yet: a soft pulsing outline at the canvas's center marks where
   // something can be dropped. No text, no arrow — just a shape, and it's gone the instant
-  // anything exists on the board.
+  // anything exists on the board. Game-rule switches (gravity/wrap) don't count here — they're
+  // not placed on the board at all anymore, so they shouldn't affect what counts as "empty".
   function isCanvasEmpty() {
     if (actors.length > 0) return false;
-    if (worldMarkers.gravity.length || worldMarkers.wrapH.length || worldMarkers.wrapV.length) return false;
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x]) return false;
     return true;
   }
@@ -1670,7 +1641,7 @@
     renderTileSwatches();
     renderActorSwatches();
     renderPlayerSwatch();
-    renderWorldSwatches();
+    renderGameRuleSwatches();
     renderPresetSwatches();
     renderPoseTabs();
     renderPixelCanvas();
