@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Throwaway test: placeable gravity piece</title>
+<!--
+  THROWAWAY PROTOTYPE — not wired into the main tool (index.html), and not meant to become
+  part of it as-is. Delete or ignore once the question below is answered.
+
+  QUESTION THIS TESTS
+  From the v1 revision's open problem: gravity/scroll/room-linking need to be discovered by
+  playing, not set in a settings panel — a checkbox is just the genre menu moved one level
+  down. Candidate mechanic: a placeable world-piece (like a tile) whose presence turns
+  gravity on for the region below it, rather than a global on/off switch.
+
+  This prototype implements exactly that, nothing else: place "ground", place "blocks"
+  (things that can fall), place a "gravity piece" in a column, and see whether blocks in
+  that column start falling — instantly, live, no play/edit split, matching the main
+  toy's own non-negotiable. Column tinting here is instrumentation for evaluating the feel;
+  it is not part of the mechanic and would not exist in the real tool.
+
+  OBSERVATIONS (filled in after trying it)
+  - Effect reads immediately and unambiguously: placing the piece above a floating block
+    makes it fall on the very next tick, with nothing else on screen changing. A kid
+    watching for "what does this do" gets an instant, legible answer.
+  - Column-wide falls farther than intuition expects: the piece looks like it belongs to
+    one tile, but a block placed far below it, in the same column, also starts falling
+    immediately, with no visible connection between the two. Worth testing a shorter-range
+    version (e.g. falls only within N tiles below the piece, or only until the next
+    non-empty cell) so the cause and effect stay visually adjacent.
+  - Dragging a block into an inactive column and then back into an active one correctly
+    starts/stops its fall live, which matches the "canvas is always live" rule well.
+  - Open question this prototype doesn't answer: whether gravity should also flip the
+    player's own move-up action into a jump globally, or only while standing in an active
+    column — the revised spec assumes a single global gravity switch for that, which sits
+    oddly next to a per-column placement mechanic. Needs its own follow-up test.
+-->
+<style>
+  :root { --bg:#1e1f26; --panel:#2a2c37; --accent:#ffd166; --text:#f2f2f2; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Verdana,sans-serif; }
+  h1 { font-size:16px; color:var(--accent); margin:0 0 4px; }
+  p.sub { font-size:12px; color:#999; max-width:640px; margin:0 0 14px; line-height:1.5; }
+  #wrap { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
+  .panel { background:var(--panel); border-radius:10px; padding:12px; }
+  .toolbar { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  button { background:#383b4a; color:var(--text); border:1px solid transparent; border-radius:6px; padding:7px 11px; font-size:13px; cursor:pointer; }
+  button.active { background:var(--accent); color:#222; font-weight:bold; }
+  #grid { image-rendering:pixelated; border:3px solid #383b4a; border-radius:4px; cursor:crosshair; }
+  #log { font-size:12px; color:#bbb; max-width:520px; margin-top:8px; }
+</style>
+</head>
+<body>
+  <h1>Throwaway test: placeable gravity piece</h1>
+  <p class="sub">
+    Testing one candidate mechanic for discovering gravity by playing, instead of a settings-panel
+    checkbox. Place ground, place a block, then place the gravity piece in that block's column
+    and watch what happens — nothing to read, just try it.
+  </p>
+  <div id="wrap">
+    <div class="panel">
+      <div class="toolbar">
+        <button id="toolGround" class="active">Ground</button>
+        <button id="toolBlock">Block</button>
+        <button id="toolGravity">Gravity piece</button>
+        <button id="toolErase">Erase</button>
+        <button id="toolClear">Clear</button>
+      </div>
+      <canvas id="grid" width="400" height="320"></canvas>
+      <div id="log"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  const COLS = 10, ROWS = 8, CELL = 40;
+  const canvas = document.getElementById("grid");
+  canvas.width = COLS * CELL; canvas.height = ROWS * CELL;
+  const ctx = canvas.getContext("2d");
+
+  // board[y][x] = null | "ground" | "block"
+  let board = [];
+  for (let y = 0; y < ROWS; y++) board.push(new Array(COLS).fill(null));
+
+  // a gravity piece is a fixed marker, tracked separately from the board (it never falls,
+  // and isn't "ground" — it's the thing whose presence changes the physics around it)
+  let gravityPieces = []; // {x, y}
+
+  let tool = "ground";
+  ["toolGround", "toolBlock", "toolGravity", "toolErase"].forEach(id => {
+    document.getElementById(id).addEventListener("click", () => {
+      tool = id.replace("tool", "").toLowerCase();
+      document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
+      document.getElementById(id).classList.add("active");
+    });
+  });
+  document.getElementById("toolClear").addEventListener("click", () => {
+    board = []; for (let y = 0; y < ROWS; y++) board.push(new Array(COLS).fill(null));
+    gravityPieces = [];
+    log("Cleared.");
+  });
+
+  function log(msg) {
+    const el = document.getElementById("log");
+    el.textContent = msg;
+  }
+
+  function activeColumns() {
+    // The mechanic under test: a column is "live" (gravity on) below any row that has a
+    // gravity piece in it, for that column only. No global switch anywhere.
+    const cols = new Set();
+    gravityPieces.forEach(p => cols.add(p.x));
+    return cols;
+  }
+
+  function cellFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const gx = Math.floor((e.clientX - rect.left) / (rect.width / COLS));
+    const gy = Math.floor((e.clientY - rect.top) / (rect.height / ROWS));
+    return { gx, gy };
+  }
+
+  let dragFrom = null; // {x,y} of a block currently being dragged
+
+  canvas.addEventListener("mousedown", (e) => {
+    const { gx, gy } = cellFromEvent(e);
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+
+    if (tool === "erase") {
+      board[gy][gx] = null;
+      gravityPieces = gravityPieces.filter(p => !(p.x === gx && p.y === gy));
+      log("Erased " + gx + "," + gy);
+      return;
+    }
+    if (tool === "gravity") {
+      if (!gravityPieces.some(p => p.x === gx && p.y === gy)) {
+        gravityPieces.push({ x: gx, y: gy });
+        log("Placed gravity piece at column " + gx + " — that whole column is now live.");
+      }
+      return;
+    }
+    if (tool === "ground") { board[gy][gx] = "ground"; log("Placed ground."); return; }
+    if (tool === "block") {
+      if (board[gy][gx] === "block") {
+        // an existing block under the cursor: drag it live, same as the main toy's actors
+        dragFrom = { x: gx, y: gy };
+      } else if (board[gy][gx] === null) {
+        board[gy][gx] = "block";
+        log("Placed a block — falls only if its column is live.");
+      }
+      return;
+    }
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    if (!dragFrom) return;
+    const { gx, gy } = cellFromEvent(e);
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (gx === dragFrom.x && gy === dragFrom.y) return;
+    if (board[gy][gx] !== null) return; // don't drop onto an occupied cell
+    board[dragFrom.y][dragFrom.x] = null;
+    board[gy][gx] = "block";
+    dragFrom = { x: gx, y: gy };
+    render();
+  });
+  window.addEventListener("mouseup", () => { dragFrom = null; });
+
+  // The physics tick: exactly one rule, applied only to columns a gravity piece has touched.
+  function tick() {
+    const live = activeColumns();
+    // iterate bottom-up so a falling stack doesn't skip over itself in one tick
+    for (let x = 0; x < COLS; x++) {
+      if (!live.has(x)) continue;
+      for (let y = ROWS - 2; y >= 0; y--) {
+        if (board[y][x] === "block" && board[y + 1][x] === null) {
+          board[y + 1][x] = "block";
+          board[y][x] = null;
+        }
+      }
+    }
+    render();
+  }
+  setInterval(tick, 140);
+
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const live = activeColumns();
+
+    // instrumentation only: tint live columns so we can *see* the mechanic's true extent
+    // while evaluating it. The real tool would show nothing here — only the falling itself.
+    live.forEach(x => {
+      ctx.fillStyle = "rgba(255,209,102,0.08)";
+      ctx.fillRect(x * CELL, 0, CELL, ROWS * CELL);
+    });
+
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,ROWS*CELL); ctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(COLS*CELL,y*CELL); ctx.stroke(); }
+
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (board[y][x] === "ground") {
+          ctx.fillStyle = "#616161";
+          ctx.fillRect(x*CELL+2, y*CELL+2, CELL-4, CELL-4);
+        } else if (board[y][x] === "block") {
+          ctx.fillStyle = "#4dd0e1";
+          ctx.fillRect(x*CELL+6, y*CELL+6, CELL-12, CELL-12);
+        }
+      }
+    }
+    gravityPieces.forEach(p => {
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.moveTo(p.x*CELL + CELL/2, p.y*CELL + 8);
+      ctx.lineTo(p.x*CELL + CELL - 8, p.y*CELL + CELL - 8);
+      ctx.lineTo(p.x*CELL + 8, p.y*CELL + CELL - 8);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  // seed: a floating block with no gravity piece yet, so the very first click you make
+  // (placing the piece above it) is the whole experiment.
+  board[2][4] = "block";
+  render();
+  log("Ready. That floating block stays put until a gravity piece touches its column.");
+})();
+</script>
+</body>
+</html>

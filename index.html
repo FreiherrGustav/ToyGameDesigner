@@ -160,6 +160,13 @@
     overflow-y: auto;
     width: 100%;
   }
+
+  #hud {
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--accent);
+    margin-left: auto;
+  }
 </style>
 </head>
 <body>
@@ -215,6 +222,7 @@
       <button class="tbtn" id="resetBtn">↺ Reset to start</button>
       <button class="tbtn" id="setStartBtn">📍 Set player start here</button>
       <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
+      <div id="hud">Score: <span id="scoreVal">0</span></div>
     </div>
     <canvas id="gameCanvas" width="384" height="288"></canvas>
     <div id="dpad">
@@ -235,21 +243,24 @@
   // ============== Constants ==============
   const COLS = 12, ROWS = 9, TILE = 16, ART = 8, SCALE = TILE / ART;
 
-  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery"];
-  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer"];
+  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal"];
+  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
 
   const TILE_COLORS = {
     walkable: "#4caf50",
     solid: "#616161",
     hazard: "#e53935",
     bouncy: "#ff9800",
-    slippery: "#29b6f6"
+    slippery: "#29b6f6",
+    diggable: "#8d6e63",
+    goal: "#ec407a"
   };
   const TEMPERAMENT_COLORS = {
     stationary: "#9575cd",
     wanderer: "#26a69a",
     chaser: "#ef5350",
-    fleer: "#ffca28"
+    fleer: "#ffca28",
+    collectible: "#26c6da"
   };
   const PLAYER_COLOR = "#ffd166";
   const PLAYER_DEF_ID = "player";
@@ -285,8 +296,11 @@
   let isDrawingPixel = false;
   let isPaintingBoard = false;
 
-  let animState = {}; // actorInstId -> {type, t}
-  let flashTiles = []; // {x,y,until}
+  let animState = {}; // actorInstId -> {recipe, t}
+  let tileAnimState = {}; // "x,y" -> {recipe, t, art} for transient tile effects (e.g. crumbling)
+
+  let score = 0; // engine-tracked, never authored
+  let intensity = 0; // hidden ramp; only its effects (chaser speed) are ever visible
 
   // ============== Init board ==============
   function initBoard() {
@@ -360,8 +374,23 @@
     boop: () => beep(440, 0.08, "triangle", 0.15),
     oof: () => beep(150, 0.1, "square", 0.18),
     gotcha: () => { beep(700, 0.08, "square", 0.2); setTimeout(() => beep(500, 0.08, "square", 0.2), 90); setTimeout(() => beep(300, 0.15, "square", 0.2), 180); },
-    pop: () => beep(900, 0.1, "sine", 0.2)
+    pop: () => beep(900, 0.1, "sine", 0.2),
+    crumble: () => { beep(200, 0.05, "sawtooth", 0.12); setTimeout(() => beep(140, 0.08, "sawtooth", 0.12), 40); setTimeout(() => beep(90, 0.12, "sawtooth", 0.12), 90); },
+    celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); }
   };
+
+  function addScore(n) {
+    score += n;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = score;
+  }
+
+  function resetScoreAndIntensity() {
+    score = 0;
+    intensity = 0;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = "0";
+  }
 
   function log(msg) {
     const el = document.getElementById("log");
@@ -385,6 +414,88 @@
   const pixelCanvas = document.getElementById("pixelCanvas");
   const pctx = pixelCanvas.getContext("2d");
   const PIXEL_DISPLAY_SCALE = pixelCanvas.width / ART; // 128/8 = 16
+
+  // ============== Deformation-recipe animation library ==============
+  // A small fixed set of hand-authored keyframed sequences, applied automatically to
+  // whatever art the actor/tile already has — the way a rig works on any character
+  // regardless of its design. Kids never author these; they're matched to reaction
+  // types below. Offsets (ox, oy) are in tile-fractions; rot is radians.
+  const RECIPES = {
+    flattenRecover: { duration: 260, keyframes: [
+      { t: 0,    sx: 1,    sy: 1,    rot: 0,    ox: 0,    oy: 0,    alpha: 1 },
+      { t: 0.35, sx: 1.35, sy: 0.45, rot: 0,    ox: 0,    oy: 0.28, alpha: 1 },
+      { t: 1,    sx: 1,    sy: 1,    rot: 0,    ox: 0,    oy: 0,    alpha: 1 }
+    ]},
+    knockTilt: { duration: 300, keyframes: [
+      { t: 0,    sx: 1, sy: 1, rot: 0,     ox: 0,     oy: 0, alpha: 1 },
+      { t: 0.25, sx: 1, sy: 1, rot: -0.35, ox: -0.28, oy: 0, alpha: 0.35 },
+      { t: 0.55, sx: 1, sy: 1, rot: 0.2,   ox: 0.14,  oy: 0, alpha: 1 },
+      { t: 1,    sx: 1, sy: 1, rot: 0,     ox: 0,     oy: 0, alpha: 1 }
+    ]},
+    launchSpin: { duration: 320, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,   rot: 0,          ox: 0, oy: 0,    alpha: 1 },
+      { t: 0.5, sx: 0.8, sy: 0.8, rot: Math.PI,     ox: 0, oy: -0.5, alpha: 1 },
+      { t: 1,   sx: 1,   sy: 1,   rot: Math.PI * 2, ox: 0, oy: 0,    alpha: 1 }
+    ]},
+    slideSquish: { duration: 200, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 1.2, sy: 0.85, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 1,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    crumbleFade: { duration: 320, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,   rot: 0,   ox: 0, oy: 0,    alpha: 1 },
+      { t: 0.4, sx: 1.1, sy: 0.9, rot: 0.1, ox: 0, oy: 0.05, alpha: 0.7 },
+      { t: 1,   sx: 0.2, sy: 0.2, rot: 0.4, ox: 0, oy: 0.3,  alpha: 0 }
+    ]},
+    celebrationBurst: { duration: 500, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,   rot: 0,     ox: 0, oy: 0,    alpha: 1 },
+      { t: 0.3, sx: 1.4, sy: 1.4, rot: -0.15, ox: 0, oy: -0.3, alpha: 1 },
+      { t: 0.6, sx: 0.9, sy: 1.2, rot: 0.15,  ox: 0, oy: -0.1, alpha: 1 },
+      { t: 1,   sx: 1,   sy: 1,   rot: 0,     ox: 0, oy: 0,    alpha: 1 }
+    ]},
+    boopPulse: { duration: 200, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 1.2, sy: 0.85, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 1,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    bounceRock: { duration: 220, keyframes: [
+      { t: 0,    sx: 1, sy: 1, rot: 0,    ox: 0,     oy: 0, alpha: 1 },
+      { t: 0.25, sx: 1, sy: 1, rot: -0.3, ox: -0.2,  oy: 0, alpha: 1 },
+      { t: 0.75, sx: 1, sy: 1, rot: 0.3,  ox: 0.2,   oy: 0, alpha: 1 },
+      { t: 1,    sx: 1, sy: 1, rot: 0,    ox: 0,     oy: 0, alpha: 1 }
+    ]},
+    caughtSquashFade: { duration: 300, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,   rot: 0, ox: 0, oy: 0,   alpha: 1 },
+      { t: 0.5, sx: 1.4, sy: 0.4, rot: 0, ox: 0, oy: 0.3, alpha: 0.8 },
+      { t: 1,   sx: 0.6, sy: 0.6, rot: 0, ox: 0, oy: 0.1, alpha: 0 }
+    ]},
+    popVanish: { duration: 220, keyframes: [
+      { t: 0,   sx: 1,   sy: 1,   rot: 0,   ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 1.3, sy: 1.3, rot: 0.2, ox: 0, oy: 0, alpha: 0.7 },
+      { t: 1,   sx: 1.8, sy: 1.8, rot: 0.4, ox: 0, oy: 0, alpha: 0 }
+    ]}
+  };
+
+  function playRecipe(entity, name) {
+    animState[entity.id] = { recipe: name, t: performance.now() };
+  }
+
+  // Samples a recipe at `elapsedMs` into its playback; returns the interpolated
+  // transform plus `done` once elapsed has passed the recipe's full duration.
+  function sampleRecipe(name, elapsedMs) {
+    const recipe = RECIPES[name];
+    if (!recipe) return null;
+    const f = Math.min(1, elapsedMs / recipe.duration);
+    const kfs = recipe.keyframes;
+    let a = kfs[0], b = kfs[kfs.length - 1];
+    for (let i = 0; i < kfs.length - 1; i++) {
+      if (f >= kfs[i].t && f <= kfs[i + 1].t) { a = kfs[i]; b = kfs[i + 1]; break; }
+    }
+    const span = b.t - a.t;
+    const lf = span > 0 ? (f - a.t) / span : 0;
+    const lerp = (k) => a[k] + (b[k] - a[k]) * lf;
+    return { sx: lerp("sx"), sy: lerp("sy"), rot: lerp("rot"), ox: lerp("ox"), oy: lerp("oy"), alpha: lerp("alpha"), done: f >= 1 };
+  }
 
   // ============== Palette UI ==============
   function makeSwatchCanvas(art) {
@@ -707,15 +818,33 @@
   }, { passive: false });
   gameCanvas.addEventListener("touchend", () => { isPaintingBoard = false; dragActor = null; });
 
-  // Dragging an actor into a wall in the editor triggers the same bump reaction as gameplay.
+  // Dragging an actor in the editor triggers the exact same reaction table as keyboard
+  // movement — a wall bump, a temperament-specific player/actor contact, or a generic
+  // actor/actor bounce, whichever the reaction table actually calls for. This used to
+  // always fire a generic bounce for any occupied target cell, even when the player was
+  // dragged onto a chaser/fleer/stationary/wanderer actor (or vice versa), which meant
+  // editor and play diverged. It no longer does.
   function moveActorTo(actor, gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     if (actor.x === gx && actor.y === gy) return;
 
     const blockerActor = actors.find(a => a.id !== actor.id && a.x === gx && a.y === gy);
     if (blockerActor) {
-      // actor x actor collision (reaction #10), applies regardless of who's "the player"
-      triggerActorBounce(actor, blockerActor);
+      const playerActor = actor.isPlayer ? actor : (blockerActor.isPlayer ? blockerActor : null);
+      if (!playerActor) {
+        // neither side is the player: always a generic actor/actor bounce (reaction #10)
+        triggerActorBounce(actor, blockerActor);
+        renderAll();
+        return;
+      }
+      const npcActor = playerActor === actor ? blockerActor : actor;
+      const npcDef = actorDefs[npcActor.defId];
+      const temperament = npcDef ? npcDef.temperament : null;
+      if (temperament === "chaser" || temperament === "fleer" || temperament === "collectible") {
+        // the dragged actor actually lands on the target cell before the reaction plays out
+        actor.x = gx; actor.y = gy;
+      }
+      resolveActorContact(actor, blockerActor);
       renderAll();
       return;
     }
@@ -726,8 +855,8 @@
     if (actor.isPlayer) {
       resolvePlayerTileEntry(actor, gx, gy, tileDef);
     } else {
-      // non-player actors ignore hazard/bouncy/slippery; only solid blocks them
-      if (tileDef.property === "solid") {
+      // non-player actors ignore hazard/bouncy/slippery/goal; diggable acts solid to them too
+      if (tileDef.property === "solid" || tileDef.property === "diggable") {
         triggerBump(actor);
       } else {
         actor.x = gx; actor.y = gy;
@@ -737,17 +866,102 @@
   }
 
   // ============== Reaction table ==============
+  // This IS the engine. Every reaction below is reached from three places —
+  // keyboard movement, editor drag, and autonomous actor ticking — through the
+  // same shared functions, so the same input always produces the same reaction
+  // no matter which of the three moved the piece.
   function triggerBump(actor) {
     sounds.thud();
-    animState[actor.id] = { type: "bump", t: performance.now() };
+    playRecipe(actor, "flattenRecover");
     log(actor.isPlayer ? "Bump! (solid)" : "An actor bumped a wall.");
   }
 
   function triggerActorBounce(a, b) {
     sounds.boing();
-    animState[a.id] = { type: "bounce", t: performance.now() };
-    animState[b.id] = { type: "bounce", t: performance.now() };
+    playRecipe(a, "bounceRock");
+    playRecipe(b, "bounceRock");
     log("Two actors bounced off each other.");
+  }
+
+  function countCollectibles() {
+    return actors.filter(a => {
+      const d = actorDefs[a.defId];
+      return d && d.temperament === "collectible";
+    }).length;
+  }
+
+  // A round loops either by reaching a `goal` tile or by clearing every collectible.
+  // Intensity is engine-only: the kid never sets or sees it, only its effect (chaser speed).
+  function roundComplete() {
+    intensity++;
+    const player = actors.find(a => a.isPlayer);
+    if (player) {
+      sounds.celebrate();
+      playRecipe(player, "celebrationBurst");
+      setTimeout(() => {
+        player.x = startPos.x; player.y = startPos.y;
+        renderAll();
+      }, RECIPES.celebrationBurst.duration);
+    }
+    log("Round complete!");
+  }
+
+  function maybeRoundCompleteFromCollectibles() {
+    if (countCollectibles() === 0) roundComplete();
+  }
+
+  // Resolves any contact between two actors, regardless of which one physically moved
+  // (keyboard step, editor drag, or AI tick) — the reaction is always keyed by the
+  // temperament of whichever actor isn't the player. Two NPCs colliding always just bounce.
+  function resolveActorContact(moverActor, otherActor) {
+    const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
+    if (!playerActor) {
+      triggerActorBounce(moverActor, otherActor);
+      return;
+    }
+    const npcActor = playerActor === moverActor ? otherActor : moverActor;
+    const def = actorDefs[npcActor.defId];
+    const temperament = def ? def.temperament : null;
+
+    if (temperament === "stationary") {
+      sounds.boop();
+      playRecipe(npcActor, "boopPulse");
+      playRecipe(playerActor, "flattenRecover");
+      resetPlayerBumpPosition(playerActor, npcActor);
+      log("Boop!");
+    } else if (temperament === "wanderer") {
+      sounds.oof();
+      playRecipe(npcActor, "bounceRock");
+      playRecipe(playerActor, "bounceRock");
+      resetPlayerBumpPosition(playerActor, npcActor);
+      log("Oof!");
+    } else if (temperament === "chaser") {
+      sounds.gotcha();
+      playRecipe(playerActor, "caughtSquashFade");
+      log("Caught! Resetting to start.");
+      setTimeout(() => {
+        playerActor.x = startPos.x; playerActor.y = startPos.y;
+        renderAll();
+      }, RECIPES.caughtSquashFade.duration);
+    } else if (temperament === "fleer") {
+      sounds.pop();
+      playRecipe(npcActor, "popVanish");
+      log("Pop!");
+      setTimeout(() => {
+        actors = actors.filter(a => a.id !== npcActor.id);
+        renderAll();
+      }, RECIPES.popVanish.duration);
+    } else if (temperament === "collectible") {
+      sounds.pop();
+      playRecipe(npcActor, "popVanish");
+      addScore(1);
+      log("Got it! +1");
+      setTimeout(() => {
+        actors = actors.filter(a => a.id !== npcActor.id);
+        maybeRoundCompleteFromCollectibles();
+        renderAll();
+      }, RECIPES.popVanish.duration);
+    }
   }
 
   function resolvePlayerTileEntry(player, gx, gy, tileDef) {
@@ -761,7 +975,7 @@
       // knockback one tile from where they came
       const dx = gx - player.x, dy = gy - player.y;
       sounds.yelp();
-      animState[player.id] = { type: "flash", t: performance.now() };
+      playRecipe(player, "knockTilt");
       const kx = player.x - dx, ky = player.y - dy;
       if (kx >= 0 && kx < COLS && ky >= 0 && ky < ROWS) {
         player.x = kx; player.y = ky;
@@ -770,21 +984,22 @@
     } else if (prop === "bouncy") {
       const dx = Math.sign(gx - player.x), dy = Math.sign(gy - player.y);
       sounds.boing();
-      animState[player.id] = { type: "spin", t: performance.now() };
+      playRecipe(player, "launchSpin");
       let launchDist = 2 + Math.floor(Math.random() * 2); // 2-3 tiles
       let tx = player.x, ty = player.y;
       for (let i = 0; i < launchDist; i++) {
         const nx = tx + dx, ny = ty + dy;
         if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
         const nDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
-        if (nDef.property === "solid") break;
+        if (nDef.property === "solid" || nDef.property === "diggable") break;
         tx = nx; ty = ny;
       }
       player.x = tx; player.y = ty;
       log("Boing! Launched by bouncy tile.");
-      checkTileAfterMove(player, tx, ty);
     } else if (prop === "slippery") {
       const dx = gx - player.x, dy = gy - player.y;
+      sounds.footstep();
+      playRecipe(player, "slideSquish");
       let tx = gx, ty = gy;
       while (true) {
         const nx = tx + dx, ny = ty + dy;
@@ -795,60 +1010,33 @@
       }
       player.x = tx; player.y = ty;
       log("Wheee! Sliding.");
-      // resolve landing tile's reaction (could be solid/hazard/bouncy/walkable) at next step
+      // resolve landing tile's reaction (could be solid/hazard/bouncy/diggable/goal) at next step
       const landDx = Math.sign(dx), landDy = Math.sign(dy);
       const nx = tx + landDx, ny = ty + landDy;
       if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
         const landDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
         if (landDef.property !== "walkable") {
           resolvePlayerTileEntry(player, nx, ny, landDef);
+          return; // the recursive call already ran the actor-contact check below
         }
       }
-    }
-    checkActorCollisionsForPlayer(player);
-  }
-
-  function checkTileAfterMove(player, x, y) {
-    const def = board[y] && board[y][x] ? tileDefs[board[y][x]] : { property: "walkable" };
-    if (def.property === "hazard" || def.property === "bouncy" || def.property === "slippery" || def.property === "solid") {
-      // Landing on a special tile after a bounce re-triggers its reaction, but avoid infinite bounce loops
+    } else if (prop === "diggable") {
+      sounds.crumble();
+      const key = gx + "," + gy;
+      tileAnimState[key] = { recipe: "crumbleFade", t: performance.now(), art: tileDefs[board[gy][gx]].art };
+      board[gy][gx] = null; // crumbles permanently to walkable
+      player.x = gx; player.y = gy;
+      log("Crumble! That tile's walkable now.");
+    } else if (prop === "goal") {
+      player.x = gx; player.y = gy;
+      roundComplete();
     }
     checkActorCollisionsForPlayer(player);
   }
 
   function checkActorCollisionsForPlayer(player) {
     const hit = actors.find(a => a.id !== player.id && a.x === player.x && a.y === player.y);
-    if (!hit) return;
-    const def = actorDefs[hit.defId];
-    if (def.temperament === "stationary") {
-      sounds.boop();
-      animState[hit.id] = { type: "boop", t: performance.now() };
-      // player stays put -> revert to previous tile? For simplicity, push player back one tile.
-      resetPlayerBumpPosition(player, hit);
-      log("Boop! Ran into something.");
-    } else if (def.temperament === "wanderer") {
-      sounds.oof();
-      animState[player.id] = { type: "bounce", t: performance.now() };
-      animState[hit.id] = { type: "bounce", t: performance.now() };
-      resetPlayerBumpPosition(player, hit);
-      log("Oof! Bounced off a wanderer.");
-    } else if (def.temperament === "chaser") {
-      sounds.gotcha();
-      animState[player.id] = { type: "gotcha", t: performance.now() };
-      log("Caught! Resetting to start.");
-      setTimeout(() => {
-        player.x = startPos.x; player.y = startPos.y;
-        renderAll();
-      }, 260);
-    } else if (def.temperament === "fleer") {
-      sounds.pop();
-      animState[hit.id] = { type: "pop", t: performance.now() };
-      log("Pop! Fleer vanished.");
-      setTimeout(() => {
-        actors = actors.filter(a => a.id !== hit.id);
-        renderAll();
-      }, 150);
-    }
+    if (hit) resolveActorContact(player, hit);
   }
 
   function resetPlayerBumpPosition(player, blocker) {
@@ -876,44 +1064,16 @@
     const blockerActor = actors.find(a => a.id !== player.id && a.x === nx && a.y === ny);
     if (blockerActor) {
       const def = actorDefs[blockerActor.defId];
-      if (def.temperament === "stationary" || def.temperament === "wanderer") {
-        // bump-like: player stays, but appropriate sound/animation
-        if (def.temperament === "stationary") {
-          sounds.boop();
-          animState[player.id] = { type: "bump", t: performance.now() };
-          animState[blockerActor.id] = { type: "boop", t: performance.now() };
-          log("Boop!");
-        } else {
-          sounds.oof();
-          animState[player.id] = { type: "bounce", t: performance.now() };
-          animState[blockerActor.id] = { type: "bounce", t: performance.now() };
-          log("Oof!");
-        }
-        renderAll();
-        return;
-      } else if (def.temperament === "chaser") {
+      const temperament = def ? def.temperament : null;
+      // chaser/fleer/collectible reactions read right when the player actually reaches that
+      // cell (caught, or the thing vanishing from under them); stationary/wanderer are a bump
+      // that leaves the player adjacent, so only those three actually move the player onto it.
+      if (temperament === "chaser" || temperament === "fleer" || temperament === "collectible") {
         player.x = nx; player.y = ny;
-        sounds.gotcha();
-        animState[player.id] = { type: "gotcha", t: performance.now() };
-        log("Caught! Resetting to start.");
-        renderAll();
-        setTimeout(() => {
-          player.x = startPos.x; player.y = startPos.y;
-          renderAll();
-        }, 260);
-        return;
-      } else if (def.temperament === "fleer") {
-        player.x = nx; player.y = ny;
-        sounds.pop();
-        animState[blockerActor.id] = { type: "pop", t: performance.now() };
-        log("Pop!");
-        renderAll();
-        setTimeout(() => {
-          actors = actors.filter(a => a.id !== blockerActor.id);
-          renderAll();
-        }, 150);
-        return;
       }
+      resolveActorContact(player, blockerActor);
+      renderAll();
+      return;
     }
 
     const tileDefId = board[ny][nx];
@@ -958,6 +1118,9 @@
     if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
     initBoard();
     actors = [];
+    animState = {};
+    tileAnimState = {};
+    resetScoreAndIntensity();
     renderAll();
   });
 
@@ -984,8 +1147,26 @@
     const cell = TILE / ART;
 
     // tiles
+    const now0 = performance.now();
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
+        const key = x + "," + y;
+        const tanim = tileAnimState[key];
+        if (tanim) {
+          const sample = sampleRecipe(tanim.recipe, now0 - tanim.t);
+          if (sample) {
+            gctx.save();
+            gctx.globalAlpha = sample.alpha;
+            const cx = x * TILE + TILE / 2 + sample.ox * TILE, cy = y * TILE + TILE / 2 + sample.oy * TILE;
+            gctx.translate(cx, cy);
+            if (sample.rot) gctx.rotate(sample.rot);
+            gctx.scale(sample.sx, sample.sy);
+            drawArtScaled(gctx, tanim.art, -TILE / 2, -TILE / 2, TILE, cell);
+            gctx.restore();
+            if (sample.done) delete tileAnimState[key];
+            continue;
+          }
+        }
         const defId = board[y][x];
         if (defId && tileDefs[defId]) {
           drawArtScaled(gctx, tileDefs[defId].art, x * TILE, y * TILE, TILE, cell);
@@ -1008,42 +1189,30 @@
     gctx.lineWidth = 1.5;
     gctx.strokeRect(startPos.x * TILE + 1, startPos.y * TILE + 1, TILE - 2, TILE - 2);
 
-    // actors (with simple animation offsets)
+    // actors, deformed by whichever hand-authored recipe their last reaction triggered
     const now = performance.now();
     actors.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
-      let ox = 0, oy = 0, alpha = 1, rot = 0, scaleAdj = 1;
+      let t = { sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 };
       const anim = animState[actor.id];
       if (anim) {
-        const dt = now - anim.t;
-        if (anim.type === "bump" && dt < 200) {
-          oy = Math.sin(dt / 200 * Math.PI) * 3;
-        } else if (anim.type === "bounce" && dt < 200) {
-          ox = Math.sin(dt / 200 * Math.PI * 2) * 2;
-        } else if (anim.type === "boop" && dt < 200) {
-          scaleAdj = 1 + Math.sin(dt / 200 * Math.PI) * 0.15;
-        } else if (anim.type === "flash" && dt < 200) {
-          alpha = (Math.floor(dt / 50) % 2 === 0) ? 0.3 : 1;
-        } else if (anim.type === "spin" && dt < 300) {
-          rot = (dt / 300) * Math.PI * 2;
-        } else if (anim.type === "gotcha" && dt < 260) {
-          scaleAdj = 1 - dt / 260 * 0.5;
-        } else if (anim.type === "pop" && dt < 150) {
-          scaleAdj = 1 + dt / 150 * 0.8;
-          alpha = 1 - dt / 150;
+        const sample = sampleRecipe(anim.recipe, now - anim.t);
+        if (sample) {
+          t = sample;
+          if (sample.done) delete animState[actor.id];
         } else {
           delete animState[actor.id];
         }
       }
 
       gctx.save();
-      gctx.globalAlpha = alpha;
-      const centerX = actor.x * TILE + TILE / 2 + ox;
-      const centerY = actor.y * TILE + TILE / 2 + oy;
+      gctx.globalAlpha = t.alpha;
+      const centerX = actor.x * TILE + TILE / 2 + t.ox * TILE;
+      const centerY = actor.y * TILE + TILE / 2 + t.oy * TILE;
       gctx.translate(centerX, centerY);
-      if (rot) gctx.rotate(rot);
-      gctx.scale(scaleAdj, scaleAdj);
+      if (t.rot) gctx.rotate(t.rot);
+      gctx.scale(t.sx, t.sy);
       drawArtScaled(gctx, def.art, -TILE / 2, -TILE / 2, TILE, cell);
       gctx.restore();
 
@@ -1086,7 +1255,8 @@
     if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return true;
     const defId = board[y][x];
     const def = defId ? tileDefs[defId] : { property: "walkable" };
-    return def.property === "solid";
+    // diggable only opens up for the player; to every actor's own movement it's solid
+    return def.property === "solid" || def.property === "diggable";
   }
 
   // Picks a direction biased toward (dx,dy); (0,0) means pick fully at random.
@@ -1111,6 +1281,26 @@
     return null;
   }
 
+  // Attempts one step in `dir`, going through the exact same reaction table as
+  // keyboard movement and editor drag (resolveActorContact / triggerActorBounce).
+  function attemptAiMove(actor, dir, player) {
+    const v = DIR_VECT[dir];
+    const nx = actor.x + v.dx, ny = actor.y + v.dy;
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
+
+    if (player && nx === player.x && ny === player.y) {
+      actor.x = nx; actor.y = ny;
+      resolveActorContact(actor, player);
+      return;
+    }
+    const other = actors.find(a => a.id !== actor.id && a.x === nx && a.y === ny);
+    if (other) {
+      triggerActorBounce(actor, other);
+      return;
+    }
+    actor.x = nx; actor.y = ny;
+  }
+
   function tickActors() {
     const player = actors.find(a => a.isPlayer);
     actors.slice().forEach(actor => {
@@ -1125,23 +1315,17 @@
       } else if (def.temperament === "fleer" && player) {
         dir = pickDir(actor, actor.x - player.x, actor.y - player.y);
       } else {
-        return; // stationary actors never move on their own
+        return; // stationary and collectible actors never move on their own
       }
       if (!dir) return;
-      const v = DIR_VECT[dir];
-      const nx = actor.x + v.dx, ny = actor.y + v.dy;
+      attemptAiMove(actor, dir, player);
 
-      if (player && nx === player.x && ny === player.y) {
-        actor.x = nx; actor.y = ny;
-        checkActorCollisionsForPlayer(player);
-        return;
+      // Intensity ramp: chasers get a chance at a bonus step per tick as rounds loop.
+      // Entirely engine-side — nothing the kid sets or sees, only the effect of it.
+      if (def.temperament === "chaser" && intensity > 0 && Math.random() < Math.min(0.85, intensity * 0.2)) {
+        const dir2 = pickDir(actor, player ? player.x - actor.x : 0, player ? player.y - actor.y : 0);
+        if (dir2) attemptAiMove(actor, dir2, player);
       }
-      const other = actors.find(a => a.id !== actor.id && a.x === nx && a.y === ny);
-      if (other) {
-        triggerActorBounce(actor, other);
-        return;
-      }
-      actor.x = nx; actor.y = ny;
     });
   }
 
