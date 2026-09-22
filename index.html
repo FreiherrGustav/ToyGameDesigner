@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toy Game-Maker</title>
+<style>
+  :root {
+    --bg: #1e1f26;
+    --panel: #2a2c37;
+    --panel-light: #383b4a;
+    --accent: #ffd166;
+    --text: #f2f2f2;
+    --grid-line: #444656;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Verdana, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 8px 0;
+    color: var(--accent);
+  }
+  .panel {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  /* ---------- Game canvas ---------- */
+  #gameWrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #gameCanvas {
+    background: #000;
+    image-rendering: pixelated;
+    border: 3px solid var(--panel-light);
+    border-radius: 4px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  #dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 48px);
+    grid-template-rows: repeat(3, 48px);
+    gap: 4px;
+  }
+  #dpad button {
+    background: var(--panel-light);
+    color: var(--text);
+    border: none;
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+  }
+  #dpad button:active { background: var(--accent); color: #222; }
+  .dpad-up { grid-column: 2; grid-row: 1; }
+  .dpad-left { grid-column: 1; grid-row: 2; }
+  .dpad-right { grid-column: 3; grid-row: 2; }
+  .dpad-down { grid-column: 2; grid-row: 3; }
+
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button.tbtn {
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.tbtn:hover { border-color: var(--accent); }
+  button.tbtn.active {
+    background: var(--accent);
+    color: #222;
+    font-weight: bold;
+  }
+
+  /* ---------- Palette panel ---------- */
+  #paletteWrap { width: 260px; display: flex; flex-direction: column; gap: 12px; }
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
+  .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .swatch {
+    width: 42px; height: 42px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    text-align: center;
+    color: #fff;
+    line-height: 1.1;
+  }
+  .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
+
+  .mode-toggle { display: flex; gap: 4px; }
+  .mode-toggle button {
+    flex: 1;
+    background: var(--panel-light);
+    color: var(--text);
+    border: none;
+    border-radius: 6px;
+    padding: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .mode-toggle button.active { background: var(--accent); color: #222; font-weight: bold; }
+
+  /* ---------- Pixel editor ---------- */
+  #pixelEditor { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  #pixelCanvas {
+    background: #fff;
+    image-rendering: pixelated;
+    border: 2px solid var(--panel-light);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #colorRow { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  .colorSwatch {
+    width: 22px; height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .colorSwatch.selected { border-color: var(--accent); }
+
+  select, input[type="text"] {
+    background: var(--panel-light);
+    color: var(--text);
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+
+  .hint {
+    font-size: 11px;
+    color: #999;
+    max-width: 260px;
+    line-height: 1.4;
+  }
+
+  #log {
+    font-size: 12px;
+    color: #bbb;
+    max-height: 60px;
+    overflow-y: auto;
+    width: 100%;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Palette / Authoring panel -->
+  <div class="panel" id="paletteWrap">
+    <h1>Toy Game-Maker</h1>
+
+    <div>
+      <div class="section-title">Paint mode</div>
+      <div class="mode-toggle">
+        <button id="modeTile" class="active">Tiles</button>
+        <button id="modeActor">Actors</button>
+        <button id="modeErase">Erase</button>
+      </div>
+    </div>
+
+    <div id="tilePropertiesBlock">
+      <div class="section-title">Tile property</div>
+      <div class="swatch-row" id="tileSwatches"></div>
+    </div>
+
+    <div id="actorPropertiesBlock" style="display:none;">
+      <div class="section-title">Temperament</div>
+      <div class="swatch-row" id="actorSwatches"></div>
+      <div class="section-title" style="margin-top:8px;">
+        <label><input type="checkbox" id="playerControlled"> Player-controlled</label>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">tile</span></div>
+      <div id="pixelEditor">
+        <canvas id="pixelCanvas" width="128" height="128"></canvas>
+        <div id="colorRow"></div>
+        <div class="toolbar">
+          <button class="tbtn" id="clearArt">Clear art</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="hint">
+      Pick a tile property or temperament, draw its 8×8 look, then click-drag on the grid to paint tiles, or click to place an actor. The grid is always live — no separate play mode.
+    </div>
+  </div>
+
+  <!-- Game / Editor canvas -->
+  <div class="panel" id="gameWrap">
+    <div class="toolbar">
+      <button class="tbtn" id="resetBtn">↺ Reset to start</button>
+      <button class="tbtn" id="setStartBtn">📍 Set player start here</button>
+      <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
+    </div>
+    <canvas id="gameCanvas" width="384" height="288"></canvas>
+    <div id="dpad">
+      <button class="dpad-up" data-dir="up">▲</button>
+      <button class="dpad-left" data-dir="left">◀</button>
+      <button class="dpad-right" data-dir="right">▶</button>
+      <button class="dpad-down" data-dir="down">▼</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ============== Constants ==============
+  const COLS = 12, ROWS = 9, TILE = 16, ART = 8, SCALE = TILE / ART;
+
+  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery"];
+  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer"];
+
+  const TILE_COLORS = {
+    walkable: "#4caf50",
+    solid: "#616161",
+    hazard: "#e53935",
+    bouncy: "#ff9800",
+    slippery: "#29b6f6"
+  };
+  const TEMPERAMENT_COLORS = {
+    stationary: "#9575cd",
+    wanderer: "#26a69a",
+    chaser: "#ef5350",
+    fleer: "#ffca28"
+  };
+
+  const PALETTE_COLORS = [
+    "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff",
+    "#ffff00", "#ff8800", "#ff00ff", "#00ffff", "#8b4513",
+    "#808080", "#ffc0cb", null // null = transparent (eraser)
+  ];
+
+  // ============== State ==============
+  // Board: grid of tile type ids (index into tileDefs) OR null (default walkable-empty)
+  let tileDefs = {}; // id -> {property, art: Uint8Array-ish array of color indices, name}
+  let actorDefs = {}; // id -> {temperament, art, name}
+  let nextTileDefId = 1;
+  let nextActorDefId = 1;
+
+  let board = []; // ROWS x COLS, each cell = tileDefId or null
+  let actors = []; // {id, defId, x, y, isPlayer}
+  let nextActorInstId = 1;
+
+  let startPos = { x: 1, y: 1 };
+
+  let paintMode = "tile"; // 'tile' | 'actor' | 'erase'
+  let selectedTileProp = "walkable";
+  let selectedTemperament = "stationary";
+  let selectedTileDefId = null;
+  let selectedActorDefId = null;
+  let playerControlledFlag = false;
+
+  let currentArt = new Array(ART * ART).fill(null); // color index or null(transparent), stores hex or null
+  let currentColor = PALETTE_COLORS[2];
+  let isDrawingPixel = false;
+  let isPaintingBoard = false;
+
+  let animState = {}; // actorInstId -> {type, t}
+  let flashTiles = []; // {x,y,until}
+
+  // ============== Init board ==============
+  function initBoard() {
+    board = [];
+    for (let y = 0; y < ROWS; y++) {
+      const row = [];
+      for (let x = 0; x < COLS; x++) row.push(null);
+      board.push(row);
+    }
+  }
+  initBoard();
+
+  // default tile defs, one per property, with simple flat-color art, so kids have something immediately usable
+  function makeDefaultArt(hex) {
+    return new Array(ART * ART).fill(hex);
+  }
+  TILE_PROPS.forEach(prop => {
+    const id = "t" + (nextTileDefId++);
+    tileDefs[id] = { property: prop, art: makeDefaultArt(TILE_COLORS[prop]), name: prop };
+  });
+  TEMPERAMENTS.forEach(temp => {
+    const id = "a" + (nextActorDefId++);
+    actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), name: temp };
+  });
+
+  function findDefaultTileDef(prop) {
+    return Object.keys(tileDefs).find(id => tileDefs[id].property === prop && tileDefs[id].name === prop);
+  }
+  function findDefaultActorDef(temp) {
+    return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
+  }
+
+  selectedTileDefId = findDefaultTileDef(selectedTileProp);
+  selectedActorDefId = findDefaultActorDef(selectedTemperament);
+  currentArt = tileDefs[selectedTileDefId].art.slice();
+
+  // ============== Audio (simple beeps) ==============
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+  function beep(freq, duration, type, volume) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type || "square";
+      osc.frequency.value = freq;
+      gain.gain.value = volume || 0.15;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      osc.start(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      osc.stop(now + duration);
+    } catch (e) { /* audio not available, ignore */ }
+  }
+  const sounds = {
+    footstep: () => beep(220, 0.06, "square", 0.06),
+    thud: () => beep(90, 0.18, "square", 0.2),
+    yelp: () => beep(600, 0.15, "sawtooth", 0.2),
+    boing: () => { beep(300, 0.1, "sine", 0.2); setTimeout(() => beep(500, 0.1, "sine", 0.15), 60); },
+    boop: () => beep(440, 0.08, "triangle", 0.15),
+    oof: () => beep(150, 0.1, "square", 0.18),
+    gotcha: () => { beep(700, 0.08, "square", 0.2); setTimeout(() => beep(500, 0.08, "square", 0.2), 90); setTimeout(() => beep(300, 0.15, "square", 0.2), 180); },
+    pop: () => beep(900, 0.1, "sine", 0.2)
+  };
+
+  function log(msg) {
+    const el = document.getElementById("log");
+    const line = document.createElement("div");
+    line.textContent = msg;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+    while (el.children.length > 20) el.removeChild(el.firstChild);
+  }
+
+  // ============== Canvas setup ==============
+  const gameCanvas = document.getElementById("gameCanvas");
+  const gctx = gameCanvas.getContext("2d");
+  gameCanvas.width = COLS * TILE;
+  gameCanvas.height = ROWS * TILE;
+  // scale up for display via CSS while keeping backing resolution for crisp pixel art
+  const DISPLAY_SCALE = 2;
+  gameCanvas.style.width = (COLS * TILE * DISPLAY_SCALE) + "px";
+  gameCanvas.style.height = (ROWS * TILE * DISPLAY_SCALE) + "px";
+
+  const pixelCanvas = document.getElementById("pixelCanvas");
+  const pctx = pixelCanvas.getContext("2d");
+  const PIXEL_DISPLAY_SCALE = pixelCanvas.width / ART; // 128/8 = 16
+
+  // ============== Palette UI ==============
+  function makeSwatchCanvas(art) {
+    const c = document.createElement("canvas");
+    c.width = ART; c.height = ART;
+    const cx = c.getContext("2d");
+    drawArtToCtx(cx, art, ART);
+    return c;
+  }
+
+  function drawArtToCtx(ctx, art, size) {
+    ctx.clearRect(0, 0, size, size);
+    const cell = size / ART;
+    for (let y = 0; y < ART; y++) {
+      for (let x = 0; x < ART; x++) {
+        const color = art[y * ART + x];
+        if (color) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x * cell, y * cell, cell, cell);
+        }
+      }
+    }
+  }
+
+  function renderTileSwatches() {
+    const container = document.getElementById("tileSwatches");
+    container.innerHTML = "";
+    TILE_PROPS.forEach(prop => {
+      // show the currently-selected def for this property, or default
+      const defId = (selectedTileProp === prop && selectedTileDefId) ? selectedTileDefId : findDefaultTileDef(prop);
+      const def = tileDefs[defId];
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedTileProp === prop ? " selected" : "");
+      sw.style.background = TILE_COLORS[prop];
+      sw.title = prop;
+      const label = document.createElement("div");
+      label.textContent = prop;
+      label.style.fontSize = "9px";
+      label.style.position = "absolute";
+      sw.style.position = "relative";
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        selectedTileProp = prop;
+        selectedTileDefId = findDefaultTileDef(prop);
+        currentArt = tileDefs[selectedTileDefId].art.slice();
+        paintMode = "tile";
+        updateModeButtons();
+        renderAll();
+      });
+      container.appendChild(sw);
+    });
+  }
+
+  function renderActorSwatches() {
+    const container = document.getElementById("actorSwatches");
+    container.innerHTML = "";
+    TEMPERAMENTS.forEach(temp => {
+      const defId = (selectedTemperament === temp && selectedActorDefId) ? selectedActorDefId : findDefaultActorDef(temp);
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedTemperament === temp ? " selected" : "");
+      sw.style.background = TEMPERAMENT_COLORS[temp];
+      sw.title = temp;
+      const label = document.createElement("div");
+      label.textContent = temp;
+      label.style.fontSize = "9px";
+      label.style.position = "absolute";
+      sw.style.position = "relative";
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        selectedTemperament = temp;
+        selectedActorDefId = findDefaultActorDef(temp);
+        currentArt = actorDefs[selectedActorDefId].art.slice();
+        paintMode = "actor";
+        updateModeButtons();
+        renderAll();
+      });
+      container.appendChild(sw);
+    });
+  }
+
+  function renderColorRow() {
+    const row = document.getElementById("colorRow");
+    row.innerHTML = "";
+    PALETTE_COLORS.forEach(color => {
+      const sw = document.createElement("div");
+      sw.className = "colorSwatch" + (color === currentColor ? " selected" : "");
+      sw.style.background = color || "repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 8px 8px";
+      sw.title = color || "eraser";
+      sw.addEventListener("click", () => {
+        currentColor = color;
+        renderColorRow();
+      });
+      row.appendChild(sw);
+    });
+  }
+
+  function updateModeButtons() {
+    document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
+    document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
+    document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
+    document.getElementById("tilePropertiesBlock").style.display = paintMode === "actor" ? "none" : "block";
+    document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
+    document.getElementById("editingLabel").textContent = paintMode === "actor" ? "actor" : "tile";
+    document.getElementById("playerControlled").checked = playerControlledFlag;
+  }
+
+  document.getElementById("modeTile").addEventListener("click", () => {
+    paintMode = "tile";
+    currentArt = tileDefs[selectedTileDefId].art.slice();
+    updateModeButtons(); renderAll();
+  });
+  document.getElementById("modeActor").addEventListener("click", () => {
+    paintMode = "actor";
+    currentArt = actorDefs[selectedActorDefId].art.slice();
+    updateModeButtons(); renderAll();
+  });
+  document.getElementById("modeErase").addEventListener("click", () => {
+    paintMode = "erase";
+    updateModeButtons(); renderAll();
+  });
+  document.getElementById("playerControlled").addEventListener("change", (e) => {
+    playerControlledFlag = e.target.checked;
+  });
+
+  // ============== Pixel editor drawing ==============
+  function renderPixelCanvas() {
+    drawArtToCtx(pctx, currentArt, pixelCanvas.width);
+    // grid lines
+    pctx.strokeStyle = "rgba(0,0,0,0.15)";
+    pctx.lineWidth = 1;
+    for (let i = 0; i <= ART; i++) {
+      pctx.beginPath();
+      pctx.moveTo(i * PIXEL_DISPLAY_SCALE, 0);
+      pctx.lineTo(i * PIXEL_DISPLAY_SCALE, pixelCanvas.height);
+      pctx.stroke();
+      pctx.beginPath();
+      pctx.moveTo(0, i * PIXEL_DISPLAY_SCALE);
+      pctx.lineTo(pixelCanvas.width, i * PIXEL_DISPLAY_SCALE);
+      pctx.stroke();
+    }
+  }
+
+  function pixelFromEvent(e) {
+    const rect = pixelCanvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const px = Math.floor(cx / (rect.width / ART));
+    const py = Math.floor(cy / (rect.height / ART));
+    return { px, py };
+  }
+
+  function paintPixel(e) {
+    const { px, py } = pixelFromEvent(e);
+    if (px < 0 || px >= ART || py < 0 || py >= ART) return;
+    currentArt[py * ART + px] = currentColor;
+    renderPixelCanvas();
+    commitArtToActiveDef();
+    renderAll();
+  }
+
+  function commitArtToActiveDef() {
+    if (paintMode === "actor") {
+      actorDefs[selectedActorDefId].art = currentArt.slice();
+    } else {
+      tileDefs[selectedTileDefId].art = currentArt.slice();
+    }
+  }
+
+  pixelCanvas.addEventListener("mousedown", (e) => { isDrawingPixel = true; paintPixel(e); });
+  pixelCanvas.addEventListener("mousemove", (e) => { if (isDrawingPixel) paintPixel(e); });
+  window.addEventListener("mouseup", () => { isDrawingPixel = false; });
+  pixelCanvas.addEventListener("touchstart", (e) => { isDrawingPixel = true; paintPixel(e); e.preventDefault(); }, { passive: false });
+  pixelCanvas.addEventListener("touchmove", (e) => { if (isDrawingPixel) paintPixel(e); e.preventDefault(); }, { passive: false });
+  pixelCanvas.addEventListener("touchend", () => { isDrawingPixel = false; });
+
+  document.getElementById("clearArt").addEventListener("click", () => {
+    currentArt = new Array(ART * ART).fill(null);
+    renderPixelCanvas();
+    commitArtToActiveDef();
+    renderAll();
+  });
+
+  // ============== Board painting ==============
+  function cellFromEvent(e) {
+    const rect = gameCanvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const gx = Math.floor(cx / (rect.width / COLS));
+    const gy = Math.floor(cy / (rect.height / ROWS));
+    return { gx, gy };
+  }
+
+  function actorAt(gx, gy) {
+    return actors.find(a => a.x === gx && a.y === gy);
+  }
+
+  function paintBoardCell(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+
+    if (paintMode === "erase") {
+      const a = actorAt(gx, gy);
+      if (a) {
+        actors = actors.filter(ac => ac.id !== a.id);
+      } else {
+        board[gy][gx] = null;
+      }
+      renderAll();
+      return;
+    }
+
+    if (paintMode === "tile") {
+      // don't paint tile under an actor's cell is fine, tiles and actors are independent layers
+      board[gy][gx] = selectedTileDefId;
+      renderAll();
+      return;
+    }
+
+    if (paintMode === "actor") {
+      const existing = actorAt(gx, gy);
+      if (existing) {
+        // reposition doesn't apply on click-in-place; but clicking same mode again replaces def
+        existing.defId = selectedActorDefId;
+        existing.isPlayer = playerControlledFlag ? true : existing.isPlayer;
+        if (playerControlledFlag) {
+          actors.forEach(a => { if (a.id !== existing.id) a.isPlayer = false; });
+        }
+        renderAll();
+        return;
+      }
+      const isPlayer = playerControlledFlag;
+      if (isPlayer) {
+        actors.forEach(a => { a.isPlayer = false; });
+      }
+      const newActor = {
+        id: nextActorInstId++,
+        defId: selectedActorDefId,
+        x: gx, y: gy,
+        isPlayer
+      };
+      actors.push(newActor);
+      if (isPlayer) {
+        startPos = { x: gx, y: gy };
+      }
+      renderAll();
+      return;
+    }
+  }
+
+  let dragActor = null; // actor being dragged in editor
+  let dragOffsetNone = true;
+
+  gameCanvas.addEventListener("mousedown", (e) => {
+    const { gx, gy } = cellFromEvent(e);
+    if (paintMode === "actor") {
+      const existing = actorAt(gx, gy);
+      if (existing && existing.defId === selectedActorDefId) {
+        // drag to reposition existing matching actor
+        dragActor = existing;
+        return;
+      }
+    }
+    isPaintingBoard = true;
+    paintBoardCell(gx, gy);
+  });
+  gameCanvas.addEventListener("mousemove", (e) => {
+    const { gx, gy } = cellFromEvent(e);
+    if (dragActor) {
+      moveActorTo(dragActor, gx, gy);
+      return;
+    }
+    if (isPaintingBoard && paintMode === "tile") {
+      paintBoardCell(gx, gy);
+    }
+  });
+  window.addEventListener("mouseup", () => {
+    isPaintingBoard = false;
+    dragActor = null;
+  });
+
+  gameCanvas.addEventListener("touchstart", (e) => {
+    const { gx, gy } = cellFromEvent(e);
+    if (paintMode === "actor") {
+      const existing = actorAt(gx, gy);
+      if (existing && existing.defId === selectedActorDefId) {
+        dragActor = existing;
+        e.preventDefault();
+        return;
+      }
+    }
+    isPaintingBoard = true;
+    paintBoardCell(gx, gy);
+    e.preventDefault();
+  }, { passive: false });
+  gameCanvas.addEventListener("touchmove", (e) => {
+    const { gx, gy } = cellFromEvent(e);
+    if (dragActor) { moveActorTo(dragActor, gx, gy); e.preventDefault(); return; }
+    if (isPaintingBoard && paintMode === "tile") paintBoardCell(gx, gy);
+    e.preventDefault();
+  }, { passive: false });
+  gameCanvas.addEventListener("touchend", () => { isPaintingBoard = false; dragActor = null; });
+
+  // Dragging an actor into a wall in the editor triggers the same bump reaction as gameplay.
+  function moveActorTo(actor, gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (actor.x === gx && actor.y === gy) return;
+
+    const blockerActor = actors.find(a => a.id !== actor.id && a.x === gx && a.y === gy);
+    if (blockerActor) {
+      // actor x actor collision (reaction #10), applies regardless of who's "the player"
+      triggerActorBounce(actor, blockerActor);
+      renderAll();
+      return;
+    }
+
+    const tileDefId = board[gy][gx];
+    const tileDef = tileDefId ? tileDefs[tileDefId] : { property: "walkable" };
+
+    if (actor.isPlayer) {
+      resolvePlayerTileEntry(actor, gx, gy, tileDef);
+    } else {
+      // non-player actors ignore hazard/bouncy/slippery; only solid blocks them
+      if (tileDef.property === "solid") {
+        triggerBump(actor);
+      } else {
+        actor.x = gx; actor.y = gy;
+      }
+    }
+    renderAll();
+  }
+
+  // ============== Reaction table ==============
+  function triggerBump(actor) {
+    sounds.thud();
+    animState[actor.id] = { type: "bump", t: performance.now() };
+    log(actor.isPlayer ? "Bump! (solid)" : "An actor bumped a wall.");
+  }
+
+  function triggerActorBounce(a, b) {
+    sounds.boing();
+    animState[a.id] = { type: "bounce", t: performance.now() };
+    animState[b.id] = { type: "bounce", t: performance.now() };
+    log("Two actors bounced off each other.");
+  }
+
+  function resolvePlayerTileEntry(player, gx, gy, tileDef) {
+    const prop = tileDef.property;
+    if (prop === "walkable") {
+      player.x = gx; player.y = gy;
+      sounds.footstep();
+    } else if (prop === "solid") {
+      triggerBump(player);
+    } else if (prop === "hazard") {
+      // knockback one tile from where they came
+      const dx = gx - player.x, dy = gy - player.y;
+      sounds.yelp();
+      animState[player.id] = { type: "flash", t: performance.now() };
+      const kx = player.x - dx, ky = player.y - dy;
+      if (kx >= 0 && kx < COLS && ky >= 0 && ky < ROWS) {
+        player.x = kx; player.y = ky;
+      }
+      log("Ouch! Hazard knockback.");
+    } else if (prop === "bouncy") {
+      const dx = Math.sign(gx - player.x), dy = Math.sign(gy - player.y);
+      sounds.boing();
+      animState[player.id] = { type: "spin", t: performance.now() };
+      let launchDist = 2 + Math.floor(Math.random() * 2); // 2-3 tiles
+      let tx = player.x, ty = player.y;
+      for (let i = 0; i < launchDist; i++) {
+        const nx = tx + dx, ny = ty + dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
+        const nDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
+        if (nDef.property === "solid") break;
+        tx = nx; ty = ny;
+      }
+      player.x = tx; player.y = ty;
+      log("Boing! Launched by bouncy tile.");
+      checkTileAfterMove(player, tx, ty);
+    } else if (prop === "slippery") {
+      const dx = gx - player.x, dy = gy - player.y;
+      let tx = gx, ty = gy;
+      while (true) {
+        const nx = tx + dx, ny = ty + dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
+        const nDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
+        if (nDef.property !== "slippery") break;
+        tx = nx; ty = ny;
+      }
+      player.x = tx; player.y = ty;
+      log("Wheee! Sliding.");
+      // resolve landing tile's reaction (could be solid/hazard/bouncy/walkable) at next step
+      const landDx = Math.sign(dx), landDy = Math.sign(dy);
+      const nx = tx + landDx, ny = ty + landDy;
+      if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
+        const landDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
+        if (landDef.property !== "walkable") {
+          resolvePlayerTileEntry(player, nx, ny, landDef);
+        }
+      }
+    }
+    checkActorCollisionsForPlayer(player);
+  }
+
+  function checkTileAfterMove(player, x, y) {
+    const def = board[y] && board[y][x] ? tileDefs[board[y][x]] : { property: "walkable" };
+    if (def.property === "hazard" || def.property === "bouncy" || def.property === "slippery" || def.property === "solid") {
+      // Landing on a special tile after a bounce re-triggers its reaction, but avoid infinite bounce loops
+    }
+    checkActorCollisionsForPlayer(player);
+  }
+
+  function checkActorCollisionsForPlayer(player) {
+    const hit = actors.find(a => a.id !== player.id && a.x === player.x && a.y === player.y);
+    if (!hit) return;
+    const def = actorDefs[hit.defId];
+    if (def.temperament === "stationary") {
+      sounds.boop();
+      animState[hit.id] = { type: "boop", t: performance.now() };
+      // player stays put -> revert to previous tile? For simplicity, push player back one tile.
+      resetPlayerBumpPosition(player, hit);
+      log("Boop! Ran into something.");
+    } else if (def.temperament === "wanderer") {
+      sounds.oof();
+      animState[player.id] = { type: "bounce", t: performance.now() };
+      animState[hit.id] = { type: "bounce", t: performance.now() };
+      resetPlayerBumpPosition(player, hit);
+      log("Oof! Bounced off a wanderer.");
+    } else if (def.temperament === "chaser") {
+      sounds.gotcha();
+      animState[player.id] = { type: "gotcha", t: performance.now() };
+      log("Caught! Resetting to start.");
+      setTimeout(() => {
+        player.x = startPos.x; player.y = startPos.y;
+        renderAll();
+      }, 260);
+    } else if (def.temperament === "fleer") {
+      sounds.pop();
+      animState[hit.id] = { type: "pop", t: performance.now() };
+      log("Pop! Fleer vanished.");
+      setTimeout(() => {
+        actors = actors.filter(a => a.id !== hit.id);
+        renderAll();
+      }, 150);
+    }
+  }
+
+  function resetPlayerBumpPosition(player, blocker) {
+    // move player back to be adjacent, not overlapping the stationary/wanderer actor
+    const dx = Math.sign(player.x - blocker.x) || 1;
+    const dy = Math.sign(player.y - blocker.y);
+    let bx = blocker.x + dx, by = blocker.y + dy;
+    if (bx < 0 || bx >= COLS) bx = blocker.x;
+    if (by < 0 || by >= ROWS) by = blocker.y;
+    player.x = bx; player.y = by;
+  }
+
+  // ============== Player movement (keyboard / dpad) ==============
+  function movePlayer(dir) {
+    const player = actors.find(a => a.isPlayer);
+    if (!player) return;
+    let dx = 0, dy = 0;
+    if (dir === "up") dy = -1;
+    else if (dir === "down") dy = 1;
+    else if (dir === "left") dx = -1;
+    else if (dir === "right") dx = 1;
+    const nx = player.x + dx, ny = player.y + dy;
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
+
+    const blockerActor = actors.find(a => a.id !== player.id && a.x === nx && a.y === ny);
+    if (blockerActor) {
+      const def = actorDefs[blockerActor.defId];
+      if (def.temperament === "stationary" || def.temperament === "wanderer") {
+        // bump-like: player stays, but appropriate sound/animation
+        if (def.temperament === "stationary") {
+          sounds.boop();
+          animState[player.id] = { type: "bump", t: performance.now() };
+          animState[blockerActor.id] = { type: "boop", t: performance.now() };
+          log("Boop!");
+        } else {
+          sounds.oof();
+          animState[player.id] = { type: "bounce", t: performance.now() };
+          animState[blockerActor.id] = { type: "bounce", t: performance.now() };
+          log("Oof!");
+        }
+        renderAll();
+        return;
+      } else if (def.temperament === "chaser") {
+        player.x = nx; player.y = ny;
+        sounds.gotcha();
+        animState[player.id] = { type: "gotcha", t: performance.now() };
+        log("Caught! Resetting to start.");
+        renderAll();
+        setTimeout(() => {
+          player.x = startPos.x; player.y = startPos.y;
+          renderAll();
+        }, 260);
+        return;
+      } else if (def.temperament === "fleer") {
+        player.x = nx; player.y = ny;
+        sounds.pop();
+        animState[blockerActor.id] = { type: "pop", t: performance.now() };
+        log("Pop!");
+        renderAll();
+        setTimeout(() => {
+          actors = actors.filter(a => a.id !== blockerActor.id);
+          renderAll();
+        }, 150);
+        return;
+      }
+    }
+
+    const tileDefId = board[ny][nx];
+    const tileDef = tileDefId ? tileDefs[tileDefId] : { property: "walkable" };
+    resolvePlayerTileEntry(player, nx, ny, tileDef);
+    renderAll();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const map = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+                  w: "up", s: "down", a: "left", d: "right" };
+    if (map[e.key]) {
+      e.preventDefault();
+      movePlayer(map[e.key]);
+    }
+  });
+
+  document.querySelectorAll("#dpad button").forEach(btn => {
+    btn.addEventListener("click", () => movePlayer(btn.dataset.dir));
+  });
+
+  // ============== Reset / start controls ==============
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    const player = actors.find(a => a.isPlayer);
+    if (player) {
+      player.x = startPos.x; player.y = startPos.y;
+      renderAll();
+    }
+  });
+
+  document.getElementById("setStartBtn").addEventListener("click", () => {
+    const player = actors.find(a => a.isPlayer);
+    if (player) {
+      startPos = { x: player.x, y: player.y };
+      log("Start position set to player's current tile.");
+    } else {
+      log("Place a player-controlled actor first.");
+    }
+  });
+
+  document.getElementById("clearAllBtn").addEventListener("click", () => {
+    if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
+    initBoard();
+    actors = [];
+    renderAll();
+  });
+
+  updateModeButtons();
+
+  // ============== Rendering ==============
+  function drawArtScaled(ctx, art, dx, dy, size, cellSize) {
+    for (let y = 0; y < ART; y++) {
+      for (let x = 0; x < ART; x++) {
+        const color = art[y * ART + x];
+        if (color) {
+          ctx.fillStyle = color;
+          ctx.fillRect(dx + x * cellSize, dy + y * cellSize, cellSize + 0.5, cellSize + 0.5);
+        }
+      }
+    }
+  }
+
+  function renderGame() {
+    gctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+    gctx.fillStyle = "#111";
+    gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+
+    const cell = TILE / ART;
+
+    // tiles
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const defId = board[y][x];
+        if (defId && tileDefs[defId]) {
+          drawArtScaled(gctx, tileDefs[defId].art, x * TILE, y * TILE, TILE, cell);
+        }
+      }
+    }
+
+    // grid lines
+    gctx.strokeStyle = "rgba(255,255,255,0.06)";
+    gctx.lineWidth = 1;
+    for (let x = 0; x <= COLS; x++) {
+      gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+      gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke();
+    }
+
+    // start marker
+    gctx.strokeStyle = "rgba(255,209,102,0.7)";
+    gctx.lineWidth = 1.5;
+    gctx.strokeRect(startPos.x * TILE + 1, startPos.y * TILE + 1, TILE - 2, TILE - 2);
+
+    // actors (with simple animation offsets)
+    const now = performance.now();
+    actors.forEach(actor => {
+      const def = actorDefs[actor.defId];
+      if (!def) return;
+      let ox = 0, oy = 0, alpha = 1, rot = 0, scaleAdj = 1;
+      const anim = animState[actor.id];
+      if (anim) {
+        const dt = now - anim.t;
+        if (anim.type === "bump" && dt < 200) {
+          oy = Math.sin(dt / 200 * Math.PI) * 3;
+        } else if (anim.type === "bounce" && dt < 200) {
+          ox = Math.sin(dt / 200 * Math.PI * 2) * 2;
+        } else if (anim.type === "boop" && dt < 200) {
+          scaleAdj = 1 + Math.sin(dt / 200 * Math.PI) * 0.15;
+        } else if (anim.type === "flash" && dt < 200) {
+          alpha = (Math.floor(dt / 50) % 2 === 0) ? 0.3 : 1;
+        } else if (anim.type === "spin" && dt < 300) {
+          rot = (dt / 300) * Math.PI * 2;
+        } else if (anim.type === "gotcha" && dt < 260) {
+          scaleAdj = 1 - dt / 260 * 0.5;
+        } else if (anim.type === "pop" && dt < 150) {
+          scaleAdj = 1 + dt / 150 * 0.8;
+          alpha = 1 - dt / 150;
+        } else {
+          delete animState[actor.id];
+        }
+      }
+
+      gctx.save();
+      gctx.globalAlpha = alpha;
+      const centerX = actor.x * TILE + TILE / 2 + ox;
+      const centerY = actor.y * TILE + TILE / 2 + oy;
+      gctx.translate(centerX, centerY);
+      if (rot) gctx.rotate(rot);
+      gctx.scale(scaleAdj, scaleAdj);
+      drawArtScaled(gctx, def.art, -TILE / 2, -TILE / 2, TILE, cell);
+      gctx.restore();
+
+      if (actor.isPlayer) {
+        gctx.strokeStyle = "#ffd166";
+        gctx.lineWidth = 1.5;
+        gctx.strokeRect(actor.x * TILE + 1, actor.y * TILE + 1, TILE - 2, TILE - 2);
+      }
+    });
+
+    requestAnimationFrame(renderGame);
+  }
+
+  function renderAll() {
+    renderTileSwatches();
+    renderActorSwatches();
+    // don't re-render game here; it's animated continuously via requestAnimationFrame
+  }
+
+  renderColorRow();
+  renderPixelCanvas();
+  renderAll();
+  requestAnimationFrame(renderGame);
+
+  // ============== Autonomous actor movement (wanderer / chaser / fleer) ==============
+  const DIRS = ["up", "down", "left", "right"];
+  const DIR_VECT = { up: { dx: 0, dy: -1 }, down: { dx: 0, dy: 1 }, left: { dx: -1, dy: 0 }, right: { dx: 1, dy: 0 } };
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function isSolidAt(x, y) {
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return true;
+    const defId = board[y][x];
+    const def = defId ? tileDefs[defId] : { property: "walkable" };
+    return def.property === "solid";
+  }
+
+  // Picks a direction biased toward (dx,dy); (0,0) means pick fully at random.
+  // Always turns away from solid tiles (and the board edge), per the temperament rules.
+  function pickDir(actor, dx, dy) {
+    let prefs = [];
+    if (dx === 0 && dy === 0) {
+      prefs = shuffle(DIRS.slice());
+    } else if (Math.abs(dx) >= Math.abs(dy)) {
+      prefs.push(dx > 0 ? "right" : "left");
+      if (dy !== 0) prefs.push(dy > 0 ? "down" : "up");
+    } else {
+      prefs.push(dy > 0 ? "down" : "up");
+      if (dx !== 0) prefs.push(dx > 0 ? "right" : "left");
+    }
+    const seen = new Set(prefs);
+    DIRS.forEach(d => { if (!seen.has(d)) { seen.add(d); prefs.push(d); } });
+    for (const d of prefs) {
+      const v = DIR_VECT[d];
+      if (!isSolidAt(actor.x + v.dx, actor.y + v.dy)) return d;
+    }
+    return null;
+  }
+
+  function tickActors() {
+    const player = actors.find(a => a.isPlayer);
+    actors.slice().forEach(actor => {
+      if (actor.isPlayer) return;
+      const def = actorDefs[actor.defId];
+      if (!def) return;
+      let dir = null;
+      if (def.temperament === "wanderer") {
+        dir = pickDir(actor, 0, 0);
+      } else if (def.temperament === "chaser" && player) {
+        dir = pickDir(actor, player.x - actor.x, player.y - actor.y);
+      } else if (def.temperament === "fleer" && player) {
+        dir = pickDir(actor, actor.x - player.x, actor.y - player.y);
+      } else {
+        return; // stationary actors never move on their own
+      }
+      if (!dir) return;
+      const v = DIR_VECT[dir];
+      const nx = actor.x + v.dx, ny = actor.y + v.dy;
+
+      if (player && nx === player.x && ny === player.y) {
+        actor.x = nx; actor.y = ny;
+        checkActorCollisionsForPlayer(player);
+        return;
+      }
+      const other = actors.find(a => a.id !== actor.id && a.x === nx && a.y === ny);
+      if (other) {
+        triggerActorBounce(actor, other);
+        return;
+      }
+      actor.x = nx; actor.y = ny;
+    });
+  }
+
+  setInterval(tickActors, 480);
+
+  // ============== Seed a tiny starter scene so it's not a blank void ==============
+  (function seed() {
+    // border walls (solid)
+    const solidId = findDefaultTileDef("solid");
+    for (let x = 0; x < COLS; x++) {
+      board[0][x] = solidId;
+      board[ROWS - 1][x] = solidId;
+    }
+    for (let y = 0; y < ROWS; y++) {
+      board[y][0] = solidId;
+      board[y][COLS - 1] = solidId;
+    }
+    // place a player-controlled stationary actor at 1,1
+    const playerDefId = findDefaultActorDef("stationary");
+    actors.push({ id: nextActorInstId++, defId: playerDefId, x: 1, y: 1, isPlayer: true });
+    startPos = { x: 1, y: 1 };
+    log("Ready. Arrow keys move the player. Walk into a wall and watch it fall down.");
+  })();
+
+})();
+</script>
+</body>
+</html>
