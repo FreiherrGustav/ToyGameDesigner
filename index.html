@@ -184,10 +184,12 @@
     </div>
 
     <div id="actorPropertiesBlock" style="display:none;">
-      <div class="section-title">Temperament</div>
+      <div class="section-title">Temperament (for actors the player runs into)</div>
       <div class="swatch-row" id="actorSwatches"></div>
-      <div class="section-title" style="margin-top:8px;">
-        <label><input type="checkbox" id="playerControlled"> Player-controlled</label>
+      <div class="section-title" style="margin-top:10px;">The player (only one)</div>
+      <div class="swatch-row" id="playerSwatchRow"></div>
+      <div class="hint" style="margin-top:2px;">
+        This is the one actor you move with arrow keys. It has no temperament of its own — temperament only describes how the <em>other</em> actors react when this one bumps into them.
       </div>
     </div>
 
@@ -203,7 +205,7 @@
     </div>
 
     <div class="hint">
-      Pick a tile property or temperament, draw its 8×8 look, then click-drag on the grid to paint tiles, or click to place an actor. The grid is always live — no separate play mode.
+      Pick a tile property, temperament, or the player, draw its 8×8 look, then click-drag on the grid to paint tiles, or click to place an actor. The grid is always live — no separate play mode.
     </div>
   </div>
 
@@ -249,6 +251,8 @@
     chaser: "#ef5350",
     fleer: "#ffca28"
   };
+  const PLAYER_COLOR = "#ffd166";
+  const PLAYER_DEF_ID = "player";
 
   const PALETTE_COLORS = [
     "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff",
@@ -274,7 +278,7 @@
   let selectedTemperament = "stationary";
   let selectedTileDefId = null;
   let selectedActorDefId = null;
-  let playerControlledFlag = false;
+  let selectedActorKind = "stationary"; // one of TEMPERAMENTS, or the literal "player"
 
   let currentArt = new Array(ART * ART).fill(null); // color index or null(transparent), stores hex or null
   let currentColor = PALETTE_COLORS[2];
@@ -307,6 +311,10 @@
     const id = "a" + (nextActorDefId++);
     actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), name: temp };
   });
+  // The player is its own kind, not a temperament — it never runs on the fixed reaction/movement
+  // rules, it's just whichever single actor arrow keys move. Its art is separate from the four
+  // NPC temperaments so it never looks like (or is mistaken for) an autonomous actor.
+  actorDefs[PLAYER_DEF_ID] = { temperament: null, art: makeDefaultArt(PLAYER_COLOR), name: "player" };
 
   function findDefaultTileDef(prop) {
     return Object.keys(tileDefs).find(id => tileDefs[id].property === prop && tileDefs[id].name === prop);
@@ -430,13 +438,26 @@
     });
   }
 
+  function selectActorKind(kind) {
+    selectedActorKind = kind;
+    paintMode = "actor";
+    if (kind === "player") {
+      selectedActorDefId = PLAYER_DEF_ID;
+    } else {
+      selectedTemperament = kind;
+      selectedActorDefId = findDefaultActorDef(kind);
+    }
+    currentArt = actorDefs[selectedActorDefId].art.slice();
+    updateModeButtons();
+    renderAll();
+  }
+
   function renderActorSwatches() {
     const container = document.getElementById("actorSwatches");
     container.innerHTML = "";
     TEMPERAMENTS.forEach(temp => {
-      const defId = (selectedTemperament === temp && selectedActorDefId) ? selectedActorDefId : findDefaultActorDef(temp);
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedTemperament === temp ? " selected" : "");
+      sw.className = "swatch" + (selectedActorKind === temp ? " selected" : "");
       sw.style.background = TEMPERAMENT_COLORS[temp];
       sw.title = temp;
       const label = document.createElement("div");
@@ -445,16 +466,27 @@
       label.style.position = "absolute";
       sw.style.position = "relative";
       sw.appendChild(label);
-      sw.addEventListener("click", () => {
-        selectedTemperament = temp;
-        selectedActorDefId = findDefaultActorDef(temp);
-        currentArt = actorDefs[selectedActorDefId].art.slice();
-        paintMode = "actor";
-        updateModeButtons();
-        renderAll();
-      });
+      sw.addEventListener("click", () => selectActorKind(temp));
       container.appendChild(sw);
     });
+  }
+
+  function renderPlayerSwatch() {
+    const container = document.getElementById("playerSwatchRow");
+    container.innerHTML = "";
+    const sw = document.createElement("div");
+    sw.className = "swatch" + (selectedActorKind === "player" ? " selected" : "");
+    sw.style.background = PLAYER_COLOR;
+    sw.title = "player";
+    const label = document.createElement("div");
+    label.textContent = "player";
+    label.style.fontSize = "9px";
+    label.style.position = "absolute";
+    label.style.color = "#222";
+    sw.style.position = "relative";
+    sw.appendChild(label);
+    sw.addEventListener("click", () => selectActorKind("player"));
+    container.appendChild(sw);
   }
 
   function renderColorRow() {
@@ -479,8 +511,8 @@
     document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
     document.getElementById("tilePropertiesBlock").style.display = paintMode === "actor" ? "none" : "block";
     document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
-    document.getElementById("editingLabel").textContent = paintMode === "actor" ? "actor" : "tile";
-    document.getElementById("playerControlled").checked = playerControlledFlag;
+    const label = paintMode === "actor" ? selectedActorKind : selectedTileProp;
+    document.getElementById("editingLabel").textContent = label;
   }
 
   document.getElementById("modeTile").addEventListener("click", () => {
@@ -496,9 +528,6 @@
   document.getElementById("modeErase").addEventListener("click", () => {
     paintMode = "erase";
     updateModeButtons(); renderAll();
-  });
-  document.getElementById("playerControlled").addEventListener("change", (e) => {
-    playerControlledFlag = e.target.checked;
   });
 
   // ============== Pixel editor drawing ==============
@@ -595,20 +624,20 @@
     }
 
     if (paintMode === "actor") {
-      const existing = actorAt(gx, gy);
-      if (existing) {
-        // reposition doesn't apply on click-in-place; but clicking same mode again replaces def
-        existing.defId = selectedActorDefId;
-        existing.isPlayer = playerControlledFlag ? true : existing.isPlayer;
-        if (playerControlledFlag) {
-          actors.forEach(a => { if (a.id !== existing.id) a.isPlayer = false; });
-        }
-        renderAll();
-        return;
-      }
-      const isPlayer = playerControlledFlag;
+      const isPlayer = selectedActorDefId === PLAYER_DEF_ID;
+      // The player is a singleton: placing one anywhere unflags any previous player actor
+      // (it stays on the board as a plain NPC, using whatever temperament it already had).
       if (isPlayer) {
         actors.forEach(a => { a.isPlayer = false; });
+      }
+
+      const existing = actorAt(gx, gy);
+      if (existing) {
+        existing.defId = selectedActorDefId;
+        existing.isPlayer = isPlayer;
+        renderAll();
+        if (isPlayer) startPos = { x: gx, y: gy };
+        return;
       }
       const newActor = {
         id: nextActorInstId++,
@@ -1031,6 +1060,8 @@
   function renderAll() {
     renderTileSwatches();
     renderActorSwatches();
+    renderPlayerSwatch();
+    renderPixelCanvas(); // switching which sprite is selected must update the drawing immediately
     // don't re-render game here; it's animated continuously via requestAnimationFrame
   }
 
@@ -1128,9 +1159,8 @@
       board[y][0] = solidId;
       board[y][COLS - 1] = solidId;
     }
-    // place a player-controlled stationary actor at 1,1
-    const playerDefId = findDefaultActorDef("stationary");
-    actors.push({ id: nextActorInstId++, defId: playerDefId, x: 1, y: 1, isPlayer: true });
+    // place the player at 1,1
+    actors.push({ id: nextActorInstId++, defId: PLAYER_DEF_ID, x: 1, y: 1, isPlayer: true });
     startPos = { x: 1, y: 1 };
     log("Ready. Arrow keys move the player. Walk into a wall and watch it fall down.");
   })();
