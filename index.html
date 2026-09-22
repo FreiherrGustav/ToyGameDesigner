@@ -102,20 +102,34 @@
     text-align: center;
     color: #fff;
     line-height: 1.1;
+    position: relative;
   }
   .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
   .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
+  .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; }
 
-  .mode-toggle { display: flex; gap: 4px; }
+  .presetSwatch {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    border: 2px solid var(--panel-light);
+    cursor: pointer;
+    background: #111;
+    overflow: hidden;
+  }
+  .presetSwatch canvas { width: 32px; height: 32px; image-rendering: pixelated; display: block; margin: 1px; }
+  .presetSwatch:hover { border-color: var(--accent); }
+
+  .mode-toggle { display: flex; gap: 4px; flex-wrap: wrap; }
   .mode-toggle button {
     flex: 1;
+    min-width: 56px;
     background: var(--panel-light);
     color: var(--text);
     border: none;
     border-radius: 6px;
-    padding: 8px;
+    padding: 8px 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
   }
   .mode-toggle button.active { background: var(--accent); color: #222; font-weight: bold; }
 
@@ -136,15 +150,6 @@
     border: 2px solid transparent;
   }
   .colorSwatch.selected { border-color: var(--accent); }
-
-  select, input[type="text"] {
-    background: var(--panel-light);
-    color: var(--text);
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-size: 13px;
-  }
 
   .hint {
     font-size: 11px;
@@ -181,6 +186,7 @@
       <div class="mode-toggle">
         <button id="modeTile" class="active">Tiles</button>
         <button id="modeActor">Actors</button>
+        <button id="modeWorld">World</button>
         <button id="modeErase">Erase</button>
       </div>
     </div>
@@ -196,11 +202,29 @@
       <div class="section-title" style="margin-top:10px;">The player (only one)</div>
       <div class="swatch-row" id="playerSwatchRow"></div>
       <div class="hint" style="margin-top:2px;">
-        This is the one actor you move with arrow keys. It has no temperament of its own — temperament only describes how the <em>other</em> actors react when this one bumps into them.
+        This is the one actor you move. It has no temperament of its own — temperament only
+        describes how the <em>other</em> actors react when this one touches them.
       </div>
     </div>
 
-    <div>
+    <div id="worldPropertiesBlock" style="display:none;">
+      <div class="section-title">World pieces</div>
+      <div class="swatch-row" id="worldSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Placed like a tile, but it doesn't do anything on contact — it changes the rules
+        nearby. A gravity piece makes things fall in the tiles below it.
+      </div>
+    </div>
+
+    <div id="presetsBlock">
+      <div class="section-title">Grab a sprite</div>
+      <div class="swatch-row" id="presetSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Starter art for whatever's selected above — grab one, then keep editing it below.
+      </div>
+    </div>
+
+    <div id="pixelEditorBlock">
       <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">tile</span></div>
       <div id="pixelEditor">
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
@@ -212,7 +236,8 @@
     </div>
 
     <div class="hint">
-      Pick a tile property, temperament, or the player, draw its 8×8 look, then click-drag on the grid to paint tiles, or click to place an actor. The grid is always live — no separate play mode.
+      Tiles paint cell-by-cell. Actors and the player move with real physics once placed —
+      jump, fall, slide, bounce. The grid is always live — no separate play mode.
     </div>
   </div>
 
@@ -240,30 +265,24 @@
 (function () {
   "use strict";
 
-  // ============== Constants ==============
-  const COLS = 12, ROWS = 9, TILE = 16, ART = 8, SCALE = TILE / ART;
+  // ============== Grid (authoring) constants ==============
+  const COLS = 12, ROWS = 9, TILE = 16, ART = 8;
+  const ACTOR_INSET = 2;
+  const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, slightly inset from the cell
 
   const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal"];
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
 
   const TILE_COLORS = {
-    walkable: "#4caf50",
-    solid: "#616161",
-    hazard: "#e53935",
-    bouncy: "#ff9800",
-    slippery: "#29b6f6",
-    diggable: "#8d6e63",
-    goal: "#ec407a"
+    walkable: "#4caf50", solid: "#616161", hazard: "#e53935", bouncy: "#ff9800",
+    slippery: "#29b6f6", diggable: "#8d6e63", goal: "#ec407a"
   };
   const TEMPERAMENT_COLORS = {
-    stationary: "#9575cd",
-    wanderer: "#26a69a",
-    chaser: "#ef5350",
-    fleer: "#ffca28",
-    collectible: "#26c6da"
+    stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
   };
   const PLAYER_COLOR = "#ffd166";
   const PLAYER_DEF_ID = "player";
+  const GRAVITY_DEF_ID = "gravity";
 
   const PALETTE_COLORS = [
     "#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff",
@@ -271,52 +290,63 @@
     "#808080", "#ffc0cb", null // null = transparent (eraser)
   ];
 
+  // ============== Continuous physics constants ==============
+  const GRAVITY = 1200;          // px/s^2, applied only inside a gravity marker's zone
+  const GRAVITY_RANGE = 7;       // tiles below a marker that stay live — propagates locally,
+                                  // not down the whole column (the v1 prototype's noted follow-up),
+                                  // but wide enough on this 9-row board that a marker near the top
+                                  // still reaches the floor rather than dropping a kid mid-air
+  const JUMP_VELOCITY = -310;    // px/s upward impulse, only while grounded and in a gravity zone
+  const MOVE_ACCEL = 900;        // px/s^2, player/NPC horizontal (and free-roam vertical) accel
+  const MAX_SPEED = 110;         // px/s, player cap
+  const NPC_MAX_SPEED = 80;      // px/s, NPC steering cap — slower than the player, on purpose
+  const NPC_ACCEL = 700;
+  const FRICTION_DECEL = 900;
+  const SLIPPERY_FRICTION_MULT = 0.12; // reduced friction while standing on/in a slippery tile
+  const MAX_FALL = 500;
+  const BOUNCE_RESTITUTION = 0.82;
+  const HAZARD_KNOCKBACK_SPEED = 190;
+  const HAZARD_COOLDOWN_MS = 450;
+
   // ============== State ==============
-  // Board: grid of tile type ids (index into tileDefs) OR null (default walkable-empty)
-  let tileDefs = {}; // id -> {property, art: Uint8Array-ish array of color indices, name}
-  let actorDefs = {}; // id -> {temperament, art, name}
+  let tileDefs = {};   // id -> {property, art, name}
+  let actorDefs = {};  // id -> {temperament, art, name}
   let nextTileDefId = 1;
   let nextActorDefId = 1;
 
-  let board = []; // ROWS x COLS, each cell = tileDefId or null
-  let actors = []; // {id, defId, x, y, isPlayer}
+  let board = [];            // ROWS x COLS, each cell = tileDefId or null
+  let gravityMarkers = [];   // [{x,y}] grid cells — the placed world-marker for gravity
+  let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...}
   let nextActorInstId = 1;
 
-  let startPos = { x: 1, y: 1 };
+  let startPos = { x: 0, y: 0 }; // continuous pixel position
 
-  let paintMode = "tile"; // 'tile' | 'actor' | 'erase'
+  let paintMode = "tile"; // 'tile' | 'actor' | 'world' | 'erase'
   let selectedTileProp = "walkable";
-  let selectedTemperament = "stationary";
+  let selectedActorKind = "stationary"; // one of TEMPERAMENTS, or "player"
   let selectedTileDefId = null;
   let selectedActorDefId = null;
-  let selectedActorKind = "stationary"; // one of TEMPERAMENTS, or the literal "player"
 
-  let currentArt = new Array(ART * ART).fill(null); // color index or null(transparent), stores hex or null
+  let currentArt = new Array(ART * ART).fill(null);
   let currentColor = PALETTE_COLORS[2];
   let isDrawingPixel = false;
   let isPaintingBoard = false;
 
-  let animState = {}; // actorInstId -> {recipe, t}
-  let tileAnimState = {}; // "x,y" -> {recipe, t, art} for transient tile effects (e.g. crumbling)
+  let animState = {};      // actorInstId -> {recipe, t} — discrete event overlays only (pop/caught/celebration/boop)
+  let tileAnimState = {};  // "x,y" -> {recipe, t, art} — transient tile effects (crumbling)
 
-  let score = 0; // engine-tracked, never authored
-  let intensity = 0; // hidden ramp; only its effects (chaser speed) are ever visible
+  let score = 0;
+  let intensity = 0;
 
   // ============== Init board ==============
   function initBoard() {
     board = [];
-    for (let y = 0; y < ROWS; y++) {
-      const row = [];
-      for (let x = 0; x < COLS; x++) row.push(null);
-      board.push(row);
-    }
+    for (let y = 0; y < ROWS; y++) board.push(new Array(COLS).fill(null));
   }
   initBoard();
 
-  // default tile defs, one per property, with simple flat-color art, so kids have something immediately usable
-  function makeDefaultArt(hex) {
-    return new Array(ART * ART).fill(hex);
-  }
+  function makeDefaultArt(hex) { return new Array(ART * ART).fill(hex); }
+
   TILE_PROPS.forEach(prop => {
     const id = "t" + (nextTileDefId++);
     tileDefs[id] = { property: prop, art: makeDefaultArt(TILE_COLORS[prop]), name: prop };
@@ -325,9 +355,6 @@
     const id = "a" + (nextActorDefId++);
     actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), name: temp };
   });
-  // The player is its own kind, not a temperament — it never runs on the fixed reaction/movement
-  // rules, it's just whichever single actor arrow keys move. Its art is separate from the four
-  // NPC temperaments so it never looks like (or is mistaken for) an autonomous actor.
   actorDefs[PLAYER_DEF_ID] = { temperament: null, art: makeDefaultArt(PLAYER_COLOR), name: "player" };
 
   function findDefaultTileDef(prop) {
@@ -338,15 +365,67 @@
   }
 
   selectedTileDefId = findDefaultTileDef(selectedTileProp);
-  selectedActorDefId = findDefaultActorDef(selectedTemperament);
+  selectedActorDefId = findDefaultActorDef(selectedActorKind);
   currentArt = tileDefs[selectedTileDefId].art.slice();
+
+  // ============== Sprite presets — "grab a piece off a shelf", not a template menu ==============
+  // Small hand-authored 8x8 patterns via ASCII rows + a color legend, so they're readable to edit
+  // here instead of raw 64-entry hex arrays. Loading one just fills currentArt for whatever's
+  // currently selected (tile property / temperament / player) — it never locks in a "kind".
+  function pat(rows, legend) {
+    const art = new Array(ART * ART).fill(null);
+    for (let y = 0; y < ART; y++) {
+      for (let x = 0; x < ART; x++) art[y * ART + x] = legend[rows[y][x]] || null;
+    }
+    return art;
+  }
+  const SPRITE_PRESETS = [
+    { name: "player", art: pat([
+      "..MMMM..", ".MMMMMM.", "MM.KK.MM", "MMMMMMMM",
+      "MMMMMMMM", ".MM..MM.", ".MM..MM.", ".M....M."
+    ], { M: "#ffd166", K: "#2b2b2b" }) },
+    { name: "blocker", art: pat([
+      "MMMMMMMM", "M.M..M.M", "M..MM..M", "MMMMMMMM",
+      "MMMMMMMM", "M..MM..M", "M.M..M.M", "MMMMMMMM"
+    ], { M: "#9575cd" }) },
+    { name: "wanderer", art: pat([
+      "..MMMM..", ".MMMMMM.", "MMMKKMMM", "MMMMMMMM",
+      "MMMMMMMM", "MMMMMMMM", ".MMMMMM.", "..MMMM.."
+    ], { M: "#26a69a", K: "#173a36" }) },
+    { name: "chaser", art: pat([
+      "M.M..M.M", ".MMMMMM.", "MKMMMMKM", "MMMMMMMM",
+      "MMMKKMMM", "MMMMMMMM", ".MMMMMM.", "M.M..M.M"
+    ], { M: "#ef5350", K: "#3a0a0a" }) },
+    { name: "fleer", art: pat([
+      "..MMMM..", ".MWWWWM.", ".MWKWKM.", ".MMMMMM.",
+      "MMMMMMMM", "MMMMMMMM", ".MM..MM.", ".M....M."
+    ], { M: "#ffca28", W: "#fff8e1", K: "#2b2b2b" }) },
+    { name: "collectible", art: pat([
+      "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
+      ".MMMMMM.", "..MMMM..", "...MM...", "........"
+    ], { M: "#26c6da" }) },
+    { name: "ground", art: pat([
+      "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM",
+      "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM"
+    ], { M: "#616161" }) },
+    { name: "hazard", art: pat([
+      "M.M.M.M.", "MMMMMMMM", ".MMMMMM.", "..MMMM..",
+      "MMMMMMMM", "M.M.M.M.", "MMMMMMMM", "........"
+    ], { M: "#e53935" }) },
+    { name: "bouncy", art: pat([
+      "MMMMMMMM", "M......M", "M.MMMM.M", "M.M..M.M",
+      "M.M..M.M", "M.MMMM.M", "M......M", "MMMMMMMM"
+    ], { M: "#ff9800" }) },
+    { name: "goal", art: pat([
+      "M.......", "MMMM....", "MMMMMM..", "MMMM....",
+      "M.......", "M.......", "M.......", "MMMMMMM."
+    ], { M: "#ec407a" }) }
+  ];
 
   // ============== Audio (simple beeps) ==============
   let audioCtx = null;
   function getAudioCtx() {
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
   function beep(freq, duration, type, volume) {
@@ -367,7 +446,7 @@
     } catch (e) { /* audio not available, ignore */ }
   }
   const sounds = {
-    footstep: () => beep(220, 0.06, "square", 0.06),
+    footstep: () => beep(220, 0.05, "square", 0.05),
     thud: () => beep(90, 0.18, "square", 0.2),
     yelp: () => beep(600, 0.15, "sawtooth", 0.2),
     boing: () => { beep(300, 0.1, "sine", 0.2); setTimeout(() => beep(500, 0.1, "sine", 0.15), 60); },
@@ -376,21 +455,9 @@
     gotcha: () => { beep(700, 0.08, "square", 0.2); setTimeout(() => beep(500, 0.08, "square", 0.2), 90); setTimeout(() => beep(300, 0.15, "square", 0.2), 180); },
     pop: () => beep(900, 0.1, "sine", 0.2),
     crumble: () => { beep(200, 0.05, "sawtooth", 0.12); setTimeout(() => beep(140, 0.08, "sawtooth", 0.12), 40); setTimeout(() => beep(90, 0.12, "sawtooth", 0.12), 90); },
-    celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); }
+    celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); },
+    jump: () => beep(400, 0.07, "square", 0.12)
   };
-
-  function addScore(n) {
-    score += n;
-    const el = document.getElementById("scoreVal");
-    if (el) el.textContent = score;
-  }
-
-  function resetScoreAndIntensity() {
-    score = 0;
-    intensity = 0;
-    const el = document.getElementById("scoreVal");
-    if (el) el.textContent = "0";
-  }
 
   function log(msg) {
     const el = document.getElementById("log");
@@ -401,87 +468,63 @@
     while (el.children.length > 20) el.removeChild(el.firstChild);
   }
 
+  function addScore(n) {
+    score += n;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = score;
+  }
+  function resetScoreAndIntensity() {
+    score = 0; intensity = 0;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = "0";
+  }
+
   // ============== Canvas setup ==============
   const gameCanvas = document.getElementById("gameCanvas");
   const gctx = gameCanvas.getContext("2d");
   gameCanvas.width = COLS * TILE;
   gameCanvas.height = ROWS * TILE;
-  // scale up for display via CSS while keeping backing resolution for crisp pixel art
   const DISPLAY_SCALE = 2;
   gameCanvas.style.width = (COLS * TILE * DISPLAY_SCALE) + "px";
   gameCanvas.style.height = (ROWS * TILE * DISPLAY_SCALE) + "px";
 
   const pixelCanvas = document.getElementById("pixelCanvas");
   const pctx = pixelCanvas.getContext("2d");
-  const PIXEL_DISPLAY_SCALE = pixelCanvas.width / ART; // 128/8 = 16
+  const PIXEL_DISPLAY_SCALE = pixelCanvas.width / ART;
 
-  // ============== Deformation-recipe animation library ==============
-  // A small fixed set of hand-authored keyframed sequences, applied automatically to
-  // whatever art the actor/tile already has — the way a rig works on any character
-  // regardless of its design. Kids never author these; they're matched to reaction
-  // types below. Offsets (ox, oy) are in tile-fractions; rot is radians.
+  // ============== Discrete event recipes (catch/pop/celebrate/boop/crumble) ==============
+  // Routine movement (lean, squash, crouch) is physics-driven now, computed straight from
+  // velocity every frame — see stepActor(). These few recipes remain only for the handful of
+  // reactions that are genuinely one-off narrative beats, not continuous physical states.
   const RECIPES = {
-    flattenRecover: { duration: 260, keyframes: [
-      { t: 0,    sx: 1,    sy: 1,    rot: 0,    ox: 0,    oy: 0,    alpha: 1 },
-      { t: 0.35, sx: 1.35, sy: 0.45, rot: 0,    ox: 0,    oy: 0.28, alpha: 1 },
-      { t: 1,    sx: 1,    sy: 1,    rot: 0,    ox: 0,    oy: 0,    alpha: 1 }
-    ]},
-    knockTilt: { duration: 300, keyframes: [
-      { t: 0,    sx: 1, sy: 1, rot: 0,     ox: 0,     oy: 0, alpha: 1 },
-      { t: 0.25, sx: 1, sy: 1, rot: -0.35, ox: -0.28, oy: 0, alpha: 0.35 },
-      { t: 0.55, sx: 1, sy: 1, rot: 0.2,   ox: 0.14,  oy: 0, alpha: 1 },
-      { t: 1,    sx: 1, sy: 1, rot: 0,     ox: 0,     oy: 0, alpha: 1 }
-    ]},
-    launchSpin: { duration: 320, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,   rot: 0,          ox: 0, oy: 0,    alpha: 1 },
-      { t: 0.5, sx: 0.8, sy: 0.8, rot: Math.PI,     ox: 0, oy: -0.5, alpha: 1 },
-      { t: 1,   sx: 1,   sy: 1,   rot: Math.PI * 2, ox: 0, oy: 0,    alpha: 1 }
-    ]},
-    slideSquish: { duration: 200, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 },
-      { t: 0.5, sx: 1.2, sy: 0.85, rot: 0, ox: 0, oy: 0, alpha: 1 },
-      { t: 1,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 }
-    ]},
-    crumbleFade: { duration: 320, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,   rot: 0,   ox: 0, oy: 0,    alpha: 1 },
-      { t: 0.4, sx: 1.1, sy: 0.9, rot: 0.1, ox: 0, oy: 0.05, alpha: 0.7 },
-      { t: 1,   sx: 0.2, sy: 0.2, rot: 0.4, ox: 0, oy: 0.3,  alpha: 0 }
-    ]},
-    celebrationBurst: { duration: 500, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,   rot: 0,     ox: 0, oy: 0,    alpha: 1 },
-      { t: 0.3, sx: 1.4, sy: 1.4, rot: -0.15, ox: 0, oy: -0.3, alpha: 1 },
-      { t: 0.6, sx: 0.9, sy: 1.2, rot: 0.15,  ox: 0, oy: -0.1, alpha: 1 },
-      { t: 1,   sx: 1,   sy: 1,   rot: 0,     ox: 0, oy: 0,    alpha: 1 }
-    ]},
-    boopPulse: { duration: 200, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 },
-      { t: 0.5, sx: 1.2, sy: 0.85, rot: 0, ox: 0, oy: 0, alpha: 1 },
-      { t: 1,   sx: 1,   sy: 1,    rot: 0, ox: 0, oy: 0, alpha: 1 }
-    ]},
-    bounceRock: { duration: 220, keyframes: [
-      { t: 0,    sx: 1, sy: 1, rot: 0,    ox: 0,     oy: 0, alpha: 1 },
-      { t: 0.25, sx: 1, sy: 1, rot: -0.3, ox: -0.2,  oy: 0, alpha: 1 },
-      { t: 0.75, sx: 1, sy: 1, rot: 0.3,  ox: 0.2,   oy: 0, alpha: 1 },
-      { t: 1,    sx: 1, sy: 1, rot: 0,    ox: 0,     oy: 0, alpha: 1 }
+    popVanish: { duration: 220, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 1.3, sy: 1.3, rot: 0.2, ox: 0, oy: 0, alpha: 0.7 },
+      { t: 1, sx: 1.8, sy: 1.8, rot: 0.4, ox: 0, oy: 0, alpha: 0 }
     ]},
     caughtSquashFade: { duration: 300, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,   rot: 0, ox: 0, oy: 0,   alpha: 1 },
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
       { t: 0.5, sx: 1.4, sy: 0.4, rot: 0, ox: 0, oy: 0.3, alpha: 0.8 },
-      { t: 1,   sx: 0.6, sy: 0.6, rot: 0, ox: 0, oy: 0.1, alpha: 0 }
+      { t: 1, sx: 0.6, sy: 0.6, rot: 0, ox: 0, oy: 0.1, alpha: 0 }
     ]},
-    popVanish: { duration: 220, keyframes: [
-      { t: 0,   sx: 1,   sy: 1,   rot: 0,   ox: 0, oy: 0, alpha: 1 },
-      { t: 0.5, sx: 1.3, sy: 1.3, rot: 0.2, ox: 0, oy: 0, alpha: 0.7 },
-      { t: 1,   sx: 1.8, sy: 1.8, rot: 0.4, ox: 0, oy: 0, alpha: 0 }
+    celebrationBurst: { duration: 500, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.3, sx: 1.4, sy: 1.4, rot: -0.15, ox: 0, oy: -0.3, alpha: 1 },
+      { t: 0.6, sx: 0.9, sy: 1.2, rot: 0.15, ox: 0, oy: -0.1, alpha: 1 },
+      { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    boopPulse: { duration: 200, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 1.2, sy: 0.85, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    crumbleFade: { duration: 320, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.4, sx: 1.1, sy: 0.9, rot: 0.1, ox: 0, oy: 0.05, alpha: 0.7 },
+      { t: 1, sx: 0.2, sy: 0.2, rot: 0.4, ox: 0, oy: 0.3, alpha: 0 }
     ]}
   };
-
-  function playRecipe(entity, name) {
-    animState[entity.id] = { recipe: name, t: performance.now() };
-  }
-
-  // Samples a recipe at `elapsedMs` into its playback; returns the interpolated
-  // transform plus `done` once elapsed has passed the recipe's full duration.
+  function playRecipe(entity, name) { animState[entity.id] = { recipe: name, t: performance.now() }; }
   function sampleRecipe(name, elapsedMs) {
     const recipe = RECIPES[name];
     if (!recipe) return null;
@@ -498,24 +541,13 @@
   }
 
   // ============== Palette UI ==============
-  function makeSwatchCanvas(art) {
-    const c = document.createElement("canvas");
-    c.width = ART; c.height = ART;
-    const cx = c.getContext("2d");
-    drawArtToCtx(cx, art, ART);
-    return c;
-  }
-
   function drawArtToCtx(ctx, art, size) {
     ctx.clearRect(0, 0, size, size);
     const cell = size / ART;
     for (let y = 0; y < ART; y++) {
       for (let x = 0; x < ART; x++) {
         const color = art[y * ART + x];
-        if (color) {
-          ctx.fillStyle = color;
-          ctx.fillRect(x * cell, y * cell, cell, cell);
-        }
+        if (color) { ctx.fillStyle = color; ctx.fillRect(x * cell, y * cell, cell, cell); }
       }
     }
   }
@@ -524,18 +556,13 @@
     const container = document.getElementById("tileSwatches");
     container.innerHTML = "";
     TILE_PROPS.forEach(prop => {
-      // show the currently-selected def for this property, or default
-      const defId = (selectedTileProp === prop && selectedTileDefId) ? selectedTileDefId : findDefaultTileDef(prop);
-      const def = tileDefs[defId];
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedTileProp === prop ? " selected" : "");
+      sw.className = "swatch" + (paintMode === "tile" && selectedTileProp === prop ? " selected" : "");
       sw.style.background = TILE_COLORS[prop];
       sw.title = prop;
       const label = document.createElement("div");
+      label.className = "lbl";
       label.textContent = prop;
-      label.style.fontSize = "9px";
-      label.style.position = "absolute";
-      sw.style.position = "relative";
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         selectedTileProp = prop;
@@ -552,12 +579,7 @@
   function selectActorKind(kind) {
     selectedActorKind = kind;
     paintMode = "actor";
-    if (kind === "player") {
-      selectedActorDefId = PLAYER_DEF_ID;
-    } else {
-      selectedTemperament = kind;
-      selectedActorDefId = findDefaultActorDef(kind);
-    }
+    selectedActorDefId = kind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(kind);
     currentArt = actorDefs[selectedActorDefId].art.slice();
     updateModeButtons();
     renderAll();
@@ -572,10 +594,8 @@
       sw.style.background = TEMPERAMENT_COLORS[temp];
       sw.title = temp;
       const label = document.createElement("div");
+      label.className = "lbl";
       label.textContent = temp;
-      label.style.fontSize = "9px";
-      label.style.position = "absolute";
-      sw.style.position = "relative";
       sw.appendChild(label);
       sw.addEventListener("click", () => selectActorKind(temp));
       container.appendChild(sw);
@@ -590,14 +610,54 @@
     sw.style.background = PLAYER_COLOR;
     sw.title = "player";
     const label = document.createElement("div");
-    label.textContent = "player";
-    label.style.fontSize = "9px";
-    label.style.position = "absolute";
+    label.className = "lbl";
     label.style.color = "#222";
-    sw.style.position = "relative";
+    label.textContent = "player";
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
+  }
+
+  function renderWorldSwatches() {
+    const container = document.getElementById("worldSwatches");
+    container.innerHTML = "";
+    const sw = document.createElement("div");
+    sw.className = "swatch selected"; // only one world piece exists so far — always "selected"
+    sw.style.background = "#2f3140";
+    sw.title = "gravity";
+    const icon = document.createElement("div");
+    icon.style.width = "0"; icon.style.height = "0";
+    icon.style.borderLeft = "9px solid transparent";
+    icon.style.borderRight = "9px solid transparent";
+    icon.style.borderTop = "14px solid " + PLAYER_COLOR;
+    sw.appendChild(icon);
+    const label = document.createElement("div");
+    label.className = "lbl";
+    label.textContent = "gravity";
+    sw.appendChild(label);
+    container.appendChild(sw);
+  }
+
+  function renderPresetSwatches() {
+    const container = document.getElementById("presetSwatches");
+    container.innerHTML = "";
+    SPRITE_PRESETS.forEach(preset => {
+      const sw = document.createElement("div");
+      sw.className = "presetSwatch";
+      sw.title = preset.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), preset.art, ART);
+      sw.appendChild(c);
+      sw.addEventListener("click", () => {
+        currentArt = preset.art.slice();
+        renderPixelCanvas();
+        commitArtToActiveDef();
+        renderAll();
+        log("Grabbed the \"" + preset.name + "\" sprite — keep editing it, or place it as-is.");
+      });
+      container.appendChild(sw);
+    });
   }
 
   function renderColorRow() {
@@ -608,10 +668,7 @@
       sw.className = "colorSwatch" + (color === currentColor ? " selected" : "");
       sw.style.background = color || "repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 8px 8px";
       sw.title = color || "eraser";
-      sw.addEventListener("click", () => {
-        currentColor = color;
-        renderColorRow();
-      });
+      sw.addEventListener("click", () => { currentColor = color; renderColorRow(); });
       row.appendChild(sw);
     });
   }
@@ -619,11 +676,17 @@
   function updateModeButtons() {
     document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
     document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
+    document.getElementById("modeWorld").classList.toggle("active", paintMode === "world");
     document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
-    document.getElementById("tilePropertiesBlock").style.display = paintMode === "actor" ? "none" : "block";
+    document.getElementById("tilePropertiesBlock").style.display = paintMode === "tile" ? "block" : "none";
     document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
-    const label = paintMode === "actor" ? selectedActorKind : selectedTileProp;
-    document.getElementById("editingLabel").textContent = label;
+    document.getElementById("worldPropertiesBlock").style.display = paintMode === "world" ? "block" : "none";
+    const editingArt = paintMode !== "world" && paintMode !== "erase";
+    document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
+    document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
+    if (editingArt) {
+      document.getElementById("editingLabel").textContent = paintMode === "actor" ? selectedActorKind : selectedTileProp;
+    }
   }
 
   document.getElementById("modeTile").addEventListener("click", () => {
@@ -636,6 +699,10 @@
     currentArt = actorDefs[selectedActorDefId].art.slice();
     updateModeButtons(); renderAll();
   });
+  document.getElementById("modeWorld").addEventListener("click", () => {
+    paintMode = "world";
+    updateModeButtons(); renderAll();
+  });
   document.getElementById("modeErase").addEventListener("click", () => {
     paintMode = "erase";
     updateModeButtons(); renderAll();
@@ -644,18 +711,11 @@
   // ============== Pixel editor drawing ==============
   function renderPixelCanvas() {
     drawArtToCtx(pctx, currentArt, pixelCanvas.width);
-    // grid lines
     pctx.strokeStyle = "rgba(0,0,0,0.15)";
     pctx.lineWidth = 1;
     for (let i = 0; i <= ART; i++) {
-      pctx.beginPath();
-      pctx.moveTo(i * PIXEL_DISPLAY_SCALE, 0);
-      pctx.lineTo(i * PIXEL_DISPLAY_SCALE, pixelCanvas.height);
-      pctx.stroke();
-      pctx.beginPath();
-      pctx.moveTo(0, i * PIXEL_DISPLAY_SCALE);
-      pctx.lineTo(pixelCanvas.width, i * PIXEL_DISPLAY_SCALE);
-      pctx.stroke();
+      pctx.beginPath(); pctx.moveTo(i * PIXEL_DISPLAY_SCALE, 0); pctx.lineTo(i * PIXEL_DISPLAY_SCALE, pixelCanvas.height); pctx.stroke();
+      pctx.beginPath(); pctx.moveTo(0, i * PIXEL_DISPLAY_SCALE); pctx.lineTo(pixelCanvas.width, i * PIXEL_DISPLAY_SCALE); pctx.stroke();
     }
   }
 
@@ -663,9 +723,7 @@
     const rect = pixelCanvas.getBoundingClientRect();
     const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    const px = Math.floor(cx / (rect.width / ART));
-    const py = Math.floor(cy / (rect.height / ART));
-    return { px, py };
+    return { px: Math.floor(cx / (rect.width / ART)), py: Math.floor(cy / (rect.height / ART)) };
   }
 
   function paintPixel(e) {
@@ -678,11 +736,8 @@
   }
 
   function commitArtToActiveDef() {
-    if (paintMode === "actor") {
-      actorDefs[selectedActorDefId].art = currentArt.slice();
-    } else {
-      tileDefs[selectedTileDefId].art = currentArt.slice();
-    }
+    if (paintMode === "actor") actorDefs[selectedActorDefId].art = currentArt.slice();
+    else if (paintMode === "tile") tileDefs[selectedTileDefId].art = currentArt.slice();
   }
 
   pixelCanvas.addEventListener("mousedown", (e) => { isDrawingPixel = true; paintPixel(e); });
@@ -699,199 +754,124 @@
     renderAll();
   });
 
-  // ============== Board painting ==============
-  function cellFromEvent(e) {
-    const rect = gameCanvas.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    const gx = Math.floor(cx / (rect.width / COLS));
-    const gy = Math.floor(cy / (rect.height / ROWS));
-    return { gx, gy };
+  // ============== Physics helpers ==============
+  function tileAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    const id = board[gy][gx];
+    return id ? tileDefs[id] : null;
+  }
+  function tilePropAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return "solid"; // board edges act solid
+    const t = tileAt(gx, gy);
+    return t ? t.property : "walkable";
   }
 
-  function actorAt(gx, gy) {
-    return actors.find(a => a.x === gx && a.y === gy);
+  // A cell blocks THIS actor's movement (participates in AABB resolution) if:
+  //  - it's solid (blocks everyone)
+  //  - it's diggable and the mover isn't the player (the player digs through; NPCs just see a wall)
+  //  - it's bouncy and the mover isn't the player (NPCs ignore bounce per the original rule —
+  //    they walk past/through it; only the player bounces off it)
+  function isBlockingFor(actor, prop) {
+    if (prop === "solid") return true;
+    if (prop === "diggable") return !actor.isPlayer;
+    if (prop === "bouncy") return !!actor.isPlayer;
+    return false;
   }
 
-  function paintBoardCell(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
-
-    if (paintMode === "erase") {
-      const a = actorAt(gx, gy);
-      if (a) {
-        actors = actors.filter(ac => ac.id !== a.id);
-      } else {
-        board[gy][gx] = null;
-      }
-      renderAll();
-      return;
+  function isGravityZoneAt(gx, gy) {
+    for (const m of gravityMarkers) {
+      if (m.x === gx && gy >= m.y && (gy - m.y) <= GRAVITY_RANGE) return true;
     }
-
-    if (paintMode === "tile") {
-      // don't paint tile under an actor's cell is fine, tiles and actors are independent layers
-      board[gy][gx] = selectedTileDefId;
-      renderAll();
-      return;
-    }
-
-    if (paintMode === "actor") {
-      const isPlayer = selectedActorDefId === PLAYER_DEF_ID;
-      // The player is a singleton: placing one anywhere unflags any previous player actor
-      // (it stays on the board as a plain NPC, using whatever temperament it already had).
-      if (isPlayer) {
-        actors.forEach(a => { a.isPlayer = false; });
-      }
-
-      const existing = actorAt(gx, gy);
-      if (existing) {
-        existing.defId = selectedActorDefId;
-        existing.isPlayer = isPlayer;
-        renderAll();
-        if (isPlayer) startPos = { x: gx, y: gy };
-        return;
-      }
-      const newActor = {
-        id: nextActorInstId++,
-        defId: selectedActorDefId,
-        x: gx, y: gy,
-        isPlayer
-      };
-      actors.push(newActor);
-      if (isPlayer) {
-        startPos = { x: gx, y: gy };
-      }
-      renderAll();
-      return;
-    }
+    return false;
+  }
+  function actorCenterCell(actor) {
+    return { gx: Math.floor((actor.x + actor.w / 2) / TILE), gy: Math.floor((actor.y + actor.h / 2) / TILE) };
+  }
+  function isInGravityZone(actor) {
+    const c = actorCenterCell(actor);
+    return isGravityZoneAt(c.gx, c.gy);
   }
 
-  let dragActor = null; // actor being dragged in editor
-  let dragOffsetNone = true;
+  function overlappedCells(actor) {
+    const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
+    const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
+    const cells = [];
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) cells.push({ cx, cy });
+    return cells;
+  }
 
-  gameCanvas.addEventListener("mousedown", (e) => {
-    const { gx, gy } = cellFromEvent(e);
-    if (paintMode === "actor") {
-      const existing = actorAt(gx, gy);
-      if (existing && existing.defId === selectedActorDefId) {
-        // drag to reposition existing matching actor
-        dragActor = existing;
-        return;
-      }
+  function frictionMultiplierFor(actor) {
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (tilePropAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
     }
-    isPaintingBoard = true;
-    paintBoardCell(gx, gy);
-  });
-  gameCanvas.addEventListener("mousemove", (e) => {
-    const { gx, gy } = cellFromEvent(e);
-    if (dragActor) {
-      moveActorTo(dragActor, gx, gy);
-      return;
-    }
-    if (isPaintingBoard && paintMode === "tile") {
-      paintBoardCell(gx, gy);
-    }
-  });
-  window.addEventListener("mouseup", () => {
-    isPaintingBoard = false;
-    dragActor = null;
-  });
+    return 1;
+  }
 
-  gameCanvas.addEventListener("touchstart", (e) => {
-    const { gx, gy } = cellFromEvent(e);
-    if (paintMode === "actor") {
-      const existing = actorAt(gx, gy);
-      if (existing && existing.defId === selectedActorDefId) {
-        dragActor = existing;
-        e.preventDefault();
-        return;
-      }
-    }
-    isPaintingBoard = true;
-    paintBoardCell(gx, gy);
-    e.preventDefault();
-  }, { passive: false });
-  gameCanvas.addEventListener("touchmove", (e) => {
-    const { gx, gy } = cellFromEvent(e);
-    if (dragActor) { moveActorTo(dragActor, gx, gy); e.preventDefault(); return; }
-    if (isPaintingBoard && paintMode === "tile") paintBoardCell(gx, gy);
-    e.preventDefault();
-  }, { passive: false });
-  gameCanvas.addEventListener("touchend", () => { isPaintingBoard = false; dragActor = null; });
-
-  // Dragging an actor in the editor triggers the exact same reaction table as keyboard
-  // movement — a wall bump, a temperament-specific player/actor contact, or a generic
-  // actor/actor bounce, whichever the reaction table actually calls for. This used to
-  // always fire a generic bounce for any occupied target cell, even when the player was
-  // dragged onto a chaser/fleer/stationary/wanderer actor (or vice versa), which meant
-  // editor and play diverged. It no longer does.
-  function moveActorTo(actor, gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
-    if (actor.x === gx && actor.y === gy) return;
-
-    const blockerActor = actors.find(a => a.id !== actor.id && a.x === gx && a.y === gy);
-    if (blockerActor) {
-      const playerActor = actor.isPlayer ? actor : (blockerActor.isPlayer ? blockerActor : null);
-      if (!playerActor) {
-        // neither side is the player: always a generic actor/actor bounce (reaction #10)
-        triggerActorBounce(actor, blockerActor);
-        renderAll();
-        return;
-      }
-      const npcActor = playerActor === actor ? blockerActor : actor;
-      const npcDef = actorDefs[npcActor.defId];
-      const temperament = npcDef ? npcDef.temperament : null;
-      if (temperament === "chaser" || temperament === "fleer" || temperament === "collectible") {
-        // the dragged actor actually lands on the target cell before the reaction plays out
-        actor.x = gx; actor.y = gy;
-      }
-      resolveActorContact(actor, blockerActor);
-      renderAll();
-      return;
-    }
-
-    const tileDefId = board[gy][gx];
-    const tileDef = tileDefId ? tileDefs[tileDefId] : { property: "walkable" };
-
-    if (actor.isPlayer) {
-      resolvePlayerTileEntry(actor, gx, gy, tileDef);
+  function applyAxisFriction(actor, axis, dt, accelInput) {
+    const key = axis === "x" ? "vx" : "vy";
+    const friction = FRICTION_DECEL * frictionMultiplierFor(actor);
+    if (accelInput !== 0) {
+      actor[key] += accelInput * dt;
     } else {
-      // non-player actors ignore hazard/bouncy/slippery/goal; diggable acts solid to them too
-      if (tileDef.property === "solid" || tileDef.property === "diggable") {
-        triggerBump(actor);
-      } else {
-        actor.x = gx; actor.y = gy;
+      const decel = friction * dt;
+      if (Math.abs(actor[key]) <= decel) actor[key] = 0;
+      else actor[key] -= Math.sign(actor[key]) * decel;
+    }
+  }
+
+  // Axis-separated AABB resolution against blocking tiles. Bouncy reflects velocity (with
+  // restitution) instead of zeroing it — a real bounce, not a scripted launch.
+  function resolveAxis(actor, axis) {
+    const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
+    const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
+    for (let cy = r0; cy <= r1; cy++) {
+      for (let cx = c0; cx <= c1; cx++) {
+        const prop = tilePropAt(cx, cy);
+        if (!isBlockingFor(actor, prop)) continue;
+        const bouncy = prop === "bouncy";
+        if (axis === "x") {
+          if (actor.vx > 0) {
+            actor.x = cx * TILE - actor.w;
+            triggerImpact(actor, "x", actor.vx);
+            actor.vx = bouncy ? -actor.vx * BOUNCE_RESTITUTION : 0;
+          } else if (actor.vx < 0) {
+            actor.x = (cx + 1) * TILE;
+            triggerImpact(actor, "x", actor.vx);
+            actor.vx = bouncy ? -actor.vx * BOUNCE_RESTITUTION : 0;
+          }
+        } else {
+          if (actor.vy > 0) {
+            actor.y = cy * TILE - actor.h;
+            triggerImpact(actor, "y", actor.vy);
+            if (bouncy) { actor.vy = -actor.vy * BOUNCE_RESTITUTION; }
+            else { actor.vy = 0; actor.grounded = true; }
+          } else if (actor.vy < 0) {
+            actor.y = (cy + 1) * TILE;
+            triggerImpact(actor, "y", actor.vy);
+            actor.vy = bouncy ? -actor.vy * BOUNCE_RESTITUTION : 0;
+          }
+        }
       }
     }
-    renderAll();
   }
 
-  // ============== Reaction table ==============
-  // This IS the engine. Every reaction below is reached from three places —
-  // keyboard movement, editor drag, and autonomous actor ticking — through the
-  // same shared functions, so the same input always produces the same reaction
-  // no matter which of the three moved the piece.
-  function triggerBump(actor) {
-    sounds.thud();
-    playRecipe(actor, "flattenRecover");
-    log(actor.isPlayer ? "Bump! (solid)" : "An actor bumped a wall.");
+  // Physics-driven impact squash: magnitude scales with the incoming speed on that axis —
+  // a light bump barely dips, a hard fall/collision flattens hard. No fixed animation plays;
+  // this just seeds a decaying value that the renderer reads every frame.
+  function triggerImpact(actor, axis, incomingSpeed) {
+    const mag = Math.min(1, Math.abs(incomingSpeed) / 260);
+    if (mag > (actor.impactAxis === axis ? actor.impactSquash : 0)) {
+      actor.impactSquash = mag;
+      actor.impactAxis = axis;
+    }
+    if (mag > 0.35 && axis === "y" && incomingSpeed > 0) sounds.thud();
   }
 
-  function triggerActorBounce(a, b) {
-    sounds.boing();
-    playRecipe(a, "bounceRock");
-    playRecipe(b, "bounceRock");
-    log("Two actors bounced off each other.");
-  }
-
+  // ============== Reaction table (physics terms) ==============
   function countCollectibles() {
-    return actors.filter(a => {
-      const d = actorDefs[a.defId];
-      return d && d.temperament === "collectible";
-    }).length;
+    return actors.filter(a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible"; }).length;
   }
 
-  // A round loops either by reaching a `goal` tile or by clearing every collectible.
-  // Intensity is engine-only: the kid never sets or sees it, only its effect (chaser speed).
   function roundComplete() {
     intensity++;
     const player = actors.find(a => a.isPlayer);
@@ -900,23 +880,20 @@
       playRecipe(player, "celebrationBurst");
       setTimeout(() => {
         player.x = startPos.x; player.y = startPos.y;
-        renderAll();
+        player.vx = 0; player.vy = 0;
       }, RECIPES.celebrationBurst.duration);
     }
     log("Round complete!");
   }
+  function maybeRoundCompleteFromCollectibles() { if (countCollectibles() === 0) roundComplete(); }
 
-  function maybeRoundCompleteFromCollectibles() {
-    if (countCollectibles() === 0) roundComplete();
-  }
-
-  // Resolves any contact between two actors, regardless of which one physically moved
-  // (keyboard step, editor drag, or AI tick) — the reaction is always keyed by the
-  // temperament of whichever actor isn't the player. Two NPCs colliding always just bounce.
+  // Resolves contact between two actors, regardless of which one physically moved into the
+  // other (player input, editor drag, or AI steering) — reaction is keyed by whichever actor
+  // isn't the player. Two NPCs colliding just reflect off each other.
   function resolveActorContact(moverActor, otherActor) {
     const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
     if (!playerActor) {
-      triggerActorBounce(moverActor, otherActor);
+      reflectActorsApart(moverActor, otherActor);
       return;
     }
     const npcActor = playerActor === moverActor ? otherActor : moverActor;
@@ -926,14 +903,11 @@
     if (temperament === "stationary") {
       sounds.boop();
       playRecipe(npcActor, "boopPulse");
-      playRecipe(playerActor, "flattenRecover");
-      resetPlayerBumpPosition(playerActor, npcActor);
+      pushApart(playerActor, npcActor);
       log("Boop!");
     } else if (temperament === "wanderer") {
       sounds.oof();
-      playRecipe(npcActor, "bounceRock");
-      playRecipe(playerActor, "bounceRock");
-      resetPlayerBumpPosition(playerActor, npcActor);
+      reflectActorsApart(playerActor, npcActor);
       log("Oof!");
     } else if (temperament === "chaser") {
       sounds.gotcha();
@@ -941,16 +915,13 @@
       log("Caught! Resetting to start.");
       setTimeout(() => {
         playerActor.x = startPos.x; playerActor.y = startPos.y;
-        renderAll();
+        playerActor.vx = 0; playerActor.vy = 0;
       }, RECIPES.caughtSquashFade.duration);
     } else if (temperament === "fleer") {
       sounds.pop();
       playRecipe(npcActor, "popVanish");
       log("Pop!");
-      setTimeout(() => {
-        actors = actors.filter(a => a.id !== npcActor.id);
-        renderAll();
-      }, RECIPES.popVanish.duration);
+      setTimeout(() => { actors = actors.filter(a => a.id !== npcActor.id); }, RECIPES.popVanish.duration);
     } else if (temperament === "collectible") {
       sounds.pop();
       playRecipe(npcActor, "popVanish");
@@ -959,167 +930,436 @@
       setTimeout(() => {
         actors = actors.filter(a => a.id !== npcActor.id);
         maybeRoundCompleteFromCollectibles();
-        renderAll();
       }, RECIPES.popVanish.duration);
     }
   }
 
-  function resolvePlayerTileEntry(player, gx, gy, tileDef) {
-    const prop = tileDef.property;
-    if (prop === "walkable") {
-      player.x = gx; player.y = gy;
-      sounds.footstep();
-    } else if (prop === "solid") {
-      triggerBump(player);
-    } else if (prop === "hazard") {
-      // knockback one tile from where they came
-      const dx = gx - player.x, dy = gy - player.y;
-      sounds.yelp();
-      playRecipe(player, "knockTilt");
-      const kx = player.x - dx, ky = player.y - dy;
-      if (kx >= 0 && kx < COLS && ky >= 0 && ky < ROWS) {
-        player.x = kx; player.y = ky;
+  // Any two actors colliding: velocities reflect off each other (a real bounce, elastic-ish).
+  function reflectActorsApart(a, b) {
+    sounds.boing();
+    const dx = (a.x + a.w / 2) - (b.x + b.w / 2);
+    const dy = (a.y + a.h / 2) - (b.y + b.h / 2);
+    const horizontal = Math.abs(dx) >= Math.abs(dy);
+    if (horizontal) {
+      const speed = Math.max(60, Math.abs(a.vx) + Math.abs(b.vx));
+      a.vx = Math.sign(dx || 1) * speed * 0.5;
+      b.vx = -Math.sign(dx || 1) * speed * 0.5;
+    } else {
+      const speed = Math.max(60, Math.abs(a.vy) + Math.abs(b.vy));
+      a.vy = Math.sign(dy || 1) * speed * 0.5;
+      b.vy = -Math.sign(dy || 1) * speed * 0.5;
+    }
+    pushApart(a, b);
+  }
+
+  // Nudges two overlapping actors apart along their separation axis so a bounce/bump reaction
+  // doesn't just re-trigger next frame from continued overlap.
+  function pushApart(a, b) {
+    const dx = (a.x + a.w / 2) - (b.x + b.w / 2);
+    const dy = (a.y + a.h / 2) - (b.y + b.h / 2);
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      const push = Math.sign(dx || 1) * 3;
+      a.x += push; b.x -= push;
+    } else {
+      const push = Math.sign(dy || 1) * 3;
+      a.y += push; b.y -= push;
+    }
+  }
+
+  function triggerHazard(actor) {
+    if (actor.hazardCooldown > 0) return;
+    actor.hazardCooldown = HAZARD_COOLDOWN_MS;
+    sounds.yelp();
+    actor.flashTimer = 1;
+    const speed = Math.hypot(actor.vx, actor.vy) || 1;
+    const kx = speed > 1 ? -actor.vx / speed : 0;
+    const ky = speed > 1 ? -actor.vy / speed : -1;
+    actor.vx = kx * HAZARD_KNOCKBACK_SPEED;
+    actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
+    actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
+    log("Ouch! Hazard knockback.");
+  }
+
+  function triggerDig(gx, gy) {
+    const id = board[gy][gx];
+    if (!id) return;
+    sounds.crumble();
+    tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), art: tileDefs[id].art };
+    board[gy][gx] = null;
+    log("Crumble! That tile's walkable now.");
+  }
+
+  function triggerGoal(player) {
+    if (player.goalCooldown > 0) return;
+    player.goalCooldown = RECIPES.celebrationBurst.duration + 300; // outlives the reset it schedules
+    roundComplete();
+  }
+
+  // Player-only contact reactions that aren't part of AABB blocking: hazard, diggable
+  // (crumbles instead of blocking the player), and goal.
+  function checkPlayerTileContacts(player) {
+    for (const { cx, cy } of overlappedCells(player)) {
+      const prop = tilePropAt(cx, cy);
+      if (prop === "hazard") triggerHazard(player);
+      else if (prop === "diggable") triggerDig(cx, cy);
+      else if (prop === "goal") triggerGoal(player);
+    }
+  }
+
+  // Every actor-actor/player-actor touch reacts once, then goes quiet for a beat — without
+  // this, two overlapping AABBs would re-fire the reaction every single frame they touch
+  // (dozens of times before a knockback/pop even has a chance to separate them).
+  const ACTOR_CONTACT_COOLDOWN_MS = 500;
+  let actorContactCooldown = {}; // "idA_idB" -> ms remaining
+  function contactKey(a, b) { return Math.min(a.id, b.id) + "_" + Math.max(a.id, b.id); }
+
+  function checkActorContacts(actor, allActors) {
+    for (const other of allActors) {
+      if (other.id === actor.id) continue;
+      if (actor.x < other.x + other.w && actor.x + actor.w > other.x &&
+          actor.y < other.y + other.h && actor.y + actor.h > other.y) {
+        const key = contactKey(actor, other);
+        if (actorContactCooldown[key] > 0) continue;
+        actorContactCooldown[key] = ACTOR_CONTACT_COOLDOWN_MS;
+        resolveActorContact(actor, other);
+        return; // one contact resolved per frame is plenty for a toy engine
       }
-      log("Ouch! Hazard knockback.");
-    } else if (prop === "bouncy") {
-      const dx = Math.sign(gx - player.x), dy = Math.sign(gy - player.y);
-      sounds.boing();
-      playRecipe(player, "launchSpin");
-      let launchDist = 2 + Math.floor(Math.random() * 2); // 2-3 tiles
-      let tx = player.x, ty = player.y;
-      for (let i = 0; i < launchDist; i++) {
-        const nx = tx + dx, ny = ty + dy;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
-        const nDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
-        if (nDef.property === "solid" || nDef.property === "diggable") break;
-        tx = nx; ty = ny;
+    }
+  }
+  function tickActorContactCooldowns(dt) {
+    for (const k in actorContactCooldown) {
+      actorContactCooldown[k] -= dt * 1000;
+      if (actorContactCooldown[k] <= 0) delete actorContactCooldown[k];
+    }
+  }
+
+  // ============== Steering (wanderer / chaser / fleer) ==============
+  // Same continuous physics as the player: acceleration toward/away from the player, capped
+  // at a max speed — not a discrete per-tick grid direction. A wandering actor picks a lazily
+  // drifting heading instead of true randomness, so it doesn't jitter frame to frame.
+  const wanderHeadings = {}; // actorId -> {angle, until}
+  function steeringAccelFor(actor, player) {
+    const def = actorDefs[actor.defId];
+    if (!def) return { ax: 0, ay: 0 };
+    if (def.temperament === "wanderer") {
+      let h = wanderHeadings[actor.id];
+      const now = performance.now();
+      if (!h || now > h.until) {
+        h = { angle: Math.random() * Math.PI * 2, until: now + 800 + Math.random() * 900 };
+        wanderHeadings[actor.id] = h;
       }
-      player.x = tx; player.y = ty;
-      log("Boing! Launched by bouncy tile.");
-    } else if (prop === "slippery") {
-      const dx = gx - player.x, dy = gy - player.y;
-      sounds.footstep();
-      playRecipe(player, "slideSquish");
-      let tx = gx, ty = gy;
-      while (true) {
-        const nx = tx + dx, ny = ty + dy;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
-        const nDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
-        if (nDef.property !== "slippery") break;
-        tx = nx; ty = ny;
+      return { ax: Math.cos(h.angle) * NPC_ACCEL, ay: Math.sin(h.angle) * NPC_ACCEL };
+    }
+    if (!player) return { ax: 0, ay: 0 };
+    const dx = (player.x + player.w / 2) - (actor.x + actor.w / 2);
+    const dy = (player.y + player.h / 2) - (actor.y + actor.h / 2);
+    const dist = Math.hypot(dx, dy) || 1;
+    const sign = def.temperament === "chaser" ? 1 : (def.temperament === "fleer" ? -1 : 0);
+    if (sign === 0) return { ax: 0, ay: 0 };
+    return { ax: (dx / dist) * NPC_ACCEL * sign, ay: (dy / dist) * NPC_ACCEL * sign };
+  }
+
+  // ============== Per-actor physics step ==============
+  const keys = {};
+  window.addEventListener("keydown", (e) => {
+    const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
+    if (map.includes(e.key)) e.preventDefault();
+    keys[e.key] = true;
+  });
+  window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+
+  function stepActor(actor, dt, player) {
+    if (actor.dragging) return; // frozen while the editor is dragging it
+    const def = actorDefs[actor.defId];
+    const temperament = def ? def.temperament : null;
+    if (temperament === "stationary" || temperament === "collectible") {
+      // never move on their own; still decay any residual velocity from a bounce
+      applyAxisFriction(actor, "x", dt, 0);
+      actor.vx *= 0.8; actor.vy *= 0.8;
+      if (Math.abs(actor.vx) < 1) actor.vx = 0;
+      if (Math.abs(actor.vy) < 1) actor.vy = 0;
+    } else {
+      const inGravity = isInGravityZone(actor);
+      let ax = 0, ay = 0, wantsJump = false;
+
+      if (actor.isPlayer) {
+        const left = keys["ArrowLeft"] || keys["a"] || keys["A"];
+        const right = keys["ArrowRight"] || keys["d"] || keys["D"];
+        const up = keys["ArrowUp"] || keys["w"] || keys["W"];
+        const down = keys["ArrowDown"] || keys["s"] || keys["S"];
+        if (left && !right) ax = -MOVE_ACCEL; else if (right && !left) ax = MOVE_ACCEL;
+        if (inGravity) {
+          wantsJump = keys[" "] || up;
+        } else {
+          if (up && !down) ay = -MOVE_ACCEL; else if (down && !up) ay = MOVE_ACCEL;
+        }
+      } else {
+        const steer = steeringAccelFor(actor, player);
+        ax = steer.ax;
+        if (!inGravity) ay = steer.ay;
       }
-      player.x = tx; player.y = ty;
-      log("Wheee! Sliding.");
-      // resolve landing tile's reaction (could be solid/hazard/bouncy/diggable/goal) at next step
-      const landDx = Math.sign(dx), landDy = Math.sign(dy);
-      const nx = tx + landDx, ny = ty + landDy;
-      if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
-        const landDef = board[ny][nx] ? tileDefs[board[ny][nx]] : { property: "walkable" };
-        if (landDef.property !== "walkable") {
-          resolvePlayerTileEntry(player, nx, ny, landDef);
-          return; // the recursive call already ran the actor-contact check below
+
+      applyAxisFriction(actor, "x", dt, ax);
+      const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
+
+      if (inGravity) {
+        // horizontal run-speed and vertical fall-speed are different caps in a platformer,
+        // so each axis clamps independently here
+        actor.vx = Math.max(-cap, Math.min(cap, actor.vx));
+        if (wantsJump && actor.grounded) {
+          actor.vy = JUMP_VELOCITY;
+          actor.jumpCrouch = 1;
+          sounds.jump();
+        }
+        // reset every frame; resolveAxis("y") below sets it true again only if still
+        // resting on something — this must happen right before gravity integrates,
+        // not after, or a free-roam actor's "always grounded" never survives re-entry
+        actor.grounded = false;
+        actor.vy += GRAVITY * dt;
+        actor.vy = Math.min(actor.vy, MAX_FALL);
+      } else {
+        applyAxisFriction(actor, "y", dt, ay);
+        actor.grounded = true; // no falling concept outside a gravity zone
+        // free-roam movement is a single 2D cap on the combined vector — clamping vx/vy
+        // independently would let a diagonal exceed cap by up to sqrt(2)x
+        const speed = Math.hypot(actor.vx, actor.vy);
+        if (speed > cap) { const scale = cap / speed; actor.vx *= scale; actor.vy *= scale; }
+      }
+    }
+
+    if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
+    if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
+
+    actor.x += actor.vx * dt;
+    resolveAxis(actor, "x");
+    actor.y += actor.vy * dt;
+    resolveAxis(actor, "y");
+
+    // decay physics-driven deformation values
+    actor.impactSquash = Math.max(0, actor.impactSquash - dt * 4);
+    actor.jumpCrouch = Math.max(0, actor.jumpCrouch - dt * 6);
+    actor.flashTimer = Math.max(0, actor.flashTimer - dt * 3.5);
+
+    if (actor.isPlayer) checkPlayerTileContacts(actor);
+    checkActorContacts(actor, actors);
+
+    // fell off the world (only meaningful once gravity/holes exist) — recycle to start, no
+    // fail-state semantics, matching the throwaway prototype this folds in
+    if (actor.isPlayer && actor.y > ROWS * TILE + 200) {
+      actor.x = startPos.x; actor.y = startPos.y; actor.vx = 0; actor.vy = 0;
+    }
+  }
+
+  function tick(dt) {
+    const player = actors.find(a => a.isPlayer);
+    actors.slice().forEach(actor => stepActor(actor, dt, player));
+    tickActorContactCooldowns(dt);
+  }
+
+  // ============== Board / world / actor painting ==============
+  function cellFromEvent(e) {
+    const rect = gameCanvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    return { gx: Math.floor(cx / (rect.width / COLS)), gy: Math.floor(cy / (rect.height / ROWS)) };
+  }
+  function pxFromEvent(e) {
+    const rect = gameCanvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    return { px: cx / (rect.width / (COLS * TILE)), py: cy / (rect.height / (ROWS * TILE)) };
+  }
+
+  function actorAABBAt(px, py) {
+    return actors.find(a => px >= a.x && px < a.x + a.w && py >= a.y && py < a.y + a.h);
+  }
+
+  function paintTileAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    board[gy][gx] = selectedTileDefId;
+  }
+  function paintGravityAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (!gravityMarkers.some(m => m.x === gx && m.y === gy)) {
+      gravityMarkers.push({ x: gx, y: gy });
+      log("Placed a gravity piece — things below it in this column will fall.");
+    }
+  }
+  function eraseAt(gx, gy, px, py) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    const hit = actorAABBAt(px, py);
+    if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
+    const beforeLen = gravityMarkers.length;
+    gravityMarkers = gravityMarkers.filter(m => !(m.x === gx && m.y === gy));
+    if (gravityMarkers.length !== beforeLen) return;
+    board[gy][gx] = null;
+  }
+
+  function placeNewActor(px, py) {
+    const isPlayer = selectedActorDefId === PLAYER_DEF_ID;
+    if (isPlayer) actors.forEach(a => { a.isPlayer = false; });
+    const actor = {
+      id: nextActorInstId++,
+      defId: selectedActorDefId,
+      x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
+      w: ACTOR_SIZE, h: ACTOR_SIZE,
+      vx: 0, vy: 0, grounded: false, isPlayer,
+      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0
+    };
+    actors.push(actor);
+    if (isPlayer) startPos = { x: actor.x, y: actor.y };
+    return actor;
+  }
+
+  // ============== Editor drag: continuous, collision-aware, same reactions as gameplay ==============
+  // Dragging just moves the actor's real AABB with the cursor, clamped by the exact same solid/
+  // diggable/bouncy collision the physics uses, and runs the exact same contact reactions —
+  // there is no separate "editor bump" logic to keep in sync with gameplay anymore.
+  let dragActor = null;
+  let dragContactCooldown = {}; // "cellKey"|actorId -> ms remaining, so a slow drag doesn't spam a reaction every frame
+
+  function clampDragPosition(actor, targetX, targetY) {
+    // resolve one axis at a time, exactly like simulation, but teleporting instead of integrating
+    const before = { x: actor.x, y: actor.y };
+    actor.x = targetX;
+    for (const { cx, cy } of overlappedCells(actor)) {
+      const prop = tilePropAt(cx, cy);
+      if (isBlockingFor(actor, prop) && prop !== "bouncy") {
+        // push back to just outside this cell on X
+        if (targetX > before.x) actor.x = Math.min(actor.x, cx * TILE - actor.w);
+        else if (targetX < before.x) actor.x = Math.max(actor.x, (cx + 1) * TILE);
+        const key = "t" + cx + "," + cy;
+        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); dragContactCooldown[key] = 220; }
+      }
+    }
+    actor.y = targetY;
+    for (const { cx, cy } of overlappedCells(actor)) {
+      const prop = tilePropAt(cx, cy);
+      if (isBlockingFor(actor, prop) && prop !== "bouncy") {
+        if (targetY > before.y) actor.y = Math.min(actor.y, cy * TILE - actor.h);
+        else if (targetY < before.y) actor.y = Math.max(actor.y, (cy + 1) * TILE);
+        const key = "t" + cx + "," + cy;
+        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); dragContactCooldown[key] = 220; }
+      }
+    }
+    // non-blocking contact reactions still fire live while dragging, same as gameplay
+    if (actor.isPlayer) {
+      for (const { cx, cy } of overlappedCells(actor)) {
+        const prop = tilePropAt(cx, cy);
+        const key = "c" + cx + "," + cy;
+        if ((prop === "hazard" || prop === "diggable" || prop === "goal") && !dragContactCooldown[key]) {
+          dragContactCooldown[key] = 350;
+          if (prop === "hazard") { sounds.yelp(); actor.flashTimer = 1; log("Ouch! (dragged onto a hazard tile)"); }
+          else if (prop === "diggable") triggerDig(cx, cy);
+          else if (prop === "goal") triggerGoal(actor);
         }
       }
-    } else if (prop === "diggable") {
-      sounds.crumble();
-      const key = gx + "," + gy;
-      tileAnimState[key] = { recipe: "crumbleFade", t: performance.now(), art: tileDefs[board[gy][gx]].art };
-      board[gy][gx] = null; // crumbles permanently to walkable
-      player.x = gx; player.y = gy;
-      log("Crumble! That tile's walkable now.");
-    } else if (prop === "goal") {
-      player.x = gx; player.y = gy;
-      roundComplete();
     }
-    checkActorCollisionsForPlayer(player);
+    // Actor-actor contact needs no special handling here: the OTHER actor in the pair still
+    // runs its own stepActor()/checkActorContacts() every frame regardless of who's being
+    // dragged, and that path already has its own cooldown-gated resolveActorContact call —
+    // duplicating it here previously caused a contact to fire twice (once from each path).
+  }
+  function triggerBumpFeedback(actor) {
+    sounds.thud();
+    actor.impactSquash = 0.7;
+  }
+  function tickDragCooldowns(dt) {
+    for (const k in dragContactCooldown) {
+      dragContactCooldown[k] -= dt * 1000;
+      if (dragContactCooldown[k] <= 0) delete dragContactCooldown[k];
+    }
   }
 
-  function checkActorCollisionsForPlayer(player) {
-    const hit = actors.find(a => a.id !== player.id && a.x === player.x && a.y === player.y);
-    if (hit) resolveActorContact(player, hit);
-  }
-
-  function resetPlayerBumpPosition(player, blocker) {
-    // move player back to be adjacent, not overlapping the stationary/wanderer actor
-    const dx = Math.sign(player.x - blocker.x) || 1;
-    const dy = Math.sign(player.y - blocker.y);
-    let bx = blocker.x + dx, by = blocker.y + dy;
-    if (bx < 0 || bx >= COLS) bx = blocker.x;
-    if (by < 0 || by >= ROWS) by = blocker.y;
-    player.x = bx; player.y = by;
-  }
-
-  // ============== Player movement (keyboard / dpad) ==============
-  function movePlayer(dir) {
-    const player = actors.find(a => a.isPlayer);
-    if (!player) return;
-    let dx = 0, dy = 0;
-    if (dir === "up") dy = -1;
-    else if (dir === "down") dy = 1;
-    else if (dir === "left") dx = -1;
-    else if (dir === "right") dx = 1;
-    const nx = player.x + dx, ny = player.y + dy;
-    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
-
-    const blockerActor = actors.find(a => a.id !== player.id && a.x === nx && a.y === ny);
-    if (blockerActor) {
-      const def = actorDefs[blockerActor.defId];
-      const temperament = def ? def.temperament : null;
-      // chaser/fleer/collectible reactions read right when the player actually reaches that
-      // cell (caught, or the thing vanishing from under them); stationary/wanderer are a bump
-      // that leaves the player adjacent, so only those three actually move the player onto it.
-      if (temperament === "chaser" || temperament === "fleer" || temperament === "collectible") {
-        player.x = nx; player.y = ny;
-      }
-      resolveActorContact(player, blockerActor);
-      renderAll();
+  gameCanvas.addEventListener("mousedown", (e) => {
+    const { px, py } = pxFromEvent(e);
+    const { gx, gy } = cellFromEvent(e);
+    if (paintMode === "actor") {
+      const hit = actorAABBAt(px, py);
+      if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return; }
+      placeNewActor(px, py);
       return;
     }
+    if (paintMode === "world") { isPaintingBoard = true; paintGravityAt(gx, gy); return; }
+    if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
+    if (paintMode === "tile") { isPaintingBoard = true; paintTileAt(gx, gy); return; }
+  });
+  gameCanvas.addEventListener("mousemove", (e) => {
+    const { px, py } = pxFromEvent(e);
+    const { gx, gy } = cellFromEvent(e);
+    if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); return; }
+    if (!isPaintingBoard) return;
+    if (paintMode === "tile") paintTileAt(gx, gy);
+    else if (paintMode === "world") paintGravityAt(gx, gy);
+    else if (paintMode === "erase") eraseAt(gx, gy, px, py);
+  });
+  window.addEventListener("mouseup", () => {
+    isPaintingBoard = false;
+    if (dragActor) { dragActor.dragging = false; dragContactCooldown = {}; }
+    dragActor = null;
+  });
 
-    const tileDefId = board[ny][nx];
-    const tileDef = tileDefId ? tileDefs[tileDefId] : { property: "walkable" };
-    resolvePlayerTileEntry(player, nx, ny, tileDef);
-    renderAll();
-  }
-
-  window.addEventListener("keydown", (e) => {
-    const map = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
-                  w: "up", s: "down", a: "left", d: "right" };
-    if (map[e.key]) {
+  gameCanvas.addEventListener("touchstart", (e) => {
+    const { px, py } = pxFromEvent(e);
+    const { gx, gy } = cellFromEvent(e);
+    if (paintMode === "actor") {
+      const hit = actorAABBAt(px, py);
+      if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return; }
+      placeNewActor(px, py);
       e.preventDefault();
-      movePlayer(map[e.key]);
+      return;
     }
+    isPaintingBoard = true;
+    if (paintMode === "tile") paintTileAt(gx, gy);
+    else if (paintMode === "world") paintGravityAt(gx, gy);
+    else if (paintMode === "erase") eraseAt(gx, gy, px, py);
+    e.preventDefault();
+  }, { passive: false });
+  gameCanvas.addEventListener("touchmove", (e) => {
+    const { px, py } = pxFromEvent(e);
+    const { gx, gy } = cellFromEvent(e);
+    if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); e.preventDefault(); return; }
+    if (isPaintingBoard) {
+      if (paintMode === "tile") paintTileAt(gx, gy);
+      else if (paintMode === "world") paintGravityAt(gx, gy);
+      else if (paintMode === "erase") eraseAt(gx, gy, px, py);
+    }
+    e.preventDefault();
+  }, { passive: false });
+  gameCanvas.addEventListener("touchend", () => {
+    isPaintingBoard = false;
+    if (dragActor) { dragActor.dragging = false; dragContactCooldown = {}; }
+    dragActor = null;
   });
 
   document.querySelectorAll("#dpad button").forEach(btn => {
-    btn.addEventListener("click", () => movePlayer(btn.dataset.dir));
+    btn.addEventListener("mousedown", () => { keys[dirKey(btn.dataset.dir)] = true; });
+    btn.addEventListener("mouseup", () => { keys[dirKey(btn.dataset.dir)] = false; });
+    btn.addEventListener("mouseleave", () => { keys[dirKey(btn.dataset.dir)] = false; });
+    btn.addEventListener("click", () => { keys[dirKey(btn.dataset.dir)] = true; setTimeout(() => keys[dirKey(btn.dataset.dir)] = false, 120); });
   });
+  function dirKey(dir) {
+    return { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[dir];
+  }
 
   // ============== Reset / start controls ==============
   document.getElementById("resetBtn").addEventListener("click", () => {
     const player = actors.find(a => a.isPlayer);
-    if (player) {
-      player.x = startPos.x; player.y = startPos.y;
-      renderAll();
-    }
+    if (player) { player.x = startPos.x; player.y = startPos.y; player.vx = 0; player.vy = 0; }
   });
-
   document.getElementById("setStartBtn").addEventListener("click", () => {
     const player = actors.find(a => a.isPlayer);
-    if (player) {
-      startPos = { x: player.x, y: player.y };
-      log("Start position set to player's current tile.");
-    } else {
-      log("Place a player-controlled actor first.");
-    }
+    if (player) { startPos = { x: player.x, y: player.y }; log("Start position set to player's current spot."); }
+    else log("Place the player first.");
   });
-
   document.getElementById("clearAllBtn").addEventListener("click", () => {
     if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
     initBoard();
     actors = [];
+    gravityMarkers = [];
     animState = {};
     tileAnimState = {};
+    actorContactCooldown = {};
     resetScoreAndIntensity();
     renderAll();
   });
@@ -1131,10 +1371,7 @@
     for (let y = 0; y < ART; y++) {
       for (let x = 0; x < ART; x++) {
         const color = art[y * ART + x];
-        if (color) {
-          ctx.fillStyle = color;
-          ctx.fillRect(dx + x * cellSize, dy + y * cellSize, cellSize + 0.5, cellSize + 0.5);
-        }
+        if (color) { ctx.fillStyle = color; ctx.fillRect(dx + x * cellSize, dy + y * cellSize, cellSize + 0.5, cellSize + 0.5); }
       }
     }
   }
@@ -1145,20 +1382,18 @@
     gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
 
     const cell = TILE / ART;
+    const now = performance.now();
 
-    // tiles
-    const now0 = performance.now();
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const key = x + "," + y;
         const tanim = tileAnimState[key];
         if (tanim) {
-          const sample = sampleRecipe(tanim.recipe, now0 - tanim.t);
+          const sample = sampleRecipe(tanim.recipe, now - tanim.t);
           if (sample) {
             gctx.save();
             gctx.globalAlpha = sample.alpha;
-            const cx = x * TILE + TILE / 2 + sample.ox * TILE, cy = y * TILE + TILE / 2 + sample.oy * TILE;
-            gctx.translate(cx, cy);
+            gctx.translate(x * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) gctx.rotate(sample.rot);
             gctx.scale(sample.sx, sample.sy);
             drawArtScaled(gctx, tanim.art, -TILE / 2, -TILE / 2, TILE, cell);
@@ -1168,48 +1403,66 @@
           }
         }
         const defId = board[y][x];
-        if (defId && tileDefs[defId]) {
-          drawArtScaled(gctx, tileDefs[defId].art, x * TILE, y * TILE, TILE, cell);
-        }
+        if (defId && tileDefs[defId]) drawArtScaled(gctx, tileDefs[defId].art, x * TILE, y * TILE, TILE, cell);
       }
     }
 
-    // grid lines
     gctx.strokeStyle = "rgba(255,255,255,0.06)";
     gctx.lineWidth = 1;
-    for (let x = 0; x <= COLS; x++) {
-      gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke();
-    }
-    for (let y = 0; y <= ROWS; y++) {
-      gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke();
-    }
+    for (let x = 0; x <= COLS; x++) { gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke(); }
 
-    // start marker
+    // gravity markers: a small fixed triangle, no zone tint — the falling itself is the only feedback
+    gravityMarkers.forEach(m => {
+      gctx.fillStyle = PLAYER_COLOR;
+      gctx.beginPath();
+      gctx.moveTo(m.x * TILE + TILE / 2, m.y * TILE + 3);
+      gctx.lineTo(m.x * TILE + TILE - 3, m.y * TILE + TILE - 3);
+      gctx.lineTo(m.x * TILE + 3, m.y * TILE + TILE - 3);
+      gctx.closePath();
+      gctx.fill();
+    });
+
     gctx.strokeStyle = "rgba(255,209,102,0.7)";
     gctx.lineWidth = 1.5;
-    gctx.strokeRect(startPos.x * TILE + 1, startPos.y * TILE + 1, TILE - 2, TILE - 2);
+    gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
 
-    // actors, deformed by whichever hand-authored recipe their last reaction triggered
-    const now = performance.now();
     actors.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
-      let t = { sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 };
+
+      // physics-driven continuous deformation: lean tracks vx, squash tracks impact speed,
+      // crouch tracks jump-launch magnitude, airborne stretch tracks vy — no fixed sequence,
+      // sampled straight from the actor's current physical state every frame
+      const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
+      const lean = Math.max(-1, Math.min(1, actor.vx / cap)) * 0.18;
+      let sx = 1, sy = 1;
+      if (actor.impactSquash > 0) {
+        if (actor.impactAxis === "y") { sy *= 1 - actor.impactSquash * 0.5; sx *= 1 + actor.impactSquash * 0.3; }
+        else { sx *= 1 - actor.impactSquash * 0.5; sy *= 1 + actor.impactSquash * 0.3; }
+      }
+      if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
+      if (!actor.grounded) {
+        const fall = Math.max(0, Math.min(1, actor.vy / MAX_FALL));
+        sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
+      }
+
+      let t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       const anim = animState[actor.id];
       if (anim) {
         const sample = sampleRecipe(anim.recipe, now - anim.t);
         if (sample) {
-          t = sample;
+          t.sx *= sample.sx; t.sy *= sample.sy; t.rot += sample.rot;
+          t.ox += sample.ox; t.oy += sample.oy; t.alpha *= sample.alpha;
           if (sample.done) delete animState[actor.id];
-        } else {
-          delete animState[actor.id];
-        }
+        } else delete animState[actor.id];
       }
+      if (actor.flashTimer > 0) t.alpha *= (Math.floor(now / 50) % 2 === 0) ? 0.35 : 1;
 
       gctx.save();
       gctx.globalAlpha = t.alpha;
-      const centerX = actor.x * TILE + TILE / 2 + t.ox * TILE;
-      const centerY = actor.y * TILE + TILE / 2 + t.oy * TILE;
+      const centerX = actor.x + actor.w / 2 + t.ox * TILE;
+      const centerY = actor.y + actor.h / 2 + t.oy * TILE;
       gctx.translate(centerX, centerY);
       if (t.rot) gctx.rotate(t.rot);
       gctx.scale(t.sx, t.sy);
@@ -1219,135 +1472,58 @@
       if (actor.isPlayer) {
         gctx.strokeStyle = "#ffd166";
         gctx.lineWidth = 1.5;
-        gctx.strokeRect(actor.x * TILE + 1, actor.y * TILE + 1, TILE - 2, TILE - 2);
+        gctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
       }
     });
-
-    requestAnimationFrame(renderGame);
   }
 
   function renderAll() {
     renderTileSwatches();
     renderActorSwatches();
     renderPlayerSwatch();
-    renderPixelCanvas(); // switching which sprite is selected must update the drawing immediately
-    // don't re-render game here; it's animated continuously via requestAnimationFrame
+    renderWorldSwatches();
+    renderPresetSwatches();
+    renderPixelCanvas();
   }
 
   renderColorRow();
   renderPixelCanvas();
   renderAll();
-  requestAnimationFrame(renderGame);
 
-  // ============== Autonomous actor movement (wanderer / chaser / fleer) ==============
-  const DIRS = ["up", "down", "left", "right"];
-  const DIR_VECT = { up: { dx: 0, dy: -1 }, down: { dx: 0, dy: 1 }, left: { dx: -1, dy: 0 }, right: { dx: 1, dy: 0 } };
-
-  function shuffle(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+  // ============== Main loop ==============
+  let lastT = performance.now();
+  function frame(t) {
+    let dt = (t - lastT) / 1000;
+    lastT = t;
+    dt = Math.min(dt, 0.033);
+    tick(dt);
+    tickDragCooldowns(dt);
+    renderGame();
+    requestAnimationFrame(frame);
   }
+  requestAnimationFrame(frame);
 
-  function isSolidAt(x, y) {
-    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return true;
-    const defId = board[y][x];
-    const def = defId ? tileDefs[defId] : { property: "walkable" };
-    // diggable only opens up for the player; to every actor's own movement it's solid
-    return def.property === "solid" || def.property === "diggable";
-  }
-
-  // Picks a direction biased toward (dx,dy); (0,0) means pick fully at random.
-  // Always turns away from solid tiles (and the board edge), per the temperament rules.
-  function pickDir(actor, dx, dy) {
-    let prefs = [];
-    if (dx === 0 && dy === 0) {
-      prefs = shuffle(DIRS.slice());
-    } else if (Math.abs(dx) >= Math.abs(dy)) {
-      prefs.push(dx > 0 ? "right" : "left");
-      if (dy !== 0) prefs.push(dy > 0 ? "down" : "up");
-    } else {
-      prefs.push(dy > 0 ? "down" : "up");
-      if (dx !== 0) prefs.push(dx > 0 ? "right" : "left");
-    }
-    const seen = new Set(prefs);
-    DIRS.forEach(d => { if (!seen.has(d)) { seen.add(d); prefs.push(d); } });
-    for (const d of prefs) {
-      const v = DIR_VECT[d];
-      if (!isSolidAt(actor.x + v.dx, actor.y + v.dy)) return d;
-    }
-    return null;
-  }
-
-  // Attempts one step in `dir`, going through the exact same reaction table as
-  // keyboard movement and editor drag (resolveActorContact / triggerActorBounce).
-  function attemptAiMove(actor, dir, player) {
-    const v = DIR_VECT[dir];
-    const nx = actor.x + v.dx, ny = actor.y + v.dy;
-    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
-
-    if (player && nx === player.x && ny === player.y) {
-      actor.x = nx; actor.y = ny;
-      resolveActorContact(actor, player);
-      return;
-    }
-    const other = actors.find(a => a.id !== actor.id && a.x === nx && a.y === ny);
-    if (other) {
-      triggerActorBounce(actor, other);
-      return;
-    }
-    actor.x = nx; actor.y = ny;
-  }
-
-  function tickActors() {
-    const player = actors.find(a => a.isPlayer);
-    actors.slice().forEach(actor => {
-      if (actor.isPlayer) return;
-      const def = actorDefs[actor.defId];
-      if (!def) return;
-      let dir = null;
-      if (def.temperament === "wanderer") {
-        dir = pickDir(actor, 0, 0);
-      } else if (def.temperament === "chaser" && player) {
-        dir = pickDir(actor, player.x - actor.x, player.y - actor.y);
-      } else if (def.temperament === "fleer" && player) {
-        dir = pickDir(actor, actor.x - player.x, actor.y - player.y);
-      } else {
-        return; // stationary and collectible actors never move on their own
-      }
-      if (!dir) return;
-      attemptAiMove(actor, dir, player);
-
-      // Intensity ramp: chasers get a chance at a bonus step per tick as rounds loop.
-      // Entirely engine-side — nothing the kid sets or sees, only the effect of it.
-      if (def.temperament === "chaser" && intensity > 0 && Math.random() < Math.min(0.85, intensity * 0.2)) {
-        const dir2 = pickDir(actor, player ? player.x - actor.x : 0, player ? player.y - actor.y : 0);
-        if (dir2) attemptAiMove(actor, dir2, player);
-      }
-    });
-  }
-
-  setInterval(tickActors, 480);
-
-  // ============== Seed a tiny starter scene so it's not a blank void ==============
+  // ============== Seed a tiny starter scene ==============
   (function seed() {
-    // border walls (solid)
     const solidId = findDefaultTileDef("solid");
-    for (let x = 0; x < COLS; x++) {
-      board[0][x] = solidId;
-      board[ROWS - 1][x] = solidId;
-    }
-    for (let y = 0; y < ROWS; y++) {
-      board[y][0] = solidId;
-      board[y][COLS - 1] = solidId;
-    }
-    // place the player at 1,1
-    actors.push({ id: nextActorInstId++, defId: PLAYER_DEF_ID, x: 1, y: 1, isPlayer: true });
-    startPos = { x: 1, y: 1 };
-    log("Ready. Arrow keys move the player. Walk into a wall and watch it fall down.");
+    for (let x = 0; x < COLS; x++) { board[0][x] = solidId; board[ROWS - 1][x] = solidId; }
+    for (let y = 0; y < ROWS; y++) { board[y][0] = solidId; board[y][COLS - 1] = solidId; }
+    const player = placeNewActorAt(1, 1, PLAYER_DEF_ID, true);
+    startPos = { x: player.x, y: player.y };
+    log("Ready. Arrow keys move the player. Walk into a wall and watch it stop you.");
   })();
+
+  function placeNewActorAt(gx, gy, defId, isPlayer) {
+    const actor = {
+      id: nextActorInstId++, defId,
+      x: gx * TILE + (TILE - ACTOR_SIZE) / 2, y: gy * TILE + (TILE - ACTOR_SIZE) / 2,
+      w: ACTOR_SIZE, h: ACTOR_SIZE,
+      vx: 0, vy: 0, grounded: false, isPlayer: !!isPlayer,
+      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0
+    };
+    actors.push(actor);
+    return actor;
+  }
 
 })();
 </script>
