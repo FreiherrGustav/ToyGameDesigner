@@ -746,6 +746,18 @@
     return key ? GAMEPLAY_TILE_DEFS[key] : null;
   }
 
+  // Shared between the "grab a sprite" preset shelf (any kid, any project) and the two built-in
+  // example games' own dedicated defs (see EXAMPLE_CHEESE_DEF_ID/EXAMPLE_CAT_DEF_ID below) — one
+  // piece of art, two places it shows up, so the two never drift apart.
+  const CHEESE_ART = pat([
+    "..MMMMMM", ".MMMMMMM", "MMMMMMMM", "MMM.MMMM",
+    "MM.MM.MM", "MMMMMMMM", "MMMMMMM.", ".MMMMMM."
+  ], { M: "#ffca28" });
+  const CAT_ART = pat([
+    "M......M", "MM....MM", ".MMMMMM.", "MK.MM.KM",
+    "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
+  ], { M: "#ef5350", K: "#2b2b2b" });
+
   const ACTOR_PRESETS = [
     { name: "stick figure", poses: STICK_POSES },
     { name: "player", art: pat([
@@ -771,7 +783,9 @@
     { name: "collectible", art: pat([
       "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
       ".MMMMMM.", "..MMMM..", "...MM...", "........"
-    ], { M: "#26c6da" }) }
+    ], { M: "#26c6da" }) },
+    { name: "cheese", art: CHEESE_ART },
+    { name: "cat", art: CAT_ART }
   ];
   const BACKGROUND_PRESETS = [
     { name: "ground", art: pat([
@@ -788,20 +802,8 @@
   // "collectible"/"chaser" swatch looks like for anyone who hasn't touched them.
   const EXAMPLE_CHEESE_DEF_ID = "exCheese";
   const EXAMPLE_CAT_DEF_ID = "exCat";
-  actorDefs[EXAMPLE_CHEESE_DEF_ID] = {
-    temperament: "collectible", name: "cheese", poses: null,
-    art: pat([
-      "..MMMMMM", ".MMMMMMM", "MMMMMMMM", "MMM.MMMM",
-      "MM.MM.MM", "MMMMMMMM", "MMMMMMM.", ".MMMMMM."
-    ], { M: "#ffca28" })
-  };
-  actorDefs[EXAMPLE_CAT_DEF_ID] = {
-    temperament: "chaser", name: "cat", poses: null,
-    art: pat([
-      "M......M", "MM....MM", ".MMMMMM.", "MK.MM.KM",
-      "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
-    ], { M: "#ef5350", K: "#2b2b2b" })
-  };
+  actorDefs[EXAMPLE_CHEESE_DEF_ID] = { temperament: "collectible", name: "cheese", poses: null, art: CHEESE_ART.slice() };
+  actorDefs[EXAMPLE_CAT_DEF_ID] = { temperament: "chaser", name: "cat", poses: null, art: CAT_ART.slice() };
 
   // Places one actor of the given def at a cell's center, the same way a kid's own click would
   // (reuses placeNewActor itself, so the player-singleton cleanup / startPos / playerRoomId
@@ -816,19 +818,29 @@
     return actor;
   }
 
-  // A maze of solid pillars: 2x2 blocks on a 4-cell grid, leaving 2-wide corridors — reads as
-  // "a maze" without needing a hand-typed layout. Deterministic, so the same example loads the
-  // same way every time.
-  function paintWaffleMaze(x0, y0, x1, y1) {
-    for (let by = y0; by + 1 <= y1; by += 4) {
-      for (let bx = x0; bx + 1 <= x1; bx += 4) {
-        board[by][bx] = gameplayKey("solid", "none");
-        board[by][bx + 1] = gameplayKey("solid", "none");
-        board[by + 1][bx] = gameplayKey("solid", "none");
-        board[by + 1][bx + 1] = gameplayKey("solid", "none");
-      }
-    }
-  }
+  // A proper corridor maze with a walled-off center chamber (the "ghost box") — hand-designed
+  // rather than a procedural pattern, one character per cell, '#' solid / '.' open. Rows must
+  // be COLS (24) characters and there must be ROWS (18) of them.
+  const CHEESE_HEIST_MAZE = [
+    "########################",
+    "#.......#....#.........#",
+    "#.#####.#.##.#.#######.#",
+    "#.......#.##.#.........#",
+    "#.#####.#....#.#######.#",
+    "#......................#",
+    "#.#.#.#..........#.#.#.#",
+    "#.#..#..###..###..#..#.#",
+    "#.#.....#......#.....#.#",
+    "#.#.###.#......#.###.#.#",
+    "#.#.....########.....#.#",
+    "#.#.###..........###.#.#",
+    "#......................#",
+    "#.######.#....#.######.#",
+    "#........#.##.#........#",
+    "#.######.#.##.#.######.#",
+    "#........#....#........#",
+    "########################"
+  ];
 
   // Top-down maze, gravity off, win by gathering every cheese — the toolset's collect-and-chase
   // range, deliberately built with nothing beyond what a kid already has in the palette.
@@ -838,19 +850,19 @@
     activateRoom(room.id);
     gravityEnabled = false; wrapHEnabled = false; wrapVEnabled = false;
 
-    for (let x = 0; x < COLS; x++) {
-      board[0][x] = gameplayKey("solid", "none");
-      board[ROWS - 1][x] = gameplayKey("solid", "none");
-    }
     for (let y = 0; y < ROWS; y++) {
-      board[y][0] = gameplayKey("solid", "none");
-      board[y][COLS - 1] = gameplayKey("solid", "none");
+      for (let x = 0; x < COLS; x++) {
+        if (CHEESE_HEIST_MAZE[y][x] === "#") board[y][x] = gameplayKey("solid", "none");
+      }
     }
-    paintWaffleMaze(2, 2, COLS - 2, ROWS - 2);
 
-    const playerCell = { x: 12, y: 15 };
+    // The maze walls off a sealed center chamber (rows 8-9, cols 9-14, entered only through the
+    // gap at row 7) — the cats start penned up in there, same as the ghost box this shape always
+    // implies, while the player starts out on the open edge of the maze, as far from them as the
+    // layout allows.
+    const playerCell = { x: 1, y: 16 };
     const catCells = [{ x: 10, y: 8 }, { x: 13, y: 9 }];
-    // guarantee these spawn cells are open corridor regardless of where the maze pattern fell
+    // guarantee these spawn cells are open regardless of the maze layout above
     [playerCell, ...catCells].forEach(c => { board[c.y][c.x] = null; });
 
     const skip = new Set([playerCell, ...catCells].map(c => c.x + "," + c.y));
