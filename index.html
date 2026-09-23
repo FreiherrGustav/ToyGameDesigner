@@ -294,13 +294,30 @@
   // below), geometry (what blocks movement), and modifier (what happens on contact, layered
   // on top of whichever geometry). "walkable" no longer exists as a pickable choice — it's
   // just the absence of a geometry pick ("none").
-  const GEOMETRIES = ["none", "solid", "diggable", "goal", "switch", "door"];
+  //
+  // v2.5 splits the old single "diggable" into two: `trap` keeps its exact old behavior
+  // (instant, non-blocking, a deliberate gag tile), while `diggable` is redefined as a wall
+  // that blocks like solid until sustained contact erodes it away — see resolveAxis().
+  const GEOMETRIES = [
+    "none", "solid", "diggable", "trap", "goal", "switch", "door",
+    "cannon-up", "cannon-down", "cannon-left", "cannon-right", "bomb", "warp"
+  ];
   const MODIFIERS = ["none", "slippery", "bouncy", "hazard"];
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
-  const GEOMETRY_SWATCH_COLORS = { none: "#4caf50", solid: "#616161", diggable: "#8d6e63", goal: "#ec407a", switch: "#3f51b5", door: "#795548" };
+  const GEOMETRY_SWATCH_COLORS = {
+    none: "#4caf50", solid: "#616161", diggable: "#a1887f", trap: "#8d6e63",
+    goal: "#ec407a", switch: "#3f51b5", door: "#795548",
+    "cannon-up": "#ff5722", "cannon-down": "#ff5722", "cannon-left": "#ff5722", "cannon-right": "#ff5722",
+    bomb: "#424242", warp: "#8e24aa"
+  };
   const MODIFIER_SWATCH_COLORS = { none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935" };
+  // Which way each cannon direction shoots, keyed by its own geometry string.
+  const CANNON_DIRECTIONS = {
+    "cannon-up": { x: 0, y: -1 }, "cannon-down": { x: 0, y: 1 },
+    "cannon-left": { x: -1, y: 0 }, "cannon-right": { x: 1, y: 0 }
+  };
 
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
   const TEMPERAMENT_COLORS = {
@@ -333,6 +350,11 @@
   const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
+  const DIG_DURATION_MS = 900;     // sustained contact needed to erode a diggable wall through
+  const CANNON_LAUNCH_SPEED = 700; // stronger than a bouncy launch — a fixed-direction override reads as "shot", not "bounced harder"
+  const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
+  const BOMB_BLAST_KNOCKBACK_SPEED = 480;
+  const WARP_COOLDOWN_MS = 400;
 
   // ============== State ==============
   // Two board layers: background (pure art, no gameplay meaning) drawn first, and gameplay
@@ -353,7 +375,9 @@
   let currentRoomId = null;  // which room is being viewed/edited right now
   let playerRoomId = null;   // which room the player actually resides in (may differ from currentRoomId)
   let doorLinks = {};       // "roomId:x,y" -> {toRoomId, toX, toY}
-  function doorKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
+  function roomCellKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
+  let digProgress = {};     // roomCellKey -> ms of sustained contact accumulated eroding a diggable wall
+  let bombArmed = {};       // roomCellKey -> true while a bomb's fuse is lit
 
   let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
   let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
@@ -470,10 +494,18 @@
   // hold, so gameplay tiles use a small consistent icon set rather than custom art). ----
   const GEOMETRY_ICONS = {
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
-    diggable: pat([
+    // trap keeps the old diggable's exact look (and behavior) — a crack pattern that always
+    // read as "about to give way", now explicitly framed as a one-touch gag tile.
+    trap: pat([
       "MMMMMMMM", "MMMKMMMM", "MMKMMMMM", "MKMMMMMM",
       "MMMMMKMM", "MMMMKMMM", "MMMKMMMM", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.diggable, K: "#5d4037" }),
+    ], { M: GEOMETRY_SWATCH_COLORS.trap, K: "#5d4037" }),
+    // diggable (redefined) starts looking solid — it blocks like a wall until eroded — and
+    // visibly cracks in stages as sustained contact wears it down; see DIGGABLE_STAGE_ICONS.
+    diggable: pat([
+      "MMMMMMMM", "MMM.MMMM", "MMMMMMMM", "MMMMM.MM",
+      "MMMMMMMM", "MM.MMMMM", "MMMMMMMM", "MMMMMMMM"
+    ], { M: GEOMETRY_SWATCH_COLORS.diggable }),
     goal: pat([
       "M.......", "MMMM....", "MMMMMM..", "MMMM....",
       "M.......", "M.......", "M.......", "MMMMMMM."
@@ -485,8 +517,46 @@
     door: pat([
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
-    ], { M: "#4e342e", K: GEOMETRY_SWATCH_COLORS.door, k: "#ffd166" })
+    ], { M: "#4e342e", K: GEOMETRY_SWATCH_COLORS.door, k: "#ffd166" }),
+    "cannon-up": pat([
+      "...MM...", "..MMMM..", ".MM..MM.", "...MM...",
+      "...MM...", "...MM...", "...MM...", "...MM..."
+    ], { M: GEOMETRY_SWATCH_COLORS["cannon-up"] }),
+    "cannon-down": pat([
+      "...MM...", "...MM...", "...MM...", "...MM...",
+      "...MM...", ".MM..MM.", "..MMMM..", "...MM..."
+    ], { M: GEOMETRY_SWATCH_COLORS["cannon-down"] }),
+    "cannon-left": pat([
+      "........", "...M....", "..MM....", ".MMMMMMM",
+      ".MMMMMMM", "..MM....", "...M....", "........"
+    ], { M: GEOMETRY_SWATCH_COLORS["cannon-left"] }),
+    "cannon-right": pat([
+      "........", "....M...", "....MM..", "MMMMMMM.",
+      "MMMMMMM.", "....MM..", "....M...", "........"
+    ], { M: GEOMETRY_SWATCH_COLORS["cannon-right"] }),
+    bomb: pat([
+      "..K.....", "...M....", "..MMM...", ".MMMMM..",
+      "MMMMMMM.", "MMMMMMM.", ".MMMMM..", "..MMM..."
+    ], { M: "#2b2b2b", K: "#ffab00" }),
+    warp: pat([
+      "..MMMM..", ".M....M.", "M.MM...M", "M.M.M..M",
+      "M..M.M.M", "M...MM.M", ".M....M.", "..MMMM.."
+    ], { M: GEOMETRY_SWATCH_COLORS.warp })
   };
+
+  // Progressive erosion stages for diggable, sampled by how much sustained contact has
+  // accumulated (see resolveAxis()) — stage 0 is the same art as GEOMETRY_ICONS.diggable.
+  const DIGGABLE_STAGE_ICONS = [
+    GEOMETRY_ICONS.diggable,
+    pat([
+      "MM.MM.MM", "M.MMMM.M", "MM.MM.MM", "M.MMMM.M",
+      "MM.MM.MM", "M.MMMM.M", "MM.MM.MM", "M.MMMM.M"
+    ], { M: GEOMETRY_SWATCH_COLORS.diggable }),
+    pat([
+      "M.M.M.M.", ".M.M.M.M", "M.M.M.M.", ".M.M.M.M",
+      "M.M.M.M.", ".M.M.M.M", "M.M.M.M.", ".M.M.M.M"
+    ], { M: GEOMETRY_SWATCH_COLORS.diggable })
+  ];
 
   // The art currently "active" for a def: its single flat art, or — for a posed actor def —
   // whichever pose the editor currently has open (falling back to "stand" if unset).
@@ -609,7 +679,11 @@
     crumble: () => { beep(200, 0.05, "sawtooth", 0.12); setTimeout(() => beep(140, 0.08, "sawtooth", 0.12), 40); setTimeout(() => beep(90, 0.12, "sawtooth", 0.12), 90); },
     celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); },
     jump: () => beep(400, 0.07, "square", 0.12),
-    flip: () => { beep(300, 0.07, "triangle", 0.16); setTimeout(() => beep(600, 0.09, "triangle", 0.16), 70); }
+    flip: () => { beep(300, 0.07, "triangle", 0.16); setTimeout(() => beep(600, 0.09, "triangle", 0.16), 70); },
+    shot: () => beep(700, 0.06, "sawtooth", 0.22),
+    fuse: () => beep(1000, 0.05, "square", 0.12),
+    boom: () => { beep(80, 0.3, "sawtooth", 0.25); setTimeout(() => beep(50, 0.25, "sawtooth", 0.2), 60); },
+    warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); }
   };
 
   function log(msg) {
@@ -680,6 +754,17 @@
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
       { t: 0.5, sx: 0.7, sy: 0.7, rot: Math.PI, ox: 0, oy: 0, alpha: 1 },
       { t: 1, sx: 1, sy: 1, rot: Math.PI * 2, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    bombBlast: { duration: 350, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.3, sx: 1.6, sy: 1.6, rot: 0.1, ox: 0, oy: 0, alpha: 1 },
+      { t: 1, sx: 2.2, sy: 2.2, rot: 0.2, ox: 0, oy: 0, alpha: 0 }
+    ]},
+    warpPop: { duration: 250, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.4, sx: 0.3, sy: 0.3, rot: 0.3, ox: 0, oy: 0, alpha: 0.3 },
+      { t: 0.6, sx: 0.3, sy: 0.3, rot: -0.3, ox: 0, oy: 0, alpha: 0.3 },
+      { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
     ]}
   };
   function playRecipe(entity, name) { animState[entity.id] = { recipe: name, t: performance.now() }; }
@@ -1055,13 +1140,16 @@
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
   //  - geometry is solid (blocks everyone)
-  //  - geometry is diggable and the mover isn't the player (the player digs through; NPCs
-  //    just see a wall)
+  //  - geometry is diggable (blocks everyone too, like a wall — only sustained player contact
+  //    erodes it away; see resolveAxis())
+  //  - geometry is trap and the mover isn't the player (the player digs straight through
+  //    instantly, same as the old diggable; NPCs just see a wall)
   // Modifiers never block on their own — they only change WHAT HAPPENS on contact/collision,
   // handled inside resolveAxis() (blocking geometry) or checkPlayerTileContacts() (non-blocking).
   function isBlockingGeometry(geometry, actor) {
     if (geometry === "solid") return true;
-    if (geometry === "diggable") return !actor.isPlayer;
+    if (geometry === "diggable") return true;
+    if (geometry === "trap") return !actor.isPlayer;
     return false;
   }
 
@@ -1112,7 +1200,7 @@
     }
     if (actor.grounded) {
       for (const { cx, cy } of cellsUnderneath(actor)) {
-        if (geometryAt(cx, cy) === "solid" && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
+        if (isBlockingGeometry(geometryAt(cx, cy), actor) && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
       }
     }
     return 1;
@@ -1134,13 +1222,31 @@
   // (with restitution) instead of zeroing it — a real bounce, not a scripted launch — and
   // only for the player; NPCs only ever react to geometry, never to modifiers. `hazard` on
   // blocking geometry (a spike floor) hurts right where contact happens, same function,
-  // regardless of which side was hit.
-  function resolveAxis(actor, axis) {
+  // regardless of which side was hit. A diggable wall the player is pressed against erodes a
+  // little every frame contact continues, and gives way once fully worn down — see
+  // DIG_DURATION_MS. Progress is keyed by room+cell and never decays on its own, so stepping
+  // away and coming back later resumes right where digging left off.
+  function resolveAxis(actor, axis, dt) {
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
-        const geometry = geometryAt(cx, cy);
+        let geometry = geometryAt(cx, cy);
+        if (geometry === "diggable" && actor.isPlayer) {
+          const key = roomCellKey(currentRoomId, cx, cy);
+          const progress = (digProgress[key] || 0) + dt * 1000;
+          if (progress >= DIG_DURATION_MS) {
+            delete digProgress[key];
+            const modifier = modifierAt(cx, cy);
+            sounds.crumble();
+            tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: performance.now(), geometry: "diggable", modifier };
+            board[cy][cx] = null;
+            log("Dug through!");
+            geometry = "none"; // fully eroded — the player passes straight through this frame
+          } else {
+            digProgress[key] = progress;
+          }
+        }
         if (!isBlockingGeometry(geometry, actor)) continue;
         const modifier = modifierAt(cx, cy);
         const bouncy = modifier === "bouncy" && actor.isPlayer;
@@ -1320,14 +1426,17 @@
     log("Boing! Launched.");
   }
 
-  function triggerDig(gx, gy) {
+  // trap keeps the old diggable's exact behavior: one touch, instant crumble, gone — now
+  // framed as a deliberate gag tile (a trapdoor under a chaser's patrol path) rather than a
+  // resource-clearing tool.
+  function triggerTrap(gx, gy) {
     const key = board[gy][gx];
     if (!key) return;
     const tile = GAMEPLAY_TILE_DEFS[key];
     sounds.crumble();
     tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
     board[gy][gx] = null;
-    log("Crumble! That tile's walkable now.");
+    log("Crumble!");
   }
 
   function triggerGoal(player) {
@@ -1350,6 +1459,104 @@
     renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
   }
 
+  // Cannon overrides velocity outright rather than reflecting it — that's what makes it read
+  // as "shot" instead of "bounced harder". Works the same regardless of gravity: a fixed
+  // impulse in the tile's own printed direction, full stop.
+  function triggerCannon(actor, geometry) {
+    if (actor.cannonCooldown > 0) return;
+    actor.cannonCooldown = 350;
+    const dir = CANNON_DIRECTIONS[geometry];
+    actor.vx = dir.x * CANNON_LAUNCH_SPEED;
+    actor.vy = dir.y * CANNON_LAUNCH_SPEED;
+    sounds.shot();
+    actor.impactSquash = 0.7;
+    actor.impactAxis = dir.x !== 0 ? "x" : "y";
+    log("Shot!");
+  }
+
+  // Bomb is the first tile whose effect reaches past its own cell — clearing solid geometry
+  // in the cells next to it, not just itself. A short fuse (a beat to run in) separates
+  // arming from detonation; re-touching an already-armed bomb during that window is a no-op,
+  // it doesn't restart or stack the timer. The room is captured by id at arm time so the fuse
+  // still resolves correctly even if a kid switches which room they're viewing before it goes
+  // off — see detonateBombAt().
+  function triggerBombArm(gx, gy) {
+    const key = roomCellKey(currentRoomId, gx, gy);
+    if (bombArmed[key]) return;
+    bombArmed[key] = true;
+    sounds.fuse();
+    log("Fuse lit — run!");
+    const roomId = currentRoomId;
+    setTimeout(() => detonateBombAt(roomId, gx, gy), BOMB_FUSE_MS);
+  }
+
+  function detonateBombAt(roomId, gx, gy) {
+    const key = roomCellKey(roomId, gx, gy);
+    delete bombArmed[key];
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return; // the room's own board is gone (shouldn't happen) — nothing to blow up
+    const isHot = roomId === currentRoomId;
+    const targetBoard = isHot ? board : room.board;
+    const targetActors = isHot ? actors : room.actors;
+
+    // the bomb's own cell always clears; a solid neighbor clears too, anything else next to
+    // it (goal, another bomb, background art) is untouched — cardinal-only blast, the more
+    // conservative implementation call for the tile whose neighbor-reach is worth being
+    // careful with
+    const cells = [{ x: gx, y: gy }, { x: gx - 1, y: gy }, { x: gx + 1, y: gy }, { x: gx, y: gy - 1 }, { x: gx, y: gy + 1 }];
+    cells.forEach(({ x, y }) => {
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+      const cellKey = targetBoard[y][x];
+      const tile = cellKey ? GAMEPLAY_TILE_DEFS[cellKey] : null;
+      if (!tile) return;
+      const isBombItself = x === gx && y === gy;
+      if (!isBombItself && tile.geometry !== "solid") return;
+      if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
+      targetBoard[y][x] = null;
+    });
+
+    // Explicit exception to "actors only ever react to geometry, never modifiers": a bomb
+    // doesn't discriminate between the player and an NPC caught in its blast.
+    targetActors.forEach(actor => {
+      const acx = Math.floor((actor.x + actor.w / 2) / TILE);
+      const acy = Math.floor((actor.y + actor.h / 2) / TILE);
+      if (Math.abs(acx - gx) + Math.abs(acy - gy) > 1) return;
+      const dx = (actor.x + actor.w / 2) - (gx * TILE + TILE / 2);
+      const dy = (actor.y + actor.h / 2) - (gy * TILE + TILE / 2);
+      const dd = Math.hypot(dx, dy) || 1;
+      actor.vx = (dx / dd) * BOMB_BLAST_KNOCKBACK_SPEED;
+      actor.vy = (dy / dd) * BOMB_BLAST_KNOCKBACK_SPEED;
+      actor.impactSquash = 0.8;
+      actor.impactAxis = "y";
+      actor.flashTimer = 1;
+    });
+
+    if (isHot) { sounds.boom(); log("Boom!"); }
+  }
+
+  // Closest to already-proven work — goal already repositions the player on touch; this just
+  // randomizes the destination and, per the physical-comedy brief for this whole round, keeps
+  // velocity through the jump instead of zeroing it — landing mid-motion somewhere unexpected
+  // is funnier than a clean stop.
+  function triggerWarp(player, gx, gy) {
+    if (player.warpCooldown > 0) return;
+    player.warpCooldown = WARP_COOLDOWN_MS;
+    const candidates = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (x === gx && y === gy) continue;
+        if (!isBlockingGeometry(geometryAt(x, y), player)) candidates.push({ x, y });
+      }
+    }
+    const pool = candidates.length > 0 ? candidates : [{ x: gx, y: gy }];
+    const dest = pool[Math.floor(Math.random() * pool.length)];
+    player.x = dest.x * TILE + TILE / 2 - player.w / 2;
+    player.y = dest.y * TILE + TILE / 2 - player.h / 2;
+    sounds.warp();
+    playRecipe(player, "warpPop");
+    log("Warped!");
+  }
+
   // ============== Rooms: door transitions (freeze -> swap -> resume) ==============
   const ROOM_TRANSITION_MS = 420;
   let roomTransition = null; // { startedAt, fromBoard, fromBackgroundBoard, fromActors }
@@ -1362,7 +1569,7 @@
   function triggerDoor(player, gx, gy) {
     if (roomTransition) return; // already mid-transition (reachable via drag; gameplay can't re-enter here, see tick())
     if (player.doorCooldown > 0) return;
-    const link = doorLinks[doorKey(currentRoomId, gx, gy)];
+    const link = doorLinks[roomCellKey(currentRoomId, gx, gy)];
     if (!link) return; // an erased-then-repainted cell without a link — harmless no-op
     player.doorCooldown = ROOM_TRANSITION_MS + 500;
     beginRoomTransition(link);
@@ -1398,17 +1605,21 @@
   }
 
   // Player-only contact reactions for whatever the player is actually overlapping — geometry
-  // that doesn't block (diggable/goal/switch — solid's own hazard/bouncy handling lives in
-  // resolveAxis instead, since the player never overlaps a solid tile) and any modifier found
-  // there. Geometry and modifier are independent, so both can fire from the same cell.
+  // that doesn't block (trap/goal/switch/door/warp/bomb/cannon — solid and diggable's own
+  // hazard/bouncy handling, plus diggable's erosion, live in resolveAxis instead, since the
+  // player never overlaps blocking geometry) and any modifier found there. Geometry and
+  // modifier are independent, so both can fire from the same cell.
   function checkPlayerTileContacts(player) {
     for (const { cx, cy } of overlappedCells(player)) {
       const geometry = geometryAt(cx, cy);
       const modifier = modifierAt(cx, cy);
-      if (geometry === "diggable") triggerDig(cx, cy);
+      if (geometry === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
       else if (geometry === "switch") triggerFlip(player);
+      else if (geometry === "bomb") triggerBombArm(cx, cy);
+      else if (CANNON_DIRECTIONS[geometry]) triggerCannon(player, geometry);
       else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
+      else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
       if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player);
     }
@@ -1509,11 +1720,21 @@
 
       applyAxisFriction(actor, "x", dt, ax);
       const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
+      // A cannon/bouncy/hazard/bomb-blast launch is deliberately stronger than the normal
+      // movement cap — that's the whole point of an impulse or a knockback. Without this, the
+      // very next frame's cap-clamp below would silently flatten it straight back down to
+      // ordinary walking speed, and a "strong, fixed-direction impulse" (or a hazard/bomb
+      // sending you flying) would barely read as different from normal movement at all.
+      // cannonCooldown/bouncyCooldown and flashTimer (set by both triggerHazard and a bomb
+      // blast) already track "how recently was this actor hit", so reusing them here costs
+      // nothing new and just lets friction bring the speed back down naturally instead of an
+      // instant hard clamp.
+      const recentlyLaunched = actor.cannonCooldown > 0 || actor.bouncyCooldown > 0 || actor.flashTimer > 0;
 
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
         // so each axis clamps independently here
-        actor.vx = Math.max(-cap, Math.min(cap, actor.vx));
+        if (!recentlyLaunched) actor.vx = Math.max(-cap, Math.min(cap, actor.vx));
         if (wantsJump && actor.grounded) {
           actor.vy = JUMP_VELOCITY;
           actor.jumpCrouch = 1;
@@ -1530,8 +1751,10 @@
         actor.grounded = true; // no falling concept outside a gravity zone
         // free-roam movement is a single 2D cap on the combined vector — clamping vx/vy
         // independently would let a diagonal exceed cap by up to sqrt(2)x
-        const speed = Math.hypot(actor.vx, actor.vy);
-        if (speed > cap) { const scale = cap / speed; actor.vx *= scale; actor.vy *= scale; }
+        if (!recentlyLaunched) {
+          const speed = Math.hypot(actor.vx, actor.vy);
+          if (speed > cap) { const scale = cap / speed; actor.vx *= scale; actor.vy *= scale; }
+        }
       }
     }
 
@@ -1540,11 +1763,13 @@
     if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
     if (actor.bouncyCooldown > 0) actor.bouncyCooldown -= dt * 1000;
     if (actor.doorCooldown > 0) actor.doorCooldown -= dt * 1000;
+    if (actor.cannonCooldown > 0) actor.cannonCooldown -= dt * 1000;
+    if (actor.warpCooldown > 0) actor.warpCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
-    resolveAxis(actor, "x");
+    resolveAxis(actor, "x", dt);
     actor.y += actor.vy * dt;
-    resolveAxis(actor, "y");
+    resolveAxis(actor, "y", dt);
     applyWorldWrap(actor);
 
     // decay physics-driven deformation values
@@ -1607,6 +1832,11 @@
       createDoorAt(gx, gy);
       return;
     }
+    // repainting a cell is an editing action, not a play action — any dig progress or a lit
+    // fuse that used to belong to whatever was here goes away with it
+    const key = roomCellKey(currentRoomId, gx, gy);
+    delete digProgress[key];
+    delete bombArmed[key];
     if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
   }
@@ -1621,8 +1851,8 @@
     const newRoom = createEmptyRoom("room " + (rooms.length + 1));
     newRoom.board[gy][gx] = gameplayKey("door", "none");
     rooms.push(newRoom);
-    doorLinks[doorKey(fromRoomId, gx, gy)] = { toRoomId: newRoom.id, toX: gx, toY: gy };
-    doorLinks[doorKey(newRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
+    doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: newRoom.id, toX: gx, toY: gy };
+    doorLinks[roomCellKey(newRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
     renderRoomTabs();
     log("New door — added \"" + newRoom.name + "\" and linked it back here.");
   }
@@ -1636,7 +1866,13 @@
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
     if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
-    if (board[gy][gx]) { board[gy][gx] = null; return; }
+    if (board[gy][gx]) {
+      const key = roomCellKey(currentRoomId, gx, gy);
+      delete digProgress[key];
+      delete bombArmed[key];
+      board[gy][gx] = null;
+      return;
+    }
     backgroundBoard[gy][gx] = null;
   }
 
@@ -1659,7 +1895,8 @@
       w: ACTOR_SIZE, h: ACTOR_SIZE,
       vx: 0, vy: 0, grounded: false, isPlayer,
       impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
-      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0
+      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
+      cannonCooldown: 0, warpCooldown: 0
     };
     actors.push(actor);
     if (isPlayer) { startPos = { x: actor.x, y: actor.y }; playerRoomId = currentRoomId; }
@@ -1704,15 +1941,22 @@
         const key = "c" + cx + "," + cy;
         if (!dragContactCooldown[key]) {
           let fired = false;
-          if (geometry === "diggable") { triggerDig(cx, cy); fired = true; }
+          if (geometry === "trap") { triggerTrap(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
           else if (geometry === "switch") { triggerFlip(actor); fired = true; }
+          else if (geometry === "bomb") { triggerBombArm(cx, cy); fired = true; }
+          else if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); fired = true; }
           else if (geometry === "door") {
             // relocates the actor into a different room's actor list entirely — bail out of
             // this drag-clamp call immediately rather than keep resolving stale cells against
             // whatever room is now hot
             dragContactCooldown[key] = 350;
             triggerDoor(actor, cx, cy);
+            return;
+          } else if (geometry === "warp") {
+            // relocates the actor elsewhere in this same room — same staleness reasoning as door
+            dragContactCooldown[key] = 350;
+            triggerWarp(actor, cx, cy);
             return;
           }
           if (modifier === "hazard") { triggerHazard(actor); fired = true; }
@@ -1825,6 +2069,8 @@
     tileAnimState = {};
     actorContactCooldown = {};
     dragContactCooldown = {};
+    digProgress = {};
+    bombArmed = {};
     resetScoreAndIntensity();
     renderAll();
   });
@@ -1845,8 +2091,10 @@
   // Geometry draws as its fixed icon (or nothing, for "none"); a modifier layers on top as a
   // colored ring around the tile if there's a geometry icon underneath, or a soft tinted wash
   // if there's none — so a none+hazard puddle still reads as "not solid" even though it's
-  // clearly marked.
-  function drawGameplayTile(ctx, x, y, tile) {
+  // clearly marked. `extra` carries per-instance runtime state that isn't part of the shared
+  // tile definition: how far along a diggable wall's erosion is, or whether a bomb's fuse is
+  // currently lit.
+  function drawGameplayTile(ctx, x, y, tile, extra) {
     const cell = TILE / ART;
     if (tile.geometry === "none") {
       if (tile.modifier !== "none") {
@@ -1858,7 +2106,19 @@
       }
       return;
     }
-    drawArtScaled(ctx, GEOMETRY_ICONS[tile.geometry], x, y, TILE, cell);
+    let icon = GEOMETRY_ICONS[tile.geometry];
+    if (tile.geometry === "diggable" && extra && extra.digFrac > 0) {
+      const stage = Math.min(DIGGABLE_STAGE_ICONS.length - 1, Math.floor(extra.digFrac * DIGGABLE_STAGE_ICONS.length));
+      icon = DIGGABLE_STAGE_ICONS[stage];
+    }
+    if (tile.geometry === "bomb" && extra && extra.armed) {
+      ctx.save();
+      ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
+      drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
+    } else {
+      drawArtScaled(ctx, icon, x, y, TILE, cell);
+    }
     if (tile.modifier !== "none") {
       ctx.save();
       ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
@@ -1899,7 +2159,17 @@
           }
         }
         const gKey = boardArg[y][x];
-        if (gKey && GAMEPLAY_TILE_DEFS[gKey]) drawGameplayTile(ctx, x * TILE, y * TILE, GAMEPLAY_TILE_DEFS[gKey]);
+        if (gKey && GAMEPLAY_TILE_DEFS[gKey]) {
+          const tile = GAMEPLAY_TILE_DEFS[gKey];
+          let extra = null;
+          if (isLive && tile.geometry === "diggable") {
+            const progress = digProgress[roomCellKey(currentRoomId, x, y)] || 0;
+            extra = { digFrac: progress / DIG_DURATION_MS };
+          } else if (isLive && tile.geometry === "bomb") {
+            extra = { armed: !!bombArmed[roomCellKey(currentRoomId, x, y)] };
+          }
+          drawGameplayTile(ctx, x * TILE, y * TILE, tile, extra);
+        }
       }
     }
 
