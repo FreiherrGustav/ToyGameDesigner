@@ -880,87 +880,101 @@
     return room;
   }
 
+  // One character per cell, '#' solid / 'D' diggable / '.' open — hand-designed layouts for the
+  // two Tunnel Trouble rooms (see buildTunnelTroubleGame). Room 2's row 0 is deliberately left
+  // with no border at all (not even the side walls the other rows have) — with v-wrap on and no
+  // floor anywhere below row 8, falling out the bottom of the room wraps back in through that
+  // open top and drops the player right back into the same challenge.
+  const TOPSIDE_MAZE = [
+    "########################",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "######D..D######DD.#####",
+    "#.....DDDD......DD.....#",
+    "#.....DDDD......DD.....#",
+    "#.....DDDD......DD..O..#",
+    "########################"
+  ];
+  const THE_DIG_MAZE = [
+    "........................",
+    "#############DDDDDDDDDD#",
+    "#.O....................#",
+    "#################DDDDDD#",
+    "#................DDDDDD#",
+    "#................DDDDDD#",
+    "#DDDDDDDDDDDDDDDDDDDDDD#",
+    "#DDDDDDDDDDDDDDDDDDDDDD#",
+    "#................#######",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#....................G.#",
+    "#.........C..........###",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#"
+  ];
+
+  function paintMazeString(maze) {
+    for (let y = 0; y < maze.length; y++) {
+      for (let x = 0; x < maze[y].length; x++) {
+        const c = maze[y][x];
+        if (c === "#") board[y][x] = gameplayKey("solid", "none");
+        else if (c === "D") board[y][x] = gameplayKey("diggable", "none");
+      }
+    }
+  }
+
   // Gravity-on descent through two rooms — the toolset's platforming/rooms range. A diggable
-  // gate to tunnel through, a gap that only a jump clears, a cat on patrol in each room, and a
-  // cannon near the end as a "these exist too" flourish, all on the way to a goal tile.
+  // gauntlet to tunnel through in each room, a cat on patrol, and a cannon that's the way across
+  // the open drop in room 2, on the way to a goal tile. Falling short there just wraps you back
+  // to the top for another go, rather than stranding you.
   function buildTunnelTroubleGame() {
-    gravityEnabled = true; wrapHEnabled = false; wrapVEnabled = false;
+    gravityEnabled = true; wrapHEnabled = false; wrapVEnabled = true;
 
     const groundBg = Object.keys(backgroundTileDefs)[0]; // the built-in "ground" background
+    const decorate = (maze) => {
+      for (let y = 0; y < maze.length; y++) for (let x = 0; x < maze[y].length; x++) {
+        if (board[y][x]) backgroundBoard[y][x] = groundBg;
+      }
+    };
 
     // ---- Room 1: "Topside" ----
     const room1 = createEmptyRoom("Topside");
     rooms.push(room1);
     activateRoom(room1.id);
-    for (let x = 0; x < COLS; x++) { board[0][x] = gameplayKey("solid", "none"); }
-    for (let y = 0; y < ROWS; y++) {
-      board[y][0] = gameplayKey("solid", "none");
-      board[y][COLS - 1] = gameplayKey("solid", "none");
-    }
-    // ground floor, walking level is the row above it (row 12)
-    for (let x = 1; x < COLS - 1; x++) {
-      board[13][x] = gameplayKey("solid", "none");
-      backgroundBoard[13][x] = groundBg;
-    }
-    // a diggable gate blocking the corridor near the start — tunnel through it to continue.
-    // The floor at column 8 stays solid (already painted by the loop above); only the walking
-    // row above it becomes a wall.
-    board[12][8] = gameplayKey("diggable", "none");
-    // a gap in the floor only a jump clears cleanly — walking in instead drops you one tile
-    // onto a safety floor you can still hop back up from, rather than a bottomless pit with no
-    // way out (a jump only reaches ~132px, so anything deeper than one 32px tile would strand
-    // the player for good)
-    board[13][11] = null;
-    board[13][12] = null;
-    backgroundBoard[13][11] = null; // clear the ground texture the floor loop above left behind —
-    backgroundBoard[13][12] = null; // it's open air here now, not decorated floor
-    board[14][11] = gameplayKey("solid", "none");
-    board[14][12] = gameplayKey("solid", "none");
-    backgroundBoard[14][11] = groundBg;
-    backgroundBoard[14][12] = groundBg;
-    // continue the floor past the gap
-    for (let x = 13; x < COLS - 1; x++) {
-      board[13][x] = gameplayKey("solid", "none");
-      backgroundBoard[13][x] = groundBg;
-    }
-    // a door onward to room 2, near the end of this room's corridor
-    const doorOut = { x: 20, y: 12 };
+    paintMazeString(TOPSIDE_MAZE);
+    decorate(TOPSIDE_MAZE);
+    const doorOut = { x: 20, y: 16 };
     board[doorOut.y][doorOut.x] = gameplayKey("door", "none");
 
-    placeExampleActor(EXAMPLE_CAT_DEF_ID, 16, 12);
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 8, 13);
     placeExampleActor(PLAYER_DEF_ID, 2, 12);
 
     // ---- Room 2: "The Dig" ----
-    // The cannon's launch speed is uncapped while it's still recently fired (see
-    // stepActor's recentlyLaunched exemption), so it can send the player rocketing an
-    // unpredictable distance if a kid holds a direction key through the whole arc — nowhere
-    // near precise enough to land on a specific target tile. Rather than fight that, the
-    // cannon here sits off the main floor entirely (in a niche a couple of tiles overhead,
-    // only reachable by jumping up into it) so it's there to discover and play with without
-    // gating the ordinary walk to the goal at all.
     const room2 = createEmptyRoom("The Dig");
     rooms.push(room2);
     activateRoom(room2.id);
-    for (let x = 0; x < COLS; x++) { board[0][x] = gameplayKey("solid", "none"); }
-    for (let y = 0; y < ROWS; y++) {
-      board[y][0] = gameplayKey("solid", "none");
-      board[y][COLS - 1] = gameplayKey("solid", "none");
-    }
-    for (let x = 1; x < COLS - 1; x++) {
-      board[13][x] = gameplayKey("solid", "none");
-      backgroundBoard[13][x] = groundBg;
-    }
-    // the room's own entrance door, on the opposite side from the goal so there's a real
-    // corridor to walk down
-    const doorIn = { x: 2, y: 12 };
+    paintMazeString(THE_DIG_MAZE);
+    decorate(THE_DIG_MAZE);
+    const doorIn = { x: 2, y: 2 };
     board[doorIn.y][doorIn.x] = gameplayKey("door", "none");
-    board[10][10] = gameplayKey("cannon-ne", "none"); // a jump-up-and-try-it niche, off the walking row
+    board[13][10] = gameplayKey("cannon-ne", "none");
     board[12][21] = gameplayKey("goal", "none");
 
     doorLinks[roomCellKey(room1.id, doorOut.x, doorOut.y)] = { toRoomId: room2.id, toX: doorIn.x, toY: doorIn.y };
     doorLinks[roomCellKey(room2.id, doorIn.x, doorIn.y)] = { toRoomId: room1.id, toX: doorOut.x, toY: doorOut.y };
-
-    placeExampleActor(EXAMPLE_CAT_DEF_ID, 14, 12);
 
     activateRoom(room1.id);
     return room1;
@@ -2314,13 +2328,60 @@
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
   }
 
-  // Placing a door needs no destination picker: it structurally comes with a brand-new room
-  // already attached, the way a Lego door piece doesn't ask which house it belongs to. The new
-  // room gets its own auto-placed return door at the same cell coordinates, so walking back
-  // through it lands you roughly where you started.
+  // True if room A already has some door leading to room B (in either direction) — used so a
+  // fresh door doesn't get silently folded into a connection that already exists elsewhere.
+  function hasDoorLinkBetween(roomAId, roomBId) {
+    return Object.keys(doorLinks).some(key => {
+      if (!key.startsWith(roomAId + ":")) return false;
+      return doorLinks[key].toRoomId === roomBId;
+    });
+  }
+
+  // Writes to whichever room's board actually holds the live data — the hot room's own `board`
+  // global if it's the one currently active, or straight into the room object's own array
+  // otherwise (every other room's true state always lives there, untouched until it becomes hot).
+  function setRoomBoardCell(roomId, gx, gy, value) {
+    if (roomId === currentRoomId) { board[gy][gx] = value; return; }
+    const room = rooms.find(r => r.id === roomId);
+    if (room) room.board[gy][gx] = value;
+  }
+
+  // Tears down one door connection completely: both directions of its doorLinks entry, and
+  // both physical door tiles (this side and whatever room it led to). A door is fundamentally a
+  // pair — leaving either half behind after the other is gone just reads as a broken door with
+  // nowhere to go, so removing one always removes its match.
+  function severDoorLink(roomId, gx, gy) {
+    const key = roomCellKey(roomId, gx, gy);
+    const link = doorLinks[key];
+    if (!link) return;
+    delete doorLinks[key];
+    delete doorLinks[roomCellKey(link.toRoomId, link.toX, link.toY)];
+    setRoomBoardCell(roomId, gx, gy, null);
+    setRoomBoardCell(link.toRoomId, link.toX, link.toY, null);
+  }
+
+  // Placing a door needs no destination picker. By default it connects onward to the next room
+  // in the room list (the room immediately after this one, tab-order) if one exists, isn't
+  // already connected to this room some other way, and has this exact cell free — the common
+  // case of redoing a broken or erased door just reconnects it to the room it obviously belongs
+  // to, rather than spinning up a pointless new one. Otherwise (this is the last room, or the
+  // next one's already linked, or that cell over there is occupied) it falls back to attaching a
+  // brand-new room, same as always, with its own auto-placed return door at the same coordinates.
   function createDoorAt(gx, gy) {
     const fromRoomId = currentRoomId;
     board[gy][gx] = gameplayKey("door", selectedModifier);
+
+    const roomIndex = rooms.findIndex(r => r.id === fromRoomId);
+    const nextRoom = rooms[roomIndex + 1];
+    if (nextRoom && !nextRoom.board[gy][gx] && !hasDoorLinkBetween(fromRoomId, nextRoom.id)) {
+      nextRoom.board[gy][gx] = gameplayKey("door", "none");
+      doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: nextRoom.id, toX: gx, toY: gy };
+      doorLinks[roomCellKey(nextRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
+      renderRoomTabs();
+      log("New door — connected onward to \"" + nextRoom.name + "\".");
+      return;
+    }
+
     const newRoom = createEmptyRoom("room " + (rooms.length + 1));
     newRoom.board[gy][gx] = gameplayKey("door", "none");
     rooms.push(newRoom);
@@ -2329,12 +2390,42 @@
     renderRoomTabs();
     log("New door — added \"" + newRoom.name + "\" and linked it back here.");
   }
+
+  // Removes a room entirely — its board, actors, and every door connecting it to any other room
+  // (each severed cleanly, so nothing dangling is left behind on the other end). A game always
+  // needs at least one room, so the last one can't be deleted. If the player lived here, it's
+  // gone too, exactly like erasing it directly would be — same as any other actor in a deleted
+  // room, it's the kid's to place fresh wherever makes sense now.
+  function deleteRoom(roomId) {
+    if (rooms.length <= 1) { log("Can't delete the only room — a game needs at least one."); return; }
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+    if (!confirm("Delete \"" + room.name + "\"? This removes everything in it, and any doors leading to it.")) return;
+
+    Object.keys(doorLinks).filter(k => k.startsWith(roomId + ":")).forEach(key => {
+      const [gx, gy] = key.slice((roomId + ":").length).split(",").map(Number);
+      severDoorLink(roomId, gx, gy);
+    });
+
+    const wasCurrent = roomId === currentRoomId;
+    const wasPlayerHome = roomId === playerRoomId;
+    rooms = rooms.filter(r => r.id !== roomId);
+    if (wasCurrent) currentRoomId = null; // avoid activateRoom() saving stale state into the room just removed
+    if (wasPlayerHome) playerRoomId = null;
+
+    activateRoom(rooms[0].id);
+    renderRoomTabs();
+    renderAll();
+    log("Deleted \"" + room.name + "\".");
+  }
   function paintBackgroundAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     backgroundBoard[gy][gx] = selectedBackgroundId;
   }
   // Erase checks the most-foreground thing at a cell first: an actor, then the gameplay tile,
-  // then the background — one universal "undo this cell" tool for all three layers.
+  // then the background — one universal "undo this cell" tool for all three layers. Erasing a
+  // door severs the connection cleanly (see severDoorLink) rather than leaving a stale link
+  // behind for a later door to accidentally inherit.
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
@@ -2343,6 +2434,8 @@
       const key = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[key];
       delete bombArmed[key];
+      const tile = GAMEPLAY_TILE_DEFS[board[gy][gx]];
+      if (tile && tile.geometry === "door") { severDoorLink(currentRoomId, gx, gy); return; }
       board[gy][gx] = null;
       return;
     }
@@ -2835,6 +2928,9 @@
     const container = document.getElementById("roomTabRow");
     container.innerHTML = "";
     rooms.forEach(room => {
+      const wrap = document.createElement("span");
+      wrap.style.display = "inline-flex";
+      wrap.style.gap = "2px";
       const btn = document.createElement("button");
       btn.className = "tbtn" + (room.id === currentRoomId ? " active" : "");
       btn.textContent = room.name + (room.id === playerRoomId ? " •" : "");
@@ -2845,7 +2941,16 @@
         renderRoomTabs();
         renderAll();
       });
-      container.appendChild(btn);
+      wrap.appendChild(btn);
+      if (rooms.length > 1) {
+        const del = document.createElement("button");
+        del.className = "tbtn";
+        del.textContent = "×";
+        del.title = "Delete " + room.name;
+        del.addEventListener("click", (e) => { e.stopPropagation(); deleteRoom(room.id); });
+        wrap.appendChild(del);
+      }
+      container.appendChild(wrap);
     });
   }
 
