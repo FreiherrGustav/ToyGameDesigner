@@ -427,6 +427,11 @@
   // ordinary testing. Editing only exists in Build; nothing paints, drags, or opens the pixel
   // editor while appMode is "play".
   let appMode = "build"; // "build" | "play"
+  // False in the live tool (where the overlay's "try again" instruction points at the real
+  // Play button); the exported standalone file hardcodes this true so the same shared overlay
+  // function points at the restart-on-keypress/tap handling that file wires up for itself,
+  // since it has no Build/Play toggle UI at all.
+  const IS_STANDALONE_EXPORT = false;
   let buildSnapshot = null; // { rooms, doorLinks, gravityEnabled, wrapHEnabled, wrapVEnabled, currentRoomId, playerRoomId }
   const DEFAULT_LIVES = 3;
   let lives = DEFAULT_LIVES;
@@ -2555,7 +2560,7 @@
     gctx.fillText("Score: " + score, gameCanvas.width / 2, gameCanvas.height / 2 + 26);
     gctx.font = "14px sans-serif";
     gctx.fillStyle = "#bbb";
-    gctx.fillText("Press ▶ Play to try again", gameCanvas.width / 2, gameCanvas.height / 2 + 52);
+    gctx.fillText(IS_STANDALONE_EXPORT ? "Press any key or tap to play again" : "Press ▶ Play to try again", gameCanvas.width / 2, gameCanvas.height / 2 + 52);
     gctx.restore();
   }
 
@@ -2722,7 +2727,8 @@
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
       `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
       `const RECIPES = ${JSON.stringify(RECIPES)};`,
-      `const appMode = "play"; // exported games are always Play — there is no Build mode here`
+      `const appMode = "play"; // exported games are always Play — there is no Build mode here`,
+      `const IS_STANDALONE_EXPORT = true;`
     ].join("\n  ");
 
     const html = buildExportHTMLDocument(gameData, constantsSource, soundsSource, functionSource);
@@ -2820,19 +2826,44 @@
   activateRoom(playerRoomId);
   renderPlayHUD();
 
+  // No Build/Play toggle exists in this standalone export, so the win/game-over overlay's
+  // "try again" instruction points here instead: any key, a canvas tap, or a dpad tap restarts
+  // the session fresh from the original exported game data.
+  const initialGameData = JSON.parse(JSON.stringify(GAME_DATA));
+  function restartStandaloneGame() {
+    rooms = JSON.parse(JSON.stringify(initialGameData.rooms));
+    doorLinks = JSON.parse(JSON.stringify(initialGameData.doorLinks));
+    gravityEnabled = initialGameData.gravityEnabled;
+    wrapHEnabled = initialGameData.wrapHEnabled;
+    wrapVEnabled = initialGameData.wrapVEnabled;
+    playerRoomId = initialGameData.playerRoomId;
+    digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
+    actorContactCooldown = {}; dragContactCooldown = {};
+    roomTransition = null;
+    score = 0; intensity = 0;
+    lives = DEFAULT_LIVES;
+    playSessionEnded = null;
+    currentRoomId = null;
+    activateRoom(playerRoomId);
+    renderPlayHUD();
+  }
+
   const keys = {};
   window.addEventListener("keydown", (e) => {
+    if (playSessionEnded) { restartStandaloneGame(); return; }
     const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
     if (map.includes(e.key)) e.preventDefault();
     keys[e.key] = true;
   });
   window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+  gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded) restartStandaloneGame(); });
+  gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
   function dirKey(dir) { return { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[dir]; }
   document.querySelectorAll("#dpad button").forEach(btn => {
-    btn.addEventListener("mousedown", () => { keys[dirKey(btn.dataset.dir)] = true; });
+    btn.addEventListener("mousedown", () => { if (playSessionEnded) { restartStandaloneGame(); return; } keys[dirKey(btn.dataset.dir)] = true; });
     btn.addEventListener("mouseup", () => { keys[dirKey(btn.dataset.dir)] = false; });
     btn.addEventListener("mouseleave", () => { keys[dirKey(btn.dataset.dir)] = false; });
-    btn.addEventListener("touchstart", (e) => { keys[dirKey(btn.dataset.dir)] = true; e.preventDefault(); }, { passive: false });
+    btn.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); return; } keys[dirKey(btn.dataset.dir)] = true; e.preventDefault(); }, { passive: false });
     btn.addEventListener("touchend", (e) => { keys[dirKey(btn.dataset.dir)] = false; e.preventDefault(); }, { passive: false });
   });
 
