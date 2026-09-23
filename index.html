@@ -184,6 +184,7 @@
     <div>
       <div class="section-title">Paint mode</div>
       <div class="mode-toggle">
+        <button id="modeBackground">Background</button>
         <button id="modeTile">Tiles</button>
         <button id="modeActor" class="active">Actors</button>
         <button id="modeErase">Erase</button>
@@ -200,9 +201,25 @@
       </div>
     </div>
 
+    <div id="backgroundPropertiesBlock" style="display:none;">
+      <div class="section-title">Background</div>
+      <div class="swatch-row" id="backgroundSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Pure decoration, zero gameplay meaning. Pick one to paint, or hit + to draw a new one —
+        it's added to this project's kit, never swapped in for an old one.
+      </div>
+    </div>
+
     <div id="tilePropertiesBlock" style="display:none;">
-      <div class="section-title">Tile property</div>
-      <div class="swatch-row" id="tileSwatches"></div>
+      <div class="section-title">Geometry</div>
+      <div class="swatch-row" id="geometrySwatches"></div>
+      <div class="section-title" style="margin-top:10px;">Modifier</div>
+      <div class="swatch-row" id="modifierSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Two independent choices, painted together. Geometry decides what blocks movement.
+        Modifier decides what happens on contact, layered on top of whichever geometry you
+        picked — <em>none</em> + <em>none</em> just clears a tile back to plain background.
+      </div>
     </div>
 
     <div id="actorPropertiesBlock">
@@ -237,8 +254,9 @@
     </div>
 
     <div class="hint">
-      Tiles paint cell-by-cell. Actors and the player move with real physics once placed —
-      jump, fall, slide, bounce. The grid is always live — no separate play mode.
+      Geometry/modifier tiles use small built-in icons — no drawing needed, so they always
+      read the same way. Backgrounds and actors are yours to draw. The grid is always live —
+      no separate play mode.
     </div>
   </div>
 
@@ -271,13 +289,19 @@
   const ACTOR_INSET = 5;
   const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, ~30% margin inside the cell
 
-  const TILE_PROPS = ["walkable", "solid", "hazard", "bouncy", "slippery", "diggable", "goal", "flip"];
-  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
+  // A tile is three independent questions: background (pure decoration, see BACKGROUND_*
+  // below), geometry (what blocks movement), and modifier (what happens on contact, layered
+  // on top of whichever geometry). "walkable" no longer exists as a pickable choice — it's
+  // just the absence of a geometry pick ("none").
+  const GEOMETRIES = ["none", "solid", "diggable", "goal", "switch"];
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard"];
 
-  const TILE_COLORS = {
-    walkable: "#4caf50", solid: "#616161", hazard: "#e53935", bouncy: "#ff9800",
-    slippery: "#29b6f6", diggable: "#8d6e63", goal: "#ec407a", flip: "#3f51b5"
-  };
+  // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
+  // faint tint for a none+modifier tile) — see drawGameplayTile().
+  const GEOMETRY_SWATCH_COLORS = { none: "#4caf50", solid: "#616161", diggable: "#8d6e63", goal: "#ec407a", switch: "#3f51b5" };
+  const MODIFIER_SWATCH_COLORS = { none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935" };
+
+  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
   const TEMPERAMENT_COLORS = {
     stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
   };
@@ -305,19 +329,24 @@
   const SLIPPERY_FRICTION_MULT = 0.12; // reduced friction while standing on/in a slippery tile
   const MAX_FALL = 750;           // terminal velocity, slowed to match the softer gravity above
   const BOUNCE_RESTITUTION = 0.82;
+  const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
 
   // ============== State ==============
-  let tileDefs = {};   // id -> {property, art, name}
-  let actorDefs = {};  // id -> {temperament, art, name}
-  let nextTileDefId = 1;
+  // Two board layers: background (pure art, no gameplay meaning) drawn first, and gameplay
+  // (geometry+modifier, built-in icons only) drawn on top. They're independent — erasing one
+  // never touches the other.
+  let backgroundTileDefs = {}; // id -> {art, name}
+  let nextBackgroundId = 1;
+  let actorDefs = {};  // id -> {temperament, art, poses, name}
   let nextActorDefId = 1;
 
-  let board = [];            // ROWS x COLS, each cell = tileDefId or null
+  let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer)
+  let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer)
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
   // location stopped carrying any information — only whether one existed mattered. So these
-  // are now plain toggles in the palette, not something placed on the board at all.
+  // are plain toggles in the palette, not something placed on the board at all.
   let gravityEnabled = false;
   let wrapHEnabled = false;
   let wrapVEnabled = false;
@@ -327,10 +356,11 @@
   let startPos = { x: 0, y: 0 }; // continuous pixel position
 
   // Defaults put the player one click away on a blank canvas — no trip to "actor mode" first.
-  let paintMode = "actor"; // 'tile' | 'actor' | 'erase'
-  let selectedTileProp = "walkable";
+  let paintMode = "actor"; // 'background' | 'tile' | 'actor' | 'erase'
+  let selectedGeometry = "none";
+  let selectedModifier = "none";
+  let selectedBackgroundId = null;
   let selectedActorKind = "player"; // one of TEMPERAMENTS, or "player"
-  let selectedTileDefId = null;
   let selectedActorDefId = null;
   let selectedPoseKey = "stand"; // 'stand' | 'stride' | 'air' | 'crouch' — only used for posed defs
 
@@ -340,7 +370,7 @@
   let isPaintingBoard = false;
 
   let animState = {};      // actorInstId -> {recipe, t} — discrete event overlays only (pop/caught/celebration/boop)
-  let tileAnimState = {};  // "x,y" -> {recipe, t, art} — transient tile effects (crumbling)
+  let tileAnimState = {};  // "x,y" -> {recipe, t, geometry, modifier} — transient tile effects (crumbling)
 
   let score = 0;
   let intensity = 0;
@@ -348,7 +378,11 @@
   // ============== Init board ==============
   function initBoard() {
     board = [];
-    for (let y = 0; y < ROWS; y++) board.push(new Array(COLS).fill(null));
+    backgroundBoard = [];
+    for (let y = 0; y < ROWS; y++) {
+      board.push(new Array(COLS).fill(null));
+      backgroundBoard.push(new Array(COLS).fill(null));
+    }
   }
   initBoard();
 
@@ -357,7 +391,7 @@
   // ============== Sprite presets — "grab a piece off a shelf", not a template menu ==============
   // Small hand-authored 8x8 patterns via ASCII rows + a color legend, so they're readable to edit
   // here instead of raw 64-entry hex arrays. Loading one just fills currentArt for whatever's
-  // currently selected (tile property / temperament / player) — it never locks in a "kind".
+  // currently selected — it never locks in a "kind".
   function pat(rows, legend) {
     const art = new Array(ART * ART).fill(null);
     for (let y = 0; y < ART; y++) {
@@ -390,16 +424,31 @@
     ], STICK_LEGEND)
   };
 
-  // The art currently "active" for a def: its single flat art, or — for a posed def — whichever
-  // pose the editor currently has open (falling back to "stand" if that pose is somehow unset).
+  // ---- Built-in geometry icons (fixed, not kid-editable — see the v2.3 note-for-later:
+  // a `solid` tile needs to always visually read as solid for "discover by touching" to
+  // hold, so gameplay tiles use a small consistent icon set rather than custom art). ----
+  const GEOMETRY_ICONS = {
+    solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
+    diggable: pat([
+      "MMMMMMMM", "MMMKMMMM", "MMKMMMMM", "MKMMMMMM",
+      "MMMMMKMM", "MMMMKMMM", "MMMKMMMM", "MMMMMMMM"
+    ], { M: GEOMETRY_SWATCH_COLORS.diggable, K: "#5d4037" }),
+    goal: pat([
+      "M.......", "MMMM....", "MMMMMM..", "MMMM....",
+      "M.......", "M.......", "M.......", "MMMMMMM."
+    ], { M: GEOMETRY_SWATCH_COLORS.goal }),
+    switch: pat([
+      "...M....", "..MMM...", "...M....", "...M....",
+      "...M....", "...M....", "..MMM...", "...M...."
+    ], { M: GEOMETRY_SWATCH_COLORS.switch })
+  };
+
+  // The art currently "active" for a def: its single flat art, or — for a posed actor def —
+  // whichever pose the editor currently has open (falling back to "stand" if unset).
   function activeArtFor(def) {
     return def.poses ? (def.poses[selectedPoseKey] || def.poses.stand) : def.art;
   }
 
-  TILE_PROPS.forEach(prop => {
-    const id = "t" + (nextTileDefId++);
-    tileDefs[id] = { property: prop, art: makeDefaultArt(TILE_COLORS[prop]), name: prop };
-  });
   TEMPERAMENTS.forEach(temp => {
     const id = "a" + (nextActorDefId++);
     actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), poses: null, name: temp };
@@ -412,18 +461,41 @@
     name: "player"
   };
 
-  function findDefaultTileDef(prop) {
-    return Object.keys(tileDefs).find(id => tileDefs[id].property === prop && tileDefs[id].name === prop);
-  }
+  // One built-in background to start from (the old "ground" brick pattern) so the palette
+  // isn't a totally empty box on first use; + grows the kit from there.
+  backgroundTileDefs["bg" + (nextBackgroundId++)] = {
+    art: pat([
+      "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM",
+      "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM"
+    ], { M: "#616161" }),
+    name: "ground"
+  };
+  selectedBackgroundId = Object.keys(backgroundTileDefs)[0];
+
   function findDefaultActorDef(temp) {
     return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
   }
 
-  selectedTileDefId = findDefaultTileDef(selectedTileProp);
   selectedActorDefId = selectedActorKind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(selectedActorKind);
   currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
 
-  const SPRITE_PRESETS = [
+  // Every geometry x modifier combination, precomputed once. Gameplay tiles carry no `art`
+  // field at all — see GEOMETRY_ICONS/drawGameplayTile() for how they're actually drawn.
+  const GAMEPLAY_TILE_DEFS = {};
+  function gameplayKey(geometry, modifier) { return geometry + ":" + modifier; }
+  GEOMETRIES.forEach(geometry => {
+    MODIFIERS.forEach(modifier => {
+      const key = gameplayKey(geometry, modifier);
+      GAMEPLAY_TILE_DEFS[key] = { geometry, modifier, name: modifier === "none" ? geometry : geometry + " + " + modifier };
+    });
+  });
+  function gameplayTileAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    const key = board[gy][gx];
+    return key ? GAMEPLAY_TILE_DEFS[key] : null;
+  }
+
+  const ACTOR_PRESETS = [
     { name: "stick figure", poses: STICK_POSES },
     { name: "player", art: pat([
       "..MMMM..", ".MMMMMM.", "MM.KK.MM", "MMMMMMMM",
@@ -448,27 +520,13 @@
     { name: "collectible", art: pat([
       "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
       ".MMMMMM.", "..MMMM..", "...MM...", "........"
-    ], { M: "#26c6da" }) },
+    ], { M: "#26c6da" }) }
+  ];
+  const BACKGROUND_PRESETS = [
     { name: "ground", art: pat([
       "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM",
       "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM"
-    ], { M: "#616161" }) },
-    { name: "hazard", art: pat([
-      "M.M.M.M.", "MMMMMMMM", ".MMMMMM.", "..MMMM..",
-      "MMMMMMMM", "M.M.M.M.", "MMMMMMMM", "........"
-    ], { M: "#e53935" }) },
-    { name: "bouncy", art: pat([
-      "MMMMMMMM", "M......M", "M.MMMM.M", "M.M..M.M",
-      "M.M..M.M", "M.MMMM.M", "M......M", "MMMMMMMM"
-    ], { M: "#ff9800" }) },
-    { name: "goal", art: pat([
-      "M.......", "MMMM....", "MMMMMM..", "MMMM....",
-      "M.......", "M.......", "M.......", "MMMMMMM."
-    ], { M: "#ec407a" }) },
-    { name: "flip", art: pat([
-      "...M....", "..MMM...", "...M....", "...M....",
-      "...M....", "...M....", "..MMM...", "...M...."
-    ], { M: "#3f51b5" }) }
+    ], { M: "#616161" }) }
   ];
 
   // ============== Audio (simple beeps) ==============
@@ -607,22 +665,82 @@
     }
   }
 
-  function renderTileSwatches() {
-    const container = document.getElementById("tileSwatches");
+  function renderBackgroundSwatches() {
+    const container = document.getElementById("backgroundSwatches");
     container.innerHTML = "";
-    TILE_PROPS.forEach(prop => {
+    Object.keys(backgroundTileDefs).forEach(id => {
+      const def = backgroundTileDefs[id];
       const sw = document.createElement("div");
-      sw.className = "swatch" + (paintMode === "tile" && selectedTileProp === prop ? " selected" : "");
-      sw.style.background = TILE_COLORS[prop];
-      sw.title = prop;
+      sw.className = "swatch" + (paintMode === "background" && selectedBackgroundId === id ? " selected" : "");
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
+      sw.addEventListener("click", () => {
+        selectedBackgroundId = id;
+        paintMode = "background";
+        currentArt = def.art.slice();
+        updateModeButtons();
+        renderAll();
+      });
+      container.appendChild(sw);
+    });
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Draw a new background tile";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const id = "bg" + (nextBackgroundId++);
+      backgroundTileDefs[id] = { art: new Array(ART * ART).fill(null), name: "background " + Object.keys(backgroundTileDefs).length };
+      selectedBackgroundId = id;
+      paintMode = "background";
+      currentArt = backgroundTileDefs[id].art.slice();
+      updateModeButtons();
+      renderAll();
+      log("New background added to the kit — draw it below.");
+    });
+    container.appendChild(plus);
+  }
+
+  function renderGeometrySwatches() {
+    const container = document.getElementById("geometrySwatches");
+    container.innerHTML = "";
+    GEOMETRIES.forEach(geometry => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (paintMode === "tile" && selectedGeometry === geometry ? " selected" : "");
+      sw.style.background = GEOMETRY_SWATCH_COLORS[geometry];
+      sw.title = geometry;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = prop;
+      label.textContent = geometry;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
-        selectedTileProp = prop;
-        selectedTileDefId = findDefaultTileDef(prop);
-        currentArt = tileDefs[selectedTileDefId].art.slice();
+        selectedGeometry = geometry;
+        paintMode = "tile";
+        updateModeButtons();
+        renderAll();
+      });
+      container.appendChild(sw);
+    });
+  }
+
+  function renderModifierSwatches() {
+    const container = document.getElementById("modifierSwatches");
+    container.innerHTML = "";
+    MODIFIERS.forEach(modifier => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (paintMode === "tile" && selectedModifier === modifier ? " selected" : "");
+      sw.style.background = MODIFIER_SWATCH_COLORS[modifier];
+      sw.title = modifier;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = modifier;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        selectedModifier = modifier;
         paintMode = "tile";
         updateModeButtons();
         renderAll();
@@ -711,13 +829,16 @@
   }
 
   function currentSelectedDef() {
-    return paintMode === "actor" ? actorDefs[selectedActorDefId] : (paintMode === "tile" ? tileDefs[selectedTileDefId] : null);
+    if (paintMode === "actor") return actorDefs[selectedActorDefId];
+    if (paintMode === "background") return backgroundTileDefs[selectedBackgroundId];
+    return null; // tile (geometry/modifier) mode has no editable art at all
   }
 
   function renderPresetSwatches() {
     const container = document.getElementById("presetSwatches");
     container.innerHTML = "";
-    SPRITE_PRESETS.forEach(preset => {
+    const presets = paintMode === "background" ? BACKGROUND_PRESETS : (paintMode === "actor" ? ACTOR_PRESETS : []);
+    presets.forEach(preset => {
       const sw = document.createElement("div");
       sw.className = "presetSwatch";
       sw.title = preset.name;
@@ -728,12 +849,12 @@
       sw.addEventListener("click", () => {
         const def = currentSelectedDef();
         if (!def) return;
-        if (preset.poses) {
+        if (paintMode === "actor" && preset.poses) {
           def.poses = { stand: preset.poses.stand.slice(), stride: preset.poses.stride.slice(), air: preset.poses.air.slice(), crouch: preset.poses.crouch.slice() };
           def.art = def.poses.stand.slice();
           selectedPoseKey = "stand";
         } else {
-          def.poses = null; // grabbing a flat-art preset reverts a previously-posed def to simple mode
+          if (paintMode === "actor") def.poses = null; // revert a previously-posed def to simple mode
           def.art = preset.art.slice();
         }
         currentArt = activeArtFor(def).slice();
@@ -782,22 +903,28 @@
   }
 
   function updateModeButtons() {
+    document.getElementById("modeBackground").classList.toggle("active", paintMode === "background");
     document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
     document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
     document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
+    document.getElementById("backgroundPropertiesBlock").style.display = paintMode === "background" ? "block" : "none";
     document.getElementById("tilePropertiesBlock").style.display = paintMode === "tile" ? "block" : "none";
     document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
-    const editingArt = paintMode !== "erase";
+    const editingArt = paintMode === "background" || paintMode === "actor";
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
     document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
     if (editingArt) {
-      document.getElementById("editingLabel").textContent = paintMode === "actor" ? selectedActorKind : selectedTileProp;
+      document.getElementById("editingLabel").textContent = paintMode === "actor" ? selectedActorKind : "background";
     }
   }
 
+  document.getElementById("modeBackground").addEventListener("click", () => {
+    paintMode = "background";
+    currentArt = backgroundTileDefs[selectedBackgroundId].art.slice();
+    updateModeButtons(); renderAll();
+  });
   document.getElementById("modeTile").addEventListener("click", () => {
     paintMode = "tile";
-    currentArt = tileDefs[selectedTileDefId].art.slice();
     updateModeButtons(); renderAll();
   });
   document.getElementById("modeActor").addEventListener("click", () => {
@@ -846,8 +973,8 @@
       } else {
         def.art = currentArt.slice();
       }
-    } else if (paintMode === "tile") {
-      tileDefs[selectedTileDefId].art = currentArt.slice();
+    } else if (paintMode === "background") {
+      backgroundTileDefs[selectedBackgroundId].art = currentArt.slice();
     }
   }
 
@@ -866,36 +993,36 @@
   });
 
   // ============== Physics helpers ==============
-  function tileAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
-    const id = board[gy][gx];
-    return id ? tileDefs[id] : null;
-  }
   // Board edges act solid by default (a hard boundary hit exactly like a solid tile) — unless
   // wrap is switched on for that axis, in which case that edge stops blocking at all and
   // applyWorldWrap() teleports whatever crosses it to the opposite side.
-  function tilePropAt(gx, gy) {
-    if (gx < 0 || gx >= COLS) return wrapHEnabled ? "walkable" : "solid";
-    if (gy < 0 || gy >= ROWS) return wrapVEnabled ? "walkable" : "solid";
-    const t = tileAt(gx, gy);
-    return t ? t.property : "walkable";
+  function geometryAt(gx, gy) {
+    if (gx < 0 || gx >= COLS) return wrapHEnabled ? "none" : "solid";
+    if (gy < 0 || gy >= ROWS) return wrapVEnabled ? "none" : "solid";
+    const tile = gameplayTileAt(gx, gy);
+    return tile ? tile.geometry : "none";
+  }
+  function modifierAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return "none"; // the boundary itself has no modifier
+    const tile = gameplayTileAt(gx, gy);
+    return tile ? tile.modifier : "none";
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
-  //  - it's solid (blocks everyone)
-  //  - it's diggable and the mover isn't the player (the player digs through; NPCs just see a wall)
-  //  - it's bouncy and the mover isn't the player (NPCs ignore bounce per the original rule —
-  //    they walk past/through it; only the player bounces off it)
-  function isBlockingFor(actor, prop) {
-    if (prop === "solid") return true;
-    if (prop === "diggable") return !actor.isPlayer;
-    if (prop === "bouncy") return !!actor.isPlayer;
+  //  - geometry is solid (blocks everyone)
+  //  - geometry is diggable and the mover isn't the player (the player digs through; NPCs
+  //    just see a wall)
+  // Modifiers never block on their own — they only change WHAT HAPPENS on contact/collision,
+  // handled inside resolveAxis() (blocking geometry) or checkPlayerTileContacts() (non-blocking).
+  function isBlockingGeometry(geometry, actor) {
+    if (geometry === "solid") return true;
+    if (geometry === "diggable") return !actor.isPlayer;
     return false;
   }
 
   // Gravity is a single shared switch, not per-actor: the palette toggle sets it once as an
-  // authoring choice, and a `flip` tile can flip the exact same value live during play — both
-  // just read/write this one function's underlying state.
+  // authoring choice, and a `switch` tile can flip the exact same value live during play —
+  // both just read/write this one function's underlying state.
   function gravityOn() { return gravityEnabled; }
 
   // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
@@ -920,9 +1047,28 @@
     return cells;
   }
 
+  // The row of cells directly beneath an actor's feet — distinct from overlappedCells(),
+  // which never includes a solid tile the actor is resting ON TOP of (they don't overlap it,
+  // they're flush against it). Needed for "standing on a slippery/hazard floor" checks.
+  function cellsUnderneath(actor) {
+    const gy = Math.floor((actor.y + actor.h + 1) / TILE);
+    const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
+    const cells = [];
+    for (let cx = c0; cx <= c1; cx++) cells.push({ cx, cy: gy });
+    return cells;
+  }
+
+  // One rule, two ways contact happens: an occupied/overlapped none-geometry tile (walking
+  // through ice), or the solid floor an actor is actually resting on (standing on ice). Which
+  // one applies falls out of geometry + gravity mode on its own — no per-case special casing.
   function frictionMultiplierFor(actor) {
     for (const { cx, cy } of overlappedCells(actor)) {
-      if (tilePropAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
+      if (geometryAt(cx, cy) === "none" && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
+    }
+    if (actor.grounded) {
+      for (const { cx, cy } of cellsUnderneath(actor)) {
+        if (geometryAt(cx, cy) === "solid" && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
+      }
     }
     return 1;
   }
@@ -939,16 +1085,20 @@
     }
   }
 
-  // Axis-separated AABB resolution against blocking tiles. Bouncy reflects velocity (with
-  // restitution) instead of zeroing it — a real bounce, not a scripted launch.
+  // Axis-separated AABB resolution against blocking geometry. `bouncy` reflects velocity
+  // (with restitution) instead of zeroing it — a real bounce, not a scripted launch — and
+  // only for the player; NPCs only ever react to geometry, never to modifiers. `hazard` on
+  // blocking geometry (a spike floor) hurts right where contact happens, same function,
+  // regardless of which side was hit.
   function resolveAxis(actor, axis) {
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
-        const prop = tilePropAt(cx, cy);
-        if (!isBlockingFor(actor, prop)) continue;
-        const bouncy = prop === "bouncy";
+        const geometry = geometryAt(cx, cy);
+        if (!isBlockingGeometry(geometry, actor)) continue;
+        const modifier = modifierAt(cx, cy);
+        const bouncy = modifier === "bouncy" && actor.isPlayer;
         if (axis === "x") {
           if (actor.vx > 0) {
             actor.x = cx * TILE - actor.w;
@@ -971,6 +1121,7 @@
             actor.vy = bouncy ? -actor.vy * BOUNCE_RESTITUTION : 0;
           }
         }
+        if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
       }
     }
   }
@@ -1100,11 +1251,34 @@
     log("Ouch! Hazard knockback.");
   }
 
+  // none+bouncy launches on entry, matching the original top-down "step on it, get launched"
+  // design. Under gravity it's a trampoline: always launches up, regardless of how you fell in.
+  function triggerBouncyLaunch(actor) {
+    if (actor.bouncyCooldown > 0) return;
+    actor.bouncyCooldown = 350;
+    sounds.boing();
+    if (gravityOn()) {
+      actor.vy = -BOUNCY_LAUNCH_SPEED;
+    } else {
+      const speed = Math.hypot(actor.vx, actor.vy);
+      if (speed > 10) {
+        const scale = BOUNCY_LAUNCH_SPEED / speed;
+        actor.vx *= scale; actor.vy *= scale;
+      } else {
+        actor.vy = -BOUNCY_LAUNCH_SPEED;
+      }
+    }
+    actor.impactSquash = 0.6;
+    actor.impactAxis = "y";
+    log("Boing! Launched.");
+  }
+
   function triggerDig(gx, gy) {
-    const id = board[gy][gx];
-    if (!id) return;
+    const key = board[gy][gx];
+    if (!key) return;
+    const tile = GAMEPLAY_TILE_DEFS[key];
     sounds.crumble();
-    tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), art: tileDefs[id].art };
+    tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
     board[gy][gx] = null;
     log("Crumble! That tile's walkable now.");
   }
@@ -1115,12 +1289,10 @@
     roundComplete();
   }
 
-  // A `flip` tile is an ordinary painted tile — felt purely on contact, same bucket as goal/
-  // diggable/hazard — but what it does is flip the one shared gravity switch for every actor
-  // in the game, not just the player. Placement is what makes this different from the old
-  // gravity marker: a kid puts one at a deliberate spot, and touching it there is a real
-  // level-design choice, the thing the marker mechanic was reaching for before its effect
-  // went global.
+  // A `switch` tile is an ordinary painted tile — felt purely on contact, same bucket as
+  // goal/diggable/hazard — but what it does is flip the one shared gravity switch for every
+  // actor in the game, not just the player. Placement is what makes this meaningful: a kid
+  // puts one at a deliberate spot, and touching it there is a real level-design choice.
   function triggerFlip(player) {
     if (player.flipCooldown > 0) return;
     player.flipCooldown = 500;
@@ -1131,15 +1303,19 @@
     renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
   }
 
-  // Player-only contact reactions that aren't part of AABB blocking: hazard, diggable
-  // (crumbles instead of blocking the player), goal, and flip.
+  // Player-only contact reactions for whatever the player is actually overlapping — geometry
+  // that doesn't block (diggable/goal/switch — solid's own hazard/bouncy handling lives in
+  // resolveAxis instead, since the player never overlaps a solid tile) and any modifier found
+  // there. Geometry and modifier are independent, so both can fire from the same cell.
   function checkPlayerTileContacts(player) {
     for (const { cx, cy } of overlappedCells(player)) {
-      const prop = tilePropAt(cx, cy);
-      if (prop === "hazard") triggerHazard(player);
-      else if (prop === "diggable") triggerDig(cx, cy);
-      else if (prop === "goal") triggerGoal(player);
-      else if (prop === "flip") triggerFlip(player);
+      const geometry = geometryAt(cx, cy);
+      const modifier = modifierAt(cx, cy);
+      if (geometry === "diggable") triggerDig(cx, cy);
+      else if (geometry === "goal") triggerGoal(player);
+      else if (geometry === "switch") triggerFlip(player);
+      if (modifier === "hazard") triggerHazard(player);
+      else if (modifier === "bouncy") triggerBouncyLaunch(player);
     }
   }
 
@@ -1267,6 +1443,7 @@
     if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
     if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
     if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
+    if (actor.bouncyCooldown > 0) actor.bouncyCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x");
@@ -1295,7 +1472,7 @@
     tickActorContactCooldowns(dt);
   }
 
-  // ============== Board / world / actor painting ==============
+  // ============== Board / actor painting ==============
   function cellFromEvent(e) {
     const rect = gameCanvas.getBoundingClientRect();
     const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
@@ -1313,15 +1490,23 @@
     return actors.find(a => px >= a.x && px < a.x + a.w && py >= a.y && py < a.y + a.h);
   }
 
-  function paintTileAt(gx, gy) {
+  function paintGeometryModifierAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
-    board[gy][gx] = selectedTileDefId;
+    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; return; }
+    board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
   }
+  function paintBackgroundAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    backgroundBoard[gy][gx] = selectedBackgroundId;
+  }
+  // Erase checks the most-foreground thing at a cell first: an actor, then the gameplay tile,
+  // then the background — one universal "undo this cell" tool for all three layers.
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
     if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
-    board[gy][gx] = null;
+    if (board[gy][gx]) { board[gy][gx] = null; return; }
+    backgroundBoard[gy][gx] = null;
   }
 
   function placeNewActor(px, py) {
@@ -1333,7 +1518,8 @@
       x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
       w: ACTOR_SIZE, h: ACTOR_SIZE,
       vx: 0, vy: 0, grounded: false, isPlayer,
-      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0, hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0
+      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
+      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0
     };
     actors.push(actor);
     if (isPlayer) startPos = { x: actor.x, y: actor.y };
@@ -1341,20 +1527,19 @@
   }
 
   // ============== Editor drag: continuous, collision-aware, same reactions as gameplay ==============
-  // Dragging just moves the actor's real AABB with the cursor, clamped by the exact same solid/
-  // diggable/bouncy collision the physics uses, and runs the exact same contact reactions —
-  // there is no separate "editor bump" logic to keep in sync with gameplay anymore.
+  // Dragging just moves the actor's real AABB with the cursor, clamped by the exact same
+  // geometry collision the physics uses, and runs the exact same contact reactions — there is
+  // no separate "editor bump" logic to keep in sync with gameplay anymore.
   let dragActor = null;
-  let dragContactCooldown = {}; // "cellKey"|actorId -> ms remaining, so a slow drag doesn't spam a reaction every frame
+  let dragContactCooldown = {}; // "cellKey" -> ms remaining, so a slow drag doesn't spam a reaction every frame
 
   function clampDragPosition(actor, targetX, targetY) {
     // resolve one axis at a time, exactly like simulation, but teleporting instead of integrating
     const before = { x: actor.x, y: actor.y };
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
-      const prop = tilePropAt(cx, cy);
-      if (isBlockingFor(actor, prop) && prop !== "bouncy") {
-        // push back to just outside this cell on X
+      const geometry = geometryAt(cx, cy);
+      if (isBlockingGeometry(geometry, actor)) {
         if (targetX > before.x) actor.x = Math.min(actor.x, cx * TILE - actor.w);
         else if (targetX < before.x) actor.x = Math.max(actor.x, (cx + 1) * TILE);
         const key = "t" + cx + "," + cy;
@@ -1363,8 +1548,8 @@
     }
     actor.y = targetY;
     for (const { cx, cy } of overlappedCells(actor)) {
-      const prop = tilePropAt(cx, cy);
-      if (isBlockingFor(actor, prop) && prop !== "bouncy") {
+      const geometry = geometryAt(cx, cy);
+      if (isBlockingGeometry(geometry, actor)) {
         if (targetY > before.y) actor.y = Math.min(actor.y, cy * TILE - actor.h);
         else if (targetY < before.y) actor.y = Math.max(actor.y, (cy + 1) * TILE);
         const key = "t" + cx + "," + cy;
@@ -1374,14 +1559,17 @@
     // non-blocking contact reactions still fire live while dragging, same as gameplay
     if (actor.isPlayer) {
       for (const { cx, cy } of overlappedCells(actor)) {
-        const prop = tilePropAt(cx, cy);
+        const geometry = geometryAt(cx, cy);
+        const modifier = modifierAt(cx, cy);
         const key = "c" + cx + "," + cy;
-        if ((prop === "hazard" || prop === "diggable" || prop === "goal" || prop === "flip") && !dragContactCooldown[key]) {
-          dragContactCooldown[key] = 350;
-          if (prop === "hazard") { sounds.yelp(); actor.flashTimer = 1; log("Ouch! (dragged onto a hazard tile)"); }
-          else if (prop === "diggable") triggerDig(cx, cy);
-          else if (prop === "goal") triggerGoal(actor);
-          else if (prop === "flip") triggerFlip(actor);
+        if (!dragContactCooldown[key]) {
+          let fired = false;
+          if (geometry === "diggable") { triggerDig(cx, cy); fired = true; }
+          else if (geometry === "goal") { triggerGoal(actor); fired = true; }
+          else if (geometry === "switch") { triggerFlip(actor); fired = true; }
+          if (modifier === "hazard") { triggerHazard(actor); fired = true; }
+          else if (modifier === "bouncy") { triggerBouncyLaunch(actor); fired = true; }
+          if (fired) dragContactCooldown[key] = 350;
         }
       }
     }
@@ -1411,14 +1599,16 @@
       return;
     }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
-    if (paintMode === "tile") { isPaintingBoard = true; paintTileAt(gx, gy); return; }
+    if (paintMode === "tile") { isPaintingBoard = true; paintGeometryModifierAt(gx, gy); return; }
+    if (paintMode === "background") { isPaintingBoard = true; paintBackgroundAt(gx, gy); return; }
   });
   gameCanvas.addEventListener("mousemove", (e) => {
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); return; }
     if (!isPaintingBoard) return;
-    if (paintMode === "tile") paintTileAt(gx, gy);
+    if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
+    else if (paintMode === "background") paintBackgroundAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
   });
   window.addEventListener("mouseup", () => {
@@ -1438,7 +1628,8 @@
       return;
     }
     isPaintingBoard = true;
-    if (paintMode === "tile") paintTileAt(gx, gy);
+    if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
+    else if (paintMode === "background") paintBackgroundAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     e.preventDefault();
   }, { passive: false });
@@ -1447,7 +1638,8 @@
     const { gx, gy } = cellFromEvent(e);
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); e.preventDefault(); return; }
     if (isPaintingBoard) {
-      if (paintMode === "tile") paintTileAt(gx, gy);
+      if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
+      else if (paintMode === "background") paintBackgroundAt(gx, gy);
       else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     }
     e.preventDefault();
@@ -1501,6 +1693,33 @@
     }
   }
 
+  // Gameplay tiles use small built-in icons, not kid-drawn art (see the v2.3 note-for-later).
+  // Geometry draws as its fixed icon (or nothing, for "none"); a modifier layers on top as a
+  // colored ring around the tile if there's a geometry icon underneath, or a soft tinted wash
+  // if there's none — so a none+hazard puddle still reads as "not solid" even though it's
+  // clearly marked.
+  function drawGameplayTile(ctx, x, y, tile) {
+    const cell = TILE / ART;
+    if (tile.geometry === "none") {
+      if (tile.modifier !== "none") {
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.restore();
+      }
+      return;
+    }
+    drawArtScaled(ctx, GEOMETRY_ICONS[tile.geometry], x, y, TILE, cell);
+    if (tile.modifier !== "none") {
+      ctx.save();
+      ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+      ctx.restore();
+    }
+  }
+
   function renderGame() {
     gctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
     gctx.fillStyle = "#111";
@@ -1511,6 +1730,11 @@
 
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
+        // background layer, always drawn first
+        const bgId = backgroundBoard[y][x];
+        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(gctx, backgroundTileDefs[bgId].art, x * TILE, y * TILE, TILE, cell);
+
+        // gameplay layer on top — either the crumble animation or the static tile
         const key = x + "," + y;
         const tanim = tileAnimState[key];
         if (tanim) {
@@ -1521,14 +1745,14 @@
             gctx.translate(x * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) gctx.rotate(sample.rot);
             gctx.scale(sample.sx, sample.sy);
-            drawArtScaled(gctx, tanim.art, -TILE / 2, -TILE / 2, TILE, cell);
+            drawGameplayTile(gctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
             gctx.restore();
             if (sample.done) delete tileAnimState[key];
             continue;
           }
         }
-        const defId = board[y][x];
-        if (defId && tileDefs[defId]) drawArtScaled(gctx, tileDefs[defId].art, x * TILE, y * TILE, TILE, cell);
+        const gKey = board[y][x];
+        if (gKey && GAMEPLAY_TILE_DEFS[gKey]) drawGameplayTile(gctx, x * TILE, y * TILE, GAMEPLAY_TILE_DEFS[gKey]);
       }
     }
 
@@ -1617,10 +1841,10 @@
   // Nothing painted or placed yet: a soft pulsing outline at the canvas's center marks where
   // something can be dropped. No text, no arrow — just a shape, and it's gone the instant
   // anything exists on the board. Game-rule switches (gravity/wrap) don't count here — they're
-  // not placed on the board at all anymore, so they shouldn't affect what counts as "empty".
+  // not placed on the board at all, so they shouldn't affect what counts as "empty".
   function isCanvasEmpty() {
     if (actors.length > 0) return false;
-    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x]) return false;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x] || backgroundBoard[y][x]) return false;
     return true;
   }
   function drawEmptySocketCue(now) {
@@ -1638,7 +1862,9 @@
   }
 
   function renderAll() {
-    renderTileSwatches();
+    renderBackgroundSwatches();
+    renderGeometrySwatches();
+    renderModifierSwatches();
     renderActorSwatches();
     renderPlayerSwatch();
     renderGameRuleSwatches();
