@@ -133,6 +133,22 @@
   }
   .mode-toggle button.active { background: var(--accent); color: #222; font-weight: bold; }
 
+  /* ---------- Build / Play top-level switch ---------- */
+  #appModeToggle {
+    max-width: 340px;
+    margin: 12px auto 0;
+    padding: 0 16px;
+  }
+  #appModeToggle button { font-size: 15px; padding: 10px 4px; }
+  #modePlayBtn.active { background: #4caf50; color: #fff; }
+
+  /* Play mode hides every Build-only editing surface — the palette, the room tabs (no manual
+     room-hopping mid-game), and the build-only toolbar buttons (reset/set-start/clear/export) —
+     leaving just the canvas, dpad, HUD, and log. */
+  body.play-mode #paletteWrap { display: none; }
+  body.play-mode #roomTabRow { display: none; }
+  body.play-mode #buildToolbar { display: none; }
+
   /* ---------- Pixel editor ---------- */
   #pixelEditor { display: flex; flex-direction: column; gap: 6px; align-items: center; }
   #pixelCanvas {
@@ -175,6 +191,10 @@
 </style>
 </head>
 <body>
+<div id="appModeToggle" class="mode-toggle">
+  <button id="modeBuildBtn" class="active">🛠 Build</button>
+  <button id="modePlayBtn">▶ Play</button>
+</div>
 <div id="app">
 
   <!-- Palette / Authoring panel -->
@@ -262,11 +282,14 @@
 
   <!-- Game / Editor canvas -->
   <div class="panel" id="gameWrap">
-    <div class="toolbar">
+    <div class="toolbar" id="buildToolbar">
       <button class="tbtn" id="resetBtn">↺ Reset to start</button>
       <button class="tbtn" id="setStartBtn">📍 Set player start here</button>
       <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
-      <div id="hud">Score: <span id="scoreVal">0</span></div>
+      <button class="tbtn" id="exportBtn">⬇ Export game</button>
+    </div>
+    <div class="toolbar">
+      <div id="hud"><span id="livesRow" style="display:none;">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
     </div>
     <div class="toolbar" id="roomTabRow"></div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
@@ -396,6 +419,19 @@
   let digProgress = {};     // roomCellKey -> ms of sustained contact accumulated eroding a diggable wall
   let bombArmed = {};       // roomCellKey -> true while a bomb's fuse is lit
 
+  // ============== Build / Play (v2.7) ==============
+  // Build is the always-live sandbox this toy has always been — unchanged. Play is a snapshot:
+  // entering it clones the current rooms/rules aside into buildSnapshot (untouched, restored
+  // verbatim on exit) while the live rooms/board/actors/etc. keep being mutated as the actual
+  // session being played, exactly the way a single room's board is already mutated during
+  // ordinary testing. Editing only exists in Build; nothing paints, drags, or opens the pixel
+  // editor while appMode is "play".
+  let appMode = "build"; // "build" | "play"
+  let buildSnapshot = null; // { rooms, doorLinks, gravityEnabled, wrapHEnabled, wrapVEnabled, currentRoomId, playerRoomId }
+  const DEFAULT_LIVES = 3;
+  let lives = DEFAULT_LIVES;
+  let playSessionEnded = null; // null while playing; "win" or "lose" once a session resolves — freezes the frame loop
+
   let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
   let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
@@ -468,6 +504,64 @@
     activateRoom(first.id);
   }
   initBoard();
+
+  // ============== Build / Play mode switching ==============
+  // Entering Play stashes the live rooms/rules aside in buildSnapshot — a pristine copy taken
+  // at that instant — then keeps mutating the SAME live rooms/board/actors as the actual
+  // session being played (identical to how a single room's board is already mutated during any
+  // ordinary test run). Exiting restores from that untouched snapshot rather than whatever Play
+  // left behind; "Play" clicked again mid-session re-derives a fresh session from the same
+  // snapshot rather than the just-played (and possibly mid-game-over) live state, so repeated
+  // "try again" clicks always restart from the true original build, not accumulated play state.
+  function clearTransientRuntimeState() {
+    animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
+    digProgress = {}; bombArmed = {}; roomTransition = null;
+  }
+  function enterPlayMode() {
+    if (playerRoomId == null) { log("Place a player first!"); return; }
+    buildSnapshot = {
+      rooms: structuredClone(rooms), doorLinks: structuredClone(doorLinks),
+      gravityEnabled, wrapHEnabled, wrapVEnabled,
+      currentRoomId, playerRoomId
+    };
+    appMode = "play";
+    restartPlaySessionFromSnapshot();
+    document.body.classList.add("play-mode");
+    updateModeButtons();
+  }
+  function restartPlaySessionFromSnapshot() {
+    currentRoomId = null; // so activateRoom() below doesn't try to save stale live state into the freshly-cloned rooms
+    rooms = structuredClone(buildSnapshot.rooms);
+    doorLinks = structuredClone(buildSnapshot.doorLinks);
+    gravityEnabled = buildSnapshot.gravityEnabled;
+    wrapHEnabled = buildSnapshot.wrapHEnabled;
+    wrapVEnabled = buildSnapshot.wrapVEnabled;
+    playerRoomId = buildSnapshot.playerRoomId;
+    activateRoom(playerRoomId);
+    lives = DEFAULT_LIVES;
+    playSessionEnded = null;
+    resetScoreAndIntensity();
+    clearTransientRuntimeState();
+    renderAll();
+    log("Play started!");
+  }
+  function exitToBuildMode() {
+    currentRoomId = null; // same reason as above — avoid saving live Play state into the restored rooms
+    rooms = buildSnapshot.rooms;
+    doorLinks = buildSnapshot.doorLinks;
+    gravityEnabled = buildSnapshot.gravityEnabled;
+    wrapHEnabled = buildSnapshot.wrapHEnabled;
+    wrapVEnabled = buildSnapshot.wrapVEnabled;
+    playerRoomId = buildSnapshot.playerRoomId;
+    activateRoom(buildSnapshot.currentRoomId);
+    buildSnapshot = null;
+    appMode = "build";
+    playSessionEnded = null;
+    clearTransientRuntimeState();
+    document.body.classList.remove("play-mode");
+    updateModeButtons();
+    renderAll();
+  }
 
   function makeDefaultArt(hex) { return new Array(ART * ART).fill(hex); }
 
@@ -717,7 +811,8 @@
     shot: () => beep(700, 0.06, "sawtooth", 0.22),
     fuse: () => beep(1000, 0.05, "square", 0.12),
     boom: () => { beep(80, 0.3, "sawtooth", 0.25); setTimeout(() => beep(50, 0.25, "sawtooth", 0.2), 60); },
-    warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); }
+    warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); },
+    gameOver: () => { beep(300, 0.15, "sawtooth", 0.2); setTimeout(() => beep(220, 0.15, "sawtooth", 0.2), 150); setTimeout(() => beep(140, 0.35, "sawtooth", 0.22), 300); }
   };
 
   function log(msg) {
@@ -1084,6 +1179,8 @@
   }
 
   function updateModeButtons() {
+    document.getElementById("modeBuildBtn").classList.toggle("active", appMode === "build");
+    document.getElementById("modePlayBtn").classList.toggle("active", appMode === "play");
     document.getElementById("modeBackground").classList.toggle("active", paintMode === "background");
     document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
     document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
@@ -1098,6 +1195,16 @@
       document.getElementById("editingLabel").textContent = paintMode === "actor" ? selectedActorKind : "background";
     }
   }
+
+  document.getElementById("modeBuildBtn").addEventListener("click", () => {
+    if (appMode === "build") return;
+    exitToBuildMode();
+  });
+  document.getElementById("modePlayBtn").addEventListener("click", () => {
+    // clicking Play while already playing is "try again" — restart fresh from the same snapshot
+    if (appMode === "build") enterPlayMode();
+    else restartPlaySessionFromSnapshot();
+  });
 
   document.getElementById("modeBackground").addEventListener("click", () => {
     paintMode = "background";
@@ -1365,7 +1472,13 @@
     return actors.filter(a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible"; }).length;
   }
 
+  // goal and full collection both funnel through here — one completion reaction, two ways to
+  // reach it. In Build mode this stays exactly the tinkering reset it's always been. In Play,
+  // completing a room's win condition ends the whole session as a win: since a room graph can
+  // branch or loop in ways this pass doesn't try to interpret, every room's own win condition
+  // doubles as the game's win condition, rather than guessing at "the next room".
   function roundComplete() {
+    if (appMode === "play") { triggerWin(); return; }
     intensity++;
     const player = actors.find(a => a.isPlayer);
     if (player) {
@@ -1380,6 +1493,38 @@
     log("Round complete!");
   }
   function maybeRoundCompleteFromCollectibles() { if (countCollectibles() === 0) roundComplete(); }
+
+  // Ends a Play session in victory — distinct from Build's reset-and-keep-tinkering loop, and
+  // distinct from a mid-game reset with lives remaining: this freezes the session (see frame())
+  // until the kid presses Play again.
+  function triggerWin() {
+    if (playSessionEnded) return;
+    playSessionEnded = "win";
+    sounds.celebrate();
+    const player = actors.find(a => a.isPlayer);
+    if (player) playRecipe(player, "celebrationBurst");
+    log("You win!");
+    renderPlayHUD();
+  }
+
+  // The only place lives are ever spent. Build mode never calls this path at all in practice,
+  // but the guard is here anyway so the exact same trigger functions (triggerHazard, the
+  // chaser-catch branch) can call this unconditionally regardless of mode.
+  function consumeLifeIfPlaying() {
+    if (appMode !== "play" || playSessionEnded) return false;
+    lives--;
+    renderPlayHUD();
+    if (lives <= 0) { triggerGameOver(); return true; }
+    return false;
+  }
+
+  function triggerGameOver() {
+    if (playSessionEnded) return;
+    playSessionEnded = "lose";
+    sounds.gameOver();
+    log("Game over!");
+    renderPlayHUD();
+  }
 
   // Resolves contact between two actors, regardless of which one physically moved into the
   // other (player input, editor drag, or AI steering) — reaction is keyed by whichever actor
@@ -1406,9 +1551,15 @@
     } else if (temperament === "chaser") {
       sounds.gotcha();
       playRecipe(playerActor, "caughtPunt");
-      log("Caught! Off you go...");
+      // Build mode: consumeLifeIfPlaying() is a no-op (returns false) and this plays out exactly
+      // as it always has. Play mode: this is one of the two events that cost a life; at zero
+      // lives the punt still plays (it's still a satisfying hit), but the respawn below is
+      // skipped in favor of the game-over screen taking over instead.
+      const causedGameOver = consumeLifeIfPlaying();
+      log(causedGameOver ? "Caught! Game over." : "Caught! Off you go...");
       const resetPos = { x: startPos.x, y: startPos.y };
       setTimeout(() => {
+        if (causedGameOver) return;
         playerActor.x = resetPos.x; playerActor.y = resetPos.y;
         playerActor.vx = 0; playerActor.vy = 0;
         playRecipe(playerActor, "caughtBounceIn");
@@ -1474,6 +1625,7 @@
     actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
     log("Ouch! Hazard knockback.");
+    consumeLifeIfPlaying(); // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — no isPlayer guard needed
   }
 
   // none+bouncy launches on entry, matching the original top-down "step on it, get launched"
@@ -2082,6 +2234,7 @@
   }
 
   gameCanvas.addEventListener("mousedown", (e) => {
+    if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
     if (paintMode === "actor") {
@@ -2110,6 +2263,7 @@
   });
 
   gameCanvas.addEventListener("touchstart", (e) => {
+    if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
     if (paintMode === "actor") {
@@ -2165,14 +2319,13 @@
   document.getElementById("clearAllBtn").addEventListener("click", () => {
     if (!confirm("Clear everything? This removes every room, door, tile, and actor and starts over with one empty room.")) return;
     initBoard();
-    animState = {};
-    tileAnimState = {};
-    actorContactCooldown = {};
-    dragContactCooldown = {};
-    digProgress = {};
-    bombArmed = {};
+    clearTransientRuntimeState();
     resetScoreAndIntensity();
     renderAll();
+  });
+
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    exportStandaloneGame();
   });
 
   updateModeButtons();
@@ -2369,15 +2522,41 @@
 
     renderRoomContents(gctx, board, backgroundBoard);
 
-    if (isCanvasEmpty()) drawEmptySocketCue(performance.now());
-
-    if (actors.some(a => a.isPlayer)) {
-      gctx.strokeStyle = "rgba(255,209,102,0.7)";
-      gctx.lineWidth = 1.5;
-      gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+    // The empty-socket cue and the start-position outline are Build-only editing affordances —
+    // Play just shows the game itself.
+    if (appMode === "build") {
+      if (isCanvasEmpty()) drawEmptySocketCue(performance.now());
+      if (actors.some(a => a.isPlayer)) {
+        gctx.strokeStyle = "rgba(255,209,102,0.7)";
+        gctx.lineWidth = 1.5;
+        gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+      }
     }
 
     renderActors(gctx, actors);
+
+    if (appMode === "play" && playSessionEnded) drawPlaySessionEndOverlay();
+  }
+
+  // Win and game-over both get a real screen — distinct from a mid-game reset, per the point
+  // of tracking lives at all. Drawn straight on the canvas, matching how every other piece of
+  // feedback in this toy already works, rather than a separate DOM overlay.
+  function drawPlaySessionEndOverlay() {
+    const isWin = playSessionEnded === "win";
+    gctx.save();
+    gctx.fillStyle = "rgba(10,10,14,0.78)";
+    gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+    gctx.textAlign = "center";
+    gctx.fillStyle = isWin ? "#ffd166" : "#ef5350";
+    gctx.font = "bold 42px sans-serif";
+    gctx.fillText(isWin ? "YOU WIN!" : "GAME OVER", gameCanvas.width / 2, gameCanvas.height / 2 - 12);
+    gctx.fillStyle = "#f2f2f2";
+    gctx.font = "18px sans-serif";
+    gctx.fillText("Score: " + score, gameCanvas.width / 2, gameCanvas.height / 2 + 26);
+    gctx.font = "14px sans-serif";
+    gctx.fillStyle = "#bbb";
+    gctx.fillText("Press ▶ Play to try again", gameCanvas.width / 2, gameCanvas.height / 2 + 52);
+    gctx.restore();
   }
 
   // Which hand-drawn pose reads correctly for a posed actor's current physical state —
@@ -2439,6 +2618,16 @@
     });
   }
 
+  // Minimal Play HUD — lives and score, nothing more. Lives only ever show in Play mode; score
+  // was already shown in Build for ordinary tinkering feedback and keeps being shown there too.
+  function renderPlayHUD() {
+    const livesRow = document.getElementById("livesRow");
+    livesRow.style.display = appMode === "play" ? "inline" : "none";
+    document.getElementById("livesVal").textContent = lives;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = score;
+  }
+
   function renderAll() {
     renderBackgroundSwatches();
     renderGeometrySwatches();
@@ -2450,11 +2639,210 @@
     renderPoseTabs();
     renderPixelCanvas();
     renderRoomTabs();
+    renderPlayHUD();
   }
 
   renderColorRow();
   renderPixelCanvas();
   renderAll();
+
+  // ============== Export: standalone playable file ==============
+  // The exported file is a second, self-contained HTML document: the current build's data
+  // (rooms/tiles/actors/backgrounds) plus just enough runtime to play it, with every editor
+  // surface (palette, pixel editor, room tabs, paint handlers) left out entirely. Rather than
+  // hand-duplicating the physics/rendering/reaction logic into a parallel copy that could drift
+  // from this one, the runtime functions below are reused by literal source (fn.toString()) —
+  // the exported game runs the exact same code, not a re-implementation of it. Hardcoding
+  // `appMode = "play"` in the exported scope is what makes that safe: every Build/Play branch
+  // already written into these functions (roundComplete, consumeLifeIfPlaying, renderGame,
+  // the canvas input guard) resolves to its Play behavior automatically, with no per-function
+  // rewriting needed. A few functions call palette-only UI refreshers as a side effect in the
+  // live tool (triggerFlip, beginRoomTransition) — those two calls are stubbed to no-ops in the
+  // export, since there's no palette to refresh.
+  function exportStandaloneGame() {
+    if (playerRoomId == null) { log("Place a player first — nothing to export yet."); return; }
+
+    const gameData = {
+      rooms: structuredClone(rooms),
+      doorLinks: structuredClone(doorLinks),
+      gravityEnabled, wrapHEnabled, wrapVEnabled,
+      playerRoomId,
+      actorDefs: structuredClone(actorDefs),
+      backgroundTileDefs: structuredClone(backgroundTileDefs)
+    };
+
+    const runtimeFunctions = [
+      geometryAt, modifierAt, isBlockingGeometry, gravityOn, applyWorldWrap,
+      overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction,
+      resolveAxis, triggerImpact, impactWobbleValue, gameplayTileAt,
+      countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
+      reflectActorsApart, pushApart, triggerHazard, triggerBouncyLaunch, triggerTrap,
+      triggerGoal, triggerFlip, triggerCannon, triggerBombArm, detonateBombAt, triggerWarp,
+      checkPlayerTileContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
+      activateRoom, triggerDoor, beginRoomTransition,
+      stepActor, tick,
+      drawArtScaled, drawGameplayTile, renderRoomContents, renderActors,
+      currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
+      playRecipe, sampleRecipe,
+      getAudioCtx, beep,
+      log, addScore, roomCellKey, gameplayKey, frame
+    ];
+    const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
+
+    const soundsSource = "const sounds = {\n" +
+      Object.keys(sounds).map(name => "    " + JSON.stringify(name) + ": " + sounds[name].toString()).join(",\n") +
+      "\n  };";
+
+    const constantsSource = [
+      `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
+      `const ACTOR_SIZE = ${ACTOR_SIZE};`,
+      `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
+      `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
+      `const CANNON_ORDER = ${JSON.stringify(CANNON_ORDER)};`,
+      `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
+      `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
+      `const CANNON_DIRECTIONS = ${JSON.stringify(CANNON_DIRECTIONS)};`,
+      `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
+      `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
+      `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
+      `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
+      `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
+      `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION};`,
+      `const BOUNCY_LAUNCH_SPEED = ${BOUNCY_LAUNCH_SPEED}, HAZARD_KNOCKBACK_SPEED = ${HAZARD_KNOCKBACK_SPEED};`,
+      `const HAZARD_COOLDOWN_MS = ${HAZARD_COOLDOWN_MS}, DIG_DURATION_MS = ${DIG_DURATION_MS};`,
+      `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
+      `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
+      `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
+      `const IMPACT_WOBBLE_FREQ = ${IMPACT_WOBBLE_FREQ}, IMPACT_WOBBLE_DECAY = ${IMPACT_WOBBLE_DECAY};`,
+      `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
+      `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
+      `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
+      `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
+      `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
+      `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
+      `const RECIPES = ${JSON.stringify(RECIPES)};`,
+      `const appMode = "play"; // exported games are always Play — there is no Build mode here`
+    ].join("\n  ");
+
+    const html = buildExportHTMLDocument(gameData, constantsSource, soundsSource, functionSource);
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-game.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log("Exported! Check your downloads for my-game.html");
+  }
+
+  function buildExportHTMLDocument(gameData, constantsSource, soundsSource, functionSource) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Game</title>
+<style>
+  :root { --bg:#1e1f26; --panel:#2a2c37; --panel-light:#383b4a; --accent:#ffd166; --text:#f2f2f2; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Verdana,sans-serif; user-select:none; -webkit-user-select:none; }
+  #wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px; }
+  #gameCanvas { background:#000; image-rendering:pixelated; border:3px solid var(--panel-light); border-radius:4px; touch-action:none; }
+  #hud { font-size:16px; font-weight:bold; color:var(--accent); }
+  #dpad { display:grid; grid-template-columns:repeat(3,48px); grid-template-rows:repeat(3,48px); gap:4px; }
+  #dpad button { background:var(--panel-light); color:var(--text); border:none; border-radius:8px; font-size:20px; cursor:pointer; }
+  #dpad button:active { background:var(--accent); color:#222; }
+  .dpad-up{grid-column:2;grid-row:1;} .dpad-left{grid-column:1;grid-row:2;} .dpad-right{grid-column:3;grid-row:2;} .dpad-down{grid-column:2;grid-row:3;}
+  #log { font-size:12px; color:#bbb; max-height:50px; overflow-y:auto; width:768px; max-width:100%; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud"><span id="livesRow">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
+  <canvas id="gameCanvas" width="768" height="576"></canvas>
+  <div id="dpad">
+    <button class="dpad-up" data-dir="up">▲</button>
+    <button class="dpad-left" data-dir="left">◀</button>
+    <button class="dpad-right" data-dir="right">▶</button>
+    <button class="dpad-down" data-dir="down">▼</button>
+  </div>
+  <div id="log"></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  const GAME_DATA = ${JSON.stringify(gameData)};
+
+  ${constantsSource}
+  ${soundsSource}
+
+  let audioCtx = null;
+
+  let rooms = GAME_DATA.rooms;
+  let doorLinks = GAME_DATA.doorLinks;
+  let gravityEnabled = GAME_DATA.gravityEnabled;
+  let wrapHEnabled = GAME_DATA.wrapHEnabled;
+  let wrapVEnabled = GAME_DATA.wrapVEnabled;
+  let playerRoomId = GAME_DATA.playerRoomId;
+  let actorDefs = GAME_DATA.actorDefs;
+  let backgroundTileDefs = GAME_DATA.backgroundTileDefs;
+
+  let currentRoomId = null;
+  let board = [], backgroundBoard = [], actors = [], startPos = { x: 0, y: 0 };
+  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
+  let actorContactCooldown = {}, dragContactCooldown = {};
+  let roomTransition = null;
+  let score = 0, intensity = 0;
+  let lives = DEFAULT_LIVES;
+  let playSessionEnded = null;
+  const wanderHeadings = {};
+
+  function addScore(n) {
+    score += n;
+    const el = document.getElementById("scoreVal");
+    if (el) el.textContent = score;
+  }
+
+  // No palette exists in the exported game — these are called as a side effect by a couple of
+  // reactions in the shared runtime code but have nothing to refresh here.
+  function renderGameRuleSwatches() {}
+  function renderRoomTabs() {}
+
+  ${functionSource}
+
+  const gameCanvas = document.getElementById("gameCanvas");
+  const gctx = gameCanvas.getContext("2d");
+
+  activateRoom(playerRoomId);
+  renderPlayHUD();
+
+  const keys = {};
+  window.addEventListener("keydown", (e) => {
+    const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
+    if (map.includes(e.key)) e.preventDefault();
+    keys[e.key] = true;
+  });
+  window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+  function dirKey(dir) { return { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[dir]; }
+  document.querySelectorAll("#dpad button").forEach(btn => {
+    btn.addEventListener("mousedown", () => { keys[dirKey(btn.dataset.dir)] = true; });
+    btn.addEventListener("mouseup", () => { keys[dirKey(btn.dataset.dir)] = false; });
+    btn.addEventListener("mouseleave", () => { keys[dirKey(btn.dataset.dir)] = false; });
+    btn.addEventListener("touchstart", (e) => { keys[dirKey(btn.dataset.dir)] = true; e.preventDefault(); }, { passive: false });
+    btn.addEventListener("touchend", (e) => { keys[dirKey(btn.dataset.dir)] = false; e.preventDefault(); }, { passive: false });
+  });
+
+  let lastT = performance.now();
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>`;
+  }
 
   // ============== Main loop ==============
   let lastT = performance.now();
@@ -2464,6 +2852,8 @@
     dt = Math.min(dt, 0.033);
     if (roomTransition) {
       if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
+    } else if (appMode === "play" && playSessionEnded) {
+      // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
     } else {
       tick(dt);
       tickDragCooldowns(dt);
