@@ -173,6 +173,10 @@
     max-width: 260px;
     line-height: 1.4;
   }
+  /* Deliberately understated — two small text links, not a featured "Examples" section, so
+     opening the tool still leads with the blank canvas rather than a set of choices. */
+  #startersHint a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  #startersHint a:hover { text-decoration: underline; }
 
   #log {
     font-size: 12px;
@@ -277,6 +281,11 @@
       Geometry/modifier tiles use small built-in icons — no drawing needed, so they always
       read the same way. Backgrounds and actors are yours to draw. The grid is always live —
       no separate play mode.
+    </div>
+
+    <div class="hint" id="startersHint">
+      Or start from someone else's build: <a href="#" id="loadCheeseHeist">The Cheese Heist</a>
+      · <a href="#" id="loadTunnelTrouble">Tunnel Trouble</a>
     </div>
   </div>
 
@@ -416,7 +425,7 @@
   let playerRoomId = null;   // which room the player actually resides in (may differ from currentRoomId)
   let doorLinks = {};       // "roomId:x,y" -> {toRoomId, toX, toY}
   function roomCellKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
-  let digProgress = {};     // roomCellKey -> ms of sustained contact accumulated eroding a diggable wall
+  let digProgress = {};     // roomCellKey -> ms of sustained digging (holding Down) accumulated eroding a diggable wall
   let bombArmed = {};       // roomCellKey -> true while a bomb's fuse is lit
 
   // ============== Build / Play (v2.7) ==============
@@ -770,6 +779,200 @@
       "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM"
     ], { M: "#616161" }) }
   ];
+
+  // ============== Built-in example games (v2.8) ==============
+  // Two small, hand-authored starting points a kid can open straight into Build mode and
+  // immediately take apart — not a gallery to browse, just two low-key links (see
+  // #startersHint). Their own actor looks get their own defs here, rather than reskinning the
+  // shared TEMPERAMENTS defaults, so loading an example never changes what a plain
+  // "collectible"/"chaser" swatch looks like for anyone who hasn't touched them.
+  const EXAMPLE_CHEESE_DEF_ID = "exCheese";
+  const EXAMPLE_CAT_DEF_ID = "exCat";
+  actorDefs[EXAMPLE_CHEESE_DEF_ID] = {
+    temperament: "collectible", name: "cheese", poses: null,
+    art: pat([
+      "..MMMMMM", ".MMMMMMM", "MMMMMMMM", "MMM.MMMM",
+      "MM.MM.MM", "MMMMMMMM", "MMMMMMM.", ".MMMMMM."
+    ], { M: "#ffca28" })
+  };
+  actorDefs[EXAMPLE_CAT_DEF_ID] = {
+    temperament: "chaser", name: "cat", poses: null,
+    art: pat([
+      "M......M", "MM....MM", ".MMMMMM.", "MK.MM.KM",
+      "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
+    ], { M: "#ef5350", K: "#2b2b2b" })
+  };
+
+  // Places one actor of the given def at a cell's center, the same way a kid's own click would
+  // (reuses placeNewActor itself, so the player-singleton cleanup / startPos / playerRoomId
+  // bookkeeping it already does happens automatically here too — no separate path to keep in
+  // sync). Swaps selectedActorDefId in and back out so it doesn't leak into whatever the kid
+  // had selected before loading an example.
+  function placeExampleActor(defId, cx, cy) {
+    const prev = selectedActorDefId;
+    selectedActorDefId = defId;
+    const actor = placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2);
+    selectedActorDefId = prev;
+    return actor;
+  }
+
+  // A maze of solid pillars: 2x2 blocks on a 4-cell grid, leaving 2-wide corridors — reads as
+  // "a maze" without needing a hand-typed layout. Deterministic, so the same example loads the
+  // same way every time.
+  function paintWaffleMaze(x0, y0, x1, y1) {
+    for (let by = y0; by + 1 <= y1; by += 4) {
+      for (let bx = x0; bx + 1 <= x1; bx += 4) {
+        board[by][bx] = gameplayKey("solid", "none");
+        board[by][bx + 1] = gameplayKey("solid", "none");
+        board[by + 1][bx] = gameplayKey("solid", "none");
+        board[by + 1][bx + 1] = gameplayKey("solid", "none");
+      }
+    }
+  }
+
+  // Top-down maze, gravity off, win by gathering every cheese — the toolset's collect-and-chase
+  // range, deliberately built with nothing beyond what a kid already has in the palette.
+  function buildCheeseHeistGame() {
+    const room = createEmptyRoom("The Cheese Heist");
+    rooms.push(room);
+    activateRoom(room.id);
+    gravityEnabled = false; wrapHEnabled = false; wrapVEnabled = false;
+
+    for (let x = 0; x < COLS; x++) {
+      board[0][x] = gameplayKey("solid", "none");
+      board[ROWS - 1][x] = gameplayKey("solid", "none");
+    }
+    for (let y = 0; y < ROWS; y++) {
+      board[y][0] = gameplayKey("solid", "none");
+      board[y][COLS - 1] = gameplayKey("solid", "none");
+    }
+    paintWaffleMaze(2, 2, COLS - 2, ROWS - 2);
+
+    const playerCell = { x: 12, y: 15 };
+    const catCells = [{ x: 10, y: 8 }, { x: 13, y: 9 }];
+    // guarantee these spawn cells are open corridor regardless of where the maze pattern fell
+    [playerCell, ...catCells].forEach(c => { board[c.y][c.x] = null; });
+
+    const skip = new Set([playerCell, ...catCells].map(c => c.x + "," + c.y));
+    for (let y = 1; y <= ROWS - 2; y += 2) {
+      for (let x = 1; x <= COLS - 2; x += 2) {
+        if (board[y][x]) continue; // a wall cell
+        if (skip.has(x + "," + y)) continue;
+        placeExampleActor(EXAMPLE_CHEESE_DEF_ID, x, y);
+      }
+    }
+    catCells.forEach(c => placeExampleActor(EXAMPLE_CAT_DEF_ID, c.x, c.y));
+    placeExampleActor(PLAYER_DEF_ID, playerCell.x, playerCell.y);
+
+    activateRoom(room.id);
+    return room;
+  }
+
+  // Gravity-on descent through two rooms — the toolset's platforming/rooms range. A diggable
+  // gate to tunnel through, a gap that only a jump clears, a cat on patrol in each room, and a
+  // cannon near the end as a "these exist too" flourish, all on the way to a goal tile.
+  function buildTunnelTroubleGame() {
+    gravityEnabled = true; wrapHEnabled = false; wrapVEnabled = false;
+
+    const groundBg = Object.keys(backgroundTileDefs)[0]; // the built-in "ground" background
+
+    // ---- Room 1: "Topside" ----
+    const room1 = createEmptyRoom("Topside");
+    rooms.push(room1);
+    activateRoom(room1.id);
+    for (let x = 0; x < COLS; x++) { board[0][x] = gameplayKey("solid", "none"); }
+    for (let y = 0; y < ROWS; y++) {
+      board[y][0] = gameplayKey("solid", "none");
+      board[y][COLS - 1] = gameplayKey("solid", "none");
+    }
+    // ground floor, walking level is the row above it (row 12)
+    for (let x = 1; x < COLS - 1; x++) {
+      board[13][x] = gameplayKey("solid", "none");
+      backgroundBoard[13][x] = groundBg;
+    }
+    // a diggable gate blocking the corridor near the start — tunnel through it to continue.
+    // The floor at column 8 stays solid (already painted by the loop above); only the walking
+    // row above it becomes a wall.
+    board[12][8] = gameplayKey("diggable", "none");
+    // a gap in the floor only a jump clears cleanly — walking in instead drops you one tile
+    // onto a safety floor you can still hop back up from, rather than a bottomless pit with no
+    // way out (a jump only reaches ~132px, so anything deeper than one 32px tile would strand
+    // the player for good)
+    board[13][11] = null;
+    board[13][12] = null;
+    backgroundBoard[13][11] = null; // clear the ground texture the floor loop above left behind —
+    backgroundBoard[13][12] = null; // it's open air here now, not decorated floor
+    board[14][11] = gameplayKey("solid", "none");
+    board[14][12] = gameplayKey("solid", "none");
+    backgroundBoard[14][11] = groundBg;
+    backgroundBoard[14][12] = groundBg;
+    // continue the floor past the gap
+    for (let x = 13; x < COLS - 1; x++) {
+      board[13][x] = gameplayKey("solid", "none");
+      backgroundBoard[13][x] = groundBg;
+    }
+    // a door onward to room 2, near the end of this room's corridor
+    const doorOut = { x: 20, y: 12 };
+    board[doorOut.y][doorOut.x] = gameplayKey("door", "none");
+
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 16, 12);
+    placeExampleActor(PLAYER_DEF_ID, 2, 12);
+
+    // ---- Room 2: "The Dig" ----
+    // The cannon's launch speed is uncapped while it's still recently fired (see
+    // stepActor's recentlyLaunched exemption), so it can send the player rocketing an
+    // unpredictable distance if a kid holds a direction key through the whole arc — nowhere
+    // near precise enough to land on a specific target tile. Rather than fight that, the
+    // cannon here sits off the main floor entirely (in a niche a couple of tiles overhead,
+    // only reachable by jumping up into it) so it's there to discover and play with without
+    // gating the ordinary walk to the goal at all.
+    const room2 = createEmptyRoom("The Dig");
+    rooms.push(room2);
+    activateRoom(room2.id);
+    for (let x = 0; x < COLS; x++) { board[0][x] = gameplayKey("solid", "none"); }
+    for (let y = 0; y < ROWS; y++) {
+      board[y][0] = gameplayKey("solid", "none");
+      board[y][COLS - 1] = gameplayKey("solid", "none");
+    }
+    for (let x = 1; x < COLS - 1; x++) {
+      board[13][x] = gameplayKey("solid", "none");
+      backgroundBoard[13][x] = groundBg;
+    }
+    // the room's own entrance door, on the opposite side from the goal so there's a real
+    // corridor to walk down
+    const doorIn = { x: 2, y: 12 };
+    board[doorIn.y][doorIn.x] = gameplayKey("door", "none");
+    board[10][10] = gameplayKey("cannon-ne", "none"); // a jump-up-and-try-it niche, off the walking row
+    board[12][21] = gameplayKey("goal", "none");
+
+    doorLinks[roomCellKey(room1.id, doorOut.x, doorOut.y)] = { toRoomId: room2.id, toX: doorIn.x, toY: doorIn.y };
+    doorLinks[roomCellKey(room2.id, doorIn.x, doorIn.y)] = { toRoomId: room1.id, toX: doorOut.x, toY: doorOut.y };
+
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 14, 12);
+
+    activateRoom(room1.id);
+    return room1;
+  }
+
+  // Shared by both "load an example" links: wipes the current build (same destructive-action
+  // confirm as Clear board, since this replaces everything just as thoroughly) and installs the
+  // requested example, still in Build mode — a kid should land in the middle of a build already
+  // in progress, not a demo reel.
+  function loadExampleGame(builderFn, label) {
+    if (appMode !== "build") return;
+    if (!confirm("Load \"" + label + "\"? This replaces everything currently on the board.")) return;
+    rooms = [];
+    nextRoomId = 1;
+    doorLinks = {};
+    currentRoomId = null;
+    playerRoomId = null;
+    builderFn();
+    clearTransientRuntimeState();
+    resetScoreAndIntensity();
+    selectActorKind("player");
+    renderAll();
+    log("Loaded: " + label + ". Take it apart, or just play it.");
+  }
 
   // ============== Audio (simple beeps) ==============
   let audioCtx = null;
@@ -1385,17 +1588,19 @@
   // (with restitution) instead of zeroing it — a real bounce, not a scripted launch — and
   // only for the player; NPCs only ever react to geometry, never to modifiers. `hazard` on
   // blocking geometry (a spike floor) hurts right where contact happens, same function,
-  // regardless of which side was hit. A diggable wall the player is pressed against erodes a
-  // little every frame contact continues, and gives way once fully worn down — see
-  // DIG_DURATION_MS. Progress is keyed by room+cell and never decays on its own, so stepping
-  // away and coming back later resumes right where digging left off.
+  // regardless of which side was hit. A diggable wall only erodes while the player is actively
+  // digging at it — holding Down is the one dig action, regardless of which side of the wall
+  // it's pressed against, so a kid can lean on a diggable wall all day without it giving way by
+  // accident. Sustained digging wears it down over DIG_DURATION_MS. Progress is keyed by
+  // room+cell and never decays on its own, so stepping away and coming back later (or standing
+  // there without digging) resumes right where digging left off.
   function resolveAxis(actor, axis, dt) {
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         let geometry = geometryAt(cx, cy);
-        if (geometry === "diggable" && actor.isPlayer) {
+        if (geometry === "diggable" && actor.isPlayer && (keys["ArrowDown"] || keys["s"] || keys["S"])) {
           const key = roomCellKey(currentRoomId, cx, cy);
           const progress = (digProgress[key] || 0) + dt * 1000;
           if (progress >= DIG_DURATION_MS) {
@@ -2331,6 +2536,15 @@
 
   document.getElementById("exportBtn").addEventListener("click", () => {
     exportStandaloneGame();
+  });
+
+  document.getElementById("loadCheeseHeist").addEventListener("click", (e) => {
+    e.preventDefault();
+    loadExampleGame(buildCheeseHeistGame, "The Cheese Heist");
+  });
+  document.getElementById("loadTunnelTrouble").addEventListener("click", (e) => {
+    e.preventDefault();
+    loadExampleGame(buildTunnelTroubleGame, "Tunnel Trouble");
   });
 
   updateModeButtons();
