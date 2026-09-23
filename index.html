@@ -669,7 +669,13 @@
   }
   const sounds = {
     footstep: () => beep(220, 0.05, "square", 0.05),
-    thud: () => beep(90, 0.18, "square", 0.2),
+    // scaled to impact magnitude (0-1): a light hop is a soft, high tap; a fall from height
+    // is a deep, loud, longer-ringing thud. mag is optional — other callers (an editor drag
+    // bump) get the old fixed mid-strength thud by omitting it.
+    thud: (mag) => {
+      const m = mag === undefined ? 0.5 : mag;
+      beep(150 - m * 90, 0.08 + m * 0.16, "square", 0.1 + m * 0.22);
+    },
     yelp: () => beep(600, 0.15, "sawtooth", 0.2),
     boing: () => { beep(300, 0.1, "sine", 0.2); setTimeout(() => beep(500, 0.1, "sine", 0.15), 60); },
     boop: () => beep(440, 0.08, "triangle", 0.15),
@@ -729,10 +735,23 @@
       { t: 0.5, sx: 1.3, sy: 1.3, rot: 0.2, ox: 0, oy: 0, alpha: 0.7 },
       { t: 1, sx: 1.8, sy: 1.8, rot: 0.4, ox: 0, oy: 0, alpha: 0 }
     ]},
-    caughtSquashFade: { duration: 300, keyframes: [
+    // A chaser catch used to be a flat teleport-to-start with a generic squash-fade — the
+    // least funny beat in the whole reaction table even as everything around it got more
+    // expressive. This is its own two-part joke instead: caughtPunt launches the player
+    // offscreen (a quick "oof" squash, then an arcing, spinning, shrinking exit), and
+    // caughtBounceIn plays once they're actually repositioned at start, landing with a
+    // spring-back bounce rather than just quietly reappearing.
+    caughtPunt: { duration: 450, keyframes: [
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
-      { t: 0.5, sx: 1.4, sy: 0.4, rot: 0, ox: 0, oy: 0.3, alpha: 0.8 },
-      { t: 1, sx: 0.6, sy: 0.6, rot: 0, ox: 0, oy: 0.1, alpha: 0 }
+      { t: 0.2, sx: 1.4, sy: 0.5, rot: -0.1, ox: 0, oy: 0.15, alpha: 1 },
+      { t: 0.55, sx: 0.6, sy: 0.6, rot: 2, ox: 0.35, oy: -1, alpha: 0.5 },
+      { t: 1, sx: 0.15, sy: 0.15, rot: 4, ox: 0.7, oy: -1.9, alpha: 0 }
+    ]},
+    caughtBounceIn: { duration: 350, keyframes: [
+      { t: 0, sx: 0.3, sy: 0.3, rot: -0.2, ox: 0, oy: 0.3, alpha: 0.4 },
+      { t: 0.45, sx: 1.3, sy: 0.7, rot: 0.1, ox: 0, oy: -0.15, alpha: 1 },
+      { t: 0.75, sx: 0.85, sy: 1.15, rot: -0.05, ox: 0, oy: 0.05, alpha: 1 },
+      { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
     ]},
     celebrationBurst: { duration: 500, keyframes: [
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
@@ -1277,16 +1296,36 @@
     }
   }
 
-  // Physics-driven impact squash: magnitude scales with the incoming speed on that axis —
+  // Physics-driven impact deformation: magnitude scales with the incoming speed on that axis —
   // a light bump barely dips, a hard fall/collision flattens hard. No fixed animation plays;
-  // this just seeds a decaying value that the renderer reads every frame.
+  // this just seeds a damped oscillation (impactMag + impactWobbleT) that the renderer samples
+  // every frame via impactWobbleValue() — compress, then settle past neutral into a slight
+  // overshoot, then a couple of decaying wobbles before coming to rest. Same input as before
+  // (impact velocity), one more stage in the same curve.
+  const IMPACT_WOBBLE_FREQ = 18;  // rad/s — how fast the follow-through wobbles back and forth
+  const IMPACT_WOBBLE_DECAY = 9;  // 1/s — how fast the wobble's amplitude dies out
+  // Gravity re-adds itself to a resting actor's vy every single frame before resolveAxis
+  // clamps it back down — that's a real, constant, ~0.09-magnitude "impact" by this function's
+  // own math, forever, for as long as anything sits on a floor under gravity. Below this floor
+  // it's equilibrium noise, not a hit worth a sound or a fresh wobble; a genuine landing (even
+  // a light one) clears it easily, since a mere one-tile fall already saturates mag toward 1.
+  const IMPACT_NOISE_FLOOR = 0.15;
+  function impactWobbleValue(actor) {
+    if (!actor.impactMag) return 0;
+    return actor.impactMag * Math.exp(-IMPACT_WOBBLE_DECAY * actor.impactWobbleT) * Math.cos(IMPACT_WOBBLE_FREQ * actor.impactWobbleT);
+  }
   function triggerImpact(actor, axis, incomingSpeed) {
     const mag = Math.min(1, Math.abs(incomingSpeed) / 260);
-    if (mag > (actor.impactAxis === axis ? actor.impactSquash : 0)) {
-      actor.impactSquash = mag;
+    if (mag <= IMPACT_NOISE_FLOOR) return;
+    const currentEnvelope = actor.impactAxis === axis
+      ? actor.impactMag * Math.exp(-IMPACT_WOBBLE_DECAY * actor.impactWobbleT) : 0;
+    if (mag > currentEnvelope) {
+      actor.impactMag = mag;
+      actor.impactWobbleT = 0;
       actor.impactAxis = axis;
     }
-    if (mag > 0.35 && axis === "y" && incomingSpeed > 0) sounds.thud();
+    // a light hop and a fall from height shouldn't sound the same — see sounds.thud()
+    if (axis === "y" && incomingSpeed > 0) sounds.thud(mag);
   }
 
   // ============== Reaction table (physics terms) ==============
@@ -1334,13 +1373,14 @@
       log("Oof!");
     } else if (temperament === "chaser") {
       sounds.gotcha();
-      playRecipe(playerActor, "caughtSquashFade");
-      log("Caught! Resetting to start.");
+      playRecipe(playerActor, "caughtPunt");
+      log("Caught! Off you go...");
       const resetPos = { x: startPos.x, y: startPos.y };
       setTimeout(() => {
         playerActor.x = resetPos.x; playerActor.y = resetPos.y;
         playerActor.vx = 0; playerActor.vy = 0;
-      }, RECIPES.caughtSquashFade.duration);
+        playRecipe(playerActor, "caughtBounceIn");
+      }, RECIPES.caughtPunt.duration);
     } else if (temperament === "fleer") {
       sounds.pop();
       playRecipe(npcActor, "popVanish");
@@ -1421,7 +1461,8 @@
         actor.vy = -BOUNCY_LAUNCH_SPEED;
       }
     }
-    actor.impactSquash = 0.6;
+    actor.impactMag = 0.6;
+    actor.impactWobbleT = 0;
     actor.impactAxis = "y";
     log("Boing! Launched.");
   }
@@ -1469,7 +1510,8 @@
     actor.vx = dir.x * CANNON_LAUNCH_SPEED;
     actor.vy = dir.y * CANNON_LAUNCH_SPEED;
     sounds.shot();
-    actor.impactSquash = 0.7;
+    actor.impactMag = 0.7;
+    actor.impactWobbleT = 0;
     actor.impactAxis = dir.x !== 0 ? "x" : "y";
     log("Shot!");
   }
@@ -1526,7 +1568,8 @@
       const dd = Math.hypot(dx, dy) || 1;
       actor.vx = (dx / dd) * BOMB_BLAST_KNOCKBACK_SPEED;
       actor.vy = (dy / dd) * BOMB_BLAST_KNOCKBACK_SPEED;
-      actor.impactSquash = 0.8;
+      actor.impactMag = 0.8;
+      actor.impactWobbleT = 0;
       actor.impactAxis = "y";
       actor.flashTimer = 1;
     });
@@ -1772,8 +1815,9 @@
     resolveAxis(actor, "y", dt);
     applyWorldWrap(actor);
 
-    // decay physics-driven deformation values
-    actor.impactSquash = Math.max(0, actor.impactSquash - dt * 4);
+    // decay physics-driven deformation values — impact deformation now decays as a damped
+    // oscillation (see impactWobbleValue()), so it's just time advancing here, not a magnitude
+    actor.impactWobbleT += dt;
     actor.jumpCrouch = Math.max(0, actor.jumpCrouch - dt * 6);
     actor.flashTimer = Math.max(0, actor.flashTimer - dt * 3.5);
 
@@ -1894,7 +1938,7 @@
       x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
       w: ACTOR_SIZE, h: ACTOR_SIZE,
       vx: 0, vy: 0, grounded: false, isPlayer,
-      impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
+      impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0
     };
@@ -1972,7 +2016,8 @@
   }
   function triggerBumpFeedback(actor) {
     sounds.thud();
-    actor.impactSquash = 0.7;
+    actor.impactMag = 0.7;
+    actor.impactWobbleT = 0;
   }
   function tickDragCooldowns(dt) {
     for (const k in dragContactCooldown) {
@@ -2194,16 +2239,19 @@
         // continuous skew/scale — skewing a thin articulated figure just looks broken.
         t = { sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 };
       } else {
-        // Physics-driven continuous deformation: lean tracks vx, squash tracks impact speed,
-        // crouch tracks jump-launch magnitude, airborne stretch tracks vy — no fixed sequence,
-        // sampled straight from the actor's current physical state every frame. This is what
-        // reads well on a blocky/blob-shaped sprite specifically.
+        // Physics-driven continuous deformation: lean tracks vx, squash-then-wobble tracks
+        // impact speed, crouch tracks jump-launch magnitude, airborne stretch tracks vy — no
+        // fixed sequence, sampled straight from the actor's current physical state every
+        // frame. This is what reads well on a blocky/blob-shaped sprite specifically.
         const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
         const lean = Math.max(-1, Math.min(1, actor.vx / cap)) * 0.18;
         let sx = 1, sy = 1;
-        if (actor.impactSquash > 0) {
-          if (actor.impactAxis === "y") { sy *= 1 - actor.impactSquash * 0.5; sx *= 1 + actor.impactSquash * 0.3; }
-          else { sx *= 1 - actor.impactSquash * 0.5; sy *= 1 + actor.impactSquash * 0.3; }
+        // impactWobble oscillates (positive = compress, negative = overshoot/stretch) and
+        // decays toward zero — a real follow-through, not a single compress-and-release.
+        const wobble = impactWobbleValue(actor);
+        if (wobble !== 0) {
+          if (actor.impactAxis === "y") { sy *= 1 - wobble * 0.5; sx *= 1 + wobble * 0.3; }
+          else { sx *= 1 - wobble * 0.5; sy *= 1 + wobble * 0.3; }
         }
         if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
         if (!actor.grounded) {
@@ -2278,10 +2326,14 @@
   }
 
   // Which hand-drawn pose reads correctly for a posed actor's current physical state —
-  // selected by state, never a timer.
+  // selected by state, never a timer. Posed sprites don't get the continuous wobble
+  // deformation (see renderActors) since skewing a thin articulated figure looks broken, so
+  // this checks "was there a strong impact just now" directly rather than sampling the
+  // oscillating wobble value — the crouch frame is a discrete cue, not meant to flicker as
+  // the wobble swings through its overshoot/settle cycle.
   function currentPoseFor(actor) {
     if (!actor.grounded) return "air";
-    if (actor.impactSquash > 0.3 && actor.impactAxis === "y") return "crouch";
+    if (actor.impactMag > 0.3 && actor.impactWobbleT < 0.12 && actor.impactAxis === "y") return "crouch";
     if (Math.abs(actor.vx) > 15) return "stride";
     return "stand";
   }
