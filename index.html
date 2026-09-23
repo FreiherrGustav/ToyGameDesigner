@@ -268,6 +268,7 @@
       <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
       <div id="hud">Score: <span id="scoreVal">0</span></div>
     </div>
+    <div class="toolbar" id="roomTabRow"></div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
     <div id="dpad">
       <button class="dpad-up" data-dir="up">▲</button>
@@ -293,12 +294,12 @@
   // below), geometry (what blocks movement), and modifier (what happens on contact, layered
   // on top of whichever geometry). "walkable" no longer exists as a pickable choice — it's
   // just the absence of a geometry pick ("none").
-  const GEOMETRIES = ["none", "solid", "diggable", "goal", "switch"];
+  const GEOMETRIES = ["none", "solid", "diggable", "goal", "switch", "door"];
   const MODIFIERS = ["none", "slippery", "bouncy", "hazard"];
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
-  const GEOMETRY_SWATCH_COLORS = { none: "#4caf50", solid: "#616161", diggable: "#8d6e63", goal: "#ec407a", switch: "#3f51b5" };
+  const GEOMETRY_SWATCH_COLORS = { none: "#4caf50", solid: "#616161", diggable: "#8d6e63", goal: "#ec407a", switch: "#3f51b5", door: "#795548" };
   const MODIFIER_SWATCH_COLORS = { none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935" };
 
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
@@ -342,18 +343,32 @@
   let actorDefs = {};  // id -> {temperament, art, poses, name}
   let nextActorDefId = 1;
 
-  let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer)
-  let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer)
+  // The board is per-room now (v2.4): each room is its own independent {board, backgroundBoard,
+  // actors, startPos}. Only ONE room simulates/renders at a time — whichever one is currently
+  // "hot" — so the rest of the engine (physics, painting, rendering) keeps reading/writing the
+  // same board/backgroundBoard/actors/startPos globals it always has; activateRoom() is what
+  // hot-swaps those globals to point at a different room's own arrays.
+  let rooms = [];          // [{id, name, board, backgroundBoard, actors, startPos}]
+  let nextRoomId = 1;
+  let currentRoomId = null;  // which room is being viewed/edited right now
+  let playerRoomId = null;   // which room the player actually resides in (may differ from currentRoomId)
+  let doorLinks = {};       // "roomId:x,y" -> {toRoomId, toX, toY}
+  function doorKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
+
+  let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
+  let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
   // location stopped carrying any information — only whether one existed mattered. So these
-  // are plain toggles in the palette, not something placed on the board at all.
+  // are plain toggles in the palette, not something placed on the board at all. They're shared
+  // across every room, unlike the board/actors — a kid discovers physics rules for the whole
+  // game, not room by room.
   let gravityEnabled = false;
   let wrapHEnabled = false;
   let wrapVEnabled = false;
-  let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...}
+  let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...} — hot room's own
   let nextActorInstId = 1;
 
-  let startPos = { x: 0, y: 0 }; // continuous pixel position
+  let startPos = { x: 0, y: 0 }; // continuous pixel position — hot room's own
 
   // Defaults put the player one click away on a blank canvas — no trip to "actor mode" first.
   let paintMode = "actor"; // 'background' | 'tile' | 'actor' | 'erase'
@@ -375,14 +390,40 @@
   let score = 0;
   let intensity = 0;
 
-  // ============== Init board ==============
-  function initBoard() {
-    board = [];
-    backgroundBoard = [];
-    for (let y = 0; y < ROWS; y++) {
-      board.push(new Array(COLS).fill(null));
-      backgroundBoard.push(new Array(COLS).fill(null));
+  // ============== Rooms ==============
+  function createEmptyRoom(name) {
+    const b = [], bg = [];
+    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); }
+    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, actors: [], startPos: { x: 0, y: 0 } };
+  }
+
+  // Hot-swaps which room's data the board/backgroundBoard/actors/startPos globals point at.
+  // Whichever room is "hot" is the only one that simulates or renders — switching away just
+  // stops touching a room's actors, it doesn't move anything inside it (see triggerDoor()'s
+  // comment for why that reads as "pausing the player" rather than a special pause flag).
+  function activateRoom(roomId) {
+    const outgoing = rooms.find(r => r.id === currentRoomId);
+    if (outgoing) {
+      outgoing.board = board; outgoing.backgroundBoard = backgroundBoard;
+      outgoing.actors = actors; outgoing.startPos = startPos;
     }
+    currentRoomId = roomId;
+    const incoming = rooms.find(r => r.id === roomId);
+    board = incoming.board; backgroundBoard = incoming.backgroundBoard;
+    actors = incoming.actors; startPos = incoming.startPos;
+  }
+
+  // Resets the whole multi-room game back to a single fresh room — used at startup and by the
+  // "Clear board" button.
+  function initBoard() {
+    rooms = [];
+    nextRoomId = 1;
+    doorLinks = {};
+    currentRoomId = null;
+    playerRoomId = null;
+    const first = createEmptyRoom("room 1");
+    rooms.push(first);
+    activateRoom(first.id);
   }
   initBoard();
 
@@ -440,7 +481,11 @@
     switch: pat([
       "...M....", "..MMM...", "...M....", "...M....",
       "...M....", "...M....", "..MMM...", "...M...."
-    ], { M: GEOMETRY_SWATCH_COLORS.switch })
+    ], { M: GEOMETRY_SWATCH_COLORS.switch }),
+    door: pat([
+      "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
+      "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
+    ], { M: "#4e342e", K: GEOMETRY_SWATCH_COLORS.door, k: "#ffd166" })
   };
 
   // The art currently "active" for a def: its single flat art, or — for a posed actor def —
@@ -1149,8 +1194,9 @@
     if (player) {
       sounds.celebrate();
       playRecipe(player, "celebrationBurst");
+      const resetPos = { x: startPos.x, y: startPos.y }; // snapshot now — a room switch before this fires shouldn't retarget it
       setTimeout(() => {
-        player.x = startPos.x; player.y = startPos.y;
+        player.x = resetPos.x; player.y = resetPos.y;
         player.vx = 0; player.vy = 0;
       }, RECIPES.celebrationBurst.duration);
     }
@@ -1184,8 +1230,9 @@
       sounds.gotcha();
       playRecipe(playerActor, "caughtSquashFade");
       log("Caught! Resetting to start.");
+      const resetPos = { x: startPos.x, y: startPos.y };
       setTimeout(() => {
-        playerActor.x = startPos.x; playerActor.y = startPos.y;
+        playerActor.x = resetPos.x; playerActor.y = resetPos.y;
         playerActor.vx = 0; playerActor.vy = 0;
       }, RECIPES.caughtSquashFade.duration);
     } else if (temperament === "fleer") {
@@ -1303,6 +1350,53 @@
     renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
   }
 
+  // ============== Rooms: door transitions (freeze -> swap -> resume) ==============
+  const ROOM_TRANSITION_MS = 420;
+  let roomTransition = null; // { startedAt, fromBoard, fromBackgroundBoard, fromActors }
+
+  // A door is an ordinary painted tile, felt on contact like goal/switch/diggable — it just
+  // happens to relocate the player to a different room's own board entirely. `doorCooldown`
+  // guards against the auto-placed return door immediately sending the player right back:
+  // it's set BEFORE the freeze begins and, since the whole world (including cooldown decay)
+  // pauses for the freeze's duration, still has its full value left once input resumes.
+  function triggerDoor(player, gx, gy) {
+    if (roomTransition) return; // already mid-transition (reachable via drag; gameplay can't re-enter here, see tick())
+    if (player.doorCooldown > 0) return;
+    const link = doorLinks[doorKey(currentRoomId, gx, gy)];
+    if (!link) return; // an erased-then-repainted cell without a link — harmless no-op
+    player.doorCooldown = ROOM_TRANSITION_MS + 500;
+    beginRoomTransition(link);
+  }
+
+  // The actual room swap happens instantly — board/backgroundBoard/actors/startPos hot-swap to
+  // the destination room right away, and the player is physically moved from the departure
+  // room's actor list into the arrival room's. What plays out over ROOM_TRANSITION_MS is purely
+  // visual: a cross-fade between a frozen snapshot of the room just left and the (already live)
+  // room just entered, proven in the rooms throwaway. The whole world stays paused for that
+  // window — see tick()'s early-out — which is what "input frozen during the transition" means
+  // in practice: not just the player's controls, everything.
+  function beginRoomTransition(link) {
+    const fromActorsSnapshot = actors.slice();
+    const fromBoardSnapshot = board;
+    const fromBackgroundSnapshot = backgroundBoard;
+
+    const player = actors.find(a => a.isPlayer);
+    actors = actors.filter(a => !a.isPlayer);
+
+    activateRoom(link.toRoomId);
+    player.x = link.toX * TILE + TILE / 2 - player.w / 2;
+    player.y = link.toY * TILE + TILE / 2 - player.h / 2;
+    player.vx = 0; player.vy = 0;
+    actors.push(player);
+    playerRoomId = link.toRoomId;
+
+    roomTransition = {
+      startedAt: performance.now(),
+      fromBoard: fromBoardSnapshot, fromBackgroundBoard: fromBackgroundSnapshot, fromActors: fromActorsSnapshot
+    };
+    renderRoomTabs();
+  }
+
   // Player-only contact reactions for whatever the player is actually overlapping — geometry
   // that doesn't block (diggable/goal/switch — solid's own hazard/bouncy handling lives in
   // resolveAxis instead, since the player never overlaps a solid tile) and any modifier found
@@ -1314,6 +1408,7 @@
       if (geometry === "diggable") triggerDig(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
       else if (geometry === "switch") triggerFlip(player);
+      else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
       if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player);
     }
@@ -1444,6 +1539,7 @@
     if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
     if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
     if (actor.bouncyCooldown > 0) actor.bouncyCooldown -= dt * 1000;
+    if (actor.doorCooldown > 0) actor.doorCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x");
@@ -1468,7 +1564,15 @@
 
   function tick(dt) {
     const player = actors.find(a => a.isPlayer);
-    actors.slice().forEach(actor => stepActor(actor, dt, player));
+    const snapshot = actors.slice();
+    for (const actor of snapshot) {
+      // a door touched mid-loop already hot-swapped board/backgroundBoard/actors to a
+      // different room — any actor left in this snapshot now belongs to a room that's no
+      // longer active, so stepping it further would resolve its physics against the wrong
+      // room's geometry. Stop; it simply sits paused until its own room is active again.
+      if (roomTransition) break;
+      stepActor(actor, dt, player);
+    }
     tickActorContactCooldowns(dt);
   }
 
@@ -1492,8 +1596,35 @@
 
   function paintGeometryModifierAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (selectedGeometry === "door") {
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && existingTile.geometry === "door") {
+        // already a door here (repainting the same cell during one drag stroke, or just
+        // restyling its modifier) — keep the existing link, don't spin up another room
+        board[gy][gx] = gameplayKey("door", selectedModifier);
+        return;
+      }
+      createDoorAt(gx, gy);
+      return;
+    }
     if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
+  }
+
+  // Placing a door needs no destination picker: it structurally comes with a brand-new room
+  // already attached, the way a Lego door piece doesn't ask which house it belongs to. The new
+  // room gets its own auto-placed return door at the same cell coordinates, so walking back
+  // through it lands you roughly where you started.
+  function createDoorAt(gx, gy) {
+    const fromRoomId = currentRoomId;
+    board[gy][gx] = gameplayKey("door", selectedModifier);
+    const newRoom = createEmptyRoom("room " + (rooms.length + 1));
+    newRoom.board[gy][gx] = gameplayKey("door", "none");
+    rooms.push(newRoom);
+    doorLinks[doorKey(fromRoomId, gx, gy)] = { toRoomId: newRoom.id, toX: gx, toY: gy };
+    doorLinks[doorKey(newRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
+    renderRoomTabs();
+    log("New door — added \"" + newRoom.name + "\" and linked it back here.");
   }
   function paintBackgroundAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
@@ -1511,7 +1642,16 @@
 
   function placeNewActor(px, py) {
     const isPlayer = selectedActorDefId === PLAYER_DEF_ID;
-    if (isPlayer) actors.forEach(a => { a.isPlayer = false; });
+    if (isPlayer) {
+      // the player is a true singleton across the WHOLE multi-room game, not just this room —
+      // without this, a kid could place one here, switch rooms via a tab, and place another
+      // one there, leaving two "players" scattered across rooms
+      rooms.forEach(r => {
+        const arr = r.id === currentRoomId ? actors : r.actors;
+        const idx = arr.findIndex(a => a.isPlayer);
+        if (idx !== -1) arr.splice(idx, 1);
+      });
+    }
     const actor = {
       id: nextActorInstId++,
       defId: selectedActorDefId,
@@ -1519,10 +1659,10 @@
       w: ACTOR_SIZE, h: ACTOR_SIZE,
       vx: 0, vy: 0, grounded: false, isPlayer,
       impactSquash: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
-      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0
+      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0
     };
     actors.push(actor);
-    if (isPlayer) startPos = { x: actor.x, y: actor.y };
+    if (isPlayer) { startPos = { x: actor.x, y: actor.y }; playerRoomId = currentRoomId; }
     return actor;
   }
 
@@ -1567,6 +1707,14 @@
           if (geometry === "diggable") { triggerDig(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
           else if (geometry === "switch") { triggerFlip(actor); fired = true; }
+          else if (geometry === "door") {
+            // relocates the actor into a different room's actor list entirely — bail out of
+            // this drag-clamp call immediately rather than keep resolving stale cells against
+            // whatever room is now hot
+            dragContactCooldown[key] = 350;
+            triggerDoor(actor, cx, cy);
+            return;
+          }
           if (modifier === "hazard") { triggerHazard(actor); fired = true; }
           else if (modifier === "bouncy") { triggerBouncyLaunch(actor); fired = true; }
           if (fired) dragContactCooldown[key] = 350;
@@ -1671,12 +1819,12 @@
     else log("Place the player first.");
   });
   document.getElementById("clearAllBtn").addEventListener("click", () => {
-    if (!confirm("Clear the whole board? This removes all tiles and actors.")) return;
+    if (!confirm("Clear everything? This removes every room, door, tile, and actor and starts over with one empty room.")) return;
     initBoard();
-    actors = [];
     animState = {};
     tileAnimState = {};
     actorContactCooldown = {};
+    dragContactCooldown = {};
     resetScoreAndIntensity();
     renderAll();
   });
@@ -1720,56 +1868,51 @@
     }
   }
 
-  function renderGame() {
-    gctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
-    gctx.fillStyle = "#111";
-    gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
-
+  // Draws one room's tiles (background layer, then gameplay layer, then grid lines) into ctx.
+  // Used both for the live room and — during a door transition — for the frozen snapshot of
+  // whichever room was just left, so the two can be cross-faded independently of which one is
+  // "hot" right now.
+  function renderRoomContents(ctx, boardArg, backgroundBoardArg) {
     const cell = TILE / ART;
     const now = performance.now();
+    const isLive = boardArg === board; // crumble anim only applies to the currently-active room
 
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
-        // background layer, always drawn first
-        const bgId = backgroundBoard[y][x];
-        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(gctx, backgroundTileDefs[bgId].art, x * TILE, y * TILE, TILE, cell);
+        const bgId = backgroundBoardArg[y][x];
+        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, x * TILE, y * TILE, TILE, cell);
 
-        // gameplay layer on top — either the crumble animation or the static tile
         const key = x + "," + y;
-        const tanim = tileAnimState[key];
+        const tanim = isLive ? tileAnimState[key] : null;
         if (tanim) {
           const sample = sampleRecipe(tanim.recipe, now - tanim.t);
           if (sample) {
-            gctx.save();
-            gctx.globalAlpha = sample.alpha;
-            gctx.translate(x * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
-            if (sample.rot) gctx.rotate(sample.rot);
-            gctx.scale(sample.sx, sample.sy);
-            drawGameplayTile(gctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
-            gctx.restore();
+            ctx.save();
+            ctx.globalAlpha = sample.alpha;
+            ctx.translate(x * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
+            if (sample.rot) ctx.rotate(sample.rot);
+            ctx.scale(sample.sx, sample.sy);
+            drawGameplayTile(ctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
+            ctx.restore();
             if (sample.done) delete tileAnimState[key];
             continue;
           }
         }
-        const gKey = board[y][x];
-        if (gKey && GAMEPLAY_TILE_DEFS[gKey]) drawGameplayTile(gctx, x * TILE, y * TILE, GAMEPLAY_TILE_DEFS[gKey]);
+        const gKey = boardArg[y][x];
+        if (gKey && GAMEPLAY_TILE_DEFS[gKey]) drawGameplayTile(ctx, x * TILE, y * TILE, GAMEPLAY_TILE_DEFS[gKey]);
       }
     }
 
-    gctx.strokeStyle = "rgba(255,255,255,0.06)";
-    gctx.lineWidth = 1;
-    for (let x = 0; x <= COLS; x++) { gctx.beginPath(); gctx.moveTo(x * TILE, 0); gctx.lineTo(x * TILE, ROWS * TILE); gctx.stroke(); }
-    for (let y = 0; y <= ROWS; y++) { gctx.beginPath(); gctx.moveTo(0, y * TILE); gctx.lineTo(COLS * TILE, y * TILE); gctx.stroke(); }
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * TILE, 0); ctx.lineTo(x * TILE, ROWS * TILE); ctx.stroke(); }
+    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
+  }
 
-    if (isCanvasEmpty()) drawEmptySocketCue(now);
-
-    if (actors.some(a => a.isPlayer)) {
-      gctx.strokeStyle = "rgba(255,209,102,0.7)";
-      gctx.lineWidth = 1.5;
-      gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
-    }
-
-    actors.forEach(actor => {
+  function renderActors(ctx, actorsArg) {
+    const cell = TILE / ART;
+    const now = performance.now();
+    actorsArg.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
       const posed = !!def.poses;
@@ -1811,22 +1954,57 @@
       }
       if (actor.flashTimer > 0) t.alpha *= (Math.floor(now / 50) % 2 === 0) ? 0.35 : 1;
 
-      gctx.save();
-      gctx.globalAlpha = t.alpha;
+      ctx.save();
+      ctx.globalAlpha = t.alpha;
       const centerX = actor.x + actor.w / 2 + t.ox * TILE;
       const centerY = actor.y + actor.h / 2 + t.oy * TILE;
-      gctx.translate(centerX, centerY);
-      if (t.rot) gctx.rotate(t.rot);
-      gctx.scale(t.sx, t.sy);
-      drawArtScaled(gctx, art, -TILE / 2, -TILE / 2, TILE, cell);
-      gctx.restore();
+      ctx.translate(centerX, centerY);
+      if (t.rot) ctx.rotate(t.rot);
+      ctx.scale(t.sx, t.sy);
+      drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
+      ctx.restore();
 
       if (actor.isPlayer) {
-        gctx.strokeStyle = "#ffd166";
-        gctx.lineWidth = 1.5;
-        gctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
+        ctx.strokeStyle = "#ffd166";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
       }
     });
+  }
+
+  function renderGame() {
+    gctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+    gctx.fillStyle = "#111";
+    gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+
+    if (roomTransition) {
+      // A true cross-fade: the swap already happened instantly (see beginRoomTransition), so
+      // both snapshots are stable for the whole window — just dissolve from one to the other.
+      const frac = Math.min(1, (performance.now() - roomTransition.startedAt) / ROOM_TRANSITION_MS);
+      gctx.save();
+      gctx.globalAlpha = 1 - frac;
+      renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard);
+      renderActors(gctx, roomTransition.fromActors);
+      gctx.restore();
+      gctx.save();
+      gctx.globalAlpha = frac;
+      renderRoomContents(gctx, board, backgroundBoard);
+      renderActors(gctx, actors);
+      gctx.restore();
+      return;
+    }
+
+    renderRoomContents(gctx, board, backgroundBoard);
+
+    if (isCanvasEmpty()) drawEmptySocketCue(performance.now());
+
+    if (actors.some(a => a.isPlayer)) {
+      gctx.strokeStyle = "rgba(255,209,102,0.7)";
+      gctx.lineWidth = 1.5;
+      gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+    }
+
+    renderActors(gctx, actors);
   }
 
   // Which hand-drawn pose reads correctly for a posed actor's current physical state —
@@ -1861,6 +2039,29 @@
     gctx.restore();
   }
 
+  // Room list/tab strip: grows automatically as doors create new rooms. Clicking a tab just
+  // changes which room is hot — it never moves the player, since the player is only ever
+  // simulated as part of whichever room's actor list is currently active (see activateRoom()).
+  // The dot marks whichever room the player is actually standing in right now, so hopping
+  // tabs to edit elsewhere doesn't leave a kid wondering where their player went.
+  function renderRoomTabs() {
+    const container = document.getElementById("roomTabRow");
+    container.innerHTML = "";
+    rooms.forEach(room => {
+      const btn = document.createElement("button");
+      btn.className = "tbtn" + (room.id === currentRoomId ? " active" : "");
+      btn.textContent = room.name + (room.id === playerRoomId ? " •" : "");
+      btn.title = room.id === playerRoomId ? room.name + " — the player is here" : room.name;
+      btn.addEventListener("click", () => {
+        if (room.id === currentRoomId) return;
+        activateRoom(room.id);
+        renderRoomTabs();
+        renderAll();
+      });
+      container.appendChild(btn);
+    });
+  }
+
   function renderAll() {
     renderBackgroundSwatches();
     renderGeometrySwatches();
@@ -1871,6 +2072,7 @@
     renderPresetSwatches();
     renderPoseTabs();
     renderPixelCanvas();
+    renderRoomTabs();
   }
 
   renderColorRow();
@@ -1883,8 +2085,12 @@
     let dt = (t - lastT) / 1000;
     lastT = t;
     dt = Math.min(dt, 0.033);
-    tick(dt);
-    tickDragCooldowns(dt);
+    if (roomTransition) {
+      if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
+    } else {
+      tick(dt);
+      tickDragCooldowns(dt);
+    }
     renderGame();
     requestAnimationFrame(frame);
   }
