@@ -298,25 +298,38 @@
   // v2.5 splits the old single "diggable" into two: `trap` keeps its exact old behavior
   // (instant, non-blocking, a deliberate gag tile), while `diggable` is redefined as a wall
   // that blocks like solid until sustained contact erodes it away — see resolveAxis().
+  // Cannon is one tool with four orientations rather than four separate tiles: the geometry
+  // axis still needs four distinct storable values (a cell has to remember which way it
+  // points), but the palette shows a single "cannon" swatch — see PALETTE_GEOMETRIES and
+  // paintGeometryModifierAt()'s place-then-rotate handling.
+  const CANNON_ORDER = ["cannon-ne", "cannon-se", "cannon-sw", "cannon-nw"]; // 90° clockwise each step
   const GEOMETRIES = [
     "none", "solid", "diggable", "trap", "goal", "switch", "door",
-    "cannon-up", "cannon-down", "cannon-left", "cannon-right", "bomb", "warp"
+    ...CANNON_ORDER, "bomb", "warp"
   ];
+  // What the tile palette actually offers as separate swatches — one "cannon" entry stands in
+  // for all four CANNON_ORDER values.
+  const PALETTE_GEOMETRIES = ["none", "solid", "diggable", "trap", "goal", "switch", "door", "cannon", "bomb", "warp"];
   const MODIFIERS = ["none", "slippery", "bouncy", "hazard"];
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
   const GEOMETRY_SWATCH_COLORS = {
     none: "#4caf50", solid: "#616161", diggable: "#a1887f", trap: "#8d6e63",
-    goal: "#ec407a", switch: "#3f51b5", door: "#795548",
-    "cannon-up": "#ff5722", "cannon-down": "#ff5722", "cannon-left": "#ff5722", "cannon-right": "#ff5722",
+    goal: "#ec407a", switch: "#3f51b5", door: "#795548", cannon: "#ff5722",
+    "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
     bomb: "#424242", warp: "#8e24aa"
   };
   const MODIFIER_SWATCH_COLORS = { none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935" };
-  // Which way each cannon direction shoots, keyed by its own geometry string.
+  // Each orientation fires at a true 45° angle — combined with gravity's own per-frame pull,
+  // firing up-and-out (ne/nw) rises faster than gravity can immediately cancel, arcs over, and
+  // only comes back down once gravity actually wins out. Math.SQRT1_2 = 1/√2, the unit-vector
+  // component of a 45° angle.
   const CANNON_DIRECTIONS = {
-    "cannon-up": { x: 0, y: -1 }, "cannon-down": { x: 0, y: 1 },
-    "cannon-left": { x: -1, y: 0 }, "cannon-right": { x: 1, y: 0 }
+    "cannon-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
+    "cannon-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+    "cannon-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
+    "cannon-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
   };
 
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
@@ -352,6 +365,10 @@
   const HAZARD_COOLDOWN_MS = 450;
   const DIG_DURATION_MS = 900;     // sustained contact needed to erode a diggable wall through
   const CANNON_LAUNCH_SPEED = 700; // stronger than a bouncy launch — a fixed-direction override reads as "shot", not "bounced harder"
+  // Long enough to cover a full 45°-launch arc (rise ~340ms, fall ~340ms at this speed/gravity)
+  // without the normal movement cap clamping the horizontal component back down mid-flight —
+  // see stepActor()'s recentlyLaunched exemption.
+  const CANNON_COOLDOWN_MS = 800;
   const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
   const BOMB_BLAST_KNOCKBACK_SPEED = 480;
   const WARP_COOLDOWN_MS = 400;
@@ -407,6 +424,7 @@
   let currentColor = PALETTE_COLORS[2];
   let isDrawingPixel = false;
   let isPaintingBoard = false;
+  let cannonRotateStrokeCells = new Set(); // cells already placed/rotated during the current paint stroke — see paintGeometryModifierAt
 
   let animState = {};      // actorInstId -> {recipe, t} — discrete event overlays only (pop/caught/celebration/boop)
   let tileAnimState = {};  // "x,y" -> {recipe, t, geometry, modifier} — transient tile effects (crumbling)
@@ -489,6 +507,28 @@
     ], STICK_LEGEND)
   };
 
+  // Rotates an 8x8 pixel-art array 90° clockwise — used to derive the other three cannon
+  // orientations from a single hand-drawn base icon instead of authoring four separately.
+  function rotateArt90CW(art) {
+    const out = new Array(ART * ART).fill(null);
+    for (let y = 0; y < ART; y++) {
+      for (let x = 0; x < ART; x++) {
+        out[x * ART + (ART - 1 - y)] = art[y * ART + x];
+      }
+    }
+    return out;
+  }
+  // A real cannon barrel angled at 45°, widening into a carriage with two wheels — pointing
+  // up-and-right (NE) as drawn; the other three orientations are this same art rotated 90° at
+  // a time (NE -> SE -> SW -> NW, matching CANNON_ORDER's rotation sequence).
+  const CANNON_ICON_NE = pat([
+    "......MM", ".....MM.", "....MM..", "...MMM..",
+    "..MMMMM.", ".MMMMMMM", "..W...W.", "........"
+  ], { M: "#37474f", W: "#1b1b1b" });
+  const CANNON_ICON_SE = rotateArt90CW(CANNON_ICON_NE);
+  const CANNON_ICON_SW = rotateArt90CW(CANNON_ICON_SE);
+  const CANNON_ICON_NW = rotateArt90CW(CANNON_ICON_SW);
+
   // ---- Built-in geometry icons (fixed, not kid-editable — see the v2.3 note-for-later:
   // a `solid` tile needs to always visually read as solid for "discover by touching" to
   // hold, so gameplay tiles use a small consistent icon set rather than custom art). ----
@@ -518,22 +558,10 @@
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
     ], { M: "#4e342e", K: GEOMETRY_SWATCH_COLORS.door, k: "#ffd166" }),
-    "cannon-up": pat([
-      "...MM...", "..MMMM..", ".MM..MM.", "...MM...",
-      "...MM...", "...MM...", "...MM...", "...MM..."
-    ], { M: GEOMETRY_SWATCH_COLORS["cannon-up"] }),
-    "cannon-down": pat([
-      "...MM...", "...MM...", "...MM...", "...MM...",
-      "...MM...", ".MM..MM.", "..MMMM..", "...MM..."
-    ], { M: GEOMETRY_SWATCH_COLORS["cannon-down"] }),
-    "cannon-left": pat([
-      "........", "...M....", "..MM....", ".MMMMMMM",
-      ".MMMMMMM", "..MM....", "...M....", "........"
-    ], { M: GEOMETRY_SWATCH_COLORS["cannon-left"] }),
-    "cannon-right": pat([
-      "........", "....M...", "....MM..", "MMMMMMM.",
-      "MMMMMMM.", "....MM..", "....M...", "........"
-    ], { M: GEOMETRY_SWATCH_COLORS["cannon-right"] }),
+    "cannon-ne": CANNON_ICON_NE,
+    "cannon-se": CANNON_ICON_SE,
+    "cannon-sw": CANNON_ICON_SW,
+    "cannon-nw": CANNON_ICON_NW,
     bomb: pat([
       "..K.....", "...M....", "..MMM...", ".MMMMM..",
       "MMMMMMM.", "MMMMMMM.", ".MMMMM..", "..MMM..."
@@ -857,17 +885,21 @@
   function renderGeometrySwatches() {
     const container = document.getElementById("geometrySwatches");
     container.innerHTML = "";
-    GEOMETRIES.forEach(geometry => {
+    PALETTE_GEOMETRIES.forEach(paletteGeometry => {
+      // "cannon" is a stand-in for whichever CANNON_ORDER value is actually selected/placed —
+      // one swatch, four storable orientations (see paintGeometryModifierAt's rotate handling)
+      const isCannon = paletteGeometry === "cannon";
+      const isSelected = paintMode === "tile" && (isCannon ? CANNON_ORDER.includes(selectedGeometry) : selectedGeometry === paletteGeometry);
       const sw = document.createElement("div");
-      sw.className = "swatch" + (paintMode === "tile" && selectedGeometry === geometry ? " selected" : "");
-      sw.style.background = GEOMETRY_SWATCH_COLORS[geometry];
-      sw.title = geometry;
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = GEOMETRY_SWATCH_COLORS[paletteGeometry];
+      sw.title = paletteGeometry;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = geometry;
+      label.textContent = paletteGeometry;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
-        selectedGeometry = geometry;
+        selectedGeometry = isCannon ? CANNON_ORDER[0] : paletteGeometry;
         paintMode = "tile";
         updateModeButtons();
         renderAll();
@@ -1501,18 +1533,20 @@
   }
 
   // Cannon overrides velocity outright rather than reflecting it — that's what makes it read
-  // as "shot" instead of "bounced harder". Works the same regardless of gravity: a fixed
-  // impulse in the tile's own printed direction, full stop.
+  // as "shot" instead of "bounced harder". Fired at a true 45°, an up-and-out shot (ne/nw)
+  // rises well above what gravity can cancel in a single frame, so it climbs, arcs over at its
+  // apex, and only then does gravity's steady pull actually win out and bring it back down —
+  // ordinary projectile motion, not special-cased physics; see CANNON_DIRECTIONS.
   function triggerCannon(actor, geometry) {
     if (actor.cannonCooldown > 0) return;
-    actor.cannonCooldown = 350;
+    actor.cannonCooldown = CANNON_COOLDOWN_MS;
     const dir = CANNON_DIRECTIONS[geometry];
     actor.vx = dir.x * CANNON_LAUNCH_SPEED;
     actor.vy = dir.y * CANNON_LAUNCH_SPEED;
     sounds.shot();
     actor.impactMag = 0.7;
     actor.impactWobbleT = 0;
-    actor.impactAxis = dir.x !== 0 ? "x" : "y";
+    actor.impactAxis = "y";
     log("Shot!");
   }
 
@@ -1876,6 +1910,27 @@
       createDoorAt(gx, gy);
       return;
     }
+    if (CANNON_ORDER.includes(selectedGeometry)) {
+      // one click places a cannon; a fresh click on an already-placed cannon rotates it 90°
+      // instead of re-placing it. cannonRotateStrokeCells makes this click-based rather than
+      // drag-based: a mousemove lingering on the same cell during one continuous stroke must
+      // not spin the cannon over and over just from hovering — see the stroke-reset in the
+      // mousedown/touchstart handlers.
+      const strokeKey = gx + "," + gy;
+      if (cannonRotateStrokeCells.has(strokeKey)) return;
+      cannonRotateStrokeCells.add(strokeKey);
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && CANNON_ORDER.includes(existingTile.geometry)) {
+        const next = CANNON_ORDER[(CANNON_ORDER.indexOf(existingTile.geometry) + 1) % CANNON_ORDER.length];
+        board[gy][gx] = gameplayKey(next, selectedModifier);
+        return;
+      }
+      const roomKey = roomCellKey(currentRoomId, gx, gy);
+      delete digProgress[roomKey];
+      delete bombArmed[roomKey];
+      board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
+      return;
+    }
     // repainting a cell is an editing action, not a play action — any dig progress or a lit
     // fuse that used to belong to whatever was here goes away with it
     const key = roomCellKey(currentRoomId, gx, gy);
@@ -2036,7 +2091,7 @@
       return;
     }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
-    if (paintMode === "tile") { isPaintingBoard = true; paintGeometryModifierAt(gx, gy); return; }
+    if (paintMode === "tile") { isPaintingBoard = true; cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); return; }
     if (paintMode === "background") { isPaintingBoard = true; paintBackgroundAt(gx, gy); return; }
   });
   gameCanvas.addEventListener("mousemove", (e) => {
@@ -2065,7 +2120,7 @@
       return;
     }
     isPaintingBoard = true;
-    if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
+    if (paintMode === "tile") { cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); }
     else if (paintMode === "background") paintBackgroundAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     e.preventDefault();
