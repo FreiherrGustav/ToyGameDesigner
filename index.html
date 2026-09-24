@@ -832,7 +832,7 @@
     "#.#..#..###..###..#..#.#",
     "#.#.....#......#.....#.#",
     "#.#.###.#......#.###.#.#",
-    "#.#.....########.....#.#",
+    "#.#.....###..###.....#.#",
     "#.#.###..........###.#.#",
     "#......................#",
     "#.######.#....#.######.#",
@@ -856,18 +856,22 @@
       }
     }
 
-    // The maze walls off a sealed center chamber (rows 8-9, cols 9-14, entered only through the
-    // gap at row 7) — the cats start penned up in there, same as the ghost box this shape always
-    // implies, while the player starts out on the open edge of the maze, as far from them as the
-    // layout allows.
+    // The maze walls off a center chamber (rows 7-10, cols 8-15) with a gap at both its top
+    // (row 7) and bottom (row 10) — a through-passage, not a dead-end pen, so the cats (which
+    // only ever steer straight toward the player, with no pathfinding) can actually leave it
+    // toward whichever half of the maze the player is in, rather than pacing the walls forever
+    // if the player never visits the half their one exit used to open onto. The player starts
+    // out on the open edge of the maze, as far from the chamber as the layout allows.
     const playerCell = { x: 1, y: 16 };
     const catCells = [{ x: 10, y: 8 }, { x: 13, y: 9 }];
     // guarantee these spawn cells are open regardless of the maze layout above
     [playerCell, ...catCells].forEach(c => { board[c.y][c.x] = null; });
 
+    // Every open floor cell gets a cheese (not just a sampled subset) — a proper Pac-Man-style
+    // dot-filled floor, which also means the fill never needs to change if the maze layout does.
     const skip = new Set([playerCell, ...catCells].map(c => c.x + "," + c.y));
-    for (let y = 1; y <= ROWS - 2; y += 2) {
-      for (let x = 1; x <= COLS - 2; x += 2) {
+    for (let y = 1; y <= ROWS - 2; y++) {
+      for (let x = 1; x <= COLS - 2; x++) {
         if (board[y][x]) continue; // a wall cell
         if (skip.has(x + "," + y)) continue;
         placeExampleActor(EXAMPLE_CHEESE_DEF_ID, x, y);
@@ -899,7 +903,7 @@
     "#......................#",
     "#......................#",
     "#......................#",
-    "######D..D######DD.#####",
+    "######DDDD######DD.#####",
     "#.....DDDD......DD.....#",
     "#.....DDDD......DD.....#",
     "#.....DDDD......DD..O..#",
@@ -959,7 +963,7 @@
     const doorOut = { x: 20, y: 16 };
     board[doorOut.y][doorOut.x] = gameplayKey("door", "none");
 
-    placeExampleActor(EXAMPLE_CAT_DEF_ID, 8, 13);
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 16, 12); // perched on top of the far diggable stack
     placeExampleActor(PLAYER_DEF_ID, 2, 12);
 
     // ---- Room 2: "The Dig" ----
