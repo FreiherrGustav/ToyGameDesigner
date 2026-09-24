@@ -244,6 +244,15 @@
         Modifier decides what happens on contact, layered on top of whichever geometry you
         picked — <em>none</em> + <em>none</em> just clears a tile back to plain background.
       </div>
+      <div id="channelBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Channel</div>
+        <div class="swatch-row" id="channelSwatches"></div>
+        <div class="hint" style="margin-top:2px;">
+          None: a switch flips gravity, a door/wall always works, same as ever. Pick a color and
+          a switch (or a pressure plate) flips that color's own channel instead — a matching
+          door or wall only listens to switches and plates of its own color.
+        </div>
+      </div>
     </div>
 
     <div id="actorPropertiesBlock">
@@ -251,9 +260,24 @@
       <div class="swatch-row" id="actorSwatches"></div>
       <div class="section-title" style="margin-top:10px;">The player (only one)</div>
       <div class="swatch-row" id="playerSwatchRow"></div>
+      <div class="section-title" style="margin-top:10px;">Pushable block (any number)</div>
+      <div class="swatch-row" id="pushableSwatchRow"></div>
       <div class="hint" style="margin-top:2px;">
         This is the one actor you move. It has no temperament of its own — temperament only
-        describes how the <em>other</em> actors react when this one touches them.
+        describes how the <em>other</em> actors react when this one touches them. A pushable
+        block doesn't react on its own either — it just gets shoved by contact, falls, and can
+        crush whatever it lands on hard enough.
+      </div>
+      <div class="section-title" style="margin-top:10px;">Custom actors</div>
+      <div class="swatch-row" id="customActorSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Your own named actors, each with its own art and temperament — grab one to place it, or
+        hit + to make a new one. Every actor still gets a thin colored outline keyed to its
+        temperament, however you draw it, so danger and safety still read at a glance.
+      </div>
+      <div id="temperamentPickerBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Temperament for <span id="customActorEditingName"></span></div>
+        <div class="swatch-row" id="temperamentPickerSwatches"></div>
       </div>
     </div>
 
@@ -335,24 +359,36 @@
   // points), but the palette shows a single "cannon" swatch — see PALETTE_GEOMETRIES and
   // paintGeometryModifierAt()'s place-then-rotate handling.
   const CANNON_ORDER = ["cannon-ne", "cannon-se", "cannon-sw", "cannon-nw"]; // 90° clockwise each step
+  // v2.9: pressure plate joins the geometry axis — non-blocking like goal/switch, but its
+  // channel-color effect (see CHANNEL_COLORS) only holds while something is actually on it,
+  // unlike a switch's permanent flip. Deliberately its own geometry value, not a switch variant.
   const GEOMETRIES = [
-    "none", "solid", "diggable", "trap", "goal", "switch", "door",
+    "none", "solid", "diggable", "trap", "goal", "switch", "plate", "door",
     ...CANNON_ORDER, "bomb", "warp"
   ];
   // What the tile palette actually offers as separate swatches — one "cannon" entry stands in
   // for all four CANNON_ORDER values.
-  const PALETTE_GEOMETRIES = ["none", "solid", "diggable", "trap", "goal", "switch", "door", "cannon", "bomb", "warp"];
-  const MODIFIERS = ["none", "slippery", "bouncy", "hazard"];
+  const PALETTE_GEOMETRIES = ["none", "solid", "diggable", "trap", "goal", "switch", "plate", "door", "cannon", "bomb", "warp"];
+  // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
+  // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
+  // value is actually selected/placed. Whether it reads as wind or conveyor is purely which
+  // geometry it's paired with (none = air current, solid = conveyor belt) — no separate mechanic.
+  const WIND_ORDER = ["wind-n", "wind-e", "wind-s", "wind-w"]; // clockwise each step, like CANNON_ORDER
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", ...WIND_ORDER];
+  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "wind"];
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
   const GEOMETRY_SWATCH_COLORS = {
     none: "#4caf50", solid: "#616161", diggable: "#a1887f", trap: "#8d6e63",
-    goal: "#ec407a", switch: "#3f51b5", door: "#795548", cannon: "#ff5722",
+    goal: "#ec407a", switch: "#3f51b5", plate: "#00897b", door: "#795548", cannon: "#ff5722",
     "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
     bomb: "#424242", warp: "#8e24aa"
   };
-  const MODIFIER_SWATCH_COLORS = { none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935" };
+  const MODIFIER_SWATCH_COLORS = {
+    none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", wind: "#80deea",
+    "wind-n": "#80deea", "wind-e": "#80deea", "wind-s": "#80deea", "wind-w": "#80deea"
+  };
   // Each orientation fires at a true 45° angle — combined with gravity's own per-frame pull,
   // firing up-and-out (ne/nw) rises faster than gravity can immediately cancel, arcs over, and
   // only comes back down once gravity actually wins out. Math.SQRT1_2 = 1/√2, the unit-vector
@@ -363,11 +399,32 @@
     "cannon-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
     "cannon-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
   };
+  // Cardinal, not diagonal like cannon — a sustained push reads better along a straight axis
+  // than at 45°, and it needs to work standing still on a "none" floor (an air current) just as
+  // well as running along a "solid" one (a conveyor belt).
+  const WIND_DIRECTIONS = {
+    "wind-n": { x: 0, y: -1 }, "wind-e": { x: 1, y: 0 }, "wind-s": { x: 0, y: 1 }, "wind-w": { x: -1, y: 0 }
+  };
+  const WIND_FORCE = 1000; // px/s^2, continuous — comparable to MOVE_ACCEL so a kid can still fight against it
 
   const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
   const TEMPERAMENT_COLORS = {
     stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
   };
+  // Pushable blocks are architecturally an actor (real position/velocity/mass in the same
+  // continuous physics as everyone else — see stepActor) but not a "temperament" a kid assigns:
+  // they never steer themselves, they're just displaced by contact. Kept out of TEMPERAMENTS
+  // (and so out of the custom-actor-slot temperament picker) the same way "player" already is,
+  // for the same reason — it's its own single-purpose category, not one more reaction to pick.
+  const PUSHABLE_KIND = "pushable";
+  const PUSHABLE_DEF_ID = "pushable";
+  // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
+  // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
+  // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
+  // Assigning one of the five real colors switches a switch/plate over to toggling that color's
+  // own independent channel instead, and makes a matching-colored door/solid tile listen to it.
+  const CHANNEL_COLORS = ["red", "orange", "green", "blue", "purple"];
+  const CHANNEL_COLOR_HEX = { red: "#e53935", orange: "#fb8c00", green: "#43a047", blue: "#1e88e5", purple: "#8e24aa" };
   const PLAYER_COLOR = "#ffd166";
   const PLAYER_DEF_ID = "player";
 
@@ -413,6 +470,12 @@
   let nextBackgroundId = 1;
   let actorDefs = {};  // id -> {temperament, art, poses, name}
   let nextActorDefId = 1;
+  // v2.9: ids of kid-created custom actor slots ("Actor A", "Actor B", ...), in creation order —
+  // extends the same reusable-tile kit pattern v2.3 gave backgrounds to actors. Kept as its own
+  // ordered list (rather than inferred from actorDefs) purely for stable, predictable ordering
+  // in the palette shelf.
+  let customActorSlotIds = [];
+  let nextCustomActorLetter = 0;
 
   // The board is per-room now (v2.4): each room is its own independent {board, backgroundBoard,
   // actors, startPos}. Only ONE room simulates/renders at a time — whichever one is currently
@@ -448,6 +511,11 @@
 
   let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
   let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
+  // ROWS x COLS, a CHANNEL_COLORS entry or null — the channel a switch/plate/door/solid cell is
+  // tagged with (v2.9). Meaningless everywhere else; painting any other geometry over a cell
+  // clears it. Its own parallel layer for the same reason background art is: independent of, and
+  // never touched by, ordinary geometry/modifier repainting.
+  let colorBoard = [];
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
   // location stopped carrying any information — only whether one existed mattered. So these
   // are plain toggles in the palette, not something placed on the board at all. They're shared
@@ -456,6 +524,14 @@
   let gravityEnabled = false;
   let wrapHEnabled = false;
   let wrapVEnabled = false;
+  // v2.9: one independent boolean per channel color, toggled permanently by a same-colored
+  // switch — the direct generalization of the old single gravity-flip boolean. Global across
+  // rooms, same as gravity/wrap above, for the same reason.
+  let switchChannels = {};
+  // v2.9: a color reads as "on" while EITHER its switch has been flipped OR a same-colored
+  // pressure plate currently has something on it — see isChannelOn(). Unlike switchChannels,
+  // this is fully recomputed every tick (updatePressurePlates()), never persisted.
+  let plateChannelsActive = {};
   let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...} — hot room's own
   let nextActorInstId = 1;
 
@@ -465,8 +541,9 @@
   let paintMode = "actor"; // 'background' | 'tile' | 'actor' | 'erase'
   let selectedGeometry = "none";
   let selectedModifier = "none";
+  let selectedChannelColor = null; // one of CHANNEL_COLORS, or null ("none") — see CHANNEL_COLORS
   let selectedBackgroundId = null;
-  let selectedActorKind = "player"; // one of TEMPERAMENTS, or "player"
+  let selectedActorKind = "player"; // one of TEMPERAMENTS, "player", "pushable", or a custom actor slot id
   let selectedActorDefId = null;
   let selectedPoseKey = "stand"; // 'stand' | 'stride' | 'air' | 'crouch' — only used for posed defs
 
@@ -484,24 +561,24 @@
 
   // ============== Rooms ==============
   function createEmptyRoom(name) {
-    const b = [], bg = [];
-    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); }
-    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, actors: [], startPos: { x: 0, y: 0 } };
+    const b = [], bg = [], cb = [];
+    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); }
+    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, actors: [], startPos: { x: 0, y: 0 } };
   }
 
-  // Hot-swaps which room's data the board/backgroundBoard/actors/startPos globals point at.
-  // Whichever room is "hot" is the only one that simulates or renders — switching away just
-  // stops touching a room's actors, it doesn't move anything inside it (see triggerDoor()'s
+  // Hot-swaps which room's data the board/backgroundBoard/colorBoard/actors/startPos globals
+  // point at. Whichever room is "hot" is the only one that simulates or renders — switching away
+  // just stops touching a room's actors, it doesn't move anything inside it (see triggerDoor()'s
   // comment for why that reads as "pausing the player" rather than a special pause flag).
   function activateRoom(roomId) {
     const outgoing = rooms.find(r => r.id === currentRoomId);
     if (outgoing) {
-      outgoing.board = board; outgoing.backgroundBoard = backgroundBoard;
+      outgoing.board = board; outgoing.backgroundBoard = backgroundBoard; outgoing.colorBoard = colorBoard;
       outgoing.actors = actors; outgoing.startPos = startPos;
     }
     currentRoomId = roomId;
     const incoming = rooms.find(r => r.id === roomId);
-    board = incoming.board; backgroundBoard = incoming.backgroundBoard;
+    board = incoming.board; backgroundBoard = incoming.backgroundBoard; colorBoard = incoming.colorBoard;
     actors = incoming.actors; startPos = incoming.startPos;
   }
 
@@ -529,13 +606,13 @@
   // "try again" clicks always restart from the true original build, not accumulated play state.
   function clearTransientRuntimeState() {
     animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
-    digProgress = {}; bombArmed = {}; roomTransition = null;
+    digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
     buildSnapshot = {
       rooms: structuredClone(rooms), doorLinks: structuredClone(doorLinks),
-      gravityEnabled, wrapHEnabled, wrapVEnabled,
+      gravityEnabled, wrapHEnabled, wrapVEnabled, switchChannels: structuredClone(switchChannels),
       currentRoomId, playerRoomId
     };
     appMode = "play";
@@ -550,6 +627,7 @@
     gravityEnabled = buildSnapshot.gravityEnabled;
     wrapHEnabled = buildSnapshot.wrapHEnabled;
     wrapVEnabled = buildSnapshot.wrapVEnabled;
+    switchChannels = structuredClone(buildSnapshot.switchChannels);
     playerRoomId = buildSnapshot.playerRoomId;
     activateRoom(playerRoomId);
     lives = DEFAULT_LIVES;
@@ -566,6 +644,7 @@
     gravityEnabled = buildSnapshot.gravityEnabled;
     wrapHEnabled = buildSnapshot.wrapHEnabled;
     wrapVEnabled = buildSnapshot.wrapVEnabled;
+    switchChannels = buildSnapshot.switchChannels;
     playerRoomId = buildSnapshot.playerRoomId;
     activateRoom(buildSnapshot.currentRoomId);
     buildSnapshot = null;
@@ -662,6 +741,13 @@
       "...M....", "..MMM...", "...M....", "...M....",
       "...M....", "...M....", "..MMM...", "...M...."
     ], { M: GEOMETRY_SWATCH_COLORS.switch }),
+    // A flat pressable pad, not a lever — reads as "step here" rather than "touch once", the
+    // visual half of what keeps it distinct from switch (see checkPlayerTileContacts's total
+    // absence of a plate branch — it's driven by updatePressurePlates() instead, every tick).
+    plate: pat([
+      "........", "........", "MMMMMMMM", "M......M",
+      "M......M", "M......M", "MMMMMMMM", "........"
+    ], { M: GEOMETRY_SWATCH_COLORS.plate }),
     door: pat([
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
@@ -710,6 +796,15 @@
     temperament: null, art: STICK_POSES.stand.slice(),
     poses: { stand: STICK_POSES.stand.slice(), stride: STICK_POSES.stride.slice(), air: STICK_POSES.air.slice(), crouch: STICK_POSES.crouch.slice() },
     name: "player"
+  };
+  // A crate, not a creature — reads as "physical object" rather than "actor with intent",
+  // matching that it never steers itself (see PUSHABLE_KIND).
+  actorDefs[PUSHABLE_DEF_ID] = {
+    temperament: PUSHABLE_KIND, poses: null, name: "pushable",
+    art: pat([
+      "MMMMMMMM", "M.MMMM.M", "MM.MM.MM", "MMM.M.MM",
+      "MMM.M.MM", "MM.MM.MM", "M.MMMM.M", "MMMMMMMM"
+    ], { M: "#8d6e63" })
   };
 
   // One built-in background to start from (the old "ground" brick pattern) so the palette
@@ -1245,20 +1340,51 @@
   function renderModifierSwatches() {
     const container = document.getElementById("modifierSwatches");
     container.innerHTML = "";
-    MODIFIERS.forEach(modifier => {
+    PALETTE_MODIFIERS.forEach(paletteModifier => {
+      // "wind" stands in for whichever WIND_ORDER value is actually selected/placed — one
+      // swatch, four storable orientations, same trick as "cannon" above.
+      const isWind = paletteModifier === "wind";
+      const isSelected = paintMode === "tile" && (isWind ? WIND_ORDER.includes(selectedModifier) : selectedModifier === paletteModifier);
       const sw = document.createElement("div");
-      sw.className = "swatch" + (paintMode === "tile" && selectedModifier === modifier ? " selected" : "");
-      sw.style.background = MODIFIER_SWATCH_COLORS[modifier];
-      sw.title = modifier;
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = MODIFIER_SWATCH_COLORS[paletteModifier];
+      sw.title = paletteModifier;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = modifier;
+      label.textContent = paletteModifier;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
-        selectedModifier = modifier;
+        selectedModifier = isWind ? WIND_ORDER[0] : paletteModifier;
         paintMode = "tile";
         updateModeButtons();
         renderAll();
+      });
+      container.appendChild(sw);
+    });
+  }
+
+  // Same small fixed palette everywhere a channel color is picked (v2.9) — a "none" swatch
+  // (legacy/unconditional behavior) plus one per CHANNEL_COLORS entry.
+  function renderChannelSwatches() {
+    const container = document.getElementById("channelSwatches");
+    const block = document.getElementById("channelBlock");
+    const show = paintMode === "tile" && isColorTaggable(selectedGeometry);
+    block.style.display = show ? "block" : "none";
+    if (!show) return;
+    container.innerHTML = "";
+    const options = [null, ...CHANNEL_COLORS];
+    options.forEach(color => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedChannelColor === color ? " selected" : "");
+      sw.style.background = color ? CHANNEL_COLOR_HEX[color] : "#2f3140";
+      sw.title = color || "none";
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = color || "none";
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        selectedChannelColor = color;
+        renderChannelSwatches();
       });
       container.appendChild(sw);
     });
@@ -1305,6 +1431,105 @@
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
+  }
+
+  // Its own row, same reason "player" gets one: architecturally an actor, but not a temperament
+  // a kid picks reactions for — see PUSHABLE_KIND. Any number can be placed, unlike the player.
+  function renderPushableSwatch() {
+    const container = document.getElementById("pushableSwatchRow");
+    container.innerHTML = "";
+    const sw = document.createElement("div");
+    sw.className = "swatch" + (selectedActorKind === PUSHABLE_KIND ? " selected" : "");
+    sw.style.background = "#8d6e63";
+    sw.title = "pushable";
+    const label = document.createElement("div");
+    label.className = "lbl";
+    label.textContent = "pushable";
+    sw.appendChild(label);
+    sw.addEventListener("click", () => selectActorKind(PUSHABLE_KIND));
+    container.appendChild(sw);
+  }
+
+  // Selects a kid-created custom actor slot for placing/editing — the same shape as
+  // selectActorKind, just pointed straight at a specific def id instead of looking one up by
+  // temperament, since a custom slot's id IS what's selected (see customActorSlotIds).
+  function selectCustomActor(id) {
+    selectedActorKind = id;
+    paintMode = "actor";
+    selectedActorDefId = id;
+    selectedPoseKey = "stand";
+    currentArt = activeArtFor(actorDefs[id]).slice();
+    updateModeButtons();
+    renderAll();
+  }
+
+  // v2.9: extends the same reusable-tile "+" kit pattern v2.3 gave backgrounds to actors — each
+  // custom slot gets its own name, art, and (via renderTemperamentPicker) assigned temperament,
+  // rather than sharing one built-in look per temperament.
+  function renderCustomActorSwatches() {
+    const container = document.getElementById("customActorSwatches");
+    container.innerHTML = "";
+    customActorSlotIds.forEach(id => {
+      const def = actorDefs[id];
+      if (!def) return;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedActorKind === id ? " selected" : "");
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = def.name;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectCustomActor(id));
+      container.appendChild(sw);
+    });
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Create a new custom actor";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const letter = String.fromCharCode(65 + nextCustomActorLetter++);
+      const id = "custom" + letter;
+      const name = "Actor " + letter;
+      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name };
+      customActorSlotIds.push(id);
+      selectCustomActor(id);
+      log("New custom actor \"" + name + "\" added — draw it below and pick its temperament.");
+    });
+    container.appendChild(plus);
+  }
+
+  // Shown only while editing a custom actor slot — a small, clearly separate picker (rather than
+  // repurposing the main Temperament row above, which means "what to place next") for assigning
+  // THIS slot's own temperament.
+  function renderTemperamentPicker() {
+    const block = document.getElementById("temperamentPickerBlock");
+    const isCustom = paintMode === "actor" && customActorSlotIds.includes(selectedActorDefId);
+    block.style.display = isCustom ? "block" : "none";
+    if (!isCustom) return;
+    document.getElementById("customActorEditingName").textContent = actorDefs[selectedActorDefId].name;
+    const container = document.getElementById("temperamentPickerSwatches");
+    container.innerHTML = "";
+    TEMPERAMENTS.forEach(temp => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (actorDefs[selectedActorDefId].temperament === temp ? " selected" : "");
+      sw.style.background = TEMPERAMENT_COLORS[temp];
+      sw.title = temp;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = temp;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        actorDefs[selectedActorDefId].temperament = temp;
+        renderAll();
+      });
+      container.appendChild(sw);
+    });
   }
 
   // Whole-game rule switches, not placed pieces: each swatch toggles its own state the instant
@@ -1431,7 +1656,8 @@
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
     document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
     if (editingArt) {
-      document.getElementById("editingLabel").textContent = paintMode === "actor" ? selectedActorKind : "background";
+      const actorDef = actorDefs[selectedActorDefId];
+      document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind) : "background";
     }
   }
 
@@ -1534,9 +1760,23 @@
     const tile = gameplayTileAt(gx, gy);
     return tile ? tile.modifier : "none";
   }
+  // The channel color a switch/plate/door/solid cell is tagged with (v2.9), or null for an
+  // untagged cell (or one outside the board — a wrapped/solid boundary edge has no channel).
+  function colorAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    return colorBoard[gy][gx];
+  }
+  // A color reads as "on" from either source that can drive it — a permanently-flipped switch,
+  // or a pressure plate currently occupied — see the state comments on switchChannels/
+  // plateChannelsActive for why they're tracked so differently underneath.
+  function isChannelOn(color) {
+    return !!switchChannels[color] || !!plateChannelsActive[color];
+  }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
-  //  - geometry is solid (blocks everyone)
+  //  - geometry is solid (blocks everyone) — UNLESS it's tagged with a channel color that's
+  //    currently on, in which case it's a gate standing open (see isCellBlocking(), which
+  //    layers that check on top of this — this function alone doesn't know about colors)
   //  - geometry is diggable (blocks everyone too, like a wall — only sustained player contact
   //    erodes it away; see resolveAxis())
   //  - geometry is trap and the mover isn't the player (the player digs straight through
@@ -1548,6 +1788,18 @@
     if (geometry === "diggable") return true;
     if (geometry === "trap") return !actor.isPlayer;
     return false;
+  }
+  // The one place that actually decides "can I move into this cell" — isBlockingGeometry() plus
+  // the color-gate exception a plain geometry check can't know about on its own. Every call site
+  // that used to do isBlockingGeometry(geometryAt(cx,cy), actor) should go through this instead.
+  function isCellBlocking(cx, cy, actor) {
+    const geometry = geometryAt(cx, cy);
+    if (!isBlockingGeometry(geometry, actor)) return false;
+    if (geometry === "solid") {
+      const color = colorAt(cx, cy);
+      if (color && isChannelOn(color)) return false; // a same-colored switch/plate has this gate open
+    }
+    return true;
   }
 
   // Gravity is a single shared switch, not per-actor: the palette toggle sets it once as an
@@ -1597,10 +1849,45 @@
     }
     if (actor.grounded) {
       for (const { cx, cy } of cellsUnderneath(actor)) {
-        if (isBlockingGeometry(geometryAt(cx, cy), actor) && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
+        if (isCellBlocking(cx, cy, actor) && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
       }
     }
     return 1;
+  }
+
+  // v2.9: a continuous directional push while in contact — whether it reads as wind (paired
+  // with "none", an air current to drift through) or a conveyor (paired with "solid", a belt to
+  // stand on and be carried by) is purely which geometry it's on; this doesn't care which.
+  // Respects the normal speed cap like any other accelerative force, so a kid can still walk
+  // against it — it's a push, not a cannon-style override.
+  function windAt(cx, cy) {
+    return WIND_DIRECTIONS[modifierAt(cx, cy)] || null;
+  }
+  // Returns wind's contribution as an acceleration (ax/ay), not a direct velocity add — see the
+  // comment in stepActor() on why: folded into the same ax/ay that feeds applyAxisFriction, so
+  // friction treats it as ongoing thrust instead of opposing it back to zero every frame there's
+  // no key held.
+  //
+  // Same two-way contact as frictionMultiplierFor's slippery check, and for the same reason: an
+  // actor never overlaps a solid tile it's resting ON TOP of (resolveAxis leaves it flush against
+  // the boundary, zero overlap) — only overlappedCells() would ever see a "none" air current, so
+  // a "solid" conveyor's own surface has to be read from cellsUnderneath() instead, gated on
+  // actually resting there (grounded + genuinely blocking), or every solid tile in the level
+  // would double as a conveyor the moment anything so much as brushed past its top edge.
+  function windAccelFor(actor) {
+    let ax = 0, ay = 0;
+    for (const { cx, cy } of overlappedCells(actor)) {
+      const dir = windAt(cx, cy);
+      if (dir) { ax += dir.x * WIND_FORCE; ay += dir.y * WIND_FORCE; }
+    }
+    if (actor.grounded) {
+      for (const { cx, cy } of cellsUnderneath(actor)) {
+        if (!isCellBlocking(cx, cy, actor)) continue;
+        const dir = windAt(cx, cy);
+        if (dir) { ax += dir.x * WIND_FORCE; ay += dir.y * WIND_FORCE; }
+      }
+    }
+    return { ax, ay };
   }
 
   function applyAxisFriction(actor, axis, dt, accelInput) {
@@ -1647,6 +1934,10 @@
           }
         }
         if (!isBlockingGeometry(geometry, actor)) continue;
+        if (geometry === "solid") {
+          const gateColor = colorAt(cx, cy);
+          if (gateColor && isChannelOn(gateColor)) continue; // a same-colored switch/plate has this gate standing open
+        }
         const modifier = modifierAt(cx, cy);
         const bouncy = modifier === "bouncy" && actor.isPlayer;
         if (axis === "x") {
@@ -1672,6 +1963,59 @@
           }
         }
         if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
+      }
+    }
+  }
+
+  // Whether `actor`'s current AABB overlaps any tile that would block it — used by
+  // shovePushables() as a plain yes/no check (no mutation), unlike resolveAxis() which both
+  // detects and resolves tile collision for the actor doing the moving.
+  function actorBlockedByTiles(actor) {
+    const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
+    const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
+    for (let cy = r0; cy <= r1; cy++) {
+      for (let cx = c0; cx <= c1; cx++) {
+        if (isCellBlocking(cx, cy, actor)) return true;
+      }
+    }
+    return false;
+  }
+
+  // A pushable block is "displaced by contact from the player or other actors" — a real, continuous
+  // shove every frame while contact holds, not the discrete bump-and-cooldown reaction other actor
+  // pairs get (that reads fine for a one-off "Oof!"/"Boop!", but would make a pushed block jitter
+  // in place instead of sliding, since friction decays each cooldown-gated kick before the next
+  // one fires). Runs right after the mover's own tile collision on each axis, so the block only
+  // gets carried by however far the mover's real movement to occupy this frame.
+  function shovePushables(actor, axis) {
+    const moverDef = actorDefs[actor.defId];
+    if (moverDef && moverDef.temperament === PUSHABLE_KIND) return; // no chaining pushable-into-pushable, for now
+    for (const other of actors) {
+      if (other.id === actor.id) continue;
+      const def = actorDefs[other.defId];
+      if (!def || def.temperament !== PUSHABLE_KIND) continue;
+      if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
+            actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      if (axis === "x") {
+        if (actor.vx > 0) {
+          const delta = (actor.x + actor.w) - other.x;
+          other.x += delta;
+          if (actorBlockedByTiles(other)) { other.x -= delta; actor.x = other.x - actor.w; actor.vx = 0; }
+        } else if (actor.vx < 0) {
+          const delta = (other.x + other.w) - actor.x;
+          other.x -= delta;
+          if (actorBlockedByTiles(other)) { other.x += delta; actor.x = other.x + other.w; actor.vx = 0; }
+        }
+      } else {
+        if (actor.vy > 0) {
+          const delta = (actor.y + actor.h) - other.y;
+          other.y += delta;
+          if (actorBlockedByTiles(other)) { other.y -= delta; actor.y = other.y - actor.h; actor.vy = 0; }
+        } else if (actor.vy < 0) {
+          const delta = (other.y + other.h) - actor.y;
+          other.y -= delta;
+          if (actorBlockedByTiles(other)) { other.y += delta; actor.y = other.y + other.h; actor.vy = 0; }
+        }
       }
     }
   }
@@ -1819,6 +2163,17 @@
         actors = actors.filter(a => a.id !== npcActor.id);
         maybeRoundCompleteFromCollectibles();
       }, RECIPES.popVanish.duration);
+    } else if (temperament === PUSHABLE_KIND) {
+      // "capable of ... hazard-affecting whatever's beneath it when dropped": a block falling
+      // onto the player from above with real speed crushes them — reusing the exact same
+      // knockback+life reaction any other hazard gets, not a second one invented for this.
+      // Anything short of that (an ordinary bump, or the player walking into its side) is just
+      // the shove the patch note describes — displaced by contact, nothing more — and that
+      // continuous displacement already happens every frame via shovePushables(), so there's no
+      // bounce reaction to add here; reflecting velocities on top of it would just fight the shove.
+      if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
+        triggerHazard(playerActor);
+      }
     }
   }
 
@@ -1912,17 +2267,26 @@
   }
 
   // A `switch` tile is an ordinary painted tile — felt purely on contact, same bucket as
-  // goal/diggable/hazard — but what it does is flip the one shared gravity switch for every
-  // actor in the game, not just the player. Placement is what makes this meaningful: a kid
-  // puts one at a deliberate spot, and touching it there is a real level-design choice.
-  function triggerFlip(player) {
+  // goal/diggable/hazard. An uncolored switch keeps its original v2.2 behavior: flip the one
+  // shared gravity toggle for every actor in the game. A colored switch (v2.9) instead flips
+  // that color's own independent channel, permanently, until touched again — the counterpart to
+  // a same-colored pressure plate's momentary version of the same channel (see
+  // updatePressurePlates). Placement is what makes either version meaningful: a kid puts one at
+  // a deliberate spot, and touching it there is a real level-design choice.
+  function triggerFlip(player, gx, gy) {
     if (player.flipCooldown > 0) return;
     player.flipCooldown = 500;
-    gravityEnabled = !gravityEnabled;
+    const color = gx == null ? null : colorAt(gx, gy);
     sounds.flip();
     playRecipe(player, "gravityFlip");
-    log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
-    renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
+    if (color) {
+      switchChannels[color] = !switchChannels[color];
+      log((switchChannels[color] ? "Flip! " : "Flip back! ") + color + " channel " + (switchChannels[color] ? "on." : "off."));
+    } else {
+      gravityEnabled = !gravityEnabled;
+      log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
+      renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
+    }
   }
 
   // Cannon overrides velocity outright rather than reflecting it — that's what makes it read
@@ -2015,7 +2379,7 @@
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         if (x === gx && y === gy) continue;
-        if (!isBlockingGeometry(geometryAt(x, y), player)) candidates.push({ x, y });
+        if (!isCellBlocking(x, y, player)) candidates.push({ x, y });
       }
     }
     const pool = candidates.length > 0 ? candidates : [{ x: gx, y: gy }];
@@ -2085,10 +2449,12 @@
       const modifier = modifierAt(cx, cy);
       if (geometry === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
-      else if (geometry === "switch") triggerFlip(player);
+      else if (geometry === "switch") triggerFlip(player, cx, cy);
       else if (geometry === "bomb") triggerBombArm(cx, cy);
       else if (CANNON_DIRECTIONS[geometry]) triggerCannon(player, geometry);
-      else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
+      // A colored door only actually functions while its channel is on — otherwise it's inert,
+      // same as any other painted-but-unlinked cell (see triggerDoor's own no-op comment).
+      else if (geometry === "door" && (!colorAt(cx, cy) || isChannelOn(colorAt(cx, cy)))) { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
       else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
       if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player);
@@ -2169,23 +2535,31 @@
       if (Math.abs(actor.vy) < 1) actor.vy = 0;
     } else {
       const inGravity = gravityOn();
-      let ax = 0, ay = 0, wantsJump = false;
+      // Wind/conveyor folds into the same ax/ay that player input and steering feed into
+      // applyAxisFriction, rather than adding straight to velocity beforehand — friction always
+      // opposes whatever accelInput it's given, so a raw velocity add here would just get eaten
+      // back down to nothing every frame there's no key held (the exact "conveyor doesn't carry
+      // a standing-still player" bug that shape produced). Folding it into ax/ay first means
+      // friction sees the wind as real, ongoing thrust and stops opposing it, same as it already
+      // does for a held movement key.
+      const windAccel = windAccelFor(actor);
+      let ax = windAccel.ax, ay = windAccel.ay, wantsJump = false;
 
       if (actor.isPlayer) {
         const left = keys["ArrowLeft"] || keys["a"] || keys["A"];
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
-        if (left && !right) ax = -MOVE_ACCEL; else if (right && !left) ax = MOVE_ACCEL;
+        if (left && !right) ax += -MOVE_ACCEL; else if (right && !left) ax += MOVE_ACCEL;
         if (inGravity) {
           wantsJump = keys[" "] || up;
         } else {
-          if (up && !down) ay = -MOVE_ACCEL; else if (down && !up) ay = MOVE_ACCEL;
+          if (up && !down) ay += -MOVE_ACCEL; else if (down && !up) ay += MOVE_ACCEL;
         }
       } else {
         const steer = steeringAccelFor(actor, player);
-        ax = steer.ax;
-        if (!inGravity) ay = steer.ay;
+        ax += steer.ax;
+        if (!inGravity) ay += steer.ay;
       }
 
       applyAxisFriction(actor, "x", dt, ax);
@@ -2215,6 +2589,10 @@
         // not after, or a free-roam actor's "always grounded" never survives re-entry
         actor.grounded = false;
         actor.vy += GRAVITY * dt;
+        // vertical wind still applies under gravity (e.g. a rising air current) — gravity's own
+        // integration is a direct velocity add rather than accelInput/friction, so this joins it
+        // the same way rather than through ay, which this branch never hands to applyAxisFriction.
+        actor.vy += ay * dt;
         actor.vy = Math.min(actor.vy, MAX_FALL);
       } else {
         applyAxisFriction(actor, "y", dt, ay);
@@ -2238,8 +2616,10 @@
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x", dt);
+    shovePushables(actor, "x");
     actor.y += actor.vy * dt;
     resolveAxis(actor, "y", dt);
+    shovePushables(actor, "y");
     applyWorldWrap(actor);
 
     // decay physics-driven deformation values — impact deformation now decays as a damped
@@ -2249,6 +2629,16 @@
     actor.flashTimer = Math.max(0, actor.flashTimer - dt * 3.5);
 
     if (actor.isPlayer) checkPlayerTileContacts(actor);
+    // A pushable block is "able to be launched by a cannon" same as the player (per the patch
+    // note) — the only tile reaction it needs, since it has no lives/goal/door business of its
+    // own; everything else it does (falling, colliding, crushing) already comes for free from
+    // being a full physics actor.
+    else if (temperament === PUSHABLE_KIND) {
+      for (const { cx, cy } of overlappedCells(actor)) {
+        const geometry = geometryAt(cx, cy);
+        if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); break; }
+      }
+    }
     checkActorContacts(actor, actors);
 
     // fell off the world (only meaningful once gravity/holes exist) — recycle to start, no
@@ -2258,7 +2648,24 @@
     }
   }
 
+  // Momentary channels (v2.9): recomputed from scratch every tick from whoever's currently
+  // standing on a plate, rather than toggled by an event — the defining difference from a
+  // switch's permanent flip. Any actor works, pushable blocks included (they're full actors —
+  // see PUSHABLE_KIND), no weight/mass comparison needed, per the patch note.
+  function updatePressurePlates() {
+    plateChannelsActive = {};
+    for (const actor of actors) {
+      for (const { cx, cy } of overlappedCells(actor)) {
+        if (geometryAt(cx, cy) === "plate") {
+          const color = colorAt(cx, cy);
+          if (color) plateChannelsActive[color] = true;
+        }
+      }
+    }
+  }
+
   function tick(dt) {
+    updatePressurePlates();
     const player = actors.find(a => a.isPlayer);
     const snapshot = actors.slice();
     for (const actor of snapshot) {
@@ -2290,14 +2697,22 @@
     return actors.find(a => px >= a.x && px < a.x + a.w && py >= a.y && py < a.y + a.h);
   }
 
+  // Geometries a channel color can actually tag (v2.9) — a switch or plate emits/holds the
+  // channel, a door or solid segment listens to it. Anything else painted over a cell clears
+  // whatever color tag was there; it's meaningless anywhere else.
+  function isColorTaggable(geometry) {
+    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid";
+  }
+
   function paintGeometryModifierAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     if (selectedGeometry === "door") {
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       if (existingTile && existingTile.geometry === "door") {
         // already a door here (repainting the same cell during one drag stroke, or just
-        // restyling its modifier) — keep the existing link, don't spin up another room
+        // restyling its modifier/color) — keep the existing link, don't spin up another room
         board[gy][gx] = gameplayKey("door", selectedModifier);
+        colorBoard[gy][gx] = selectedChannelColor;
         return;
       }
       createDoorAt(gx, gy);
@@ -2322,6 +2737,27 @@
       delete digProgress[roomKey];
       delete bombArmed[roomKey];
       board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
+      colorBoard[gy][gx] = null;
+      return;
+    }
+    if (WIND_ORDER.includes(selectedModifier)) {
+      // same click-to-place, click-again-to-rotate trick as cannon above, but for a MODIFIER
+      // value paired with whatever geometry is selected — a fresh click on an already-wind
+      // cell rotates its direction instead of just repainting the same thing.
+      const strokeKey = "m" + gx + "," + gy;
+      if (cannonRotateStrokeCells.has(strokeKey)) return;
+      cannonRotateStrokeCells.add(strokeKey);
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && existingTile.geometry === selectedGeometry && WIND_ORDER.includes(existingTile.modifier)) {
+        const next = WIND_ORDER[(WIND_ORDER.indexOf(existingTile.modifier) + 1) % WIND_ORDER.length];
+        board[gy][gx] = gameplayKey(selectedGeometry, next);
+        return;
+      }
+      const key = roomCellKey(currentRoomId, gx, gy);
+      delete digProgress[key];
+      delete bombArmed[key];
+      board[gy][gx] = gameplayKey(selectedGeometry, WIND_ORDER[0]);
+      colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
       return;
     }
     // repainting a cell is an editing action, not a play action — any dig progress or a lit
@@ -2329,8 +2765,9 @@
     const key = roomCellKey(currentRoomId, gx, gy);
     delete digProgress[key];
     delete bombArmed[key];
-    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; return; }
+    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
+    colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
   }
 
   // True if room A already has some door leading to room B (in either direction) — used so a
@@ -2350,6 +2787,12 @@
     const room = rooms.find(r => r.id === roomId);
     if (room) room.board[gy][gx] = value;
   }
+  // Same as setRoomBoardCell, for the parallel channel-color layer.
+  function setRoomColorCell(roomId, gx, gy, value) {
+    if (roomId === currentRoomId) { colorBoard[gy][gx] = value; return; }
+    const room = rooms.find(r => r.id === roomId);
+    if (room) room.colorBoard[gy][gx] = value;
+  }
 
   // Tears down one door connection completely: both directions of its doorLinks entry, and
   // both physical door tiles (this side and whatever room it led to). A door is fundamentally a
@@ -2363,6 +2806,8 @@
     delete doorLinks[roomCellKey(link.toRoomId, link.toX, link.toY)];
     setRoomBoardCell(roomId, gx, gy, null);
     setRoomBoardCell(link.toRoomId, link.toX, link.toY, null);
+    setRoomColorCell(roomId, gx, gy, null);
+    setRoomColorCell(link.toRoomId, link.toX, link.toY, null);
   }
 
   // Placing a door needs no destination picker. By default it connects onward to the next room
@@ -2375,6 +2820,7 @@
   function createDoorAt(gx, gy) {
     const fromRoomId = currentRoomId;
     board[gy][gx] = gameplayKey("door", selectedModifier);
+    colorBoard[gy][gx] = selectedChannelColor;
 
     const roomIndex = rooms.findIndex(r => r.id === fromRoomId);
     const nextRoom = rooms[roomIndex + 1];
@@ -2442,6 +2888,7 @@
       const tile = GAMEPLAY_TILE_DEFS[board[gy][gx]];
       if (tile && tile.geometry === "door") { severDoorLink(currentRoomId, gx, gy); return; }
       board[gy][gx] = null;
+      colorBoard[gy][gx] = null;
       return;
     }
     backgroundBoard[gy][gx] = null;
@@ -2486,8 +2933,7 @@
     const before = { x: actor.x, y: actor.y };
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
-      const geometry = geometryAt(cx, cy);
-      if (isBlockingGeometry(geometry, actor)) {
+      if (isCellBlocking(cx, cy, actor)) {
         if (targetX > before.x) actor.x = Math.min(actor.x, cx * TILE - actor.w);
         else if (targetX < before.x) actor.x = Math.max(actor.x, (cx + 1) * TILE);
         const key = "t" + cx + "," + cy;
@@ -2496,8 +2942,7 @@
     }
     actor.y = targetY;
     for (const { cx, cy } of overlappedCells(actor)) {
-      const geometry = geometryAt(cx, cy);
-      if (isBlockingGeometry(geometry, actor)) {
+      if (isCellBlocking(cx, cy, actor)) {
         if (targetY > before.y) actor.y = Math.min(actor.y, cy * TILE - actor.h);
         else if (targetY < before.y) actor.y = Math.max(actor.y, (cy + 1) * TILE);
         const key = "t" + cx + "," + cy;
@@ -2514,10 +2959,10 @@
           let fired = false;
           if (geometry === "trap") { triggerTrap(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
-          else if (geometry === "switch") { triggerFlip(actor); fired = true; }
+          else if (geometry === "switch") { triggerFlip(actor, cx, cy); fired = true; }
           else if (geometry === "bomb") { triggerBombArm(cx, cy); fired = true; }
           else if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); fired = true; }
-          else if (geometry === "door") {
+          else if (geometry === "door" && (!colorAt(cx, cy) || isChannelOn(colorAt(cx, cy)))) {
             // relocates the actor into a different room's actor list entirely — bail out of
             // this drag-clamp call immediately rather than keep resolving stale cells against
             // whatever room is now hot
@@ -2639,6 +3084,7 @@
   document.getElementById("clearAllBtn").addEventListener("click", () => {
     if (!confirm("Clear everything? This removes every room, door, tile, and actor and starts over with one empty room.")) return;
     initBoard();
+    switchChannels = {};
     clearTransientRuntimeState();
     resetScoreAndIntensity();
     renderAll();
@@ -2676,8 +3122,25 @@
   // clearly marked. `extra` carries per-instance runtime state that isn't part of the shared
   // tile definition: how far along a diggable wall's erosion is, or whether a bomb's fuse is
   // currently lit.
+  // Small chevron pointing in a wind/conveyor tile's direction — "direction visible in the
+  // art" without needing a whole extra hand-drawn icon set like cannon's, since the arrow is
+  // the same shape rotated, not four distinct drawings.
+  function drawWindArrow(ctx, cx, cy, dir) {
+    const angle = Math.atan2(dir.y, dir.x);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = MODIFIER_SWATCH_COLORS.wind;
+    ctx.beginPath();
+    ctx.moveTo(8, 0); ctx.lineTo(-6, -7); ctx.lineTo(-2, 0); ctx.lineTo(-6, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawGameplayTile(ctx, x, y, tile, extra) {
     const cell = TILE / ART;
+    const windDir = WIND_DIRECTIONS[tile.modifier];
     if (tile.geometry === "none") {
       if (tile.modifier !== "none") {
         ctx.save();
@@ -2685,17 +3148,38 @@
         ctx.fillStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
         ctx.fillRect(x, y, TILE, TILE);
         ctx.restore();
+        if (windDir) drawWindArrow(ctx, x + TILE / 2, y + TILE / 2, windDir);
       }
       return;
     }
+    // A colored solid tile currently gated open just shows as a faint, hollow outline —
+    // visibly "not really there right now" — rather than the normal full block, so its passable
+    // state reads at a glance the same way any other reaction here does.
+    const gateOpen = tile.geometry === "solid" && extra && extra.color && extra.channelOn;
     let icon = GEOMETRY_ICONS[tile.geometry];
     if (tile.geometry === "diggable" && extra && extra.digFrac > 0) {
       const stage = Math.min(DIGGABLE_STAGE_ICONS.length - 1, Math.floor(extra.digFrac * DIGGABLE_STAGE_ICONS.length));
       icon = DIGGABLE_STAGE_ICONS[stage];
     }
-    if (tile.geometry === "bomb" && extra && extra.armed) {
+    if (gateOpen) {
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = CHANNEL_COLOR_HEX[extra.color];
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 2, y + 2, TILE - 4, TILE - 4);
+      ctx.restore();
+    } else if (tile.geometry === "bomb" && extra && extra.armed) {
       ctx.save();
       ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
+      drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
+    } else if ((tile.geometry === "switch" || tile.geometry === "plate") && extra && extra.color) {
+      // dim until its own channel is on — the switch/plate itself shows the state it drives
+      ctx.save();
+      ctx.globalAlpha = extra.channelOn ? 1 : 0.55;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
     } else {
@@ -2706,6 +3190,17 @@
       ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
       ctx.lineWidth = 3;
       ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+      ctx.restore();
+      if (windDir) drawWindArrow(ctx, x + TILE / 2, y + TILE / 2, windDir);
+    }
+    if (extra && extra.color && !gateOpen) {
+      // a small corner badge on switch/plate/door/solid ties the tile to its channel color,
+      // independent of whichever on/off treatment above already applies
+      ctx.save();
+      ctx.fillStyle = CHANNEL_COLOR_HEX[extra.color];
+      ctx.beginPath();
+      ctx.arc(x + TILE - 6, y + 6, 4, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
   }
@@ -2749,6 +3244,10 @@
             extra = { digFrac: progress / DIG_DURATION_MS };
           } else if (isLive && tile.geometry === "bomb") {
             extra = { armed: !!bombArmed[roomCellKey(currentRoomId, x, y)] };
+          }
+          if (isLive && isColorTaggable(tile.geometry)) {
+            const color = colorBoard[y][x];
+            if (color) extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
           }
           drawGameplayTile(ctx, x * TILE, y * TILE, tile, extra);
         }
@@ -2821,6 +3320,14 @@
 
       if (actor.isPlayer) {
         ctx.strokeStyle = "#ffd166";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
+      } else if (TEMPERAMENT_COLORS[def.temperament]) {
+        // v2.9 legibility layer (the same concern flagged and deferred back in v2.3 for
+        // gameplay tiles): however custom an actor's drawn art gets, a thin outline keyed to
+        // its temperament category still tells a fresh player danger from safety at a glance.
+        // Applied uniformly (not just to custom actor slots) so it reads as one consistent rule.
+        ctx.strokeStyle = TEMPERAMENT_COLORS[def.temperament];
         ctx.lineWidth = 1.5;
         ctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
       }
@@ -2973,8 +3480,12 @@
     renderBackgroundSwatches();
     renderGeometrySwatches();
     renderModifierSwatches();
+    renderChannelSwatches();
     renderActorSwatches();
     renderPlayerSwatch();
+    renderPushableSwatch();
+    renderCustomActorSwatches();
+    renderTemperamentPicker();
     renderGameRuleSwatches();
     renderPresetSwatches();
     renderPoseTabs();
@@ -3007,23 +3518,26 @@
       rooms: structuredClone(rooms),
       doorLinks: structuredClone(doorLinks),
       gravityEnabled, wrapHEnabled, wrapVEnabled,
+      switchChannels: structuredClone(switchChannels),
       playerRoomId,
       actorDefs: structuredClone(actorDefs),
       backgroundTileDefs: structuredClone(backgroundTileDefs)
     };
 
     const runtimeFunctions = [
-      geometryAt, modifierAt, isBlockingGeometry, gravityOn, applyWorldWrap,
-      overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction,
-      resolveAxis, triggerImpact, impactWobbleValue, gameplayTileAt,
+      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
+      gravityOn, applyWorldWrap,
+      overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
+      resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      updatePressurePlates,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       stepActor, tick,
-      drawArtScaled, drawGameplayTile, renderRoomContents, renderActors,
+      drawArtScaled, drawWindArrow, drawGameplayTile, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, beep,
@@ -3041,6 +3555,14 @@
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
       `const CANNON_ORDER = ${JSON.stringify(CANNON_ORDER)};`,
+      `const WIND_ORDER = ${JSON.stringify(WIND_ORDER)};`,
+      `const WIND_DIRECTIONS = ${JSON.stringify(WIND_DIRECTIONS)};`,
+      `const WIND_FORCE = ${WIND_FORCE};`,
+      `const CHANNEL_COLORS = ${JSON.stringify(CHANNEL_COLORS)};`,
+      `const CHANNEL_COLOR_HEX = ${JSON.stringify(CHANNEL_COLOR_HEX)};`,
+      `const PUSHABLE_KIND = ${JSON.stringify(PUSHABLE_KIND)};`,
+      `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
+      `const TEMPERAMENT_COLORS = ${JSON.stringify(TEMPERAMENT_COLORS)};`,
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
       `const CANNON_DIRECTIONS = ${JSON.stringify(CANNON_DIRECTIONS)};`,
@@ -3129,12 +3651,14 @@
   let gravityEnabled = GAME_DATA.gravityEnabled;
   let wrapHEnabled = GAME_DATA.wrapHEnabled;
   let wrapVEnabled = GAME_DATA.wrapVEnabled;
+  let switchChannels = GAME_DATA.switchChannels;
+  let plateChannelsActive = {};
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
   let backgroundTileDefs = GAME_DATA.backgroundTileDefs;
 
   let currentRoomId = null;
-  let board = [], backgroundBoard = [], actors = [], startPos = { x: 0, y: 0 };
+  let board = [], backgroundBoard = [], colorBoard = [], actors = [], startPos = { x: 0, y: 0 };
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
@@ -3172,6 +3696,8 @@
     gravityEnabled = initialGameData.gravityEnabled;
     wrapHEnabled = initialGameData.wrapHEnabled;
     wrapVEnabled = initialGameData.wrapVEnabled;
+    switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
+    plateChannelsActive = {};
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
     actorContactCooldown = {}; dragContactCooldown = {};
