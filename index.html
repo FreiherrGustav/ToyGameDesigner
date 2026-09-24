@@ -87,6 +87,21 @@
     color: #222;
     font-weight: bold;
   }
+  button.tbtn:disabled { opacity: 0.4; cursor: default; }
+  button.tbtn:disabled:hover { border-color: transparent; }
+
+  /* ---------- Error overlay (v2.10) — a recoverable "oops", never a dead blank tab ---------- */
+  #errorOverlay {
+    position: fixed; inset: 0; background: rgba(10, 10, 14, 0.85);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  #errorOverlayCard {
+    background: var(--panel); border-radius: 12px; padding: 24px 28px; max-width: 360px;
+    text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #errorOverlayTitle { font-size: 18px; font-weight: bold; color: var(--accent); margin-bottom: 10px; }
+  #errorOverlayBody { font-size: 13px; color: var(--text); margin-bottom: 16px; line-height: 1.4; }
+  #errorOverlayResetBtn { font-size: 14px; padding: 8px 16px; }
 
   /* ---------- Palette panel ---------- */
   #paletteWrap { width: 260px; display: flex; flex-direction: column; gap: 12px; }
@@ -316,13 +331,20 @@
   <!-- Game / Editor canvas -->
   <div class="panel" id="gameWrap">
     <div class="toolbar" id="buildToolbar">
+      <button class="tbtn" id="undoBtn" title="Undo" disabled>↩ Undo</button>
+      <button class="tbtn" id="redoBtn" title="Redo" disabled>↪ Redo</button>
       <button class="tbtn" id="resetBtn">↺ Reset to start</button>
       <button class="tbtn" id="setStartBtn">📍 Set player start here</button>
       <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
+      <button class="tbtn" id="newProjectBtn">🆕 New project</button>
+      <button class="tbtn" id="saveProjectBtn">💾 Save project</button>
+      <button class="tbtn" id="loadProjectBtn">📂 Load project</button>
+      <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
       <button class="tbtn" id="exportBtn">⬇ Export game</button>
     </div>
     <div class="toolbar">
       <div id="hud"><span id="livesRow" style="display:none;">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
+      <div id="autosaveHint" class="hint" style="margin:0;"></div>
     </div>
     <div class="toolbar" id="roomTabRow"></div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
@@ -335,6 +357,16 @@
     <div id="log"></div>
   </div>
 
+</div>
+
+<div id="errorOverlay" style="display:none;">
+  <div id="errorOverlayCard">
+    <div id="errorOverlayTitle">😵 Oops! Something glitched.</div>
+    <div id="errorOverlayBody">
+      That's on us, not on you. Your last auto-saved work is safe — resetting will bring it right back.
+    </div>
+    <button class="tbtn" id="errorOverlayResetBtn">↺ Reset and keep going</button>
+  </div>
 </div>
 
 <script>
@@ -655,6 +687,216 @@
     updateModeButtons();
     renderAll();
   }
+
+  // ============== Project persistence (v2.10) ==============
+  // One canonical snapshot shape for "the entire editable project", reused by undo/redo history,
+  // localStorage autosave, the JSON save/load file format, and New Project's reset-to-factory
+  // step — so none of those four can quietly drift out of sync with what a "project" actually
+  // contains. Deliberately broader than exportStandaloneGame's gameData: that's a frozen,
+  // play-only snapshot for a finished game; this is the live, still-editable project, so it also
+  // carries the id counters and kid-authored custom actor slots an export never needs.
+  function snapshotCurrentRoomState() {
+    // Writes the hot board/backgroundBoard/colorBoard/actors/startPos globals back into the
+    // `rooms` array without switching which room is active — the "outgoing" half of
+    // activateRoom()'s job, without the "incoming" half.
+    const room = rooms.find(r => r.id === currentRoomId);
+    if (room) {
+      room.board = board; room.backgroundBoard = backgroundBoard; room.colorBoard = colorBoard;
+      room.actors = actors; room.startPos = startPos;
+    }
+  }
+  function captureProjectSnapshot() {
+    snapshotCurrentRoomState();
+    return {
+      rooms: structuredClone(rooms), doorLinks: structuredClone(doorLinks),
+      nextRoomId, currentRoomId, playerRoomId,
+      actorDefs: structuredClone(actorDefs), nextActorDefId,
+      backgroundTileDefs: structuredClone(backgroundTileDefs), nextBackgroundId,
+      customActorSlotIds: customActorSlotIds.slice(), nextCustomActorLetter,
+      nextActorInstId,
+      gravityEnabled, wrapHEnabled, wrapVEnabled,
+      switchChannels: structuredClone(switchChannels)
+    };
+  }
+  // Restores every field captureProjectSnapshot() saved, then re-derives everything downstream
+  // of it (hot room pointers, transient runtime state, the palette/canvas render). Deliberately
+  // leaves score/lives/appMode alone — those are session state, not project content, and were
+  // never part of the snapshot in the first place; a caller that also wants those reset (New
+  // Project, JSON load) does so itself on top of this.
+  function restoreProjectSnapshot(snap) {
+    rooms = structuredClone(snap.rooms);
+    doorLinks = structuredClone(snap.doorLinks);
+    nextRoomId = snap.nextRoomId;
+    playerRoomId = snap.playerRoomId;
+    actorDefs = structuredClone(snap.actorDefs);
+    nextActorDefId = snap.nextActorDefId;
+    backgroundTileDefs = structuredClone(snap.backgroundTileDefs);
+    nextBackgroundId = snap.nextBackgroundId;
+    customActorSlotIds = snap.customActorSlotIds.slice();
+    nextCustomActorLetter = snap.nextCustomActorLetter;
+    nextActorInstId = snap.nextActorInstId;
+    gravityEnabled = snap.gravityEnabled;
+    wrapHEnabled = snap.wrapHEnabled;
+    wrapVEnabled = snap.wrapVEnabled;
+    switchChannels = structuredClone(snap.switchChannels);
+    currentRoomId = null; // avoid activateRoom()'s outgoing-save writing stale state into the rooms just restored
+    activateRoom(rooms.some(r => r.id === snap.currentRoomId) ? snap.currentRoomId : rooms[0].id);
+    clearTransientRuntimeState();
+    renderRoomTabs();
+    renderAll();
+  }
+
+  // ============== Undo / redo ==============
+  // Covers tile/background painting and actor placement/dragging/erasing — the patch's own
+  // stated scope, not every possible edit (room/door management and game-rule toggles aren't
+  // wired in here; "doesn't need to be exhaustive on day one"). Each entry is a full project
+  // snapshot rather than a diff — simplest possible correct implementation, and this project is
+  // small enough that a capped stack of them is a non-issue memory-wise.
+  const UNDO_LIMIT = 50;
+  let undoStack = [];
+  let redoStack = [];
+  let suppressHistory = false; // true while an undo/redo/load is itself restoring a snapshot
+  function pushUndoSnapshot() {
+    if (suppressHistory) return;
+    undoStack.push(captureProjectSnapshot());
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack = []; // a fresh edit invalidates whatever was available to redo
+    updateUndoRedoButtons();
+  }
+  function performUndo() {
+    if (undoStack.length === 0 || appMode !== "build") return;
+    redoStack.push(captureProjectSnapshot());
+    const snap = undoStack.pop();
+    suppressHistory = true;
+    restoreProjectSnapshot(snap);
+    suppressHistory = false;
+    updateUndoRedoButtons();
+  }
+  function performRedo() {
+    if (redoStack.length === 0 || appMode !== "build") return;
+    undoStack.push(captureProjectSnapshot());
+    const snap = redoStack.pop();
+    suppressHistory = true;
+    restoreProjectSnapshot(snap);
+    suppressHistory = false;
+    updateUndoRedoButtons();
+  }
+  function resetHistory() {
+    undoStack = []; redoStack = [];
+    updateUndoRedoButtons();
+  }
+  function updateUndoRedoButtons() {
+    const undoBtn = document.getElementById("undoBtn");
+    const redoBtn = document.getElementById("redoBtn");
+    if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+    if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+  }
+
+  // ============== JSON save / load, localStorage autosave (v2.10) ==============
+  // Both wrap a captureProjectSnapshot() in the same small envelope — a format tag and version
+  // number, so a future format change can tell an old save apart from a new one instead of
+  // guessing from shape. Deliberately a *different* format from exportStandaloneGame's HTML
+  // output: that one is a frozen, playable game for sharing; this one is the live, still-editable
+  // project, for resuming and continuing to build — see the v2.10 patch note's own framing.
+  const PROJECT_FILE_FORMAT = "toygamedesigner-project";
+  const PROJECT_FILE_VERSION = 1;
+  function wrapProjectSnapshot(snap) { return { format: PROJECT_FILE_FORMAT, version: PROJECT_FILE_VERSION, data: snap }; }
+  // Loose validation on the way back in: only checks the envelope, not every field inside `data`
+  // — restoreProjectSnapshot() already assumes its shape, same as it does for undo/redo entries
+  // it produced itself, so a hand-edited or corrupted file just fails visibly (see the try/catch
+  // around every call site below) rather than silently loading a half-broken project.
+  function isValidProjectFile(parsed) {
+    return !!parsed && parsed.format === PROJECT_FILE_FORMAT && parsed.data && Array.isArray(parsed.data.rooms);
+  }
+
+  function saveProjectToFile() {
+    const json = JSON.stringify(wrapProjectSnapshot(captureProjectSnapshot()), null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-project.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    log("Project saved! Check your downloads for my-project.json.");
+  }
+  function loadProjectFromFile(file) {
+    if (appMode !== "build") return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed;
+      try { parsed = JSON.parse(reader.result); } catch (err) { log("That file isn't a project this tool can read."); return; }
+      if (!isValidProjectFile(parsed)) { log("That file isn't a project this tool can read."); return; }
+      if (!confirm("Load this project? This replaces everything currently on the board.")) return;
+      suppressHistory = true;
+      restoreProjectSnapshot(parsed.data);
+      suppressHistory = false;
+      resetScoreAndIntensity();
+      resetHistory();
+      log("Project loaded from " + file.name + ".");
+    };
+    reader.onerror = () => log("Couldn't read that file.");
+    reader.readAsText(file);
+  }
+
+  // Automatic background saving so an accidental tab close or refresh never loses a kid's work —
+  // periodic rather than on-every-keystroke, since stringifying the whole project (custom pixel
+  // art, multiple rooms, actor presets) many times a second would be wasted work for something
+  // that only ever needs to survive an accidental close. Skipped entirely in Play mode: a play
+  // session mutates the same live rooms as a matter of course (see enterPlayMode's own comment),
+  // and autosaving mid-session would overwrite the real build with runtime-only churn.
+  const AUTOSAVE_KEY = "toyGameDesigner.autosave.v1";
+  const AUTOSAVE_INTERVAL_MS = 4000;
+  let lastAutosaveJSON = null;
+  let autosaveQuotaWarned = false;
+  function setAutosaveHint(text) {
+    const el = document.getElementById("autosaveHint");
+    if (el) el.textContent = text;
+  }
+  function saveAutosave() {
+    const payload = JSON.stringify(wrapProjectSnapshot(captureProjectSnapshot()));
+    if (payload === lastAutosaveJSON) return; // nothing's actually changed since the last save
+    try {
+      localStorage.setItem(AUTOSAVE_KEY, payload);
+      lastAutosaveJSON = payload;
+      if (autosaveQuotaWarned) { autosaveQuotaWarned = false; setAutosaveHint(""); }
+    } catch (err) {
+      // localStorage has a per-origin size cap, and a project with enough custom pixel art,
+      // rooms, and actors can plausibly hit it. This is never a silent failure: the in-memory
+      // project is completely unaffected (nothing here throws past this catch), but auto-save
+      // itself has quietly stopped working, so a kid needs a clear nudge to export or clean up
+      // rather than trusting a safety net that's no longer there — surfaced once, not spammed
+      // every 4 seconds for as long as the tab stays open over the cap.
+      if (!autosaveQuotaWarned) {
+        autosaveQuotaWarned = true;
+        setAutosaveHint("⚠ Running low on browser storage — auto-save has stopped. Export your game or save a project file as backup.");
+        log("Auto-save is low on space and has stopped — export your game or save a project file as backup.");
+      }
+    }
+  }
+  function clearAutosave() {
+    lastAutosaveJSON = null;
+    try { localStorage.removeItem(AUTOSAVE_KEY); } catch (err) { /* nothing to clean up if storage is already unavailable */ }
+  }
+  // Returns true if a previous session's autosave was actually restored — false for "nothing to
+  // restore" and "the saved data was unreadable" alike, both of which fall back to the same
+  // freshly-initialized empty project a first-ever visit gets.
+  function loadAutosave() {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!isValidProjectFile(parsed)) return false;
+      restoreProjectSnapshot(parsed.data);
+      lastAutosaveJSON = raw;
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+  setInterval(() => { if (appMode === "build") saveAutosave(); }, AUTOSAVE_INTERVAL_MS);
 
   function makeDefaultArt(hex) { return new Array(ART * ART).fill(hex); }
 
@@ -1156,6 +1398,24 @@
     el.appendChild(line);
     el.scrollTop = el.scrollHeight;
     while (el.children.length > 20) el.removeChild(el.firstChild);
+  }
+
+  // v2.10: the project's founding rule ("weird choices should be funny or recoverable, never a
+  // bare error state") applied to the tool's own robustness, not just its in-game reactions.
+  // Shared between the live tool and every exported game (it's in the same extracted-function
+  // list as frame() itself — see exportStandaloneGame's runtimeFunctions) so both fail the same
+  // recoverable way instead of freezing on a silent blank frame. Reloading is deliberately the
+  // ONLY recovery action, rather than trying to patch up whatever's now-uncertain in-memory
+  // state: the live tool reloads into its own auto-saved session (see loadAutosave()), and an
+  // exported game reloads back to its own embedded GAME_DATA — both land somewhere known-good.
+  let fatalErrorShown = false;
+  function handleFatalError(err) {
+    console.error("Toy Game-Maker hit an unexpected error:", err);
+    if (fatalErrorShown) return; // already showing the overlay — no need to re-log every repeat error
+    fatalErrorShown = true;
+    try { log("😵 Something glitched — use the reset button to pick back up."); } catch (logErr) { /* even logging failed; the overlay below still covers it */ }
+    const overlay = document.getElementById("errorOverlay");
+    if (overlay) overlay.style.display = "flex";
   }
 
   function addScore(n) {
@@ -3000,6 +3260,7 @@
 
   gameCanvas.addEventListener("mousedown", (e) => {
     if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
+    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
     if (paintMode === "actor") {
@@ -3029,6 +3290,7 @@
 
   gameCanvas.addEventListener("touchstart", (e) => {
     if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
+    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
     if (paintMode === "actor") {
@@ -3090,9 +3352,48 @@
     renderAll();
   });
 
+  document.getElementById("undoBtn").addEventListener("click", performUndo);
+  document.getElementById("redoBtn").addEventListener("click", performRedo);
+  // Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y) — the two conventional bindings, guarded to
+  // build mode only (undo has no meaning mid-Play, which is its own snapshot/restore already).
+  window.addEventListener("keydown", (e) => {
+    if (appMode !== "build") return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === "z" || e.key === "Z") { e.preventDefault(); if (e.shiftKey) performRedo(); else performUndo(); }
+    else if (e.key === "y" || e.key === "Y") { e.preventDefault(); performRedo(); }
+  });
+
   document.getElementById("exportBtn").addEventListener("click", () => {
     exportStandaloneGame();
   });
+
+  document.getElementById("newProjectBtn").addEventListener("click", () => {
+    if (appMode !== "build") return;
+    if (!confirm("Start a new project? This clears everything — every room, all custom art and actors, and your saved work — and can't be undone.")) return;
+    restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT));
+    resetScoreAndIntensity();
+    resetHistory();
+    clearAutosave();
+    log("Started a new project.");
+  });
+
+  document.getElementById("saveProjectBtn").addEventListener("click", saveProjectToFile);
+  document.getElementById("loadProjectBtn").addEventListener("click", () => {
+    document.getElementById("loadProjectInput").click();
+  });
+  document.getElementById("loadProjectInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    e.target.value = ""; // so picking the same file twice in a row still fires "change"
+    if (file) loadProjectFromFile(file);
+  });
+
+  // Basic error boundary (v2.10): catches anything uncaught ANYWHERE, not just inside the frame
+  // loop (a click handler hitting an edge case nobody explicitly tested, for instance) — same
+  // recoverable overlay either way, since from a kid's seat both look the same: "I did something
+  // and now it's stuck."
+  window.addEventListener("error", (e) => handleFatalError(e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => handleFatalError(e.reason));
+  document.getElementById("errorOverlayResetBtn").addEventListener("click", () => location.reload());
 
   document.getElementById("loadCheeseHeist").addEventListener("click", (e) => {
     e.preventDefault();
@@ -3498,6 +3799,15 @@
   renderPixelCanvas();
   renderAll();
 
+  // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
+  // Captured now — after every built-in actor/background def above has been seeded and the
+  // initial empty board is in place, but before any auto-save restore might replace them — so
+  // "New Project" always resets to a truly fresh app, custom art and all, not just an empty
+  // board it happens to have booted with.
+  const FACTORY_DEFAULT_SNAPSHOT = captureProjectSnapshot();
+  if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");
+  updateUndoRedoButtons();
+
   // ============== Export: standalone playable file ==============
   // The exported file is a second, self-contained HTML document: the current build's data
   // (rooms/tiles/actors/backgrounds) plus just enough runtime to play it, with every editor
@@ -3541,7 +3851,7 @@
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, beep,
-      log, addScore, roomCellKey, gameplayKey, frame
+      log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
 
@@ -3622,6 +3932,11 @@
   #dpad button:active { background:var(--accent); color:#222; }
   .dpad-up{grid-column:2;grid-row:1;} .dpad-left{grid-column:1;grid-row:2;} .dpad-right{grid-column:3;grid-row:2;} .dpad-down{grid-column:2;grid-row:3;}
   #log { font-size:12px; color:#bbb; max-height:50px; overflow-y:auto; width:768px; max-width:100%; }
+  #errorOverlay { position:fixed; inset:0; background:rgba(10,10,14,0.85); display:none; align-items:center; justify-content:center; z-index:1000; }
+  #errorOverlayCard { background:var(--panel); border-radius:12px; padding:24px 28px; max-width:360px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,0.5); }
+  #errorOverlayTitle { font-size:18px; font-weight:bold; color:var(--accent); margin-bottom:10px; }
+  #errorOverlayBody { font-size:13px; color:var(--text); margin-bottom:16px; line-height:1.4; }
+  #errorOverlayResetBtn { font-size:14px; padding:8px 16px; background:var(--panel-light); color:var(--text); border:none; border-radius:6px; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -3635,6 +3950,13 @@
     <button class="dpad-down" data-dir="down">▼</button>
   </div>
   <div id="log"></div>
+</div>
+<div id="errorOverlay">
+  <div id="errorOverlayCard">
+    <div id="errorOverlayTitle">😵 Oops! Something glitched.</div>
+    <div id="errorOverlayBody">That's on us, not on you. Resetting starts the game fresh again.</div>
+    <button id="errorOverlayResetBtn">↺ Reset and keep going</button>
+  </div>
 </div>
 <script>
 (function () {
@@ -3665,6 +3987,7 @@
   let score = 0, intensity = 0;
   let lives = DEFAULT_LIVES;
   let playSessionEnded = null;
+  let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
   const wanderHeadings = {};
 
   function addScore(n) {
@@ -3729,6 +4052,22 @@
     btn.addEventListener("touchend", (e) => { keys[dirKey(btn.dataset.dir)] = false; e.preventDefault(); }, { passive: false });
   });
 
+  // Basic error boundary, same as the live builder's (see handleFatalError, shared verbatim via
+  // functionSource): catches anything uncaught anywhere, not just inside the frame loop. Resets
+  // by replaying the game's own embedded data rather than reloading the page — instant, and
+  // works the same whether this file was opened from disk or a server.
+  window.addEventListener("error", (e) => handleFatalError(e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => handleFatalError(e.reason));
+  document.getElementById("errorOverlayResetBtn").addEventListener("click", () => {
+    try {
+      restartStandaloneGame();
+      document.getElementById("errorOverlay").style.display = "none";
+      fatalErrorShown = false;
+      lastT = performance.now(); // avoid a huge dt on the first frame back after sitting paused
+      requestAnimationFrame(frame); // the frame loop stopped rescheduling itself on the error — restart it
+    } catch (err) { location.reload(); }
+  });
+
   let lastT = performance.now();
   requestAnimationFrame(frame);
 })();
@@ -3743,15 +4082,26 @@
     let dt = (t - lastT) / 1000;
     lastT = t;
     dt = Math.min(dt, 0.033);
-    if (roomTransition) {
-      if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
-    } else if (appMode === "play" && playSessionEnded) {
-      // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
-    } else {
-      tick(dt);
-      tickDragCooldowns(dt);
+    try {
+      if (roomTransition) {
+        if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
+      } else if (appMode === "play" && playSessionEnded) {
+        // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
+      } else {
+        tick(dt);
+        tickDragCooldowns(dt);
+      }
+      renderGame();
+    } catch (err) {
+      // An uncaught throw here would otherwise silently stop requestAnimationFrame from ever
+      // being called again — a permanently frozen tab with no console open in sight, the exact
+      // "dead white screen" failure this pass exists to prevent. Deliberately don't reschedule:
+      // limping along re-running the same broken frame every ~16ms would either wedge on the
+      // same error immediately or corrupt state further, so this freezes on the last good render
+      // with the recoverable overlay on top instead.
+      handleFatalError(err);
+      return;
     }
-    renderGame();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
