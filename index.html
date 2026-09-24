@@ -51,25 +51,6 @@
     cursor: crosshair;
     touch-action: none;
   }
-  #dpad {
-    display: grid;
-    grid-template-columns: repeat(3, 48px);
-    grid-template-rows: repeat(3, 48px);
-    gap: 4px;
-  }
-  #dpad button {
-    background: var(--panel-light);
-    color: var(--text);
-    border: none;
-    border-radius: 8px;
-    font-size: 20px;
-    cursor: pointer;
-  }
-  #dpad button:active { background: var(--accent); color: #222; }
-  .dpad-up { grid-column: 2; grid-row: 1; }
-  .dpad-left { grid-column: 1; grid-row: 2; }
-  .dpad-right { grid-column: 3; grid-row: 2; }
-  .dpad-down { grid-column: 2; grid-row: 3; }
 
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   button.tbtn {
@@ -159,7 +140,7 @@
 
   /* Play mode hides every Build-only editing surface — the palette, the room tabs (no manual
      room-hopping mid-game), and the build-only toolbar buttons (reset/set-start/clear/export) —
-     leaving just the canvas, dpad, HUD, and log. */
+     leaving just the canvas, HUD, and log. */
   body.play-mode #paletteWrap { display: none; }
   body.play-mode #roomTabRow { display: none; }
   body.play-mode #buildToolbar { display: none; }
@@ -263,9 +244,16 @@
         <div class="section-title" style="margin-top:10px;">Channel</div>
         <div class="swatch-row" id="channelSwatches"></div>
         <div class="hint" style="margin-top:2px;">
-          None: a switch flips gravity, a door/wall always works, same as ever. Pick a color and
-          a switch (or a pressure plate) flips that color's own channel instead — a matching
-          door or wall only listens to switches and plates of its own color.
+          For a switch, plate, or wall — none: a switch flips gravity, a wall always blocks, same
+          as ever. Pick a color and a switch (or plate) flips that color's own channel instead —
+          a matching wall only listens to switches and plates of its own color.
+        </div>
+        <div class="hint" style="margin-top:6px;">
+          For a door, color means something different: it's how the door decides where it leads.
+          None keeps a door's old default (links onward automatically). A color no other door is
+          using yet opens into a brand-new room. The same color on a second door links the two
+          directly — no new room — which is how a real loop back to an earlier room gets built.
+          Only two doors can ever share one color.
         </div>
       </div>
     </div>
@@ -348,12 +336,6 @@
     </div>
     <div class="toolbar" id="roomTabRow"></div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
-    <div id="dpad">
-      <button class="dpad-up" data-dir="up">▲</button>
-      <button class="dpad-left" data-dir="left">◀</button>
-      <button class="dpad-right" data-dir="right">▶</button>
-      <button class="dpad-down" data-dir="down">▼</button>
-    </div>
     <div id="log"></div>
   </div>
 
@@ -2712,9 +2694,11 @@
       else if (geometry === "switch") triggerFlip(player, cx, cy);
       else if (geometry === "bomb") triggerBombArm(cx, cy);
       else if (CANNON_DIRECTIONS[geometry]) triggerCannon(player, geometry);
-      // A colored door only actually functions while its channel is on — otherwise it's inert,
-      // same as any other painted-but-unlinked cell (see triggerDoor's own no-op comment).
-      else if (geometry === "door" && (!colorAt(cx, cy) || isChannelOn(colorAt(cx, cy)))) { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
+      // v2.9 gave a colored door a channel-gated "locked until switched" behavior; v2.11
+      // repurposes a door's color entirely for room-linking instead (see wireColoredDoor), so a
+      // door's own color no longer gates whether it functions — an unlinked/orphaned door is
+      // already a handled, harmless case on its own (see triggerDoor's own no-op comment).
+      else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
       else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
       if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player);
@@ -2969,10 +2953,21 @@
     if (selectedGeometry === "door") {
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       if (existingTile && existingTile.geometry === "door") {
-        // already a door here (repainting the same cell during one drag stroke, or just
-        // restyling its modifier/color) — keep the existing link, don't spin up another room
+        if (colorBoard[gy][gx] === selectedChannelColor) {
+          // repainting the same cell during one drag stroke, or just restyling its modifier —
+          // the color isn't actually changing, so keep the existing link untouched
+          board[gy][gx] = gameplayKey("door", selectedModifier);
+          return;
+        }
+        // the color IS changing (v2.11): a door's color is what it's linked by now, so recoloring
+        // one without re-deriving its link would leave it visually claiming a color it doesn't
+        // actually go along. Sever whatever link it had first — same as any other door removal,
+        // this leaves the far side behind as an orphan rather than deleting it — then wire it up
+        // fresh under the new color, exactly as if this were a brand-new placement.
+        severDoorLink(currentRoomId, gx, gy);
         board[gy][gx] = gameplayKey("door", selectedModifier);
         colorBoard[gy][gx] = selectedChannelColor;
+        wireDoorColor(currentRoomId, gx, gy, selectedChannelColor);
         return;
       }
       createDoorAt(gx, gy);
@@ -3054,10 +3049,16 @@
     if (room) room.colorBoard[gy][gx] = value;
   }
 
-  // Tears down one door connection completely: both directions of its doorLinks entry, and
-  // both physical door tiles (this side and whatever room it led to). A door is fundamentally a
-  // pair — leaving either half behind after the other is gone just reads as a broken door with
-  // nowhere to go, so removing one always removes its match.
+  // Tears down one door connection: both directions of its doorLinks entry, and the physical
+  // door tile on THIS side only. The far side is deliberately left in place — still its own
+  // colored door tile, just no longer linked anywhere — rather than deleted along with it (v2.11).
+  // That's what makes color-matched doors (see wireColoredDoor) actually re-pairable: erase or
+  // delete-room away one half of a pair, and the surviving half becomes an ordinary "unused
+  // color" door again, ready for some other new door to link straight to it — the exact
+  // mechanism a maze/backtracking loop is built from, painting and color-matching alone, never a
+  // room picker. A door with nowhere to go is already a handled, harmless case (see
+  // triggerDoor's "erased-then-repainted cell without a link" no-op), so leaving one dangling is
+  // never an error state.
   function severDoorLink(roomId, gx, gy) {
     const key = roomCellKey(roomId, gx, gy);
     const link = doorLinks[key];
@@ -3065,23 +3066,72 @@
     delete doorLinks[key];
     delete doorLinks[roomCellKey(link.toRoomId, link.toX, link.toY)];
     setRoomBoardCell(roomId, gx, gy, null);
-    setRoomBoardCell(link.toRoomId, link.toX, link.toY, null);
     setRoomColorCell(roomId, gx, gy, null);
-    setRoomColorCell(link.toRoomId, link.toX, link.toY, null);
   }
 
-  // Placing a door needs no destination picker. By default it connects onward to the next room
-  // in the room list (the room immediately after this one, tab-order) if one exists, isn't
-  // already connected to this room some other way, and has this exact cell free — the common
-  // case of redoing a broken or erased door just reconnects it to the room it obviously belongs
-  // to, rather than spinning up a pointless new one. Otherwise (this is the last room, or the
-  // next one's already linked, or that cell over there is occupied) it falls back to attaching a
-  // brand-new room, same as always, with its own auto-placed return door at the same coordinates.
-  function createDoorAt(gx, gy) {
-    const fromRoomId = currentRoomId;
-    board[gy][gx] = gameplayKey("door", selectedModifier);
-    colorBoard[gy][gx] = selectedChannelColor;
+  // Every door tile currently on any room's board tagged with `color`, as {roomId, gx, gy}. Used
+  // to derive a color's current pairing state fresh each time rather than trusting some separately
+  // maintained count that could drift from what's actually painted.
+  function findDoorsWithColor(color) {
+    if (!color) return [];
+    const found = [];
+    rooms.forEach(room => {
+      const rb = room.id === currentRoomId ? board : room.board;
+      const rc = room.id === currentRoomId ? colorBoard : room.colorBoard;
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          if (rc[y][x] !== color || !rb[y][x]) continue;
+          const tile = GAMEPLAY_TILE_DEFS[rb[y][x]];
+          if (tile && tile.geometry === "door") found.push({ roomId: room.id, gx: x, gy: y });
+        }
+      }
+    });
+    return found;
+  }
 
+  // v2.11: a door's color decides where it leads, using the same three-way pattern a kid already
+  // knows from switches — unused, already-used, already-paired — rather than any new UI. Assumes
+  // the door tile at (fromRoomId, gx, gy) has ALREADY been painted with `color` on colorBoard;
+  // this just derives (or refuses) the link that color implies.
+  function wireColoredDoor(fromRoomId, gx, gy, color) {
+    const existingElsewhere = findDoorsWithColor(color).filter(d => !(d.roomId === fromRoomId && d.gx === gx && d.gy === gy));
+    if (existingElsewhere.length >= 2) {
+      // hard cap already reached — "which one do you arrive at" has no good answer with a third,
+      // so refuse the placement outright rather than guess; leave no half-wired door behind
+      setRoomBoardCell(fromRoomId, gx, gy, null);
+      setRoomColorCell(fromRoomId, gx, gy, null);
+      log("That color's already used by two doors — erase one first, or pick a different color.");
+      return;
+    }
+    if (existingElsewhere.length === 1) {
+      const other = existingElsewhere[0];
+      doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: other.roomId, toX: other.gx, toY: other.gy };
+      doorLinks[roomCellKey(other.roomId, other.gx, other.gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
+      renderRoomTabs();
+      const otherRoom = rooms.find(r => r.id === other.roomId);
+      log("New door — linked directly to the matching door in \"" + (otherRoom ? otherRoom.name : "another room") + "\".");
+      return;
+    }
+    // unused color: a brand-new room, same as the original v2.4 default — its auto-generated
+    // return door just shares this color now, no longer a special case, only the first ordinary
+    // instance of the pairing rule above.
+    const newRoom = createEmptyRoom("room " + (rooms.length + 1));
+    newRoom.board[gy][gx] = gameplayKey("door", "none");
+    newRoom.colorBoard[gy][gx] = color;
+    rooms.push(newRoom);
+    doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: newRoom.id, toX: gx, toY: gy };
+    doorLinks[roomCellKey(newRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
+    renderRoomTabs();
+    log("New door — added \"" + newRoom.name + "\" and linked it back here.");
+  }
+
+  // The door-color dispatcher: a real color goes through the new color-matching pairing rule
+  // above; no color (still the default) keeps the exact original v2.4/v2.9 behavior — link
+  // onward to the next room in tab order if one's free and not already connected some other way,
+  // otherwise spin up a brand-new room, same as always. Assumes the door tile has already been
+  // painted, same as wireColoredDoor.
+  function wireDoorColor(fromRoomId, gx, gy, color) {
+    if (color) { wireColoredDoor(fromRoomId, gx, gy, color); return; }
     const roomIndex = rooms.findIndex(r => r.id === fromRoomId);
     const nextRoom = rooms[roomIndex + 1];
     if (nextRoom && !nextRoom.board[gy][gx] && !hasDoorLinkBetween(fromRoomId, nextRoom.id)) {
@@ -3102,11 +3152,22 @@
     log("New door — added \"" + newRoom.name + "\" and linked it back here.");
   }
 
-  // Removes a room entirely — its board, actors, and every door connecting it to any other room
-  // (each severed cleanly, so nothing dangling is left behind on the other end). A game always
-  // needs at least one room, so the last one can't be deleted. If the player lived here, it's
-  // gone too, exactly like erasing it directly would be — same as any other actor in a deleted
-  // room, it's the kid's to place fresh wherever makes sense now.
+  // Placing a brand-new door tile — painting it, then handing off to wireDoorColor to decide
+  // where it leads. No destination picker either way; see wireDoorColor/wireColoredDoor.
+  function createDoorAt(gx, gy) {
+    const fromRoomId = currentRoomId;
+    board[gy][gx] = gameplayKey("door", selectedModifier);
+    colorBoard[gy][gx] = selectedChannelColor;
+    wireDoorColor(fromRoomId, gx, gy, selectedChannelColor);
+  }
+
+  // Removes a room entirely — its board, actors, and every door link connecting it to any other
+  // room. The far side of each of those links survives as an ordinary orphaned door tile (see
+  // severDoorLink) rather than being deleted along with this room — that's what lets a kid delete
+  // an unwanted auto-generated room and re-pair its color-matched door somewhere else instead. A
+  // game always needs at least one room, so the last one can't be deleted. If the player lived
+  // here, it's gone too, exactly like erasing it directly would be — same as any other actor in a
+  // deleted room, it's the kid's to place fresh wherever makes sense now.
   function deleteRoom(roomId) {
     if (rooms.length <= 1) { log("Can't delete the only room — a game needs at least one."); return; }
     const room = rooms.find(r => r.id === roomId);
@@ -3222,10 +3283,11 @@
           else if (geometry === "switch") { triggerFlip(actor, cx, cy); fired = true; }
           else if (geometry === "bomb") { triggerBombArm(cx, cy); fired = true; }
           else if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); fired = true; }
-          else if (geometry === "door" && (!colorAt(cx, cy) || isChannelOn(colorAt(cx, cy)))) {
+          else if (geometry === "door") {
             // relocates the actor into a different room's actor list entirely — bail out of
             // this drag-clamp call immediately rather than keep resolving stale cells against
-            // whatever room is now hot
+            // whatever room is now hot. A door's color is for room-linking (v2.11), not a
+            // channel gate — see checkPlayerTileContacts' matching comment.
             dragContactCooldown[key] = 350;
             triggerDoor(actor, cx, cy);
             return;
@@ -3322,16 +3384,6 @@
     if (dragActor) { dragActor.dragging = false; dragContactCooldown = {}; }
     dragActor = null;
   });
-
-  document.querySelectorAll("#dpad button").forEach(btn => {
-    btn.addEventListener("mousedown", () => { keys[dirKey(btn.dataset.dir)] = true; });
-    btn.addEventListener("mouseup", () => { keys[dirKey(btn.dataset.dir)] = false; });
-    btn.addEventListener("mouseleave", () => { keys[dirKey(btn.dataset.dir)] = false; });
-    btn.addEventListener("click", () => { keys[dirKey(btn.dataset.dir)] = true; setTimeout(() => keys[dirKey(btn.dataset.dir)] = false, 120); });
-  });
-  function dirKey(dir) {
-    return { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[dir];
-  }
 
   // ============== Reset / start controls ==============
   document.getElementById("resetBtn").addEventListener("click", () => {
@@ -3927,10 +3979,6 @@
   #wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px; }
   #gameCanvas { background:#000; image-rendering:pixelated; border:3px solid var(--panel-light); border-radius:4px; touch-action:none; }
   #hud { font-size:16px; font-weight:bold; color:var(--accent); }
-  #dpad { display:grid; grid-template-columns:repeat(3,48px); grid-template-rows:repeat(3,48px); gap:4px; }
-  #dpad button { background:var(--panel-light); color:var(--text); border:none; border-radius:8px; font-size:20px; cursor:pointer; }
-  #dpad button:active { background:var(--accent); color:#222; }
-  .dpad-up{grid-column:2;grid-row:1;} .dpad-left{grid-column:1;grid-row:2;} .dpad-right{grid-column:3;grid-row:2;} .dpad-down{grid-column:2;grid-row:3;}
   #log { font-size:12px; color:#bbb; max-height:50px; overflow-y:auto; width:768px; max-width:100%; }
   #errorOverlay { position:fixed; inset:0; background:rgba(10,10,14,0.85); display:none; align-items:center; justify-content:center; z-index:1000; }
   #errorOverlayCard { background:var(--panel); border-radius:12px; padding:24px 28px; max-width:360px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,0.5); }
@@ -3943,12 +3991,6 @@
 <div id="wrap">
   <div id="hud"><span id="livesRow">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
   <canvas id="gameCanvas" width="768" height="576"></canvas>
-  <div id="dpad">
-    <button class="dpad-up" data-dir="up">▲</button>
-    <button class="dpad-left" data-dir="left">◀</button>
-    <button class="dpad-right" data-dir="right">▶</button>
-    <button class="dpad-down" data-dir="down">▼</button>
-  </div>
   <div id="log"></div>
 </div>
 <div id="errorOverlay">
@@ -4010,8 +4052,8 @@
   renderPlayHUD();
 
   // No Build/Play toggle exists in this standalone export, so the win/game-over overlay's
-  // "try again" instruction points here instead: any key, a canvas tap, or a dpad tap restarts
-  // the session fresh from the original exported game data.
+  // "try again" instruction points here instead: any key or a canvas tap restarts the session
+  // fresh from the original exported game data.
   const initialGameData = JSON.parse(JSON.stringify(GAME_DATA));
   function restartStandaloneGame() {
     rooms = JSON.parse(JSON.stringify(initialGameData.rooms));
@@ -4043,14 +4085,6 @@
   window.addEventListener("keyup", (e) => { keys[e.key] = false; });
   gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded) restartStandaloneGame(); });
   gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
-  function dirKey(dir) { return { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[dir]; }
-  document.querySelectorAll("#dpad button").forEach(btn => {
-    btn.addEventListener("mousedown", () => { if (playSessionEnded) { restartStandaloneGame(); return; } keys[dirKey(btn.dataset.dir)] = true; });
-    btn.addEventListener("mouseup", () => { keys[dirKey(btn.dataset.dir)] = false; });
-    btn.addEventListener("mouseleave", () => { keys[dirKey(btn.dataset.dir)] = false; });
-    btn.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); return; } keys[dirKey(btn.dataset.dir)] = true; e.preventDefault(); }, { passive: false });
-    btn.addEventListener("touchend", (e) => { keys[dirKey(btn.dataset.dir)] = false; e.preventDefault(); }, { passive: false });
-  });
 
   // Basic error boundary, same as the live builder's (see handleFatalError, shared verbatim via
   // functionSource): catches anything uncaught anywhere, not just inside the frame loop. Resets
