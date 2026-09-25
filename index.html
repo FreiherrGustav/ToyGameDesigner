@@ -158,7 +158,21 @@
   /* ---------- Pixel editor ---------- */
   #pixelEditor { display: flex; flex-direction: column; gap: 6px; align-items: center; }
   #pixelCanvas {
-    background: #fff;
+    /* A checkerboard reads as "transparent" the way a solid white fill never could — a plain
+       white background made a kid's own white-drawn pixels invisible against it. Square size is
+       half an art-pixel (8px, art pixels are 16px at this canvas's display scale) so the checker
+       always shows through cleanly at every cell's edges. */
+    /* The light square is pure white and the dark one a firm mid-gray (not two close, washed-out
+       grays) specifically so a solid white-drawn cell — this toy's own default player color —
+       still reads unmistakably as "filled, not checker" at a glance, not just on close zoom. */
+    background-color: #ffffff;
+    background-image:
+      linear-gradient(45deg, #aaaaaa 25%, transparent 25%),
+      linear-gradient(-45deg, #aaaaaa 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #aaaaaa 75%),
+      linear-gradient(-45deg, transparent 75%, #aaaaaa 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
     image-rendering: pixelated;
     border: 2px solid var(--panel-light);
     border-radius: 4px;
@@ -254,8 +268,14 @@
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="hint" style="margin-top:2px;">
         Things that don't move on their own and do one specific thing the moment you touch them.
-        Collectible and pushable block are yours to redraw, like a character; the rest use a
-        built-in icon, same as Ground.
+        Pushable block is yours to redraw, like a character; the rest use a built-in icon, same as
+        Ground.
+      </div>
+      <div class="section-title" style="margin-top:10px;">Collectibles</div>
+      <div class="swatch-row" id="collectibleSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Things a kid scores by touching, then they're gone — grab one to place it, or hit + to
+        draw your own.
       </div>
       <div id="objectColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
@@ -449,26 +469,29 @@
   };
   const WIND_FORCE = 1000; // px/s^2, continuous — comparable to MOVE_ACCEL so a kid can still fight against it
 
-  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer", "collectible"];
+  // v2.15: "collectible" used to live here as a temperament (one shared default def, same as
+  // wanderer/chaser/etc). It's moved out entirely — collectibles are now their own dedicated,
+  // multi-sprite category (see collectibleSlotIds below), the same way pushable already was — so
+  // TEMPERAMENTS is now purely "character behaviors a kid assigns."
+  const TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer"];
   const TEMPERAMENT_COLORS = {
-    stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
+    stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28"
   };
-  // v2.14 taxonomy: Characters are TEMPERAMENTS minus collectible — things with behavior, that a
-  // kid places to react to the player. Collectible doesn't move on its own and just does one
-  // thing on contact, so despite being built the same way (a temperament) it now lives with the
-  // Objects, not the Characters — see OBJECT_ACTOR_KINDS.
-  const CHARACTER_TEMPERAMENTS = TEMPERAMENTS.filter(t => t !== "collectible");
   // Pushable blocks are architecturally an actor (real position/velocity/mass in the same
   // continuous physics as everyone else — see stepActor) but not a "temperament" a kid assigns:
-  // they never steer themselves, they're just displaced by contact. Kept out of TEMPERAMENTS
-  // (and so out of the custom-actor-slot temperament picker) the same way "player" already is,
-  // for the same reason — it's its own single-purpose category, not one more reaction to pick.
+  // they never steer themselves, they're just displaced by contact. Kept out of TEMPERAMENTS (and
+  // so out of the custom-actor-slot temperament picker) for the same reason collectible is — it's
+  // its own single-purpose category, not one more reaction to pick. "player" (v2.15) IS offered in
+  // that picker despite the same logic applying to it, since unlike these two, handing a custom
+  // character the player role doesn't change how it's drawn or edited at all — just who's driving
+  // it — so it fits the picker fine.
   const PUSHABLE_KIND = "pushable";
   const PUSHABLE_DEF_ID = "pushable";
-  // The two actor-kinds that live in the Objects tab instead of Characters — collectible (a
-  // temperament) and pushable (its own kind) are both real actors under the hood, but neither
-  // moves on its own, so to a kid they're objects, not characters.
-  const OBJECT_ACTOR_KINDS = ["collectible", PUSHABLE_KIND];
+  // Pushable is the one actor-kind left that lives in the Objects tab instead of Characters —
+  // a real actor under the hood, same as everyone else, but it never moves on its own, so to a
+  // kid it's an object, not a character. Collectibles (v2.15) used to be the other one; they're
+  // their own dedicated section now (collectibleSlotIds), not part of this generic kind list.
+  const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND];
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -527,6 +550,11 @@
   // in the palette shelf.
   let customActorSlotIds = [];
   let nextCustomActorLetter = 0;
+  // v2.15: ids of every collectible sprite (the 4 built-in ones plus any a kid draws with +), in
+  // the same "own ordered list" style as customActorSlotIds above and for the same reason —
+  // collectibles are no longer one shared default look, but their own multi-sprite kit.
+  let collectibleSlotIds = [];
+  let nextCollectibleLetter = 0;
 
   // The board is per-room now (v2.4): each room is its own independent {board, backgroundBoard,
   // actors, startPos}. Only ONE room simulates/renders at a time — whichever one is currently
@@ -602,7 +630,7 @@
   // the other tab's last pick. These four remember "what was last chosen for this tab" so a tab
   // click can restore it exactly, independent of whatever the live variables hold right now.
   let lastCharacterActorKind = "player";
-  let lastObjectActorKind = "collectible";
+  let lastObjectActorKind = null; // reassigned below once the default collectible sprites are seeded
   let lastGroundGeometry = "solid";
   let lastObjectGeometry = "goal";
   let lastObjectAxis = "actor"; // "actor" | "tile" — which axis Objects last showed
@@ -612,6 +640,12 @@
   let selectedBackgroundId = null;
   let selectedActorKind = "player"; // one of TEMPERAMENTS, "player", "pushable", or a custom actor slot id
   let selectedActorDefId = null;
+  // v2.15: which actorDefs entry currently plays the player role — normally the built-in stick
+  // figure (PLAYER_DEF_ID), but a kid can hand this off to any custom character they've drawn
+  // (see the "player" option in the custom actor's "How it acts" picker). Placement/singleton
+  // logic compares against this instead of the constant, so whichever def it points at becomes
+  // "the player" everywhere — placement, the pixel editor, and the single "The player" swatch.
+  let playerDefId = PLAYER_DEF_ID;
   let selectedPoseKey = "stand"; // 'stand' | 'stride' | 'air' | 'crouch' — only used for posed defs
 
   let currentArt = new Array(ART * ART).fill(null);
@@ -748,6 +782,8 @@
       actorDefs: structuredClone(actorDefs), nextActorDefId,
       backgroundTileDefs: structuredClone(backgroundTileDefs), nextBackgroundId,
       customActorSlotIds: customActorSlotIds.slice(), nextCustomActorLetter,
+      collectibleSlotIds: collectibleSlotIds.slice(), nextCollectibleLetter,
+      playerDefId,
       nextActorInstId,
       gravityEnabled, wrapHEnabled, wrapVEnabled,
       switchChannels: structuredClone(switchChannels)
@@ -769,6 +805,13 @@
     nextBackgroundId = snap.nextBackgroundId;
     customActorSlotIds = snap.customActorSlotIds.slice();
     nextCustomActorLetter = snap.nextCustomActorLetter;
+    // older saves predate collectibleSlotIds — fall back to the 4 built-in seeds already restored
+    // fresh into actorDefs above (structuredClone(snap.actorDefs) won't have them, so re-derive
+    // from COLLECTIBLE_SEEDS instead of leaving the Objects tab's Collectibles row empty)
+    collectibleSlotIds = snap.collectibleSlotIds ? snap.collectibleSlotIds.slice() : COLLECTIBLE_SEEDS.map(s => s.id);
+    collectibleSlotIds.forEach(id => { if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]); });
+    nextCollectibleLetter = snap.nextCollectibleLetter || 0;
+    playerDefId = snap.playerDefId || PLAYER_DEF_ID; // older saves predate playerDefId — fall back to the default
     nextActorInstId = snap.nextActorInstId;
     gravityEnabled = snap.gravityEnabled;
     wrapHEnabled = snap.wrapHEnabled;
@@ -951,25 +994,27 @@
   // broken on a thin articulated figure — a stick figure skewed along one axis just looks
   // wrong, not "landed hard." Humanoid presets ship with real hand-drawn poses instead,
   // switched by physical state (see currentPoseFor()) rather than deformed continuously.
-  // v2.14: a clean white figure against the canvas's black default background, replacing the
-  // old accent-gold default — a real new art asset, not a reuse of something already built.
-  const STICK_LEGEND = { M: "#ffffff", K: "#2b2b2b" };
+  // v2.15: a hand-supplied reference image for "stand" (a round hollow head, a full-width
+  // T-pose arm bar, and legs splayed at the hip) — matched pixel-for-pixel — with stride/air/
+  // crouch derived from it in the same visual language (same head every frame; only the
+  // arms/legs below it change) since only the idle pose came with reference art.
+  const STICK_LEGEND = { M: "#fffaff" };
   const STICK_POSES = {
     stand: pat([
-      "..MM....", "..MM....", ".KMMK...", "..MM....",
-      "..MM....", "..MM....", "..M.M...", "..M.M..."
+      "...MM...", "..M..M..", "..M..M..", "...MM...",
+      ".MMMMMM.", "...MM...", "..M..M..", "..M..M.."
     ], STICK_LEGEND),
     stride: pat([
-      "..MM....", "..MM....", "K.MM..K.", ".KMM....",
-      "..MM....", "..MM....", ".M...M..", "M.....M."
+      "...MM...", "..M..M..", "..M..M..", "...MM...",
+      ".MMMMMM.", "...MM...", "..M....M", ".M....M."
     ], STICK_LEGEND),
     air: pat([
-      "..MM....", "..MM....", "K..MM..K", "..MM....",
-      "..MM....", "..MMM...", "..M.M...", "........"
+      "...MM...", "..M..M..", "..M..M..", "...MM...",
+      "MMMMMMMM", "..MMMM..", "..M..M..", "........"
     ], STICK_LEGEND),
     crouch: pat([
-      "..MM....", "..MM....", "..MM....", ".MMMM...",
-      ".MMMM...", "M.MMM.M.", "M.M.M.M.", "........"
+      "...MM...", "..M..M..", "..M..M..", "...MM...",
+      "..MMMM..", ".MMMMMM.", "MM....MM", "........"
     ], STICK_LEGEND)
   };
 
@@ -1083,10 +1128,26 @@
     "..MMMM..", ".MWWWWM.", ".MWKWKM.", ".MMMMMM.",
     "MMMMMMMM", "MMMMMMMM", ".MM..MM.", ".M....M."
   ], { M: "#ffca28", W: "#fff8e1", K: "#2b2b2b" });
+  // The default "gem" collectible (v2.15: one of several collectible sprites now — see
+  // collectibleSlotIds — not the single shared collectible look it used to be).
   const COLLECTIBLE_ART = pat([
     "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
     ".MMMMMM.", "..MMMM..", "...MM...", "........"
   ], { M: "#26c6da" });
+  // Pixel-matched to the kid-supplied reference heart image.
+  const HEART_ART = pat([
+    ".MM..MM.", "MMMMMMMM", "MMMMMMMM", "MMMMMMMM",
+    "MMMMMMMM", ".MMMMMM.", "..MMMM..", "...MM..."
+  ], { M: "#e91e63" });
+  // Recreated from a supplied spinning-coin GIF, exact grayscale palette matched from its frames —
+  // rounded off with transparent corners (the source frames didn't have any) to match this
+  // project's other icons, and "spun" live via the same continuous-scale deformation every other
+  // non-posed actor already gets in renderActors (see def.spin) rather than a real multi-frame
+  // sprite sheet, which this toy has no other use for and isn't worth building just for one icon.
+  const COIN_ART = pat([
+    "..MMMM..", ".MHHHHM.", "MHLHHHHM", "MHHHHHHM",
+    "MHHHHHHM", "MHHHHHHM", ".MHHHHM.", "..MMMM.."
+  ], { M: "#858585", H: "#c8c8c8", L: "#ebebeb" });
   // "stationary" doesn't chase or flee anything, so the same blocky, faceless look already built
   // for the "blocker" preset fits it directly — a solid, inert thing to bump into.
   const STATIONARY_ART = pat([
@@ -1094,7 +1155,7 @@
     "MMMMMMMM", "M..MM..M", "M.M..M.M", "MMMMMMMM"
   ], { M: "#9575cd" });
   const TEMPERAMENT_ART = {
-    stationary: STATIONARY_ART, wanderer: WANDERER_ART, chaser: CHASER_ART, fleer: FLEER_ART, collectible: COLLECTIBLE_ART
+    stationary: STATIONARY_ART, wanderer: WANDERER_ART, chaser: CHASER_ART, fleer: FLEER_ART
   };
 
   TEMPERAMENTS.forEach(temp => {
@@ -1135,7 +1196,7 @@
     return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
   }
 
-  selectedActorDefId = selectedActorKind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(selectedActorKind);
+  selectedActorDefId = selectedActorKind === "player" ? playerDefId : findDefaultActorDef(selectedActorKind);
   currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
 
   // Every geometry x modifier combination, precomputed once. Gameplay tiles carry no `art`
@@ -1166,6 +1227,23 @@
     "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
   ], { M: "#ef5350", K: "#2b2b2b" });
 
+  // v2.15: collectibles get their own dedicated, multi-sprite kit in the Objects tab — cheese and
+  // the gem were already the built-in "grab a sprite" looks, now joined by a heart and a coin —
+  // rather than one shared default def a kid could only ever redraw in place. Fixed, readable ids
+  // (not the "a"+counter scheme TEMPERAMENTS uses) since these are specific, named things, not
+  // interchangeable instances of a behavior.
+  const COLLECTIBLE_SEEDS = [
+    { id: "colCheese", name: "cheese", art: CHEESE_ART },
+    { id: "colGem", name: "gem", art: COLLECTIBLE_ART },
+    { id: "colHeart", name: "heart", art: HEART_ART },
+    { id: "colCoin", name: "coin", art: COIN_ART, spin: true }
+  ];
+  COLLECTIBLE_SEEDS.forEach(seed => {
+    actorDefs[seed.id] = { temperament: "collectible", art: seed.art.slice(), poses: null, name: seed.name, spin: !!seed.spin };
+    collectibleSlotIds.push(seed.id);
+  });
+  lastObjectActorKind = collectibleSlotIds[0];
+
   const ACTOR_PRESETS = [
     { name: "stick figure", poses: STICK_POSES },
     { name: "player", art: pat([
@@ -1176,7 +1254,9 @@
     { name: "wanderer", art: WANDERER_ART },
     { name: "chaser", art: CHASER_ART },
     { name: "fleer", art: FLEER_ART },
-    { name: "collectible", art: COLLECTIBLE_ART },
+    { name: "gem", art: COLLECTIBLE_ART },
+    { name: "heart", art: HEART_ART },
+    { name: "coin", art: COIN_ART },
     { name: "cheese", art: CHEESE_ART },
     { name: "cat", art: CAT_ART }
   ];
@@ -1699,9 +1779,10 @@
   }
 
   // Objects are the opposite of Ground: their entire point is a specific, recognizable function,
-  // so each gets a real icon rather than a color swatch. collectible and pushable are actors
-  // under the hood (kid-editable, same as a character); the rest are tile geometries with a
-  // fixed built-in icon, same as Ground — drawn the same way here either way.
+  // so each gets a real icon rather than a color swatch. pushable is an actor under the hood
+  // (kid-editable, same as a character); the rest are tile geometries with a fixed built-in icon,
+  // same as Ground — drawn the same way here either way. Collectibles (v2.15) are actors too but
+  // get their own dedicated row below (renderCollectibleSwatches) since there are several of them.
   function selectObjectActorKind(kind) { selectActorKind(kind); } // activeTab is derived inside selectActorKind itself
   function renderObjectSwatches() {
     const container = document.getElementById("objectSwatches");
@@ -1744,6 +1825,63 @@
     });
   }
 
+  // Selects one of the collectible sprites for placing/editing — same shape as selectCustomActor
+  // (a slot id IS what's selected), just always landing in Objects instead of Characters, and
+  // remembered on the Objects tab's own actor axis (v2.14 tab memory) rather than the temperament
+  // one, same as pushable.
+  function selectCollectible(id) {
+    selectedActorKind = id;
+    paintMode = "actor";
+    activeTab = "object";
+    lastObjectActorKind = id;
+    lastObjectAxis = "actor";
+    selectedActorDefId = id;
+    selectedPoseKey = "stand";
+    currentArt = activeArtFor(actorDefs[id]).slice();
+    updateModeButtons();
+    renderAll();
+  }
+  // v2.15: collectibles get their own small shelf, same "+"-grows-the-kit pattern as custom
+  // characters and backgrounds, seeded with 4 built-in sprites instead of starting empty.
+  function renderCollectibleSwatches() {
+    const container = document.getElementById("collectibleSwatches");
+    container.innerHTML = "";
+    collectibleSlotIds.forEach(id => {
+      const def = actorDefs[id];
+      if (!def) return;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedActorKind === id ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = def.name;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectCollectible(id));
+      container.appendChild(sw);
+    });
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Create a new collectible";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const letter = String.fromCharCode(65 + nextCollectibleLetter++);
+      const id = "customCol" + letter;
+      const name = "Collectible " + letter;
+      actorDefs[id] = { temperament: "collectible", art: new Array(ART * ART).fill(null), poses: null, name };
+      collectibleSlotIds.push(id);
+      selectCollectible(id);
+      log("New collectible \"" + name + "\" added — draw it below.");
+    });
+    container.appendChild(plus);
+  }
+
   // Same small fixed palette everywhere a color is picked (v2.9, renamed from "Channel" in
   // v2.14) — a "none" swatch (legacy/unconditional behavior) plus one per CHANNEL_COLORS entry.
   // Ground's wall (solid) and Objects' switch/plate/door all pick from this same picker, but
@@ -1779,17 +1917,17 @@
     renderColorSwatchesInto("objectColorSwatches", "objectColorBlock", isTile && isColorTaggable(selectedGeometry) && selectedGeometry !== "solid");
   }
 
-  // v2.14: activeTab is derived from `kind` itself rather than passed in separately — collectible
-  // and pushable always mean the Object tab, every other kind (including "player" and any custom
-  // character slot id) always means Characters, so there's no separate flag that could disagree
-  // with what was actually picked.
+  // v2.14: activeTab is derived from `kind` itself rather than passed in separately — pushable
+  // always means the Object tab, every other kind (including "player" and any custom character
+  // slot id) always means Characters, so there's no separate flag that could disagree with what
+  // was actually picked. (Collectibles route through selectCollectible instead — see below.)
   function selectActorKind(kind) {
     selectedActorKind = kind;
     paintMode = "actor";
     activeTab = OBJECT_ACTOR_KINDS.includes(kind) ? "object" : "character";
     if (activeTab === "object") { lastObjectActorKind = kind; lastObjectAxis = "actor"; }
     else { lastCharacterActorKind = kind; }
-    selectedActorDefId = kind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(kind);
+    selectedActorDefId = kind === "player" ? playerDefId : findDefaultActorDef(kind);
     selectedPoseKey = "stand";
     currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
     updateModeButtons();
@@ -1802,7 +1940,7 @@
   function renderCharacterSwatches() {
     const container = document.getElementById("characterSwatches");
     container.innerHTML = "";
-    CHARACTER_TEMPERAMENTS.forEach(temp => {
+    TEMPERAMENTS.forEach(temp => {
       const def = actorDefs[findDefaultActorDef(temp)];
       const sw = document.createElement("div");
       sw.className = "swatch" + (selectedActorKind === temp ? " selected" : "");
@@ -1821,20 +1959,24 @@
     });
   }
 
+  // Shows whichever def currently backs the player — the built-in stick figure by default, or a
+  // kid's own custom character once they've picked "player" for it (see playerDefId and the
+  // "How it acts" picker) — so this swatch always previews who you're actually about to place.
   function renderPlayerSwatch() {
     const container = document.getElementById("playerSwatchRow");
     container.innerHTML = "";
+    const def = actorDefs[playerDefId];
     const sw = document.createElement("div");
     sw.className = "swatch" + (selectedActorKind === "player" ? " selected" : "");
     sw.style.background = "#111";
     sw.title = "player";
     const c = document.createElement("canvas");
     c.width = ART; c.height = ART;
-    drawArtToCtx(c.getContext("2d"), STICK_POSES.stand, ART);
+    drawArtToCtx(c.getContext("2d"), activeArtFor(def), ART);
     sw.appendChild(c);
     const label = document.createElement("div");
     label.className = "lbl";
-    label.textContent = "player";
+    label.textContent = def.name;
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
@@ -1863,6 +2005,7 @@
     const container = document.getElementById("customActorSwatches");
     container.innerHTML = "";
     customActorSlotIds.forEach(id => {
+      if (id === playerDefId) return; // it's playing the player role now — see "The player" above
       const def = actorDefs[id];
       if (!def) return;
       const sw = document.createElement("div");
@@ -1897,9 +2040,22 @@
     container.appendChild(plus);
   }
 
+  // v2.15: promotes a custom character to the player role — playerDefId is the only thing that
+  // changes; the def's own stored temperament is left exactly as it was (see stepActor's isPlayer
+  // bypass), so nothing needs "restoring" if a different character takes the role back later.
+  // Also purges any already-placed player instance immediately, not just at the next placement —
+  // otherwise an old placed player could keep responding to keys alongside a newly-promoted one.
+  function makeCustomActorThePlayer(id) {
+    playerDefId = id;
+    removeAllPlayerInstances();
+  }
+
   // Shown only while editing a custom actor slot — a small, clearly separate picker (rather than
   // repurposing the main Temperament row above, which means "what to place next") for assigning
-  // THIS slot's own temperament.
+  // THIS slot's own temperament. v2.15: also offers "player" — handing the player role to this
+  // character — alongside the usual behaviors; picking any real temperament while this slot IS
+  // currently the player hands the role back to the built-in stick figure and returns to editing
+  // this slot as an ordinary character (see selectCustomActor).
   function renderTemperamentPicker() {
     const block = document.getElementById("temperamentPickerBlock");
     const isCustom = paintMode === "actor" && customActorSlotIds.includes(selectedActorDefId);
@@ -1908,17 +2064,26 @@
     document.getElementById("customActorEditingName").textContent = actorDefs[selectedActorDefId].name;
     const container = document.getElementById("temperamentPickerSwatches");
     container.innerHTML = "";
-    TEMPERAMENTS.forEach(temp => {
+    const isThePlayer = playerDefId === selectedActorDefId;
+    TEMPERAMENTS.concat(["player"]).forEach(temp => {
+      const isPlayerOption = temp === "player";
       const sw = document.createElement("div");
-      sw.className = "swatch" + (actorDefs[selectedActorDefId].temperament === temp ? " selected" : "");
-      sw.style.background = TEMPERAMENT_COLORS[temp];
+      const isSelected = isPlayerOption ? isThePlayer : (!isThePlayer && actorDefs[selectedActorDefId].temperament === temp);
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = isPlayerOption ? PLAYER_COLOR : TEMPERAMENT_COLORS[temp];
       sw.title = temp;
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = temp;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
+        if (isPlayerOption) {
+          makeCustomActorThePlayer(selectedActorDefId);
+          selectActorKind("player");
+          return;
+        }
         actorDefs[selectedActorDefId].temperament = temp;
+        if (isThePlayer) { playerDefId = PLAYER_DEF_ID; selectCustomActor(selectedActorDefId); return; }
         renderAll();
       });
       container.appendChild(sw);
@@ -2076,7 +2241,8 @@
     else selectActorKind(lastCharacterActorKind);
   });
   document.getElementById("modeObject").addEventListener("click", () => {
-    if (lastObjectAxis === "tile") selectGeometry(lastObjectGeometry);
+    if (lastObjectAxis === "tile") { selectGeometry(lastObjectGeometry); return; }
+    if (collectibleSlotIds.includes(lastObjectActorKind)) selectCollectible(lastObjectActorKind);
     else selectActorKind(lastObjectActorKind);
   });
   document.getElementById("modeGround").addEventListener("click", () => {
@@ -2933,7 +3099,10 @@
     if (actor.dragging) return; // frozen while the editor is dragging it
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
-    if (temperament === "stationary" || temperament === "collectible") {
+    // v2.15: a custom character made "the player" (see playerDefId) keeps whatever temperament
+    // it already had — nothing overwrites it — so a stray "stationary"/"collectible" here must
+    // never freeze it; isPlayer always wins over its def's own resting temperament.
+    if (!actor.isPlayer && (temperament === "stationary" || temperament === "collectible")) {
       // never move on their own; still decay any residual velocity from a bounce
       applyAxisFriction(actor, "x", dt, 0);
       actor.vx *= 0.8; actor.vy *= 0.8;
@@ -3377,18 +3546,23 @@
     backgroundBoard[gy][gx] = null;
   }
 
+  // The player is a true singleton across the WHOLE multi-room game, not just this room — without
+  // this, a kid could place one here, switch rooms via a tab, and place another one there,
+  // leaving two "players" scattered across rooms. Also called the instant the player role changes
+  // hands to a different character (see makeCustomActorThePlayer), not just at the next
+  // placement, so an old placed instance can never linger and keep responding to input alongside
+  // a newly-promoted one.
+  function removeAllPlayerInstances() {
+    rooms.forEach(r => {
+      const arr = r.id === currentRoomId ? actors : r.actors;
+      const idx = arr.findIndex(a => a.isPlayer);
+      if (idx !== -1) arr.splice(idx, 1);
+    });
+  }
+
   function placeNewActor(px, py) {
-    const isPlayer = selectedActorDefId === PLAYER_DEF_ID;
-    if (isPlayer) {
-      // the player is a true singleton across the WHOLE multi-room game, not just this room —
-      // without this, a kid could place one here, switch rooms via a tab, and place another
-      // one there, leaving two "players" scattered across rooms
-      rooms.forEach(r => {
-        const arr = r.id === currentRoomId ? actors : r.actors;
-        const idx = arr.findIndex(a => a.isPlayer);
-        if (idx !== -1) arr.splice(idx, 1);
-      });
-    }
+    const isPlayer = selectedActorDefId === playerDefId;
+    if (isPlayer) removeAllPlayerInstances();
     const actor = {
       id: nextActorInstId++,
       defId: selectedActorDefId,
@@ -3809,6 +3983,10 @@
           const fall = Math.max(0, Math.min(1, actor.vy / MAX_FALL));
           sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
         }
+        // v2.15: an idle "spin" for defs that opt in (see COIN_ART) — reuses this same continuous
+        // horizontal-scale channel rather than a real multi-frame sprite, squashing width down to
+        // a sliver and back to fake a coin turning edge-on, the way the reference GIF's frames did.
+        if (def.spin) sx *= Math.max(0.15, Math.abs(Math.cos(now / 260)));
         t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       }
 
@@ -3982,6 +4160,7 @@
     renderGroundSwatches();
     renderSurfaceSwatches();
     renderObjectSwatches();
+    renderCollectibleSwatches();
     renderColorSwatches();
     renderCharacterSwatches();
     renderPlayerSwatch();
