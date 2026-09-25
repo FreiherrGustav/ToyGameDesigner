@@ -1046,15 +1046,18 @@
     crouch: pat(PRINCESS_BODY.concat(["DD....DD"]), PRINCESS_LEGEND)
   };
   // Ghost floats rather than walks, so its "legs" are really just a small foot-nub that shrinks,
-  // shifts, or disappears entirely (mid-air) instead of a walking gait.
+  // shifts, or disappears entirely (mid-air) instead of a walking gait. v2.17: the reference art
+  // was drawn facing left, opposite every other character's right-facing convention (see the
+  // facingDir flip in renderActors, which assumes unflipped == facing right) — mirrored here so
+  // it's consistent with the rest, rather than special-casing it in the flip logic itself.
   const GHOST_LEGEND = { R: "#fa0000", W: "#ffffff", K: "#000000", O: "#ffbb00" };
   const GHOST_BODY = [
-    "..RRR...", "..WWW...", ".WWWWW..", ".WKWWW..",
-    "OWWWWWWW", ".WWWWWWW", "..WWWWW."
+    "...RRR..", "...WWW..", "..WWWWW.", "..WWWKW.",
+    "WWWWWWWO", "WWWWWWW.", ".WWWWW.."
   ];
   const GHOST_POSES = {
     stand: pat(GHOST_BODY.concat(["...OO..."]), GHOST_LEGEND),
-    stride: pat(GHOST_BODY.concat(["..OO...."]), GHOST_LEGEND),
+    stride: pat(GHOST_BODY.concat(["....OO.."]), GHOST_LEGEND),
     air: pat(GHOST_BODY.concat(["........"]), GHOST_LEGEND),
     crouch: pat(GHOST_BODY.concat(["..OOOO.."]), GHOST_LEGEND)
   };
@@ -1566,9 +1569,13 @@
     celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); },
     jump: () => beep(400, 0.07, "square", 0.12),
     flip: () => { beep(300, 0.07, "triangle", 0.16); setTimeout(() => beep(600, 0.09, "triangle", 0.16), 70); },
-    shot: () => beep(700, 0.06, "sawtooth", 0.22),
+    // v2.17: a sharp crack immediately followed by a low thump — more "cannon," less "laser zap"
+    // — with a longer overall decay than the old single short beep gave it.
+    shot: () => { beep(550, 0.09, "sawtooth", 0.3); setTimeout(() => beep(110, 0.22, "sawtooth", 0.22), 30); },
     fuse: () => beep(1000, 0.05, "square", 0.12),
-    boom: () => { beep(80, 0.3, "sawtooth", 0.25); setTimeout(() => beep(50, 0.25, "sawtooth", 0.2), 60); },
+    // v2.17: louder and deeper, with a third even-lower layer added purely to stretch the decay
+    // into a rumbling tail — a bomb should feel like the biggest bang in the toy.
+    boom: () => { beep(70, 0.5, "sawtooth", 0.35); setTimeout(() => beep(45, 0.45, "sawtooth", 0.28), 70); setTimeout(() => beep(28, 0.4, "sawtooth", 0.18), 160); },
     warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); },
     gameOver: () => { beep(300, 0.15, "sawtooth", 0.2); setTimeout(() => beep(220, 0.15, "sawtooth", 0.2), 150); setTimeout(() => beep(140, 0.35, "sawtooth", 0.22), 300); }
   };
