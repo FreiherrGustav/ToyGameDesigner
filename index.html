@@ -305,6 +305,12 @@
         decides what happens on contact, layered on top — <em>none</em> + <em>none</em> just
         clears a tile back to empty.
       </div>
+      <div class="hint" style="margin-top:6px;">
+        Hazard costs one life and knocks you back — you keep going. Lethal costs every life at
+        once, instantly, with no knockback — there's nothing left to fight through. Same piece
+        either way, over solid or none: paint your own art on top to make it lava, spikes, or a
+        bottomless pit.
+      </div>
       <div id="groundColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="groundColorSwatches"></div>
@@ -436,8 +442,11 @@
   // value is actually selected/placed. Whether it reads as wind or conveyor is purely which
   // geometry it's paired with (none = air current, solid = conveyor belt) — no separate mechanic.
   const WIND_ORDER = ["wind-n", "wind-e", "wind-s", "wind-w"]; // clockwise each step, like CANNON_ORDER
-  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", ...WIND_ORDER];
-  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "wind"];
+  // v2.18: "lethal" is a new severity tier on the same hazard mechanism, not a new system — same
+  // touch-detection, just a different outcome (see triggerLethalHazard). One modifier value, kid-
+  // reskinned as lava/spikes/a bottomless pit by painting over it, not three hardcoded tile types.
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", ...WIND_ORDER];
+  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "wind"];
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -448,7 +457,7 @@
     bomb: "#424242", warp: "#8e24aa"
   };
   const MODIFIER_SWATCH_COLORS = {
-    none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", wind: "#80deea",
+    none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", lethal: "#4a0000", wind: "#80deea",
     "wind-n": "#80deea", "wind-e": "#80deea", "wind-s": "#80deea", "wind-w": "#80deea"
   };
   // Each orientation fires at a true 45° angle — combined with gravity's own per-frame pull,
@@ -1577,7 +1586,11 @@
     // into a rumbling tail — a bomb should feel like the biggest bang in the toy.
     boom: () => { beep(70, 0.5, "sawtooth", 0.35); setTimeout(() => beep(45, 0.45, "sawtooth", 0.28), 70); setTimeout(() => beep(28, 0.4, "sawtooth", 0.18), 160); },
     warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); },
-    gameOver: () => { beep(300, 0.15, "sawtooth", 0.2); setTimeout(() => beep(220, 0.15, "sawtooth", 0.2), 150); setTimeout(() => beep(140, 0.35, "sawtooth", 0.22), 300); }
+    gameOver: () => { beep(300, 0.15, "sawtooth", 0.2); setTimeout(() => beep(220, 0.15, "sawtooth", 0.2), 150); setTimeout(() => beep(140, 0.35, "sawtooth", 0.22), 300); },
+    // v2.18: a cartoonish flatten-and-pop for the new lethal hazard — a low squash thud, a
+    // high comedic squelch, then two descending plops trailing off — distinct from both plain
+    // hazard's yelp and the somber gameOver stinger that still follows it.
+    splat: () => { beep(90, 0.06, "square", 0.28); setTimeout(() => beep(700, 0.05, "sawtooth", 0.2), 40); setTimeout(() => beep(180, 0.12, "sawtooth", 0.18), 90); setTimeout(() => beep(90, 0.25, "sawtooth", 0.2), 160); }
   };
 
   function log(msg) {
@@ -1690,6 +1703,15 @@
       { t: 0.4, sx: 0.3, sy: 0.3, rot: 0.3, ox: 0, oy: 0, alpha: 0.3 },
       { t: 0.6, sx: 0.3, sy: 0.3, rot: -0.3, ox: 0, oy: 0, alpha: 0.3 },
       { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
+    // v2.18: an instant KO needs to read as funny, not punishing (see triggerLethalHazard) — a
+    // hard flatten-to-a-pancake beat, then the flattened bits spin and shrink off into nothing,
+    // rather than the plain hazard flash or a somber death.
+    splatDisintegrate: { duration: 550, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.25, sx: 1.9, sy: 0.12, rot: 0, ox: 0, oy: 0.35, alpha: 1 },
+      { t: 0.55, sx: 1.5, sy: 0.35, rot: 0.6, ox: 0, oy: 0.2, alpha: 0.85 },
+      { t: 1, sx: 0.4, sy: 0.4, rot: 3.2, ox: 0, oy: -0.3, alpha: 0 }
     ]}
   };
   function playRecipe(entity, name) { animState[entity.id] = { recipe: name, t: performance.now() }; }
@@ -2590,7 +2612,8 @@
             actor.vy = bouncy ? -actor.vy * BOUNCE_RESTITUTION : 0;
           }
         }
-        if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
+        if (modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
+        else if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
       }
     }
   }
@@ -2731,12 +2754,13 @@
     return false;
   }
 
-  function triggerGameOver() {
+  // `silent` skips the stinger + log line while still freezing the session right away (see
+  // triggerLethalHazard, which fires them itself after its own splat animation finishes instead).
+  function triggerGameOver(silent) {
     if (playSessionEnded) return;
     playSessionEnded = "lose";
-    sounds.gameOver();
-    log("Game over!");
     renderPlayHUD();
+    if (!silent) { sounds.gameOver(); log("Game over!"); }
   }
 
   // Resolves contact between two actors, regardless of which one physically moved into the
@@ -2850,6 +2874,37 @@
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
     log("Ouch! Hazard knockback.");
     consumeLifeIfPlaying(); // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — no isPlayer guard needed
+  }
+
+  // v2.18: lethal is hazard's more severe sibling — same touch-detection, same cooldown gate, but
+  // an instant, unconditional loss of every remaining life instead of one knockback hit. No
+  // knockback at all (there's nothing left to fight through), and its own over-the-top comedic
+  // beat rather than the plain hazard flash, in the same spirit as the v2.6 chaser-catch fix — an
+  // instant KO needs to land as funny, not punishing. Guards appMode/playSessionEnded itself
+  // (mirroring consumeLifeIfPlaying's own guard) rather than looping that one-life-at-a-time
+  // function to zero, so Build mode still gets the full sound+animation preview with no side
+  // effect on the (nonexistent, in Build mode) life count.
+  //
+  // The session freeze is still instant (playSessionEnded flips right away — no continuing to
+  // fight through it), but the game-over stinger and overlay are deliberately held back until the
+  // splat animation actually finishes (see renderGame's matching check): showing them immediately
+  // would bury the one new comedic beat this patch adds under a dark overlay before it's even had
+  // a chance to play, and would stack the game-over jingle right on top of the splat sound.
+  function triggerLethalHazard(actor) {
+    if (actor.hazardCooldown > 0) return;
+    actor.hazardCooldown = HAZARD_COOLDOWN_MS;
+    sounds.splat();
+    playRecipe(actor, "splatDisintegrate");
+    actor.vx = 0; actor.vy = 0;
+    // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — same as
+    // triggerHazard, no isPlayer guard needed
+    const causedGameOver = appMode === "play" && !playSessionEnded;
+    if (causedGameOver) {
+      lives = 0;
+      triggerGameOver(true);
+      setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+    }
+    log(causedGameOver ? "Splat! Instant game over." : "Splat!");
   }
 
   // none+bouncy launches on entry, matching the original top-down "step on it, get launched"
@@ -3086,7 +3141,8 @@
       // already a handled, harmless case on its own (see triggerDoor's own no-op comment).
       else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
       else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
-      if (modifier === "hazard") triggerHazard(player);
+      if (modifier === "lethal") triggerLethalHazard(player);
+      else if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player);
     }
   }
@@ -3697,7 +3753,8 @@
             triggerWarp(actor, cx, cy);
             return;
           }
-          if (modifier === "hazard") { triggerHazard(actor); fired = true; }
+          if (modifier === "lethal") { triggerLethalHazard(actor); fired = true; }
+          else if (modifier === "hazard") { triggerHazard(actor); fired = true; }
           else if (modifier === "bouncy") { triggerBouncyLaunch(actor); fired = true; }
           if (fired) dragContactCooldown[key] = 350;
         }
@@ -4118,7 +4175,13 @@
 
     renderActors(gctx, actors);
 
-    if (appMode === "play" && playSessionEnded) drawPlaySessionEndOverlay();
+    // v2.18: a lethal-hazard death holds the overlay back until its own splat animation has
+    // actually played out — otherwise the overlay's dark wash would cover the "big comedic beat"
+    // the instant it starts (see triggerLethalHazard). Every other game-over path is untouched:
+    // nothing else ever plays this recipe, so midSplat is always false for them.
+    const scPlayer = actors.find(a => a.isPlayer);
+    const midSplat = scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate";
+    if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
   }
 
   // Win and game-over both get a real screen — distinct from a mid-game reset, per the point
@@ -4287,7 +4350,7 @@
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
-      reflectActorsApart, pushApart, triggerHazard, triggerBouncyLaunch, triggerTrap,
+      reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates,
