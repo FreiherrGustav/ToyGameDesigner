@@ -104,6 +104,15 @@
   .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
   .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; }
 
+  /* Game rules are one of the two headline features (alongside placing a character), not just
+     one more section — bigger swatches and a louder title so it reads as "this matters". */
+  .section-title.featured {
+    font-size: 15px; text-transform: none; letter-spacing: normal;
+    color: var(--accent); font-weight: bold; margin-bottom: 8px;
+  }
+  .swatch.big { width: 60px; height: 60px; border-width: 3px; border-radius: 8px; }
+  .swatch.big .lbl { font-size: 11px; bottom: 3px; }
+
   .presetSwatch {
     width: 36px; height: 36px;
     border-radius: 6px;
@@ -126,6 +135,7 @@
     padding: 8px 4px;
     cursor: pointer;
     font-size: 12px;
+    overflow-wrap: anywhere;
   }
   .mode-toggle button.active { background: var(--accent); color: #222; font-weight: bold; }
 
@@ -202,17 +212,7 @@
     <h1>Toy Game-Maker</h1>
 
     <div>
-      <div class="section-title">Paint mode</div>
-      <div class="mode-toggle">
-        <button id="modeBackground">Background</button>
-        <button id="modeTile">Tiles</button>
-        <button id="modeActor" class="active">Actors</button>
-        <button id="modeErase">Erase</button>
-      </div>
-    </div>
-
-    <div>
-      <div class="section-title">Game rules</div>
+      <div class="section-title featured">Game rules</div>
       <div class="swatch-row" id="gameRuleSwatches"></div>
       <div class="hint" style="margin-top:2px;">
         These aren't placed — they just switch on or off for the whole game the moment you
@@ -221,32 +221,49 @@
       </div>
     </div>
 
-    <div id="backgroundPropertiesBlock" style="display:none;">
-      <div class="section-title">Background</div>
-      <div class="swatch-row" id="backgroundSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Pure decoration, zero gameplay meaning. Pick one to paint, or hit + to draw a new one —
-        it's added to this project's kit, never swapped in for an old one.
+    <div>
+      <div class="section-title">What to place</div>
+      <div class="mode-toggle">
+        <button id="modeCharacter" class="active">Characters</button>
+        <button id="modeObject">Objects</button>
+        <button id="modeGround">Ground</button>
+        <button id="modePaint">Paint</button>
+        <button id="modeErase">Erase</button>
       </div>
     </div>
 
-    <div id="tilePropertiesBlock" style="display:none;">
-      <div class="section-title">Geometry</div>
-      <div class="swatch-row" id="geometrySwatches"></div>
-      <div class="section-title" style="margin-top:10px;">Modifier</div>
-      <div class="swatch-row" id="modifierSwatches"></div>
+    <div id="characterPropertiesBlock">
+      <div class="section-title">Pick a character</div>
+      <div class="swatch-row" id="characterSwatches"></div>
+      <div class="section-title" style="margin-top:10px;">The player (only one)</div>
+      <div class="swatch-row" id="playerSwatchRow"></div>
+      <div class="section-title" style="margin-top:10px;">Custom characters</div>
+      <div class="swatch-row" id="customActorSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Two independent choices, painted together. Geometry decides what blocks movement.
-        Modifier decides what happens on contact, layered on top of whichever geometry you
-        picked — <em>none</em> + <em>none</em> just clears a tile back to plain background.
+        Your own named characters, each with its own drawn art and its own way of acting — grab
+        one to place it, or hit + to make a new one.
       </div>
-      <div id="channelBlock" style="display:none;">
-        <div class="section-title" style="margin-top:10px;">Channel</div>
-        <div class="swatch-row" id="channelSwatches"></div>
+      <div id="temperamentPickerBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">How it acts — <span id="customActorEditingName"></span></div>
+        <div class="swatch-row" id="temperamentPickerSwatches"></div>
+      </div>
+    </div>
+
+    <div id="objectPropertiesBlock" style="display:none;">
+      <div class="section-title">Pick an object</div>
+      <div class="swatch-row" id="objectSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Things that don't move on their own and do one specific thing the moment you touch them.
+        Collectible and pushable block are yours to redraw, like a character; the rest use a
+        built-in icon, same as Ground.
+      </div>
+      <div id="objectColorBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Color</div>
+        <div class="swatch-row" id="objectColorSwatches"></div>
         <div class="hint" style="margin-top:2px;">
-          For a switch, plate, or wall — none: a switch flips gravity, a wall always blocks, same
-          as ever. Pick a color and a switch (or plate) flips that color's own channel instead —
-          a matching wall only listens to switches and plates of its own color.
+          For a switch or plate — none: a switch flips gravity, a plate does nothing. Pick a color
+          instead and it turns that color on (a switch keeps it on; a plate only while something's
+          standing on it) — any matching-colored wall over in Ground listens for it.
         </div>
         <div class="hint" style="margin-top:6px;">
           For a door, color means something different: it's how the door decides where it leads.
@@ -258,29 +275,33 @@
       </div>
     </div>
 
-    <div id="actorPropertiesBlock">
-      <div class="section-title">Temperament (for actors the player runs into)</div>
-      <div class="swatch-row" id="actorSwatches"></div>
-      <div class="section-title" style="margin-top:10px;">The player (only one)</div>
-      <div class="swatch-row" id="playerSwatchRow"></div>
-      <div class="section-title" style="margin-top:10px;">Pushable block (any number)</div>
-      <div class="swatch-row" id="pushableSwatchRow"></div>
+    <div id="groundPropertiesBlock" style="display:none;">
+      <div class="section-title">Ground</div>
+      <div class="swatch-row" id="groundSwatches"></div>
+      <div class="section-title" style="margin-top:10px;">Surface</div>
+      <div class="swatch-row" id="surfaceSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        This is the one actor you move. It has no temperament of its own — temperament only
-        describes how the <em>other</em> actors react when this one touches them. A pushable
-        block doesn't react on its own either — it just gets shoved by contact, falls, and can
-        crush whatever it lands on hard enough.
+        Two independent choices, painted together. Ground decides what blocks movement. Surface
+        decides what happens on contact, layered on top — <em>none</em> + <em>none</em> just
+        clears a tile back to empty.
       </div>
-      <div class="section-title" style="margin-top:10px;">Custom actors</div>
-      <div class="swatch-row" id="customActorSwatches"></div>
+      <div id="groundColorBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Color</div>
+        <div class="swatch-row" id="groundColorSwatches"></div>
+        <div class="hint" style="margin-top:2px;">
+          None: this wall always blocks, same as ever. Pick a color and it only blocks while
+          nothing of that color is currently on — a matching switch or plate over in Objects is
+          what turns it off.
+        </div>
+      </div>
+    </div>
+
+    <div id="paintPropertiesBlock" style="display:none;">
+      <div class="section-title">Paint</div>
+      <div class="swatch-row" id="backgroundSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Your own named actors, each with its own art and temperament — grab one to place it, or
-        hit + to make a new one. Every actor still gets a thin colored outline keyed to its
-        temperament, however you draw it, so danger and safety still read at a glance.
-      </div>
-      <div id="temperamentPickerBlock" style="display:none;">
-        <div class="section-title" style="margin-top:10px;">Temperament for <span id="customActorEditingName"></span></div>
-        <div class="swatch-row" id="temperamentPickerSwatches"></div>
+        Pure decoration, zero gameplay meaning. Pick one to paint, or hit + to draw a new one —
+        it's added to this project's kit, never swapped in for an old one.
       </div>
     </div>
 
@@ -305,9 +326,9 @@
     </div>
 
     <div class="hint">
-      Geometry/modifier tiles use small built-in icons — no drawing needed, so they always
-      read the same way. Backgrounds and actors are yours to draw. The grid is always live —
-      no separate play mode.
+      Ground and Surface pieces use small built-in icons — no drawing needed, so they always
+      read the same way. Paint and Characters are yours to draw; most Objects use a built-in
+      icon too. The grid is always live — no separate play mode.
     </div>
 
     <div class="hint" id="startersHint">
@@ -380,9 +401,16 @@
     "none", "solid", "diggable", "trap", "goal", "switch", "plate", "door",
     ...CANNON_ORDER, "bomb", "warp"
   ];
-  // What the tile palette actually offers as separate swatches — one "cannon" entry stands in
-  // for all four CANNON_ORDER values.
-  const PALETTE_GEOMETRIES = ["none", "solid", "diggable", "trap", "goal", "switch", "plate", "door", "cannon", "bomb", "warp"];
+  // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
+  // system built it. Ground is plain blocking/hazard geometry with no identity of its own beyond
+  // "blocks you" or "hurts you" — "none" stays here too, since it's what a pure Surface tile (ice,
+  // wind) needs underneath it, and what "clear this cell" means. Everything else that's painted
+  // as a tile (rather than placed as an actor) does one specific, recognizable thing on contact,
+  // so it's an Object regardless of how plain or elaborate its own reaction is — a pressure plate
+  // and a bomb belong here exactly as much as a door does. One "cannon" entry still stands in for
+  // all four CANNON_ORDER values.
+  const PALETTE_GROUND_GEOMETRIES = ["none", "solid", "diggable", "trap"];
+  const PALETTE_OBJECT_GEOMETRIES = ["goal", "switch", "plate", "door", "cannon", "bomb", "warp"];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
   // value is actually selected/placed. Whether it reads as wind or conveyor is purely which
@@ -425,6 +453,11 @@
   const TEMPERAMENT_COLORS = {
     stationary: "#9575cd", wanderer: "#26a69a", chaser: "#ef5350", fleer: "#ffca28", collectible: "#26c6da"
   };
+  // v2.14 taxonomy: Characters are TEMPERAMENTS minus collectible — things with behavior, that a
+  // kid places to react to the player. Collectible doesn't move on its own and just does one
+  // thing on contact, so despite being built the same way (a temperament) it now lives with the
+  // Objects, not the Characters — see OBJECT_ACTOR_KINDS.
+  const CHARACTER_TEMPERAMENTS = TEMPERAMENTS.filter(t => t !== "collectible");
   // Pushable blocks are architecturally an actor (real position/velocity/mass in the same
   // continuous physics as everyone else — see stepActor) but not a "temperament" a kid assigns:
   // they never steer themselves, they're just displaced by contact. Kept out of TEMPERAMENTS
@@ -432,6 +465,10 @@
   // for the same reason — it's its own single-purpose category, not one more reaction to pick.
   const PUSHABLE_KIND = "pushable";
   const PUSHABLE_DEF_ID = "pushable";
+  // The two actor-kinds that live in the Objects tab instead of Characters — collectible (a
+  // temperament) and pushable (its own kind) are both real actors under the hood, but neither
+  // moves on its own, so to a kid they're objects, not characters.
+  const OBJECT_ACTOR_KINDS = ["collectible", PUSHABLE_KIND];
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -552,7 +589,23 @@
   let startPos = { x: 0, y: 0 }; // continuous pixel position — hot room's own
 
   // Defaults put the player one click away on a blank canvas — no trip to "actor mode" first.
-  let paintMode = "actor"; // 'background' | 'tile' | 'actor' | 'erase'
+  let paintMode = "actor"; // 'background' | 'tile' | 'actor' | 'erase' — what a canvas click DOES
+  // Which top-level tab is showing (v2.14) — a UI-only grouping, independent of paintMode: the
+  // Object tab holds a mix of actor-kind (paintMode "actor") and tile-kind (paintMode "tile")
+  // pieces, so paintMode alone can't tell "Characters" and "Objects" apart. 'character' | 'object'
+  // | 'ground' | 'paint' | 'erase'.
+  let activeTab = "character";
+  // Per-tab memory (v2.14): Ground and Objects share the single live `selectedGeometry`, and
+  // Characters and Objects share the single live `selectedActorKind`, since only one of each can
+  // ever be "the thing a canvas click paints" at a time. Without a separate memory per tab,
+  // merely visiting an unrelated tab (which must land on SOME valid value for itself) would stomp
+  // the other tab's last pick. These four remember "what was last chosen for this tab" so a tab
+  // click can restore it exactly, independent of whatever the live variables hold right now.
+  let lastCharacterActorKind = "player";
+  let lastObjectActorKind = "collectible";
+  let lastGroundGeometry = "solid";
+  let lastObjectGeometry = "goal";
+  let lastObjectAxis = "actor"; // "actor" | "tile" — which axis Objects last showed
   let selectedGeometry = "none";
   let selectedModifier = "none";
   let selectedChannelColor = null; // one of CHANNEL_COLORS, or null ("none") — see CHANNEL_COLORS
@@ -898,7 +951,9 @@
   // broken on a thin articulated figure — a stick figure skewed along one axis just looks
   // wrong, not "landed hard." Humanoid presets ship with real hand-drawn poses instead,
   // switched by physical state (see currentPoseFor()) rather than deformed continuously.
-  const STICK_LEGEND = { M: PLAYER_COLOR, K: "#2b2b2b" };
+  // v2.14: a clean white figure against the canvas's black default background, replacing the
+  // old accent-gold default — a real new art asset, not a reuse of something already built.
+  const STICK_LEGEND = { M: "#ffffff", K: "#2b2b2b" };
   const STICK_POSES = {
     stand: pat([
       "..MM....", "..MM....", ".KMMK...", "..MM....",
@@ -1010,12 +1065,46 @@
     return def.poses ? (def.poses[selectedPoseKey] || def.poses.stand) : def.art;
   }
 
+  // v2.14: each Character/Object archetype gets its own recognizable default sprite instead of a
+  // flat color square, "reused from what's already been built for that archetype elsewhere in the
+  // project" — the exact same art the "grab a sprite" preset shelf already offered below, now
+  // promoted to the default instead of something a kid has to know to go find. Named here, before
+  // both the seeding loop and ACTOR_PRESETS that each need it, so there's one drawing per
+  // archetype, not two that could quietly drift apart.
+  const WANDERER_ART = pat([
+    "..MMMM..", ".MMMMMM.", "MMMKKMMM", "MMMMMMMM",
+    "MMMMMMMM", "MMMMMMMM", ".MMMMMM.", "..MMMM.."
+  ], { M: "#26a69a", K: "#173a36" });
+  const CHASER_ART = pat([
+    "M.M..M.M", ".MMMMMM.", "MKMMMMKM", "MMMMMMMM",
+    "MMMKKMMM", "MMMMMMMM", ".MMMMMM.", "M.M..M.M"
+  ], { M: "#ef5350", K: "#3a0a0a" });
+  const FLEER_ART = pat([
+    "..MMMM..", ".MWWWWM.", ".MWKWKM.", ".MMMMMM.",
+    "MMMMMMMM", "MMMMMMMM", ".MM..MM.", ".M....M."
+  ], { M: "#ffca28", W: "#fff8e1", K: "#2b2b2b" });
+  const COLLECTIBLE_ART = pat([
+    "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
+    ".MMMMMM.", "..MMMM..", "...MM...", "........"
+  ], { M: "#26c6da" });
+  // "stationary" doesn't chase or flee anything, so the same blocky, faceless look already built
+  // for the "blocker" preset fits it directly — a solid, inert thing to bump into.
+  const STATIONARY_ART = pat([
+    "MMMMMMMM", "M.M..M.M", "M..MM..M", "MMMMMMMM",
+    "MMMMMMMM", "M..MM..M", "M.M..M.M", "MMMMMMMM"
+  ], { M: "#9575cd" });
+  const TEMPERAMENT_ART = {
+    stationary: STATIONARY_ART, wanderer: WANDERER_ART, chaser: CHASER_ART, fleer: FLEER_ART, collectible: COLLECTIBLE_ART
+  };
+
   TEMPERAMENTS.forEach(temp => {
     const id = "a" + (nextActorDefId++);
-    actorDefs[id] = { temperament: temp, art: makeDefaultArt(TEMPERAMENT_COLORS[temp]), poses: null, name: temp };
+    actorDefs[id] = { temperament: temp, art: TEMPERAMENT_ART[temp].slice(), poses: null, name: temp };
   });
   // The player's default look is already the posed stick figure, so placing it with zero
-  // setup already demonstrates real per-pose art, not a flat-color block.
+  // setup already demonstrates real per-pose art, not a flat-color block. v2.14: a clean white
+  // figure (see STICK_LEGEND) rather than the old accent-gold one, for contrast against the
+  // canvas's black default background.
   actorDefs[PLAYER_DEF_ID] = {
     temperament: null, art: STICK_POSES.stand.slice(),
     poses: { stand: STICK_POSES.stand.slice(), stride: STICK_POSES.stride.slice(), air: STICK_POSES.air.slice(), crouch: STICK_POSES.crouch.slice() },
@@ -1083,26 +1172,11 @@
       "..MMMM..", ".MMMMMM.", "MM.KK.MM", "MMMMMMMM",
       "MMMMMMMM", ".MM..MM.", ".MM..MM.", ".M....M."
     ], { M: "#ffd166", K: "#2b2b2b" }) },
-    { name: "blocker", art: pat([
-      "MMMMMMMM", "M.M..M.M", "M..MM..M", "MMMMMMMM",
-      "MMMMMMMM", "M..MM..M", "M.M..M.M", "MMMMMMMM"
-    ], { M: "#9575cd" }) },
-    { name: "wanderer", art: pat([
-      "..MMMM..", ".MMMMMM.", "MMMKKMMM", "MMMMMMMM",
-      "MMMMMMMM", "MMMMMMMM", ".MMMMMM.", "..MMMM.."
-    ], { M: "#26a69a", K: "#173a36" }) },
-    { name: "chaser", art: pat([
-      "M.M..M.M", ".MMMMMM.", "MKMMMMKM", "MMMMMMMM",
-      "MMMKKMMM", "MMMMMMMM", ".MMMMMM.", "M.M..M.M"
-    ], { M: "#ef5350", K: "#3a0a0a" }) },
-    { name: "fleer", art: pat([
-      "..MMMM..", ".MWWWWM.", ".MWKWKM.", ".MMMMMM.",
-      "MMMMMMMM", "MMMMMMMM", ".MM..MM.", ".M....M."
-    ], { M: "#ffca28", W: "#fff8e1", K: "#2b2b2b" }) },
-    { name: "collectible", art: pat([
-      "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
-      ".MMMMMM.", "..MMMM..", "...MM...", "........"
-    ], { M: "#26c6da" }) },
+    { name: "blocker", art: STATIONARY_ART },
+    { name: "wanderer", art: WANDERER_ART },
+    { name: "chaser", art: CHASER_ART },
+    { name: "fleer", art: FLEER_ART },
+    { name: "collectible", art: COLLECTIBLE_ART },
     { name: "cheese", art: CHEESE_ART },
     { name: "cat", art: CAT_ART }
   ];
@@ -1553,64 +1627,132 @@
     container.appendChild(plus);
   }
 
-  function renderGeometrySwatches() {
-    const container = document.getElementById("geometrySwatches");
+  // Picks a geometry to paint as a tile (v2.14: shared by both the Ground row and the Object
+  // row — a geometry belongs to exactly one of those two palette lists, which is enough on its
+  // own to tell which tab it puts the kid in; there's no separate "which tab is this" flag to
+  // keep in sync). "cannon" is a stand-in for whichever CANNON_ORDER value is actually
+  // selected/placed — one swatch, four storable orientations (see paintGeometryModifierAt's
+  // rotate handling). Objects don't carry an independent Surface choice — see the hint text in
+  // the Object tab — so picking one always resets the modifier back to none.
+  function selectGeometry(geometry) {
+    const isCannon = geometry === "cannon";
+    selectedGeometry = isCannon ? CANNON_ORDER[0] : geometry;
+    paintMode = "tile";
+    activeTab = PALETTE_GROUND_GEOMETRIES.includes(geometry) ? "ground" : "object";
+    if (activeTab === "object") {
+      selectedModifier = "none";
+      lastObjectGeometry = selectedGeometry;
+      lastObjectAxis = "tile";
+    } else {
+      lastGroundGeometry = selectedGeometry;
+    }
+    updateModeButtons();
+    renderAll();
+  }
+  // Ground pieces don't need identity (v2.14) — a plain colored square communicates "blocks you"
+  // or "hurts you" fine, same as always, so this keeps the flat-swatch style unchanged.
+  function renderGroundSwatches() {
+    const container = document.getElementById("groundSwatches");
     container.innerHTML = "";
-    PALETTE_GEOMETRIES.forEach(paletteGeometry => {
-      // "cannon" is a stand-in for whichever CANNON_ORDER value is actually selected/placed —
-      // one swatch, four storable orientations (see paintGeometryModifierAt's rotate handling)
-      const isCannon = paletteGeometry === "cannon";
-      const isSelected = paintMode === "tile" && (isCannon ? CANNON_ORDER.includes(selectedGeometry) : selectedGeometry === paletteGeometry);
+    PALETTE_GROUND_GEOMETRIES.forEach(geometry => {
+      const isSelected = paintMode === "tile" && activeTab === "ground" && selectedGeometry === geometry;
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
-      sw.style.background = GEOMETRY_SWATCH_COLORS[paletteGeometry];
-      sw.title = paletteGeometry;
+      sw.style.background = GEOMETRY_SWATCH_COLORS[geometry];
+      sw.title = geometry;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = paletteGeometry;
+      label.textContent = geometry;
       sw.appendChild(label);
-      sw.addEventListener("click", () => {
-        selectedGeometry = isCannon ? CANNON_ORDER[0] : paletteGeometry;
-        paintMode = "tile";
-        updateModeButtons();
-        renderAll();
-      });
+      sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
     });
   }
 
-  function renderModifierSwatches() {
-    const container = document.getElementById("modifierSwatches");
+  function selectSurfaceModifier(modifier) {
+    // "wind" stands in for whichever WIND_ORDER value is actually selected/placed — one swatch,
+    // four storable orientations, same trick as "cannon" above.
+    const isWind = modifier === "wind";
+    selectedModifier = isWind ? WIND_ORDER[0] : modifier;
+    paintMode = "tile";
+    activeTab = "ground";
+    updateModeButtons();
+    renderAll();
+  }
+  function renderSurfaceSwatches() {
+    const container = document.getElementById("surfaceSwatches");
     container.innerHTML = "";
-    PALETTE_MODIFIERS.forEach(paletteModifier => {
-      // "wind" stands in for whichever WIND_ORDER value is actually selected/placed — one
-      // swatch, four storable orientations, same trick as "cannon" above.
-      const isWind = paletteModifier === "wind";
-      const isSelected = paintMode === "tile" && (isWind ? WIND_ORDER.includes(selectedModifier) : selectedModifier === paletteModifier);
+    PALETTE_MODIFIERS.forEach(modifier => {
+      const isWind = modifier === "wind";
+      const isSelected = paintMode === "tile" && (isWind ? WIND_ORDER.includes(selectedModifier) : selectedModifier === modifier);
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
-      sw.style.background = MODIFIER_SWATCH_COLORS[paletteModifier];
-      sw.title = paletteModifier;
+      sw.style.background = MODIFIER_SWATCH_COLORS[modifier];
+      sw.title = modifier;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = paletteModifier;
+      label.textContent = modifier;
       sw.appendChild(label);
-      sw.addEventListener("click", () => {
-        selectedModifier = isWind ? WIND_ORDER[0] : paletteModifier;
-        paintMode = "tile";
-        updateModeButtons();
-        renderAll();
-      });
+      sw.addEventListener("click", () => selectSurfaceModifier(modifier));
       container.appendChild(sw);
     });
   }
 
-  // Same small fixed palette everywhere a channel color is picked (v2.9) — a "none" swatch
-  // (legacy/unconditional behavior) plus one per CHANNEL_COLORS entry.
-  function renderChannelSwatches() {
-    const container = document.getElementById("channelSwatches");
-    const block = document.getElementById("channelBlock");
-    const show = paintMode === "tile" && isColorTaggable(selectedGeometry);
+  // Objects are the opposite of Ground: their entire point is a specific, recognizable function,
+  // so each gets a real icon rather than a color swatch. collectible and pushable are actors
+  // under the hood (kid-editable, same as a character); the rest are tile geometries with a
+  // fixed built-in icon, same as Ground — drawn the same way here either way.
+  function selectObjectActorKind(kind) { selectActorKind(kind); } // activeTab is derived inside selectActorKind itself
+  function renderObjectSwatches() {
+    const container = document.getElementById("objectSwatches");
+    container.innerHTML = "";
+    OBJECT_ACTOR_KINDS.forEach(kind => {
+      const def = actorDefs[kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID : findDefaultActorDef(kind)];
+      const isSelected = paintMode === "actor" && selectedActorKind === kind;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = kind;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = kind;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectObjectActorKind(kind));
+      container.appendChild(sw);
+    });
+    PALETTE_OBJECT_GEOMETRIES.forEach(geometry => {
+      const isCannon = geometry === "cannon";
+      const isSelected = paintMode === "tile" && activeTab === "object" && (isCannon ? CANNON_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = geometry;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), isCannon ? GEOMETRY_ICONS["cannon-ne"] : GEOMETRY_ICONS[geometry], ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = geometry;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectGeometry(geometry));
+      container.appendChild(sw);
+    });
+  }
+
+  // Same small fixed palette everywhere a color is picked (v2.9, renamed from "Channel" in
+  // v2.14) — a "none" swatch (legacy/unconditional behavior) plus one per CHANNEL_COLORS entry.
+  // Ground's wall (solid) and Objects' switch/plate/door all pick from this same picker, but
+  // never at the same time (a selected geometry belongs to exactly one of those tabs), so each
+  // tab gets its own mount point showing/hiding independently rather than one block that would
+  // need to physically relocate itself between them.
+  function renderColorSwatchesInto(containerId, blockId, show) {
+    const container = document.getElementById(containerId);
+    const block = document.getElementById(blockId);
     block.style.display = show ? "block" : "none";
     if (!show) return;
     container.innerHTML = "";
@@ -1626,15 +1768,27 @@
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         selectedChannelColor = color;
-        renderChannelSwatches();
+        renderColorSwatches();
       });
       container.appendChild(sw);
     });
   }
+  function renderColorSwatches() {
+    const isTile = paintMode === "tile";
+    renderColorSwatchesInto("groundColorSwatches", "groundColorBlock", isTile && selectedGeometry === "solid");
+    renderColorSwatchesInto("objectColorSwatches", "objectColorBlock", isTile && isColorTaggable(selectedGeometry) && selectedGeometry !== "solid");
+  }
 
+  // v2.14: activeTab is derived from `kind` itself rather than passed in separately — collectible
+  // and pushable always mean the Object tab, every other kind (including "player" and any custom
+  // character slot id) always means Characters, so there's no separate flag that could disagree
+  // with what was actually picked.
   function selectActorKind(kind) {
     selectedActorKind = kind;
     paintMode = "actor";
+    activeTab = OBJECT_ACTOR_KINDS.includes(kind) ? "object" : "character";
+    if (activeTab === "object") { lastObjectActorKind = kind; lastObjectAxis = "actor"; }
+    else { lastCharacterActorKind = kind; }
     selectedActorDefId = kind === "player" ? PLAYER_DEF_ID : findDefaultActorDef(kind);
     selectedPoseKey = "stand";
     currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
@@ -1642,14 +1796,22 @@
     renderAll();
   }
 
-  function renderActorSwatches() {
-    const container = document.getElementById("actorSwatches");
+  // Characters and Objects are the opposite of Ground: their whole point is a specific,
+  // recognizable function, so each archetype gets its own real sprite (drawn from the exact art
+  // already built for it — see WANDERER_ART etc.) rather than a color swatch standing in for it.
+  function renderCharacterSwatches() {
+    const container = document.getElementById("characterSwatches");
     container.innerHTML = "";
-    TEMPERAMENTS.forEach(temp => {
+    CHARACTER_TEMPERAMENTS.forEach(temp => {
+      const def = actorDefs[findDefaultActorDef(temp)];
       const sw = document.createElement("div");
       sw.className = "swatch" + (selectedActorKind === temp ? " selected" : "");
-      sw.style.background = TEMPERAMENT_COLORS[temp];
+      sw.style.background = "#111";
       sw.title = temp;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = temp;
@@ -1664,40 +1826,29 @@
     container.innerHTML = "";
     const sw = document.createElement("div");
     sw.className = "swatch" + (selectedActorKind === "player" ? " selected" : "");
-    sw.style.background = PLAYER_COLOR;
+    sw.style.background = "#111";
     sw.title = "player";
+    const c = document.createElement("canvas");
+    c.width = ART; c.height = ART;
+    drawArtToCtx(c.getContext("2d"), STICK_POSES.stand, ART);
+    sw.appendChild(c);
     const label = document.createElement("div");
     label.className = "lbl";
-    label.style.color = "#222";
     label.textContent = "player";
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
   }
 
-  // Its own row, same reason "player" gets one: architecturally an actor, but not a temperament
-  // a kid picks reactions for — see PUSHABLE_KIND. Any number can be placed, unlike the player.
-  function renderPushableSwatch() {
-    const container = document.getElementById("pushableSwatchRow");
-    container.innerHTML = "";
-    const sw = document.createElement("div");
-    sw.className = "swatch" + (selectedActorKind === PUSHABLE_KIND ? " selected" : "");
-    sw.style.background = "#8d6e63";
-    sw.title = "pushable";
-    const label = document.createElement("div");
-    label.className = "lbl";
-    label.textContent = "pushable";
-    sw.appendChild(label);
-    sw.addEventListener("click", () => selectActorKind(PUSHABLE_KIND));
-    container.appendChild(sw);
-  }
-
   // Selects a kid-created custom actor slot for placing/editing — the same shape as
   // selectActorKind, just pointed straight at a specific def id instead of looking one up by
-  // temperament, since a custom slot's id IS what's selected (see customActorSlotIds).
+  // temperament, since a custom slot's id IS what's selected (see customActorSlotIds). Custom
+  // slots always live in Characters, never Objects — there's no "custom object" concept.
   function selectCustomActor(id) {
     selectedActorKind = id;
     paintMode = "actor";
+    activeTab = "character";
+    lastCharacterActorKind = id;
     selectedActorDefId = id;
     selectedPoseKey = "stand";
     currentArt = activeArtFor(actorDefs[id]).slice();
@@ -1788,11 +1939,11 @@
     GAME_RULES.forEach(rule => {
       const on = rule.get();
       const sw = document.createElement("div");
-      sw.className = "swatch";
+      sw.className = "swatch big";
       sw.style.background = on ? PLAYER_COLOR : "#2f3140";
       sw.title = rule.label + (on ? " (on — click to turn off)" : " (off — click to turn on)");
       const glyph = document.createElement("div");
-      glyph.style.fontSize = "18px";
+      glyph.style.fontSize = "24px";
       glyph.style.color = on ? "#222" : PLAYER_COLOR;
       glyph.textContent = rule.glyph;
       sw.appendChild(glyph);
@@ -1887,13 +2038,15 @@
   function updateModeButtons() {
     document.getElementById("modeBuildBtn").classList.toggle("active", appMode === "build");
     document.getElementById("modePlayBtn").classList.toggle("active", appMode === "play");
-    document.getElementById("modeBackground").classList.toggle("active", paintMode === "background");
-    document.getElementById("modeTile").classList.toggle("active", paintMode === "tile");
-    document.getElementById("modeActor").classList.toggle("active", paintMode === "actor");
-    document.getElementById("modeErase").classList.toggle("active", paintMode === "erase");
-    document.getElementById("backgroundPropertiesBlock").style.display = paintMode === "background" ? "block" : "none";
-    document.getElementById("tilePropertiesBlock").style.display = paintMode === "tile" ? "block" : "none";
-    document.getElementById("actorPropertiesBlock").style.display = paintMode === "actor" ? "block" : "none";
+    document.getElementById("modeCharacter").classList.toggle("active", activeTab === "character");
+    document.getElementById("modeObject").classList.toggle("active", activeTab === "object");
+    document.getElementById("modeGround").classList.toggle("active", activeTab === "ground");
+    document.getElementById("modePaint").classList.toggle("active", activeTab === "paint");
+    document.getElementById("modeErase").classList.toggle("active", activeTab === "erase");
+    document.getElementById("characterPropertiesBlock").style.display = activeTab === "character" ? "block" : "none";
+    document.getElementById("objectPropertiesBlock").style.display = activeTab === "object" ? "block" : "none";
+    document.getElementById("groundPropertiesBlock").style.display = activeTab === "ground" ? "block" : "none";
+    document.getElementById("paintPropertiesBlock").style.display = activeTab === "paint" ? "block" : "none";
     const editingArt = paintMode === "background" || paintMode === "actor";
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
     document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
@@ -1913,21 +2066,30 @@
     else restartPlaySessionFromSnapshot();
   });
 
-  document.getElementById("modeBackground").addEventListener("click", () => {
+  // Tab buttons (v2.14): each tab restores whatever was last chosen for IT specifically (see the
+  // lastCharacterActorKind/lastObjectActorKind/lastGroundGeometry/lastObjectGeometry/lastObjectAxis
+  // memory declared above) rather than inspecting the live selection — the live selectedGeometry/
+  // selectedActorKind are shared between two tabs each, so merely visiting the other tab would
+  // otherwise have already overwritten them by the time you click back.
+  document.getElementById("modeCharacter").addEventListener("click", () => {
+    if (customActorSlotIds.includes(lastCharacterActorKind)) selectCustomActor(lastCharacterActorKind);
+    else selectActorKind(lastCharacterActorKind);
+  });
+  document.getElementById("modeObject").addEventListener("click", () => {
+    if (lastObjectAxis === "tile") selectGeometry(lastObjectGeometry);
+    else selectActorKind(lastObjectActorKind);
+  });
+  document.getElementById("modeGround").addEventListener("click", () => {
+    selectGeometry(lastGroundGeometry);
+  });
+  document.getElementById("modePaint").addEventListener("click", () => {
+    activeTab = "paint";
     paintMode = "background";
     currentArt = backgroundTileDefs[selectedBackgroundId].art.slice();
     updateModeButtons(); renderAll();
   });
-  document.getElementById("modeTile").addEventListener("click", () => {
-    paintMode = "tile";
-    updateModeButtons(); renderAll();
-  });
-  document.getElementById("modeActor").addEventListener("click", () => {
-    paintMode = "actor";
-    currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
-    updateModeButtons(); renderAll();
-  });
   document.getElementById("modeErase").addEventListener("click", () => {
+    activeTab = "erase";
     paintMode = "erase";
     updateModeButtons(); renderAll();
   });
@@ -3670,20 +3832,6 @@
       ctx.scale(t.sx, t.sy);
       drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
       ctx.restore();
-
-      if (actor.isPlayer) {
-        ctx.strokeStyle = "#ffd166";
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
-      } else if (TEMPERAMENT_COLORS[def.temperament]) {
-        // v2.9 legibility layer (the same concern flagged and deferred back in v2.3 for
-        // gameplay tiles): however custom an actor's drawn art gets, a thin outline keyed to
-        // its temperament category still tells a fresh player danger from safety at a glance.
-        // Applied uniformly (not just to custom actor slots) so it reads as one consistent rule.
-        ctx.strokeStyle = TEMPERAMENT_COLORS[def.temperament];
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(actor.x, actor.y, actor.w, actor.h);
-      }
     });
   }
 
@@ -3831,12 +3979,12 @@
 
   function renderAll() {
     renderBackgroundSwatches();
-    renderGeometrySwatches();
-    renderModifierSwatches();
-    renderChannelSwatches();
-    renderActorSwatches();
+    renderGroundSwatches();
+    renderSurfaceSwatches();
+    renderObjectSwatches();
+    renderColorSwatches();
+    renderCharacterSwatches();
     renderPlayerSwatch();
-    renderPushableSwatch();
     renderCustomActorSwatches();
     renderTemperamentPicker();
     renderGameRuleSwatches();
