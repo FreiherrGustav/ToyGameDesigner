@@ -1018,6 +1018,47 @@
     ], STICK_LEGEND)
   };
 
+  // v2.16: three more hand-supplied reference characters (stand only, same as the stick figure
+  // above) — head/face/body kept IDENTICAL across all four poses (there was no reference art for
+  // anything but standing, and re-drawing a detailed face four times risks it drifting between
+  // frames); only the legs (the bottom row) change to suggest stride/air/crouch, the same "only
+  // vary what physics-derived poses need to" restraint the stick figure's own derived poses used.
+  const HERO_LEGEND = { B: "#994a0a", C: "#fef2d7", K: "#000000", R: "#ff0000", S: "#00b3ff" };
+  const HERO_BODY = [
+    "........", ".BBBBBBB", "BBCCCCC.", "BCCCKCK.",
+    ".CCCCCCC", ".RRRRRR.", ".CSSSSS."
+  ];
+  const HERO_POSES = {
+    stand: pat(HERO_BODY.concat([".BB..BBB"]), HERO_LEGEND),
+    stride: pat(HERO_BODY.concat(["BBB..BB."]), HERO_LEGEND),
+    air: pat(HERO_BODY.concat(["..BBBB.."]), HERO_LEGEND),
+    crouch: pat(HERO_BODY.concat(["BB....BB"]), HERO_LEGEND)
+  };
+  const PRINCESS_LEGEND = { P: "#f9a9e0", Q: "#ec7ec9", K: "#000000", N: "#0029a3", D: "#eb0095" };
+  const PRINCESS_BODY = [
+    "........", "..PPPP..", ".PPPPPP.", ".QPKPKPQ",
+    "QPPNPNPQ", "QQDPPPD.", ".DQQPPD."
+  ];
+  const PRINCESS_POSES = {
+    stand: pat(PRINCESS_BODY.concat([".DDD.DD."]), PRINCESS_LEGEND),
+    stride: pat(PRINCESS_BODY.concat([".DD.DDD."]), PRINCESS_LEGEND),
+    air: pat(PRINCESS_BODY.concat(["..DDDD.."]), PRINCESS_LEGEND),
+    crouch: pat(PRINCESS_BODY.concat(["DD....DD"]), PRINCESS_LEGEND)
+  };
+  // Ghost floats rather than walks, so its "legs" are really just a small foot-nub that shrinks,
+  // shifts, or disappears entirely (mid-air) instead of a walking gait.
+  const GHOST_LEGEND = { R: "#fa0000", W: "#ffffff", K: "#000000", O: "#ffbb00" };
+  const GHOST_BODY = [
+    "..RRR...", "..WWW...", ".WWWWW..", ".WKWWW..",
+    "OWWWWWWW", ".WWWWWWW", "..WWWWW."
+  ];
+  const GHOST_POSES = {
+    stand: pat(GHOST_BODY.concat(["...OO..."]), GHOST_LEGEND),
+    stride: pat(GHOST_BODY.concat(["..OO...."]), GHOST_LEGEND),
+    air: pat(GHOST_BODY.concat(["........"]), GHOST_LEGEND),
+    crouch: pat(GHOST_BODY.concat(["..OOOO.."]), GHOST_LEGEND)
+  };
+
   // Rotates an 8x8 pixel-art array 90° clockwise — used to derive the other three cannon
   // orientations from a single hand-drawn base icon instead of authoring four separately.
   function rotateArt90CW(art) {
@@ -1114,7 +1155,7 @@
   // flat color square, "reused from what's already been built for that archetype elsewhere in the
   // project" — the exact same art the "grab a sprite" preset shelf already offered below, now
   // promoted to the default instead of something a kid has to know to go find. Named here, before
-  // both the seeding loop and ACTOR_PRESETS that each need it, so there's one drawing per
+  // both the seeding loop and CHARACTER_PRESETS that each need it, so there's one drawing per
   // archetype, not two that could quietly drift apart.
   const WANDERER_ART = pat([
     "..MMMM..", ".MMMMMM.", "MMMKKMMM", "MMMMMMMM",
@@ -1139,15 +1180,16 @@
     ".MM..MM.", "MMMMMMMM", "MMMMMMMM", "MMMMMMMM",
     "MMMMMMMM", ".MMMMMM.", "..MMMM..", "...MM..."
   ], { M: "#e91e63" });
-  // Recreated from a supplied spinning-coin GIF, exact grayscale palette matched from its frames —
+  // Recreated from a supplied spinning-coin GIF as a two-tone gold coin (a dark-gold rim over a
+  // bright-gold body, not the source GIF's literal grayscale, which read as "black and white") —
   // rounded off with transparent corners (the source frames didn't have any) to match this
   // project's other icons, and "spun" live via the same continuous-scale deformation every other
   // non-posed actor already gets in renderActors (see def.spin) rather than a real multi-frame
   // sprite sheet, which this toy has no other use for and isn't worth building just for one icon.
   const COIN_ART = pat([
-    "..MMMM..", ".MHHHHM.", "MHLHHHHM", "MHHHHHHM",
+    "..MMMM..", ".MHHHHM.", "MHHHHHHM", "MHHHHHHM",
     "MHHHHHHM", "MHHHHHHM", ".MHHHHM.", "..MMMM.."
-  ], { M: "#858585", H: "#c8c8c8", L: "#ebebeb" });
+  ], { M: "#b8860b", H: "#ffd700" });
   // "stationary" doesn't chase or flee anything, so the same blocky, faceless look already built
   // for the "blocker" preset fits it directly — a solid, inert thing to bump into.
   const STATIONARY_ART = pat([
@@ -1162,14 +1204,14 @@
     const id = "a" + (nextActorDefId++);
     actorDefs[id] = { temperament: temp, art: TEMPERAMENT_ART[temp].slice(), poses: null, name: temp };
   });
-  // The player's default look is already the posed stick figure, so placing it with zero
-  // setup already demonstrates real per-pose art, not a flat-color block. v2.14: a clean white
-  // figure (see STICK_LEGEND) rather than the old accent-gold one, for contrast against the
-  // canvas's black default background.
+  // The player's default look is already posed, so placing it with zero setup already
+  // demonstrates real per-pose art, not a flat-color block. v2.16: "hero" (a real reference
+  // character) instead of the plain stick figure — still available itself as a preset below for
+  // anyone who wants the simpler look back.
   actorDefs[PLAYER_DEF_ID] = {
-    temperament: null, art: STICK_POSES.stand.slice(),
-    poses: { stand: STICK_POSES.stand.slice(), stride: STICK_POSES.stride.slice(), air: STICK_POSES.air.slice(), crouch: STICK_POSES.crouch.slice() },
-    name: "player"
+    temperament: null, art: HERO_POSES.stand.slice(),
+    poses: { stand: HERO_POSES.stand.slice(), stride: HERO_POSES.stride.slice(), air: HERO_POSES.air.slice(), crouch: HERO_POSES.crouch.slice() },
+    name: "hero"
   };
   // A crate, not a creature — reads as "physical object" rather than "actor with intent",
   // matching that it never steers itself (see PUSHABLE_KIND).
@@ -1244,21 +1286,25 @@
   });
   lastObjectActorKind = collectibleSlotIds[0];
 
-  const ACTOR_PRESETS = [
+  // v2.16: split in two — a kid editing a character no longer sees collectible looks to grab
+  // (and vice versa), each shelf only offering sprites that actually fit what's being edited.
+  // renderPresetSwatches picks between them based on the def's temperament.
+  const CHARACTER_PRESETS = [
+    { name: "hero", poses: HERO_POSES },
+    { name: "princess", poses: PRINCESS_POSES },
+    { name: "ghost", poses: GHOST_POSES },
     { name: "stick figure", poses: STICK_POSES },
-    { name: "player", art: pat([
-      "..MMMM..", ".MMMMMM.", "MM.KK.MM", "MMMMMMMM",
-      "MMMMMMMM", ".MM..MM.", ".MM..MM.", ".M....M."
-    ], { M: "#ffd166", K: "#2b2b2b" }) },
     { name: "blocker", art: STATIONARY_ART },
     { name: "wanderer", art: WANDERER_ART },
     { name: "chaser", art: CHASER_ART },
     { name: "fleer", art: FLEER_ART },
+    { name: "cat", art: CAT_ART }
+  ];
+  const COLLECTIBLE_PRESETS = [
     { name: "gem", art: COLLECTIBLE_ART },
     { name: "heart", art: HEART_ART },
     { name: "coin", art: COIN_ART },
-    { name: "cheese", art: CHEESE_ART },
-    { name: "cat", art: CAT_ART }
+    { name: "cheese", art: CHEESE_ART }
   ];
   const BACKGROUND_PRESETS = [
     { name: "ground", art: pat([
@@ -2135,7 +2181,12 @@
   function renderPresetSwatches() {
     const container = document.getElementById("presetSwatches");
     container.innerHTML = "";
-    const presets = paintMode === "background" ? BACKGROUND_PRESETS : (paintMode === "actor" ? ACTOR_PRESETS : []);
+    let presets = [];
+    if (paintMode === "background") presets = BACKGROUND_PRESETS;
+    else if (paintMode === "actor") {
+      const def = currentSelectedDef();
+      presets = (def && def.temperament === "collectible") ? COLLECTIBLE_PRESETS : CHARACTER_PRESETS;
+    }
     presets.forEach(preset => {
       const sw = document.createElement("div");
       sw.className = "presetSwatch";
@@ -3181,6 +3232,12 @@
       }
     }
 
+    // v2.16: face whichever way actually moving — a small deadzone so idling near-zero drift
+    // (residual bounce, friction settling) doesn't flicker the facing back and forth; holds the
+    // last real direction the rest of the time, including while standing still.
+    if (actor.vx > 8) actor.facingDir = 1;
+    else if (actor.vx < -8) actor.facingDir = -1;
+
     if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
     if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
     if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
@@ -3568,7 +3625,7 @@
       defId: selectedActorDefId,
       x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
       w: ACTOR_SIZE, h: ACTOR_SIZE,
-      vx: 0, vy: 0, grounded: false, isPlayer,
+      vx: 0, vy: 0, grounded: false, isPlayer, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0
@@ -3989,6 +4046,10 @@
         if (def.spin) sx *= Math.max(0.15, Math.abs(Math.cos(now / 260)));
         t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       }
+      // v2.16: art is authored facing right by default — mirror it when the actor's last real
+      // movement was leftward, so a side-facing character (hero/princess/ghost, but harmless for
+      // the roughly-symmetric blob archetypes too) always faces the way it's actually going.
+      t.sx *= (actor.facingDir || 1);
 
       const anim = animState[actor.id];
       if (anim) {
