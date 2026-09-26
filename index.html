@@ -324,6 +324,10 @@
         place one: touch it and it's game over instantly, no knockback. Grab one to paint it, or
         hit + to draw your own (yours will be lethal too).
       </div>
+      <div class="hint" style="margin-top:2px;">
+        Double-click any painted Ground texture or Lethal to spin it 90° — just how it looks, not
+        how it blocks or hurts.
+      </div>
 
       <div id="groundColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
@@ -642,6 +646,12 @@
   // to ordinary geometry/modifier repainting as colorBoard above: painting a flat swatch clears
   // it, painting a named skin sets it, and rendering falls back to the built-in icon when it's null.
   let groundSkinBoard = [];
+  // ROWS x COLS, degrees (0/90/180/270) — a purely visual rotation applied to whatever's painted
+  // in the matching groundSkinBoard cell (v2.19.4). Rotate-in-place via double-click, same
+  // self-contained-choice spirit as everything else on this layer; geometry/modifier/collision are
+  // completely unaffected — a rotated spike still only hurts from a landing on top, same as an
+  // unrotated one (see resolveAxis) — this only changes what the tile looks like.
+  let groundSkinRotationBoard = [];
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
   // location stopped carrying any information — only whether one existed mattered. So these
   // are plain toggles in the palette, not something placed on the board at all. They're shared
@@ -709,27 +719,27 @@
 
   // ============== Rooms ==============
   function createEmptyRoom(name) {
-    const b = [], bg = [], cb = [], gs = [];
-    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); gs.push(new Array(COLS).fill(null)); }
-    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, actors: [], startPos: { x: 0, y: 0 } };
+    const b = [], bg = [], cb = [], gs = [], gr = [];
+    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); gs.push(new Array(COLS).fill(null)); gr.push(new Array(COLS).fill(0)); }
+    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, groundSkinRotationBoard: gr, actors: [], startPos: { x: 0, y: 0 } };
   }
 
-  // Hot-swaps which room's data the board/backgroundBoard/colorBoard/groundSkinBoard/actors/
-  // startPos globals point at. Whichever room is "hot" is the only one that simulates or renders —
-  // switching away just stops touching a room's actors, it doesn't move anything inside it (see
-  // triggerDoor()'s comment for why that reads as "pausing the player" rather than a special pause
-  // flag).
+  // Hot-swaps which room's data the board/backgroundBoard/colorBoard/groundSkinBoard/
+  // groundSkinRotationBoard/actors/startPos globals point at. Whichever room is "hot" is the only
+  // one that simulates or renders — switching away just stops touching a room's actors, it doesn't
+  // move anything inside it (see triggerDoor()'s comment for why that reads as "pausing the
+  // player" rather than a special pause flag).
   function activateRoom(roomId) {
     const outgoing = rooms.find(r => r.id === currentRoomId);
     if (outgoing) {
       outgoing.board = board; outgoing.backgroundBoard = backgroundBoard; outgoing.colorBoard = colorBoard;
-      outgoing.groundSkinBoard = groundSkinBoard;
+      outgoing.groundSkinBoard = groundSkinBoard; outgoing.groundSkinRotationBoard = groundSkinRotationBoard;
       outgoing.actors = actors; outgoing.startPos = startPos;
     }
     currentRoomId = roomId;
     const incoming = rooms.find(r => r.id === roomId);
     board = incoming.board; backgroundBoard = incoming.backgroundBoard; colorBoard = incoming.colorBoard;
-    groundSkinBoard = incoming.groundSkinBoard;
+    groundSkinBoard = incoming.groundSkinBoard; groundSkinRotationBoard = incoming.groundSkinRotationBoard;
     actors = incoming.actors; startPos = incoming.startPos;
   }
 
@@ -780,6 +790,10 @@
     wrapVEnabled = buildSnapshot.wrapVEnabled;
     switchChannels = structuredClone(buildSnapshot.switchChannels);
     playerRoomId = buildSnapshot.playerRoomId;
+    // v2.19.4: the sandbox never stops simulating in Build, so every actor (chasers especially)
+    // may well have wandered from where it was actually placed by the time Play starts — snap
+    // every room's actors back to their authored spawn points before any of them go live.
+    rooms.forEach(r => resetActorsToSpawn(r.actors, r.startPos));
     activateRoom(playerRoomId);
     lives = DEFAULT_LIVES;
     playSessionEnded = null;
@@ -815,13 +829,13 @@
   // play-only snapshot for a finished game; this is the live, still-editable project, so it also
   // carries the id counters and kid-authored custom actor slots an export never needs.
   function snapshotCurrentRoomState() {
-    // Writes the hot board/backgroundBoard/colorBoard/groundSkinBoard/actors/startPos globals back
-    // into the `rooms` array without switching which room is active — the "outgoing" half of
-    // activateRoom()'s job, without the "incoming" half.
+    // Writes the hot board/backgroundBoard/colorBoard/groundSkinBoard/groundSkinRotationBoard/
+    // actors/startPos globals back into the `rooms` array without switching which room is active —
+    // the "outgoing" half of activateRoom()'s job, without the "incoming" half.
     const room = rooms.find(r => r.id === currentRoomId);
     if (room) {
       room.board = board; room.backgroundBoard = backgroundBoard; room.colorBoard = colorBoard;
-      room.groundSkinBoard = groundSkinBoard;
+      room.groundSkinBoard = groundSkinBoard; room.groundSkinRotationBoard = groundSkinRotationBoard;
       room.actors = actors; room.startPos = startPos;
     }
   }
@@ -879,12 +893,16 @@
     wrapHEnabled = snap.wrapHEnabled;
     wrapVEnabled = snap.wrapVEnabled;
     switchChannels = structuredClone(snap.switchChannels);
-    // older saves predate groundSkinBoard on room objects — backfill an empty one so
-    // activateRoom()/rendering never index into an undefined array
+    // older saves predate groundSkinBoard/groundSkinRotationBoard on room objects — backfill empty
+    // ones so activateRoom()/rendering never index into an undefined array
     rooms.forEach(r => {
       if (!r.groundSkinBoard) {
         r.groundSkinBoard = [];
         for (let y = 0; y < ROWS; y++) r.groundSkinBoard.push(new Array(COLS).fill(null));
+      }
+      if (!r.groundSkinRotationBoard) {
+        r.groundSkinRotationBoard = [];
+        for (let y = 0; y < ROWS; y++) r.groundSkinRotationBoard.push(new Array(COLS).fill(0));
       }
     });
     currentRoomId = null; // avoid activateRoom()'s outgoing-save writing stale state into the rooms just restored
@@ -1387,8 +1405,8 @@
   // example games' own dedicated defs (see EXAMPLE_CHEESE_DEF_ID/EXAMPLE_CAT_DEF_ID below) — one
   // piece of art, two places it shows up, so the two never drift apart.
   const CHEESE_ART = pat([
-    "..MMMMMM", ".MMMMMMM", "MMMMMMMM", "MMM.MMMM",
-    "MM.MM.MM", "MMMMMMMM", "MMMMMMM.", ".MMMMMM."
+    "........", "...MMMM.", ".MMMMMM.", ".MM.MMM.",
+    ".M.MM.M.", ".MMMMM..", "..MMMM..", "........"
   ], { M: "#ffca28" });
   const CAT_ART = pat([
     "M......M", "MM....MM", ".MMMMMM.", "MK.MM.KM",
@@ -1539,7 +1557,11 @@
     // if the player never visits the half their one exit used to open onto. The player starts
     // out on the open edge of the maze, as far from the chamber as the layout allows.
     const playerCell = { x: 1, y: 16 };
-    const catCells = [{ x: 10, y: 8 }, { x: 13, y: 9 }];
+    // Two cats patrol the center chamber; a third patrols the far corridor on the opposite side of
+    // the maze from the player's own start corner — same row-band as the chamber (row 8) so it
+    // reads as "the same middle section," just out past the chamber's own walls (cols 8-15) rather
+    // than inside them.
+    const catCells = [{ x: 10, y: 8 }, { x: 13, y: 9 }, { x: 20, y: 8 }];
     // guarantee these spawn cells are open regardless of the maze layout above
     [playerCell, ...catCells].forEach(c => { board[c.y][c.x] = null; });
 
@@ -3167,14 +3189,14 @@
       sounds.pop();
       playRecipe(npcActor, "popVanish");
       log("Pop!");
-      setTimeout(() => { actors = actors.filter(a => a.id !== npcActor.id); }, RECIPES.popVanish.duration);
+      setTimeout(() => { removeActorById(npcActor.id); }, RECIPES.popVanish.duration);
     } else if (temperament === "collectible") {
       sounds.pop();
       playRecipe(npcActor, "popVanish");
       addScore(1);
       log("Got it! +1");
       setTimeout(() => {
-        actors = actors.filter(a => a.id !== npcActor.id);
+        removeActorById(npcActor.id);
         maybeRoundCompleteFromCollectibles();
       }, RECIPES.popVanish.duration);
     } else if (temperament === PUSHABLE_KIND) {
@@ -3467,7 +3489,7 @@
     const fromBackgroundSnapshot = backgroundBoard;
 
     const player = actors.find(a => a.isPlayer);
-    actors = actors.filter(a => !a.isPlayer);
+    removeActorById(player.id);
 
     activateRoom(link.toRoomId);
     player.x = link.toX * TILE + TILE / 2 - player.w / 2;
@@ -3766,6 +3788,7 @@
     if (selectedGeometry === "door") {
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       groundSkinBoard[gy][gx] = null; // a door never carries a named ground skin
+      groundSkinRotationBoard[gy][gx] = 0;
       if (existingTile && existingTile.geometry === "door") {
         if (colorBoard[gy][gx] === selectedChannelColor) {
           // repainting the same cell during one drag stroke, or just restyling its modifier —
@@ -3808,6 +3831,7 @@
       board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
       colorBoard[gy][gx] = null;
       groundSkinBoard[gy][gx] = null; // a cannon never carries a named ground skin
+      groundSkinRotationBoard[gy][gx] = 0;
       return;
     }
     if (WIND_ORDER.includes(selectedModifier)) {
@@ -3829,6 +3853,7 @@
       board[gy][gx] = gameplayKey(selectedGeometry, WIND_ORDER[0]);
       colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
       groundSkinBoard[gy][gx] = null; // wind is picked from the flat Surface swatch, never a named skin
+      groundSkinRotationBoard[gy][gx] = 0;
       return;
     }
     // repainting a cell is an editing action, not a play action — any dig progress or a lit
@@ -3836,7 +3861,7 @@
     const key = roomCellKey(currentRoomId, gx, gy);
     delete digProgress[key];
     delete bombArmed[key];
-    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; groundSkinBoard[gy][gx] = null; return; }
+    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; groundSkinBoard[gy][gx] = null; groundSkinRotationBoard[gy][gx] = 0; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
     // A named Ground/Lethal skin (grass/stone/spike/lava/...) is a self-contained pick, same as
     // goal/switch/door — it's never part of the channel-gating system, so it must never inherit
@@ -3844,10 +3869,28 @@
     // silently tagged spike/lava tiles with a stray gate color and made them ghost open like a
     // gate whenever that channel switched on).
     colorBoard[gy][gx] = (!selectedGroundSkinId && isColorTaggable(selectedGeometry)) ? selectedChannelColor : null;
+    // v2.19.4: repainting the SAME skin that's already here (a drag stroke crossing back over an
+    // already-touched cell, or the harmless first click of a double-click used to rotate it — see
+    // rotateGroundSkinAt) must never reset a rotation the kid already dialed in; only an actual
+    // change of skin (including to/from no skin at all) starts a freshly-placed tile back at 0°.
+    if (groundSkinBoard[gy][gx] !== selectedGroundSkinId) groundSkinRotationBoard[gy][gx] = 0;
     // v2.19: a named Ground/Lethal skin (see selectGroundSkin) stamps its id here so rendering can
     // draw its real art instead of the built-in icon; null (a flat swatch pick) just means "no
     // named skin", clearing whatever was here before same as colorBoard above.
     groundSkinBoard[gy][gx] = selectedGroundSkinId;
+  }
+
+  // Rotates whatever named Ground/Lethal skin is painted at (gx, gy) a further 90° clockwise —
+  // purely cosmetic, the same way the art itself is purely cosmetic on top of geometry/modifier;
+  // collision and the lethal-from-above rule are completely untouched by this. Triggered by a
+  // genuine double-click rather than "click again" (the pattern cannon/wind already use) because
+  // ground tiles are usually painted by dragging across many cells — re-touching an
+  // already-painted cell mid-drag needs to stay a harmless no-op, not spin it.
+  function rotateGroundSkinAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (!groundSkinBoard[gy][gx]) return;
+    pushUndoSnapshot();
+    groundSkinRotationBoard[gy][gx] = ((groundSkinRotationBoard[gy][gx] || 0) + 90) % 360;
   }
 
   // Writes to whichever room's board actually holds the live data — the hot room's own `board`
@@ -3994,7 +4037,7 @@
   function eraseAt(gx, gy, px, py) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
-    if (hit) { actors = actors.filter(a => a.id !== hit.id); return; }
+    if (hit) { removeActorById(hit.id); return; }
     if (board[gy][gx]) {
       const key = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[key];
@@ -4004,6 +4047,7 @@
       board[gy][gx] = null;
       colorBoard[gy][gx] = null;
       groundSkinBoard[gy][gx] = null;
+      groundSkinRotationBoard[gy][gx] = 0;
       return;
     }
     backgroundBoard[gy][gx] = null;
@@ -4023,22 +4067,60 @@
     });
   }
 
+  // Removes one actor from the CURRENT hot room's actor list by id, via splice — mutating the
+  // live array in place rather than reassigning `actors` to a filtered copy (v2.19.4 fix). The
+  // hot room's `room.actors` shares this exact array by reference (see activateRoom); a wholesale
+  // `actors = actors.filter(...)` would silently break that link until something else happened to
+  // call snapshotCurrentRoomState() first, leaving room.actors stale — a supposedly-erased or
+  // already-collected actor could then reappear on the next Play restart or export.
+  function removeActorById(id) {
+    const idx = actors.findIndex(a => a.id === id);
+    if (idx !== -1) actors.splice(idx, 1);
+  }
+
   function placeNewActor(px, py) {
     const isPlayer = selectedActorDefId === playerDefId;
     if (isPlayer) removeAllPlayerInstances();
+    const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
     const actor = {
       id: nextActorInstId++,
       defId: selectedActorDefId,
-      x: px - ACTOR_SIZE / 2, y: py - ACTOR_SIZE / 2,
-      w: ACTOR_SIZE, h: ACTOR_SIZE,
+      x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
+      // v2.19.4: where this actor snaps back to on a Play restart/export/"Reset to start" — the
+      // sandbox is always live, so a chaser wanders the instant it's placed; without its own
+      // recorded spot, whatever cell it happened to wander into by the time Play (or export) ran
+      // would silently become its real start, not the one it was actually placed at. The player's
+      // own equivalent (startPos) predates this and stays exactly as it was — see
+      // resetActorsToSpawn.
+      spawnX: x, spawnY: y,
       vx: 0, vy: 0, grounded: false, isPlayer, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0
     };
     actors.push(actor);
-    if (isPlayer) { startPos = { x: actor.x, y: actor.y }; playerRoomId = currentRoomId; }
+    // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
+    // `room.startPos` (see activateRoom), the same way board/colorBoard/actors stay in sync purely
+    // by being mutated rather than replaced. Reassigning a fresh object here would silently break
+    // that link until something else happened to call snapshotCurrentRoomState() first, leaving
+    // room.startPos stale at whatever it was before this placement (v2.19.4 fix).
+    if (isPlayer) { startPos.x = actor.x; startPos.y = actor.y; playerRoomId = currentRoomId; }
     return actor;
+  }
+
+  // Snaps every actor in `actorsList` back to where it's supposed to start: the player (a
+  // singleton, so its start is a per-room single value) to `roomStartPos`, every other actor to
+  // its own recorded spawnX/spawnY (falling back to wherever it already is if it predates this
+  // field, e.g. an actor placed by an older save). Used wherever a "start fresh" moment already
+  // existed for the player alone — Play entry/restart, standalone export, and the "Reset to
+  // start" button — so a chaser that's wandered off in the always-live sandbox lands back at its
+  // authored spot right alongside the player, not wherever it happened to be at that moment.
+  function resetActorsToSpawn(actorsList, roomStartPos) {
+    actorsList.forEach(actor => {
+      if (actor.isPlayer) { actor.x = roomStartPos.x; actor.y = roomStartPos.y; }
+      else { actor.x = actor.spawnX != null ? actor.spawnX : actor.x; actor.y = actor.spawnY != null ? actor.spawnY : actor.y; }
+      actor.vx = 0; actor.vy = 0;
+    });
   }
 
   // ============== Editor drag: continuous, collision-aware, same reactions as gameplay ==============
@@ -4135,6 +4217,18 @@
     if (paintMode === "tile") { isPaintingBoard = true; cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); return; }
     if (paintMode === "background") { isPaintingBoard = true; paintBackgroundAt(gx, gy); return; }
   });
+  // v2.19.4: double-click rotates whatever named Ground/Lethal skin is under the cursor — a real
+  // double-click rather than "click again" (cannon's own rotate trigger) since ground tiles are
+  // normally painted by dragging across a run of cells, where re-touching an already-painted one
+  // needs to stay a no-op, not spin it. Works no matter which tool happens to be selected; the two
+  // ordinary mousedowns that make up the double-click already ran (harmlessly repainting the same
+  // tile if the matching skin is selected, same as any drag stroke crossing itself), so this only
+  // needs to add the rotation on top.
+  gameCanvas.addEventListener("dblclick", (e) => {
+    if (appMode !== "build") return;
+    const { gx, gy } = cellFromEvent(e);
+    rotateGroundSkinAt(gx, gy);
+  });
   gameCanvas.addEventListener("mousemove", (e) => {
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
@@ -4146,7 +4240,9 @@
   });
   window.addEventListener("mouseup", () => {
     isPaintingBoard = false;
-    if (dragActor) { dragActor.dragging = false; dragContactCooldown = {}; }
+    // Dragging an actor to a new spot is a deliberate repositioning, same as placing it fresh —
+    // its spawn point moves with it (see resetActorsToSpawn).
+    if (dragActor) { dragActor.dragging = false; dragActor.spawnX = dragActor.x; dragActor.spawnY = dragActor.y; dragContactCooldown = {}; }
     dragActor = null;
   });
 
@@ -4181,18 +4277,19 @@
   }, { passive: false });
   gameCanvas.addEventListener("touchend", () => {
     isPaintingBoard = false;
-    if (dragActor) { dragActor.dragging = false; dragContactCooldown = {}; }
+    if (dragActor) { dragActor.dragging = false; dragActor.spawnX = dragActor.x; dragActor.spawnY = dragActor.y; dragContactCooldown = {}; }
     dragActor = null;
   });
 
   // ============== Reset / start controls ==============
+  // v2.19.4: resets every actor in the current room, not just the player — a chaser dropped
+  // somewhere gets exactly as much of a "snap back" guarantee as the player already had.
   document.getElementById("resetBtn").addEventListener("click", () => {
-    const player = actors.find(a => a.isPlayer);
-    if (player) { player.x = startPos.x; player.y = startPos.y; player.vx = 0; player.vy = 0; }
+    resetActorsToSpawn(actors, startPos);
   });
   document.getElementById("setStartBtn").addEventListener("click", () => {
     const player = actors.find(a => a.isPlayer);
-    if (player) { startPos = { x: player.x, y: player.y }; log("Start position set to player's current spot."); }
+    if (player) { startPos.x = player.x; startPos.y = player.y; log("Start position set to player's current spot."); }
     else log("Place the player first.");
   });
   document.getElementById("clearAllBtn").addEventListener("click", () => {
@@ -4303,6 +4400,17 @@
     return frames[Math.floor(performance.now() / skinDef.frameMs) % frames.length];
   }
 
+  // Same as drawArtScaled, but spun around the tile's own center first (v2.19.4) — the purely
+  // visual half of ground-skin rotation; geometry/modifier/collision never look at this at all.
+  function drawRotatedArt(ctx, art, x, y, size, cellSize, rotationDeg) {
+    if (!rotationDeg) { drawArtScaled(ctx, art, x, y, size, cellSize); return; }
+    ctx.save();
+    ctx.translate(x + size / 2, y + size / 2);
+    ctx.rotate(rotationDeg * Math.PI / 180);
+    drawArtScaled(ctx, art, -size / 2, -size / 2, size, cellSize);
+    ctx.restore();
+  }
+
   function drawGameplayTile(ctx, x, y, tile, extra) {
     const cell = TILE / ART;
     const windDir = WIND_DIRECTIONS[tile.modifier];
@@ -4310,7 +4418,7 @@
       if (extra && extra.skinDef) {
         // a named skin (lava/fire/a kid's own) over walkable ground — real art instead of the
         // plain tinted wash below, same as any other geometry gets once one's painted (see below)
-        drawArtScaled(ctx, currentSkinFrame(extra.skinDef), x, y, TILE, cell);
+        drawRotatedArt(ctx, currentSkinFrame(extra.skinDef), x, y, TILE, cell, extra.skinRotation);
         return;
       }
       if (tile.modifier !== "none") {
@@ -4359,7 +4467,7 @@
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
     } else {
-      drawArtScaled(ctx, icon, x, y, TILE, cell);
+      drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
     }
     if (tile.modifier !== "none") {
       // The colored ring is a Build-only authoring cue — a reminder of which modifier is under an
@@ -4433,7 +4541,7 @@
           }
           if (isLive) {
             const skinId = groundSkinBoard[y][x];
-            if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId] });
+            if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId], skinRotation: groundSkinRotationBoard[y][x] || 0 });
           }
           drawGameplayTile(ctx, x * TILE, y * TILE, tile, extra);
         }
@@ -4722,6 +4830,11 @@
       backgroundTileDefs: structuredClone(backgroundTileDefs),
       groundTileDefs: structuredClone(groundTileDefs)
     };
+    // v2.19.4: an exported game is a frozen snapshot of whatever the always-live sandbox looked
+    // like at the moment Export was clicked — including any chaser mid-wander. Reset every actor
+    // in the cloned copy back to its authored spawn point first, so the shipped game always starts
+    // exactly where it was placed, not wherever it happened to be standing right then.
+    gameData.rooms.forEach(r => resetActorsToSpawn(r.actors, r.startPos));
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
@@ -4737,7 +4850,7 @@
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       stepActor, tick,
-      drawArtScaled, drawWindArrow, drawGameplayTile, renderRoomContents, renderActors,
+      drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, beep,
@@ -4861,7 +4974,7 @@
   let groundTileDefs = GAME_DATA.groundTileDefs;
 
   let currentRoomId = null;
-  let board = [], backgroundBoard = [], colorBoard = [], groundSkinBoard = [], actors = [], startPos = { x: 0, y: 0 };
+  let board = [], backgroundBoard = [], colorBoard = [], groundSkinBoard = [], groundSkinRotationBoard = [], actors = [], startPos = { x: 0, y: 0 };
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
