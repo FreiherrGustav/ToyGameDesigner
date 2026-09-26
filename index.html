@@ -4282,11 +4282,17 @@
       drawArtScaled(ctx, icon, x, y, TILE, cell);
     }
     if (tile.modifier !== "none") {
-      ctx.save();
-      ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
-      ctx.restore();
+      // The colored ring is a Build-only authoring cue — a reminder of which modifier is under an
+      // icon/skin that otherwise looks the same regardless. Play (and an exported game) shows the
+      // tile exactly as a player should see it, with no bookkeeping ring; the wind arrow stays,
+      // since it's a real gameplay cue (which way the wind pushes you), not a design-time hint.
+      if (appMode === "build") {
+        ctx.save();
+        ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+        ctx.restore();
+      }
       if (windDir) drawWindArrow(ctx, x + TILE / 2, y + TILE / 2, windDir);
     }
     if (extra && extra.color && !gateOpen) {
