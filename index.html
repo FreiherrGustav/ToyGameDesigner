@@ -307,10 +307,24 @@
       </div>
       <div class="hint" style="margin-top:6px;">
         Hazard costs one life and knocks you back — you keep going. Lethal costs every life at
-        once, instantly, with no knockback — there's nothing left to fight through. Same piece
-        either way, over solid or none: paint your own art on top to make it lava, spikes, or a
-        bottomless pit.
+        once, instantly, with no knockback — there's nothing left to fight through.
       </div>
+
+      <div class="section-title" style="margin-top:10px;">Ground textures</div>
+      <div class="swatch-row" id="groundSkinSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        A real look for solid ground instead of a plain color — grab one to paint it, or hit + to
+        draw your own.
+      </div>
+
+      <div class="section-title" style="margin-top:10px;">Lethals</div>
+      <div class="swatch-row" id="lethalSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Lava and fire (both animated) and spikes — tagged lethal automatically the moment you
+        place one: touch it and it's game over instantly, no knockback. Grab one to paint it, or
+        hit + to draw your own (yours will be lethal too).
+      </div>
+
       <div id="groundColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="groundColorSwatches"></div>
@@ -547,12 +561,18 @@
 
   // ============== State ==============
   // Two board layers: background (pure art, no gameplay meaning) drawn first, and gameplay
-  // (geometry+modifier, built-in icons only) drawn on top. They're independent — erasing one
-  // never touches the other.
+  // (geometry+modifier) drawn on top — built-in icons by default, or a named skin's real art (see
+  // groundTileDefs) for whichever tiles have one. They're independent — erasing one never touches
+  // the other.
   let backgroundTileDefs = {}; // id -> {art, name}
   let nextBackgroundId = 1;
   let actorDefs = {};  // id -> {temperament, art, poses, name}
   let nextActorDefId = 1;
+  // v2.19: real, optionally-animated art for Ground-tab tiles — grass/stone/dirt/snow and the
+  // lava/fire/spike "Lethals" — layered on top of the plain geometry+modifier system the same way
+  // actorDefs layers character looks on top of temperament. `frames` is always an array (length 1
+  // for anything non-animated) so rendering never needs an "is this animated" branch.
+  let groundTileDefs = {}; // id -> {name, frames: [art,...], frameMs, geometry, modifier}
   // v2.9: ids of kid-created custom actor slots ("Actor A", "Actor B", ...), in creation order —
   // extends the same reusable-tile kit pattern v2.3 gave backgrounds to actors. Kept as its own
   // ordered list (rather than inferred from actorDefs) purely for stable, predictable ordering
@@ -564,6 +584,18 @@
   // collectibles are no longer one shared default look, but their own multi-sprite kit.
   let collectibleSlotIds = [];
   let nextCollectibleLetter = 0;
+  // v2.19: same ordered-kit pattern again, this time for the Ground tab's named tile skins —
+  // grass/stone/dirt/snow (groundSlotIds) and the lava/fire/spike "Lethals" (lethalSlotIds), each
+  // with its own real art on top of the plain geometry+modifier the flat swatches still offer.
+  let groundSlotIds = [];
+  let nextGroundLetter = 0;
+  let lethalSlotIds = [];
+  let nextLethalLetter = 0;
+  // Which named skin (if any) the NEXT tile paint should stamp — set by selectGroundSkin/
+  // selectLethalSkin, cleared by the plain flat-swatch pickers (selectGeometry/
+  // selectSurfaceModifier) so painting a flat "solid" afterward doesn't keep leaving a stray
+  // skin's art behind. null means "just the built-in icon/color, no named skin".
+  let selectedGroundSkinId = null;
 
   // The board is per-room now (v2.4): each room is its own independent {board, backgroundBoard,
   // actors, startPos}. Only ONE room simulates/renders at a time — whichever one is currently
@@ -604,6 +636,11 @@
   // clears it. Its own parallel layer for the same reason background art is: independent of, and
   // never touched by, ordinary geometry/modifier repainting.
   let colorBoard = [];
+  // ROWS x COLS, a groundTileDefs id or null — which named skin (grass/lava/a kid's own custom
+  // one/...) is painted at a cell, if any (v2.19). Same "independent parallel layer" relationship
+  // to ordinary geometry/modifier repainting as colorBoard above: painting a flat swatch clears
+  // it, painting a named skin sets it, and rendering falls back to the built-in icon when it's null.
+  let groundSkinBoard = [];
   // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
   // location stopped carrying any information — only whether one existed mattered. So these
   // are plain toggles in the palette, not something placed on the board at all. They're shared
@@ -671,24 +708,27 @@
 
   // ============== Rooms ==============
   function createEmptyRoom(name) {
-    const b = [], bg = [], cb = [];
-    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); }
-    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, actors: [], startPos: { x: 0, y: 0 } };
+    const b = [], bg = [], cb = [], gs = [];
+    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); gs.push(new Array(COLS).fill(null)); }
+    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, actors: [], startPos: { x: 0, y: 0 } };
   }
 
-  // Hot-swaps which room's data the board/backgroundBoard/colorBoard/actors/startPos globals
-  // point at. Whichever room is "hot" is the only one that simulates or renders — switching away
-  // just stops touching a room's actors, it doesn't move anything inside it (see triggerDoor()'s
-  // comment for why that reads as "pausing the player" rather than a special pause flag).
+  // Hot-swaps which room's data the board/backgroundBoard/colorBoard/groundSkinBoard/actors/
+  // startPos globals point at. Whichever room is "hot" is the only one that simulates or renders —
+  // switching away just stops touching a room's actors, it doesn't move anything inside it (see
+  // triggerDoor()'s comment for why that reads as "pausing the player" rather than a special pause
+  // flag).
   function activateRoom(roomId) {
     const outgoing = rooms.find(r => r.id === currentRoomId);
     if (outgoing) {
       outgoing.board = board; outgoing.backgroundBoard = backgroundBoard; outgoing.colorBoard = colorBoard;
+      outgoing.groundSkinBoard = groundSkinBoard;
       outgoing.actors = actors; outgoing.startPos = startPos;
     }
     currentRoomId = roomId;
     const incoming = rooms.find(r => r.id === roomId);
     board = incoming.board; backgroundBoard = incoming.backgroundBoard; colorBoard = incoming.colorBoard;
+    groundSkinBoard = incoming.groundSkinBoard;
     actors = incoming.actors; startPos = incoming.startPos;
   }
 
@@ -774,12 +814,13 @@
   // play-only snapshot for a finished game; this is the live, still-editable project, so it also
   // carries the id counters and kid-authored custom actor slots an export never needs.
   function snapshotCurrentRoomState() {
-    // Writes the hot board/backgroundBoard/colorBoard/actors/startPos globals back into the
-    // `rooms` array without switching which room is active — the "outgoing" half of
+    // Writes the hot board/backgroundBoard/colorBoard/groundSkinBoard/actors/startPos globals back
+    // into the `rooms` array without switching which room is active — the "outgoing" half of
     // activateRoom()'s job, without the "incoming" half.
     const room = rooms.find(r => r.id === currentRoomId);
     if (room) {
       room.board = board; room.backgroundBoard = backgroundBoard; room.colorBoard = colorBoard;
+      room.groundSkinBoard = groundSkinBoard;
       room.actors = actors; room.startPos = startPos;
     }
   }
@@ -792,6 +833,9 @@
       backgroundTileDefs: structuredClone(backgroundTileDefs), nextBackgroundId,
       customActorSlotIds: customActorSlotIds.slice(), nextCustomActorLetter,
       collectibleSlotIds: collectibleSlotIds.slice(), nextCollectibleLetter,
+      groundTileDefs: structuredClone(groundTileDefs),
+      groundSlotIds: groundSlotIds.slice(), nextGroundLetter,
+      lethalSlotIds: lethalSlotIds.slice(), nextLethalLetter,
       playerDefId,
       nextActorInstId,
       gravityEnabled, wrapHEnabled, wrapVEnabled,
@@ -820,12 +864,28 @@
     collectibleSlotIds = snap.collectibleSlotIds ? snap.collectibleSlotIds.slice() : COLLECTIBLE_SEEDS.map(s => s.id);
     collectibleSlotIds.forEach(id => { if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]); });
     nextCollectibleLetter = snap.nextCollectibleLetter || 0;
+    // older saves predate groundTileDefs entirely — same re-derive-from-the-factory-seeds fallback
+    // as collectibleSlotIds above, so the Ground tab's new rows aren't left empty
+    groundTileDefs = snap.groundTileDefs ? structuredClone(snap.groundTileDefs) : structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs);
+    groundSlotIds = snap.groundSlotIds ? snap.groundSlotIds.slice() : GROUND_SEEDS.map(s => s.id);
+    nextGroundLetter = snap.nextGroundLetter || 0;
+    lethalSlotIds = snap.lethalSlotIds ? snap.lethalSlotIds.slice() : LETHAL_SEEDS.map(s => s.id);
+    nextLethalLetter = snap.nextLethalLetter || 0;
+    groundSlotIds.concat(lethalSlotIds).forEach(id => { if (!groundTileDefs[id]) groundTileDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs[id]); });
     playerDefId = snap.playerDefId || PLAYER_DEF_ID; // older saves predate playerDefId — fall back to the default
     nextActorInstId = snap.nextActorInstId;
     gravityEnabled = snap.gravityEnabled;
     wrapHEnabled = snap.wrapHEnabled;
     wrapVEnabled = snap.wrapVEnabled;
     switchChannels = structuredClone(snap.switchChannels);
+    // older saves predate groundSkinBoard on room objects — backfill an empty one so
+    // activateRoom()/rendering never index into an undefined array
+    rooms.forEach(r => {
+      if (!r.groundSkinBoard) {
+        r.groundSkinBoard = [];
+        for (let y = 0; y < ROWS; y++) r.groundSkinBoard.push(new Array(COLS).fill(null));
+      }
+    });
     currentRoomId = null; // avoid activateRoom()'s outgoing-save writing stale state into the rooms just restored
     activateRoom(rooms.some(r => r.id === snap.currentRoomId) ? snap.currentRoomId : rooms[0].id);
     clearTransientRuntimeState();
@@ -1202,6 +1262,59 @@
     "..MMMM..", ".MHHHHM.", "MHHHHHHM", "MHHHHHHM",
     "MHHHHHHM", "MHHHHHHM", ".MHHHHM.", "..MMMM.."
   ], { M: "#b8860b", H: "#ffd700" });
+
+  // v2.19: real art for the Ground tab's new named tile kits (grass/stone/dirt/snow and the
+  // lava/fire/spike "Lethals"), replacing the flat colored squares those cells used to have no
+  // choice but to render as. Pixel-matched to supplied reference art where one was given (spike's
+  // PNG was already an exact 8x8 grid; fire's WEBP frames turned out to be too, at a clean 150px-
+  // per-pixel block size); lava's reference was a much finer, non-8x8-aligned landscape texture,
+  // so it's hand-composed here using that reference's own exact 4-color palette instead of a
+  // mechanical downsample. Grass/stone/dirt/snow had no reference art at all — original designs.
+  const SPIKE_ART = pat([
+    "........", "........", "...MM...", "..MHMM..",
+    "..MHLM..", ".MHLMHH.", "MHHLLMHH", "MHLLLLMH"
+  ], { M: "#3d3d3d", H: "#858585", L: "#c7cfdd" });
+  const FIRE_FRAMES = [
+    pat([
+      "....M...", "..M.M.M.", "..MMM.M.", "M.MHMMM.",
+      "M.MHHMMM", "MMMHYHMM", "MMHHYYHM", "MMHYYYHM"
+    ], { M: "#f44336", H: "#ff9800", Y: "#ffeb3b" }),
+    pat([
+      "....M...", "....M...", "..MMM.M.", "..MDMMM.",
+      "M.MHDMM.", "MMMHYDMM", "MMHYYHDM", "MMHYYHDM"
+    ], { M: "#f44336", H: "#ff9800", Y: "#ffeb3b", D: "#ff5722" })
+  ];
+  const LAVA_FRAMES = [
+    pat([
+      "GGGGGGGG", "GHGHHGHG", "HHHHHHHH", "HDHDDHDH",
+      "DDDDDDDD", "DRDRRDRD", "RRRRRRRR", "RRRRRRRR"
+    ], { G: "#ffd600", H: "#ffa725", D: "#e65100", R: "#d50000" }),
+    pat([
+      "GGGGGGGG", "HGHGGHGH", "HHHHHHHH", "DHDHHDHD",
+      "DDDDDDDD", "RDRDDRDR", "RRRRRRRR", "RRRRRRRR"
+    ], { G: "#ffd600", H: "#ffa725", D: "#e65100", R: "#d50000" }),
+    pat([
+      "GGGGGGGG", "GGHGHGHG", "HHHHHHHH", "HHDHDHDH",
+      "DDDDDDDD", "DDRDRDRD", "RRRRRRRR", "RRRRRRRR"
+    ], { G: "#ffd600", H: "#ffa725", D: "#e65100", R: "#d50000" })
+  ];
+  const GRASS_ART = pat([
+    "TGTGTGTG", "GGGGGGGG", "GGGGGGGG", "BBBBBBBB",
+    "BCBBBCBB", "BBBBBBBB", "BCBBBCBB", "BBBBBBBB"
+  ], { T: "#8bc34a", G: "#689f38", B: "#795548", C: "#6d4c41" });
+  const STONE_ART = pat([
+    "SSSSSSSS", "ShhhShhh", "ShhhShhh", "SSSSSSSS",
+    "hhhShhhS", "hhhShhhS", "SSSSSSSS", "ShhhShhh"
+  ], { S: "#757575", h: "#bdbdbd" });
+  const DIRT_ART = pat([
+    "BBCBBBcB", "BcBBCBBB", "BBBcBBCB", "CBBBBcBB",
+    "BBcBBBBC", "BCBBcBBB", "BBBBCBcB", "cBBCBBBB"
+  ], { B: "#795548", c: "#6d4c41", C: "#8d6e63" });
+  const SNOW_ART = pat([
+    "WWWWWWWW", "WIWWWIWW", "WWWSWWWW", "IWWWWWIW",
+    "WWWWWWWW", "WSWWIWWW", "WWWWWWSW", "IWWWWWWI"
+  ], { W: "#f5f5f5", I: "#b3e5fc", S: "#e1f5fe" });
+
   // "stationary" doesn't chase or flee anything, so the same blocky, faceless look already built
   // for the "blocker" preset fits it directly — a solid, inert thing to bump into.
   const STATIONARY_ART = pat([
@@ -1297,6 +1410,37 @@
     collectibleSlotIds.push(seed.id);
   });
   lastObjectActorKind = collectibleSlotIds[0];
+
+  // v2.19: Ground's own named-skin kit — plain textures with no gameplay effect beyond whatever
+  // "solid" already means, fixed readable ids for the same reason the collectible seeds above use
+  // them (specific, named things, not interchangeable instances of a behavior).
+  const GROUND_SEEDS = [
+    { id: "gndGrass", name: "grass", frames: [GRASS_ART] },
+    { id: "gndStone", name: "stone", frames: [STONE_ART] },
+    { id: "gndDirt", name: "dirt", frames: [DIRT_ART] },
+    { id: "gndSnow", name: "snow/ice", frames: [SNOW_ART] }
+  ];
+  GROUND_SEEDS.forEach(seed => {
+    groundTileDefs[seed.id] = { name: seed.name, frames: seed.frames.map(f => f.slice()), frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push(seed.id);
+  });
+  // v2.19: "Lethals" — real art for the lethal modifier's three worked examples from the patch
+  // that introduced it (lava/pit, spike floor, fire), each defaulting to the geometry that best
+  // matches how that hazard actually behaves: spike is a solid floor you land on and die touching
+  // (the patch's own "solid ground, spike floor" example); lava and fire are things you walk or
+  // fall into, not stand on top of, so "none" (the patch's "lava... you fall/walk into" example).
+  // A kid can still repaint the geometry afterward if they want a different combination — this is
+  // just the sensible one-click default, the same way every other self-contained tile choice
+  // (goal, switch, door...) picks sensible defaults a kid is free to override.
+  const LETHAL_SEEDS = [
+    { id: "lthLava", name: "lava", frames: LAVA_FRAMES, frameMs: 350, geometry: "none" },
+    { id: "lthFire", name: "fire", frames: FIRE_FRAMES, frameMs: 300, geometry: "none" },
+    { id: "lthSpike", name: "spike", frames: [SPIKE_ART], frameMs: 0, geometry: "solid" }
+  ];
+  LETHAL_SEEDS.forEach(seed => {
+    groundTileDefs[seed.id] = { name: seed.name, frames: seed.frames.map(f => f.slice()), frameMs: seed.frameMs, geometry: seed.geometry, modifier: "lethal" };
+    lethalSlotIds.push(seed.id);
+  });
 
   // v2.16: split in two — a kid editing a character no longer sees collectible looks to grab
   // (and vice versa), each shelf only offering sprites that actually fit what's being edited.
@@ -1792,6 +1936,7 @@
   function selectGeometry(geometry) {
     const isCannon = geometry === "cannon";
     selectedGeometry = isCannon ? CANNON_ORDER[0] : geometry;
+    selectedGroundSkinId = null; // a flat swatch pick means "just the built-in icon, no named skin"
     paintMode = "tile";
     activeTab = PALETTE_GROUND_GEOMETRIES.includes(geometry) ? "ground" : "object";
     if (activeTab === "object") {
@@ -1829,6 +1974,7 @@
     // four storable orientations, same trick as "cannon" above.
     const isWind = modifier === "wind";
     selectedModifier = isWind ? WIND_ORDER[0] : modifier;
+    selectedGroundSkinId = null; // a flat swatch pick means "just the built-in color, no named skin"
     paintMode = "tile";
     activeTab = "ground";
     updateModeButtons();
@@ -1851,6 +1997,102 @@
       sw.addEventListener("click", () => selectSurfaceModifier(modifier));
       container.appendChild(sw);
     });
+  }
+
+  // v2.19: selects a named Ground/Lethal skin — sets the geometry+modifier it implies AND which
+  // skin's art to stamp, in one atomic pick, the same self-contained-choice pattern goal/switch/
+  // door already use. Shared by both the "Ground" row (grass/stone/dirt/snow) and "Lethals" row
+  // (lava/fire/spike): both are just entries in the same groundTileDefs dict, so only which
+  // slot-id list a swatch iterates differs, not how picking one behaves.
+  function selectGroundSkin(id) {
+    const def = groundTileDefs[id];
+    selectedGeometry = def.geometry;
+    selectedModifier = def.modifier;
+    selectedGroundSkinId = id;
+    paintMode = "tile";
+    activeTab = "ground";
+    lastGroundGeometry = selectedGeometry;
+    currentArt = def.frames[0].slice();
+    updateModeButtons();
+    renderAll();
+  }
+  // Swatch previews always show frame 0 — animation is a board-rendering effect (see
+  // drawGameplayTile), not something the palette shelf itself needs to act out.
+  function renderGroundSkinSwatches() {
+    const container = document.getElementById("groundSkinSwatches");
+    container.innerHTML = "";
+    groundSlotIds.forEach(id => {
+      const def = groundTileDefs[id];
+      if (!def) return;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (paintMode === "tile" && selectedGroundSkinId === id ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.frames[0], ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = def.name;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectGroundSkin(id));
+      container.appendChild(sw);
+    });
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Create a new ground tile";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const letter = String.fromCharCode(65 + nextGroundLetter++);
+      const id = "customGnd" + letter;
+      const name = "Ground " + letter;
+      groundTileDefs[id] = { name, frames: [new Array(ART * ART).fill(null)], frameMs: 0, geometry: "solid", modifier: "none" };
+      groundSlotIds.push(id);
+      selectGroundSkin(id);
+      log("New ground tile \"" + name + "\" added — draw it below.");
+    });
+    container.appendChild(plus);
+  }
+  function renderLethalSwatches() {
+    const container = document.getElementById("lethalSwatches");
+    container.innerHTML = "";
+    lethalSlotIds.forEach(id => {
+      const def = groundTileDefs[id];
+      if (!def) return;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (paintMode === "tile" && selectedGroundSkinId === id ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.frames[0], ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = def.name;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectGroundSkin(id));
+      container.appendChild(sw);
+    });
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Create a new lethal tile";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const letter = String.fromCharCode(65 + nextLethalLetter++);
+      const id = "customLth" + letter;
+      const name = "Lethal " + letter;
+      groundTileDefs[id] = { name, frames: [new Array(ART * ART).fill(null)], frameMs: 0, geometry: "none", modifier: "lethal" };
+      lethalSlotIds.push(id);
+      selectGroundSkin(id);
+      log("New lethal tile \"" + name + "\" added — draw it below. It's tagged lethal by default.");
+    });
+    container.appendChild(plus);
   }
 
   // Objects are the opposite of Ground: their entire point is a specific, recognizable function,
@@ -2292,12 +2534,20 @@
     document.getElementById("objectPropertiesBlock").style.display = activeTab === "object" ? "block" : "none";
     document.getElementById("groundPropertiesBlock").style.display = activeTab === "ground" ? "block" : "none";
     document.getElementById("paintPropertiesBlock").style.display = activeTab === "paint" ? "block" : "none";
-    const editingArt = paintMode === "background" || paintMode === "actor";
+    // v2.19: a named Ground/Lethal skin is editable too (paintMode stays "tile" — see
+    // selectGroundSkin), but doesn't get the preset shelf below (there's nothing to grab a
+    // starter look from — the swatch you clicked already IS the starter look).
+    const editingActorOrBg = paintMode === "background" || paintMode === "actor";
+    const editingGroundSkin = paintMode === "tile" && !!selectedGroundSkinId;
+    const editingArt = editingActorOrBg || editingGroundSkin;
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
-    document.getElementById("presetsBlock").style.display = editingArt ? "block" : "none";
+    document.getElementById("presetsBlock").style.display = editingActorOrBg ? "block" : "none";
     if (editingArt) {
       const actorDef = actorDefs[selectedActorDefId];
-      document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind) : "background";
+      const groundDef = groundTileDefs[selectedGroundSkinId];
+      document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind)
+        : editingGroundSkin ? (groundDef ? groundDef.name : selectedGroundSkinId)
+        : "background";
     }
   }
 
@@ -2378,6 +2628,10 @@
       }
     } else if (paintMode === "background") {
       backgroundTileDefs[selectedBackgroundId].art = currentArt.slice();
+    } else if (paintMode === "tile" && selectedGroundSkinId) {
+      // drawing on it collapses an animated built-in (lava/fire) to the single frame just drawn —
+      // the same "customizing simplifies it" precedent a posed actor's art already follows above
+      groundTileDefs[selectedGroundSkinId].frames = [currentArt.slice()];
     }
   }
 
@@ -2415,6 +2669,11 @@
   function colorAt(gx, gy) {
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
     return colorBoard[gy][gx];
+  }
+  // The named skin (a groundTileDefs id) painted at a cell, or null for the plain built-in icon.
+  function groundSkinAt(gx, gy) {
+    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    return groundSkinBoard[gy][gx];
   }
   // A color reads as "on" from either source that can drive it — a permanently-flipped switch,
   // or a pressure plate currently occupied — see the state comments on switchChannels/
@@ -3403,6 +3662,7 @@
     if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
     if (selectedGeometry === "door") {
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      groundSkinBoard[gy][gx] = null; // a door never carries a named ground skin
       if (existingTile && existingTile.geometry === "door") {
         if (colorBoard[gy][gx] === selectedChannelColor) {
           // repainting the same cell during one drag stroke, or just restyling its modifier —
@@ -3444,6 +3704,7 @@
       delete bombArmed[roomKey];
       board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
       colorBoard[gy][gx] = null;
+      groundSkinBoard[gy][gx] = null; // a cannon never carries a named ground skin
       return;
     }
     if (WIND_ORDER.includes(selectedModifier)) {
@@ -3464,6 +3725,7 @@
       delete bombArmed[key];
       board[gy][gx] = gameplayKey(selectedGeometry, WIND_ORDER[0]);
       colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
+      groundSkinBoard[gy][gx] = null; // wind is picked from the flat Surface swatch, never a named skin
       return;
     }
     // repainting a cell is an editing action, not a play action — any dig progress or a lit
@@ -3471,9 +3733,13 @@
     const key = roomCellKey(currentRoomId, gx, gy);
     delete digProgress[key];
     delete bombArmed[key];
-    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; return; }
+    if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; groundSkinBoard[gy][gx] = null; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
     colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
+    // v2.19: a named Ground/Lethal skin (see selectGroundSkin) stamps its id here so rendering can
+    // draw its real art instead of the built-in icon; null (a flat swatch pick) just means "no
+    // named skin", clearing whatever was here before same as colorBoard above.
+    groundSkinBoard[gy][gx] = selectedGroundSkinId;
   }
 
   // True if room A already has some door leading to room B (in either direction) — used so a
@@ -3661,6 +3927,7 @@
       if (tile && tile.geometry === "door") { severDoorLink(currentRoomId, gx, gy); return; }
       board[gy][gx] = null;
       colorBoard[gy][gx] = null;
+      groundSkinBoard[gy][gx] = null;
       return;
     }
     backgroundBoard[gy][gx] = null;
@@ -3948,10 +4215,24 @@
     ctx.restore();
   }
 
+  // The frame a named Ground/Lethal skin should show right now — the last frame for a static
+  // (length-1) skin, or a wall-clock cycle through all of them for an animated one like lava/fire.
+  function currentSkinFrame(skinDef) {
+    const frames = skinDef.frames;
+    if (frames.length <= 1 || !skinDef.frameMs) return frames[0];
+    return frames[Math.floor(performance.now() / skinDef.frameMs) % frames.length];
+  }
+
   function drawGameplayTile(ctx, x, y, tile, extra) {
     const cell = TILE / ART;
     const windDir = WIND_DIRECTIONS[tile.modifier];
     if (tile.geometry === "none") {
+      if (extra && extra.skinDef) {
+        // a named skin (lava/fire/a kid's own) over walkable ground — real art instead of the
+        // plain tinted wash below, same as any other geometry gets once one's painted (see below)
+        drawArtScaled(ctx, currentSkinFrame(extra.skinDef), x, y, TILE, cell);
+        return;
+      }
       if (tile.modifier !== "none") {
         ctx.save();
         ctx.globalAlpha = 0.4;
@@ -3967,7 +4248,12 @@
     // state reads at a glance the same way any other reaction here does.
     const gateOpen = tile.geometry === "solid" && extra && extra.color && extra.channelOn;
     let icon = GEOMETRY_ICONS[tile.geometry];
-    if (tile.geometry === "diggable" && extra && extra.digFrac > 0) {
+    if (extra && extra.skinDef) {
+      // a named skin (grass/stone/dirt/snow/spike/a kid's own) — real art instead of the built-in
+      // icon; everything below (gate-open ghosting, the modifier ring...) still applies on top of
+      // whatever `icon` ends up being, skin or not.
+      icon = currentSkinFrame(extra.skinDef);
+    } else if (tile.geometry === "diggable" && extra && extra.digFrac > 0) {
       const stage = Math.min(DIGGABLE_STAGE_ICONS.length - 1, Math.floor(extra.digFrac * DIGGABLE_STAGE_ICONS.length));
       icon = DIGGABLE_STAGE_ICONS[stage];
     }
@@ -4058,6 +4344,10 @@
           if (isLive && isColorTaggable(tile.geometry)) {
             const color = colorBoard[y][x];
             if (color) extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
+          }
+          if (isLive) {
+            const skinId = groundSkinBoard[y][x];
+            if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId] });
           }
           drawGameplayTile(ctx, x * TILE, y * TILE, tile, extra);
         }
@@ -4290,6 +4580,8 @@
     renderBackgroundSwatches();
     renderGroundSwatches();
     renderSurfaceSwatches();
+    renderGroundSkinSwatches();
+    renderLethalSwatches();
     renderObjectSwatches();
     renderCollectibleSwatches();
     renderColorSwatches();
@@ -4341,7 +4633,8 @@
       switchChannels: structuredClone(switchChannels),
       playerRoomId,
       actorDefs: structuredClone(actorDefs),
-      backgroundTileDefs: structuredClone(backgroundTileDefs)
+      backgroundTileDefs: structuredClone(backgroundTileDefs),
+      groundTileDefs: structuredClone(groundTileDefs)
     };
 
     const runtimeFunctions = [
@@ -4349,6 +4642,7 @@
       gravityOn, applyWorldWrap,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
+      currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, detonateBombAt, triggerWarp,
@@ -4478,9 +4772,10 @@
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
   let backgroundTileDefs = GAME_DATA.backgroundTileDefs;
+  let groundTileDefs = GAME_DATA.groundTileDefs;
 
   let currentRoomId = null;
-  let board = [], backgroundBoard = [], colorBoard = [], actors = [], startPos = { x: 0, y: 0 };
+  let board = [], backgroundBoard = [], colorBoard = [], groundSkinBoard = [], actors = [], startPos = { x: 0, y: 0 };
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
