@@ -3683,7 +3683,7 @@
         severDoorLink(currentRoomId, gx, gy);
         board[gy][gx] = gameplayKey("door", selectedModifier);
         colorBoard[gy][gx] = selectedChannelColor;
-        wireDoorColor(currentRoomId, gx, gy, selectedChannelColor);
+        wireColoredDoor(currentRoomId, gx, gy, selectedChannelColor);
         return;
       }
       createDoorAt(gx, gy);
@@ -3752,15 +3752,6 @@
     groundSkinBoard[gy][gx] = selectedGroundSkinId;
   }
 
-  // True if room A already has some door leading to room B (in either direction) — used so a
-  // fresh door doesn't get silently folded into a connection that already exists elsewhere.
-  function hasDoorLinkBetween(roomAId, roomBId) {
-    return Object.keys(doorLinks).some(key => {
-      if (!key.startsWith(roomAId + ":")) return false;
-      return doorLinks[key].toRoomId === roomBId;
-    });
-  }
-
   // Writes to whichever room's board actually holds the live data — the hot room's own `board`
   // global if it's the one currently active, or straight into the room object's own array
   // otherwise (every other room's true state always lives there, untouched until it becomes hot).
@@ -3796,11 +3787,11 @@
     setRoomColorCell(roomId, gx, gy, null);
   }
 
-  // Every door tile currently on any room's board tagged with `color`, as {roomId, gx, gy}. Used
-  // to derive a color's current pairing state fresh each time rather than trusting some separately
-  // maintained count that could drift from what's actually painted.
+  // Every door tile currently on any room's board tagged with `color` — including plain colorless
+  // doors, color === null being just another bucket the same as any real color — as {roomId, gx,
+  // gy}. Used to derive a color's current pairing state fresh each time rather than trusting some
+  // separately maintained count that could drift from what's actually painted.
   function findDoorsWithColor(color) {
-    if (!color) return [];
     const found = [];
     rooms.forEach(room => {
       const rb = room.id === currentRoomId ? board : room.board;
@@ -3817,9 +3808,12 @@
   }
 
   // v2.11: a door's color decides where it leads, using the same three-way pattern a kid already
-  // knows from switches — unused, already-used, already-paired — rather than any new UI. Assumes
-  // the door tile at (fromRoomId, gx, gy) has ALREADY been painted with `color` on colorBoard;
-  // this just derives (or refuses) the link that color implies.
+  // knows from switches — unused, already-used, already-paired — rather than any new UI. A
+  // colorless door is just another bucket in this same rule, color === null, not a special case
+  // (v2.19.2 fix — it used to fall back to an entirely different tab-order-based heuristic that
+  // couldn't pair two colorless doors with each other on request, only chain onward automatically).
+  // Assumes the door tile at (fromRoomId, gx, gy) has ALREADY been painted with `color` on
+  // colorBoard; this just derives (or refuses) the link that color implies.
   function wireColoredDoor(fromRoomId, gx, gy, color) {
     const existingElsewhere = findDoorsWithColor(color).filter(d => !(d.roomId === fromRoomId && d.gx === gx && d.gy === gy));
     if (existingElsewhere.length >= 2) {
@@ -3827,7 +3821,7 @@
       // so refuse the placement outright rather than guess; leave no half-wired door behind
       setRoomBoardCell(fromRoomId, gx, gy, null);
       setRoomColorCell(fromRoomId, gx, gy, null);
-      log("That color's already used by two doors — erase one first, or pick a different color.");
+      log((color ? "That door color's" : "Colorless doors are") + " already used by two doors — erase one first, or pick a different color.");
       return;
     }
     if (existingElsewhere.length === 1) {
@@ -3839,9 +3833,9 @@
       log("New door — linked directly to the matching door in \"" + (otherRoom ? otherRoom.name : "another room") + "\".");
       return;
     }
-    // unused color: a brand-new room, same as the original v2.4 default — its auto-generated
-    // return door just shares this color now, no longer a special case, only the first ordinary
-    // instance of the pairing rule above.
+    // unused color (or no color at all): a brand-new room, same as the original v2.4 default —
+    // its auto-generated return door just shares this color now, no longer a special case, only
+    // the first ordinary instance of the pairing rule above.
     const newRoom = createEmptyRoom("room " + (rooms.length + 1));
     newRoom.board[gy][gx] = gameplayKey("door", "none");
     newRoom.colorBoard[gy][gx] = color;
@@ -3852,40 +3846,14 @@
     log("New door — added \"" + newRoom.name + "\" and linked it back here.");
   }
 
-  // The door-color dispatcher: a real color goes through the new color-matching pairing rule
-  // above; no color (still the default) keeps the exact original v2.4/v2.9 behavior — link
-  // onward to the next room in tab order if one's free and not already connected some other way,
-  // otherwise spin up a brand-new room, same as always. Assumes the door tile has already been
-  // painted, same as wireColoredDoor.
-  function wireDoorColor(fromRoomId, gx, gy, color) {
-    if (color) { wireColoredDoor(fromRoomId, gx, gy, color); return; }
-    const roomIndex = rooms.findIndex(r => r.id === fromRoomId);
-    const nextRoom = rooms[roomIndex + 1];
-    if (nextRoom && !nextRoom.board[gy][gx] && !hasDoorLinkBetween(fromRoomId, nextRoom.id)) {
-      nextRoom.board[gy][gx] = gameplayKey("door", "none");
-      doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: nextRoom.id, toX: gx, toY: gy };
-      doorLinks[roomCellKey(nextRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
-      renderRoomTabs();
-      log("New door — connected onward to \"" + nextRoom.name + "\".");
-      return;
-    }
-
-    const newRoom = createEmptyRoom("room " + (rooms.length + 1));
-    newRoom.board[gy][gx] = gameplayKey("door", "none");
-    rooms.push(newRoom);
-    doorLinks[roomCellKey(fromRoomId, gx, gy)] = { toRoomId: newRoom.id, toX: gx, toY: gy };
-    doorLinks[roomCellKey(newRoom.id, gx, gy)] = { toRoomId: fromRoomId, toX: gx, toY: gy };
-    renderRoomTabs();
-    log("New door — added \"" + newRoom.name + "\" and linked it back here.");
-  }
-
-  // Placing a brand-new door tile — painting it, then handing off to wireDoorColor to decide
-  // where it leads. No destination picker either way; see wireDoorColor/wireColoredDoor.
+  // Placing a brand-new door tile — painting it, then handing off to wireColoredDoor to decide
+  // where it leads. No destination picker either way; a colorless door pairs by "no color" the
+  // exact same way a colored one pairs by its color — see wireColoredDoor.
   function createDoorAt(gx, gy) {
     const fromRoomId = currentRoomId;
     board[gy][gx] = gameplayKey("door", selectedModifier);
     colorBoard[gy][gx] = selectedChannelColor;
-    wireDoorColor(fromRoomId, gx, gy, selectedChannelColor);
+    wireColoredDoor(fromRoomId, gx, gy, selectedChannelColor);
   }
 
   // Removes a room entirely — its board, actors, and every door link connecting it to any other
