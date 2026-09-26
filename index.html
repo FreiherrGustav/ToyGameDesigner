@@ -2849,6 +2849,11 @@
         }
         const modifier = modifierAt(cx, cy);
         const bouncy = modifier === "bouncy" && actor.isPlayer;
+        // A blocking lethal tile (a spike floor) is only meant to punish actually stepping on
+        // it from above — bumping its side while just walking up next to it, or bonking its
+        // underside, stops you like any other solid wall and nothing more. Captured before the
+        // y-branch below resets vy, since that's the only place the original direction survives.
+        const steppedOnTop = axis === "y" && actor.vy > 0;
         if (axis === "x") {
           if (actor.vx > 0) {
             actor.x = cx * TILE - actor.w;
@@ -2871,7 +2876,7 @@
             actor.vy = bouncy ? -actor.vy * BOUNCE_RESTITUTION : 0;
           }
         }
-        if (modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
+        if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
         else if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
       }
     }
@@ -3735,7 +3740,12 @@
     delete bombArmed[key];
     if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; groundSkinBoard[gy][gx] = null; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
-    colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
+    // A named Ground/Lethal skin (grass/stone/spike/lava/...) is a self-contained pick, same as
+    // goal/switch/door — it's never part of the channel-gating system, so it must never inherit
+    // whatever channel color happens to still be selected from an earlier Objects-tab pick (that
+    // silently tagged spike/lava tiles with a stray gate color and made them ghost open like a
+    // gate whenever that channel switched on).
+    colorBoard[gy][gx] = (!selectedGroundSkinId && isColorTaggable(selectedGeometry)) ? selectedChannelColor : null;
     // v2.19: a named Ground/Lethal skin (see selectGroundSkin) stamps its id here so rendering can
     // draw its real art instead of the built-in icon; null (a flat swatch pick) just means "no
     // named skin", clearing whatever was here before same as colorBoard above.
