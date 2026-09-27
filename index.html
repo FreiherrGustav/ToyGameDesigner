@@ -614,12 +614,21 @@
   };
   const FAN_RANGE_TILES = 5; // how far in front of itself a fan projects wind force
   // v2.20: force now falls off with distance instead of being flat across the whole range — right
-  // at the fan (i=1) it's FAN_NEAR_FORCE, strong enough to beat GRAVITY outright (so standing right
-  // over/in front of a fan actually lifts you), tapering down to WIND_FORCE by the far edge of its
-  // range (the same "a kid can still fight against it" strength wind/conveyor already had). This is
-  // what makes fan-to-fan hopping climb higher each time instead of topping out at one jump's worth
-  // of height — see fanAccelFor().
+  // at the fan (i=0, the fan's own cell) it's FAN_NEAR_FORCE, strong enough to beat GRAVITY
+  // outright (so standing right over/in front of a fan actually lifts you), tapering down to
+  // WIND_FORCE by the far edge of its range (the same "a kid can still fight against it" strength
+  // wind/conveyor already had). This is what makes fan-to-fan hopping climb higher each time
+  // instead of topping out at one jump's worth of height — see fanAccelFor().
   const FAN_NEAR_FORCE = 1900;
+  // v2.20.2: FAN_NEAR_FORCE alone can't visibly arrest a fast fall — a terminal-velocity drop
+  // (MAX_FALL=750) only spends 2-3 frames inside the ~1-tile-deep near zone before it's past the
+  // fan, and 450px/s² of net excess accel (1900-1450) over ~0.03s barely dents 750px/s of existing
+  // speed. Continuous accel alone made "fall into a fan, get bounced" imperceptible even though the
+  // force genuinely "beats gravity" on paper. FAN_BOUNCE_* is a discrete kick layered on top,
+  // applied once right at the near zone (see stepActor) — the same "instant, not just gradual"
+  // shape TRAMPOLINE_LAUNCH_SPEED uses for the same reason.
+  const FAN_BOUNCE_MIN_SPEED = 150; // px/s — below this, no kick; a resting/slow object just floats
+  const FAN_BOUNCE_RESTITUTION = 0.65; // how much of the incoming "falling into it" speed becomes push-back
 
   // v2.20: sticky's own two constants — how much an actor's own movement input is damped while
   // standing in/on a sticky surface (isOnStickyGround), and how much extra decel is applied when
@@ -3579,16 +3588,22 @@
     const ac = Math.floor((actor.x + actor.w / 2) / TILE), ar = Math.floor((actor.y + actor.h / 2) / TILE);
     for (const geom of FAN_ORDER) {
       const dir = FAN_DIRECTIONS[geom];
-      for (let i = 1; i <= FAN_RANGE_TILES; i++) {
+      // v2.20.2 fix: i used to start at 1 (checking cells strictly BETWEEN the actor and the fan),
+      // never i=0 (the actor's own cell). That meant an actor actually overlapping the fan's own
+      // tile — exactly the "right at it"/"fell into it" moment a kid would expect the strongest
+      // push — got ZERO force, a cliff-edge drop-off right at the point of closest approach, the
+      // opposite of what "overcome gravity when very close" needs. i=0 now IS the fan's own cell
+      // (maximum strength); i=FAN_RANGE_TILES is the far edge (plain WIND_FORCE).
+      for (let i = 0; i <= FAN_RANGE_TILES; i++) {
         const fx = ac - dir.x * i, fy = ar - dir.y * i;
         const geometry = geometryAt(fx, fy);
         if (geometry === geom) {
           const color = colorAt(fx, fy);
           if (!color || isChannelOn(color)) {
-            const t = FAN_RANGE_TILES > 1 ? (i - 1) / (FAN_RANGE_TILES - 1) : 0;
+            const t = FAN_RANGE_TILES > 0 ? i / FAN_RANGE_TILES : 0;
             const strength = FAN_NEAR_FORCE + (WIND_FORCE - FAN_NEAR_FORCE) * t;
             ax += dir.x * strength; ay += dir.y * strength;
-            if (i <= 2) near = true;
+            if (i <= 1) near = true;
           }
           break;
         }
@@ -4436,6 +4451,26 @@
       const radialAccel = radialForceAccelFor(actor);
       const fanAccel = fanAccelFor(actor);
       actor.nearFan = fanAccel.near; // v2.20: purely a render cue (floating bob) — see renderActors
+      // v2.20.2: a discrete "the wind just bounced me" kick, on top of the continuous accel below
+      // — see FAN_BOUNCE_MIN_SPEED/FAN_BOUNCE_RESTITUTION's own comment for why continuous accel
+      // alone can't visibly arrest a fast fall into an upward fan (not enough time/distance inside
+      // the near zone). Player-only, same as the bounce sound elsewhere in this file.
+      if (fanAccel.near && actor.isPlayer) {
+        const fmag = Math.hypot(fanAccel.ax, fanAccel.ay);
+        if (fmag > 0) {
+          const nx = fanAccel.ax / fmag, ny = fanAccel.ay / fmag; // unit push direction
+          const vAlong = actor.vx * nx + actor.vy * ny; // negative = moving INTO the fan's push
+          if (vAlong < -FAN_BOUNCE_MIN_SPEED) {
+            const kick = -vAlong * FAN_BOUNCE_RESTITUTION;
+            actor.vx += nx * kick; actor.vy += ny * kick;
+            // A fast fall takes 2-3 successive kicks (each frame's kick isn't restitution enough
+            // to fully cancel incoming speed in one shot, same shape as a real settling bounce) —
+            // one sound for the whole episode, not one per frame, gated on its own cooldown rather
+            // than bouncyCooldown so it never touches stepActor's recentlyLaunched speed-cap skip.
+            if (actor.fanKickCooldown <= 0) { sounds.boing(); actor.fanKickCooldown = 200; }
+          }
+        }
+      }
       let ax = windAccel.ax + radialAccel.ax + fanAccel.ax;
       let ay = windAccel.ay + radialAccel.ay + fanAccel.ay;
       let wantsJump = false;
@@ -4536,6 +4571,7 @@
     if (actor.doorCooldown > 0) actor.doorCooldown -= dt * 1000;
     if (actor.cannonCooldown > 0) actor.cannonCooldown -= dt * 1000;
     if (actor.warpCooldown > 0) actor.warpCooldown -= dt * 1000;
+    if (actor.fanKickCooldown > 0) actor.fanKickCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x", dt);
@@ -5056,7 +5092,7 @@
       // default rather than 0, and isOnStickyGround/STICKY_RELEASE_MS. nearFan is a pure render
       // cue, recomputed fresh every frame by fanAccelFor — false here is just the pre-first-frame
       // value, never read before stepActor sets it for real.
-      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0
     };
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -5104,7 +5140,7 @@
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
-      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false,
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0,
       spawnerKey, spawnBornAt: nowMs
     };
     actors.push(actor);
@@ -5652,6 +5688,11 @@
   // FAN_RANGE_TILES caps it) so the visual never promises force that isn't actually there.
   // Live-room only (isLive) — a frozen room-transition snapshot has no "current time" for the
   // animation to run against.
+  // v2.20.2: confined to the ONE tile immediately in front of the fan, not smeared across
+  // FAN_RANGE_TILES — drawing it that far out read as "several tiles high" of dashes instead of a
+  // wind effect sitting right at the fan's mouth, per direct feedback. 2-3 short wavy white lines,
+  // side by side (spaced along the perpendicular axis), each a small sine ripple confined well
+  // inside that single tile's bounds and animated by phase so they shimmer in place.
   function drawFanStream(ctx, boardArg, viewStartCol, isLive) {
     if (!isLive) return;
     const now = performance.now();
@@ -5664,26 +5705,31 @@
         if (color && !isChannelOn(color)) continue; // matches fanAccelFor's own switch-gate check
         const dir = FAN_DIRECTIONS[geometry];
         const perpX = -dir.y, perpY = dir.x;
-        for (let i = 1; i <= FAN_RANGE_TILES; i++) {
-          const fx = bx + dir.x * i, fy = y + dir.y * i;
-          if (fy < 0 || fy >= ROWS || fx < 0 || fx >= roomCols()) break;
-          const stopKey = boardArg[fy] && boardArg[fy][fx];
-          const stopGeometry = stopKey && GAMEPLAY_TILE_DEFS[stopKey] ? GAMEPLAY_TILE_DEFS[stopKey].geometry : null;
-          if (stopGeometry === "solid") break; // a wall blocks the airflow before it reaches this far
-          const sx = fx - viewStartCol;
-          if (sx < 0 || sx >= COLS) continue;
-          const phase = now / 260 - i * 0.8;
-          const wobble = Math.sin(phase) * 3;
-          const fade = 1 - (i - 1) / FAN_RANGE_TILES;
-          const cx = sx * TILE + TILE / 2 + perpX * wobble;
-          const cy = fy * TILE + TILE / 2 + perpY * wobble;
+        const fx = bx + dir.x, fy = y + dir.y; // the single tile the fan blows into
+        if (fy < 0 || fy >= ROWS || fx < 0 || fx >= roomCols()) continue;
+        const stopKey = boardArg[fy] && boardArg[fy][fx];
+        const stopGeometry = stopKey && GAMEPLAY_TILE_DEFS[stopKey] ? GAMEPLAY_TILE_DEFS[stopKey].geometry : null;
+        if (stopGeometry === "solid") continue; // a wall right against the fan blocks the airflow entirely
+        const sx = fx - viewStartCol;
+        if (sx < 0 || sx >= COLS) continue;
+        const tileCx = sx * TILE + TILE / 2, tileCy = fy * TILE + TILE / 2;
+        for (let li = 0; li < 3; li++) {
+          const perpOffset = (li - 1) * (TILE * 0.28);
+          const phase = now / 220 + li * 1.7;
           ctx.save();
-          ctx.globalAlpha = 0.5 * fade * (0.6 + 0.4 * Math.sin(phase * 1.3));
+          ctx.globalAlpha = 0.55;
           ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 1.6;
           ctx.beginPath();
-          ctx.moveTo(cx - dir.x * 6, cy - dir.y * 6);
-          ctx.lineTo(cx + dir.x * 6, cy + dir.y * 6);
+          const steps = 8;
+          for (let s = 0; s <= steps; s++) {
+            const t = s / steps; // 0..1 along the blow direction, spanning only this one tile
+            const along = (t - 0.5) * TILE * 0.8;
+            const wave = Math.sin(phase + t * Math.PI * 2.2) * (TILE * 0.09);
+            const px = tileCx + dir.x * along + perpX * (perpOffset + wave);
+            const py = tileCy + dir.y * along + perpY * (perpOffset + wave);
+            if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
           ctx.stroke();
           ctx.restore();
         }
@@ -6103,6 +6149,7 @@
       `const FAN_ORDER = ${JSON.stringify(FAN_ORDER)};`,
       `const FAN_DIRECTIONS = ${JSON.stringify(FAN_DIRECTIONS)};`,
       `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
+      `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
