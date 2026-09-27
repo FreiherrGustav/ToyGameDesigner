@@ -213,6 +213,7 @@
   body.play-mode #paletteWrap { display: none; }
   body.play-mode #roomTabRow { display: none; }
   body.play-mode #buildToolbar { display: none; }
+  body.play-mode #cameraPanRow { display: none; }
 
   /* ---------- Pixel editor ---------- */
   #pixelEditor { display: flex; flex-direction: column; gap: 6px; align-items: center; }
@@ -298,9 +299,17 @@
       <div class="section-title featured">Game rules</div>
       <div class="swatch-row" id="gameRuleSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        These aren't placed — they just switch on or off for the whole game the moment you
-        click them. Gravity makes everything fall. Wrap makes an edge loop around to the
-        opposite side instead of stopping you — one switch per direction.
+        These aren't placed — they just switch on or off the moment you click them. Gravity makes
+        everything fall. Wrap makes an edge loop around to the opposite side instead of stopping
+        you — one switch per direction. These rules, and the camera below, belong to whichever
+        room is open, and switch automatically with the room tabs.
+      </div>
+      <div class="section-title" style="margin-top:10px;">Camera</div>
+      <div class="swatch-row" id="cameraSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Fixed shows the whole room at once. Follow lets the room be wider than the screen and
+        keeps the camera on the player. Runner does the same, but the camera moves on its own —
+        fall behind it and that's game over.
       </div>
     </div>
 
@@ -464,6 +473,11 @@
       <div id="autosaveHint" class="hint" style="margin:0;"></div>
     </div>
     <div class="toolbar" id="roomTabRow"></div>
+    <div class="toolbar" id="cameraPanRow" style="display:none;">
+      <button class="tbtn" id="panLeftBtn">◀ Pan</button>
+      <span class="hint" id="panPositionLabel" style="margin:0;"></span>
+      <button class="tbtn" id="panRightBtn">Pan ▶</button>
+    </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
     <div id="log"></div>
   </div>
@@ -486,6 +500,12 @@
 
   // ============== Grid (authoring) constants ==============
   const COLS = 24, ROWS = 18, TILE = 32, ART = 8;
+  // v2.17: COLS stays the viewport width (the canvas is still exactly COLS*TILE px, one screen).
+  // A room's own board data can be wider — up to BOARD_MAX_COLS — once its camera is Follow or
+  // Runner; every room's arrays are allocated at this full width regardless of camera mode so
+  // switching modes never requires resizing them, only changing how much of it is reachable/drawn
+  // (see roomCols()/colsForCameraMode()).
+  const BOARD_MAX_COLS = COLS * 3;
   const ACTOR_INSET = 5;
   const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, ~30% margin inside the cell
 
@@ -613,6 +633,10 @@
   const FRICTION_DECEL = 1800;
   const SLIPPERY_FRICTION_MULT = 0.12; // reduced friction while standing on/in a slippery tile
   const MAX_FALL = 750;           // terminal velocity, slowed to match the softer gravity above
+  // v2.17: how fast a Runner room's camera advances on its own, independent of the player —
+  // slower than the player's own MAX_SPEED so a kid who's actually moving can stay ahead of it;
+  // falling behind (see checkRunnerFailState) is what creates the tension the mode is for.
+  const RUNNER_SPEED = 130;
   const BOUNCE_RESTITUTION = 0.82;
   const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
@@ -715,14 +739,28 @@
   // completely unaffected — a rotated spike still only hurts from a landing on top, same as an
   // unrotated one (see resolveAxis) — this only changes what the tile looks like.
   let groundSkinRotationBoard = [];
-  // Whole-game rule switches. Once gravity/wrap effects went global (v2.1), a placed marker's
-  // location stopped carrying any information — only whether one existed mattered. So these
-  // are plain toggles in the palette, not something placed on the board at all. They're shared
-  // across every room, unlike the board/actors — a kid discovers physics rules for the whole
-  // game, not room by room.
+  // Game rule switches. A placed marker's location never carried any information — only whether
+  // one existed mattered — so these are plain toggles in the palette, not something placed on the
+  // board. v2.1 through v2.16 shared them across the whole project; v2.17 makes them per-room
+  // (a runner room alongside an explorable one needs different rules), but the rest of the engine
+  // keeps reading/writing these same globals exactly as before — activateRoom() is what hot-swaps
+  // them to a different room's own values, the same pattern board/actors/startPos already use.
   let gravityEnabled = false;
   let wrapHEnabled = false;
   let wrapVEnabled = false;
+  // v2.17: "fixed" | "follow" | "runner" — see CAMERA_MODES/selectCameraMode(). Also per-room,
+  // swapped the same way.
+  let cameraMode = "fixed";
+  // v2.17: how many columns the Build-mode editor has panned right of column 0, for a room whose
+  // camera isn't Fixed — an editing-only affordance (see renderCameraPanRow()), unrelated to the
+  // real Play-mode camera position (cameraX, below). Always 0 for a Fixed room — selectCameraMode
+  // resets it the instant a room switches to Fixed, so painting can never target a column that
+  // isn't the one currently drawn (see cellFromEvent/pxFromEvent).
+  let editorPanCol = 0;
+  // v2.17: the live Play-mode camera position, in real board pixels — recomputed every tick from
+  // the hot room's cameraMode (see updateCamera()). Not persisted on the room; every room starts
+  // its camera fresh at 0 the instant it becomes hot (see activateRoom()).
+  let cameraX = 0;
   // v2.9: one independent boolean per channel color, toggled permanently by a same-colored
   // switch — the direct generalization of the old single gravity-flip boolean. Global across
   // rooms, same as gravity/wrap above, for the same reason.
@@ -781,29 +819,56 @@
   let intensity = 0;
 
   // ============== Rooms ==============
+  // v2.17: every room's board arrays are allocated at the full BOARD_MAX_COLS width regardless of
+  // its own camera mode — a Fixed room simply never lets painting/rendering/collision reach past
+  // column COLS-1 (see roomCols()/colsForCameraMode()), so switching a room's camera later never
+  // requires resizing anything, only changing how much of the already-allocated width is reachable.
   function createEmptyRoom(name) {
     const b = [], bg = [], cb = [], gs = [], gr = [];
-    for (let y = 0; y < ROWS; y++) { b.push(new Array(COLS).fill(null)); bg.push(new Array(COLS).fill(null)); cb.push(new Array(COLS).fill(null)); gs.push(new Array(COLS).fill(null)); gr.push(new Array(COLS).fill(0)); }
-    return { id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, groundSkinRotationBoard: gr, actors: [], startPos: { x: 0, y: 0 } };
+    for (let y = 0; y < ROWS; y++) { b.push(new Array(BOARD_MAX_COLS).fill(null)); bg.push(new Array(BOARD_MAX_COLS).fill(null)); cb.push(new Array(BOARD_MAX_COLS).fill(null)); gs.push(new Array(BOARD_MAX_COLS).fill(null)); gr.push(new Array(BOARD_MAX_COLS).fill(0)); }
+    return {
+      id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, groundSkinRotationBoard: gr, actors: [], startPos: { x: 0, y: 0 },
+      gravityEnabled: false, wrapHEnabled: false, wrapVEnabled: false, cameraMode: "fixed", editorPanCol: 0
+    };
+  }
+  // Pads every row of a room's 5 board layers out to BOARD_MAX_COLS — for a board wholesale
+  // -replaced with a narrower, hand-authored layout (an example game's own fixed-width maze data,
+  // or an older save's rooms) after createEmptyRoom() already allocated the full width, so no row
+  // is left short if that room's camera is later switched away from Fixed.
+  function padBoardRowsTo(rows, fill) { rows.forEach(row => { while (row.length < BOARD_MAX_COLS) row.push(fill); }); }
+  function padRoomBoards(room) {
+    padBoardRowsTo(room.board, null);
+    padBoardRowsTo(room.backgroundBoard, null);
+    padBoardRowsTo(room.colorBoard, null);
+    padBoardRowsTo(room.groundSkinBoard, null);
+    padBoardRowsTo(room.groundSkinRotationBoard, 0);
   }
 
   // Hot-swaps which room's data the board/backgroundBoard/colorBoard/groundSkinBoard/
-  // groundSkinRotationBoard/actors/startPos globals point at. Whichever room is "hot" is the only
-  // one that simulates or renders — switching away just stops touching a room's actors, it doesn't
-  // move anything inside it (see triggerDoor()'s comment for why that reads as "pausing the
-  // player" rather than a special pause flag).
+  // groundSkinRotationBoard/actors/startPos/gravityEnabled/wrapHEnabled/wrapVEnabled/cameraMode/
+  // editorPanCol globals point at. Whichever room is "hot" is the only one that simulates or
+  // renders — switching away just stops touching a room's actors, it doesn't move anything inside
+  // it (see triggerDoor()'s comment for why that reads as "pausing the player" rather than a
+  // special pause flag). The Play-mode camera position is never persisted per room — cameraX
+  // always restarts at 0 the instant any room becomes hot, matching gravity/wrap/camera being the
+  // only per-room settings that stick.
   function activateRoom(roomId) {
     const outgoing = rooms.find(r => r.id === currentRoomId);
     if (outgoing) {
       outgoing.board = board; outgoing.backgroundBoard = backgroundBoard; outgoing.colorBoard = colorBoard;
       outgoing.groundSkinBoard = groundSkinBoard; outgoing.groundSkinRotationBoard = groundSkinRotationBoard;
       outgoing.actors = actors; outgoing.startPos = startPos;
+      outgoing.gravityEnabled = gravityEnabled; outgoing.wrapHEnabled = wrapHEnabled; outgoing.wrapVEnabled = wrapVEnabled;
+      outgoing.cameraMode = cameraMode; outgoing.editorPanCol = editorPanCol;
     }
     currentRoomId = roomId;
     const incoming = rooms.find(r => r.id === roomId);
     board = incoming.board; backgroundBoard = incoming.backgroundBoard; colorBoard = incoming.colorBoard;
     groundSkinBoard = incoming.groundSkinBoard; groundSkinRotationBoard = incoming.groundSkinRotationBoard;
     actors = incoming.actors; startPos = incoming.startPos;
+    gravityEnabled = incoming.gravityEnabled; wrapHEnabled = incoming.wrapHEnabled; wrapVEnabled = incoming.wrapVEnabled;
+    cameraMode = incoming.cameraMode; editorPanCol = incoming.editorPanCol;
+    cameraX = 0;
   }
 
   // Resets the whole multi-room game back to a single fresh room — used at startup and by the
@@ -834,9 +899,10 @@
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
+    snapshotCurrentRoomState(); // flush the hot room's own gravity/wrap/camera/pan fields before cloning below
     buildSnapshot = {
       rooms: structuredClone(rooms), doorLinks: structuredClone(doorLinks),
-      gravityEnabled, wrapHEnabled, wrapVEnabled, switchChannels: structuredClone(switchChannels),
+      switchChannels: structuredClone(switchChannels),
       currentRoomId, playerRoomId
     };
     appMode = "play";
@@ -848,9 +914,6 @@
     currentRoomId = null; // so activateRoom() below doesn't try to save stale live state into the freshly-cloned rooms
     rooms = structuredClone(buildSnapshot.rooms);
     doorLinks = structuredClone(buildSnapshot.doorLinks);
-    gravityEnabled = buildSnapshot.gravityEnabled;
-    wrapHEnabled = buildSnapshot.wrapHEnabled;
-    wrapVEnabled = buildSnapshot.wrapVEnabled;
     switchChannels = structuredClone(buildSnapshot.switchChannels);
     playerRoomId = buildSnapshot.playerRoomId;
     // v2.19.4: the sandbox never stops simulating in Build, so every actor (chasers especially)
@@ -869,9 +932,6 @@
     currentRoomId = null; // same reason as above — avoid saving live Play state into the restored rooms
     rooms = buildSnapshot.rooms;
     doorLinks = buildSnapshot.doorLinks;
-    gravityEnabled = buildSnapshot.gravityEnabled;
-    wrapHEnabled = buildSnapshot.wrapHEnabled;
-    wrapVEnabled = buildSnapshot.wrapVEnabled;
     switchChannels = buildSnapshot.switchChannels;
     playerRoomId = buildSnapshot.playerRoomId;
     activateRoom(buildSnapshot.currentRoomId);
@@ -893,13 +953,16 @@
   // carries the id counters and kid-authored custom actor slots an export never needs.
   function snapshotCurrentRoomState() {
     // Writes the hot board/backgroundBoard/colorBoard/groundSkinBoard/groundSkinRotationBoard/
-    // actors/startPos globals back into the `rooms` array without switching which room is active —
-    // the "outgoing" half of activateRoom()'s job, without the "incoming" half.
+    // actors/startPos/gravityEnabled/wrapHEnabled/wrapVEnabled/cameraMode/editorPanCol globals back
+    // into the `rooms` array without switching which room is active — the "outgoing" half of
+    // activateRoom()'s job, without the "incoming" half.
     const room = rooms.find(r => r.id === currentRoomId);
     if (room) {
       room.board = board; room.backgroundBoard = backgroundBoard; room.colorBoard = colorBoard;
       room.groundSkinBoard = groundSkinBoard; room.groundSkinRotationBoard = groundSkinRotationBoard;
       room.actors = actors; room.startPos = startPos;
+      room.gravityEnabled = gravityEnabled; room.wrapHEnabled = wrapHEnabled; room.wrapVEnabled = wrapVEnabled;
+      room.cameraMode = cameraMode; room.editorPanCol = editorPanCol;
     }
   }
   function captureProjectSnapshot() {
@@ -916,7 +979,9 @@
       lethalSlotIds: lethalSlotIds.slice(), nextLethalLetter,
       playerDefId,
       nextActorInstId,
-      gravityEnabled, wrapHEnabled, wrapVEnabled,
+      // v2.17: gravity/wrap/camera moved onto each room object (see createEmptyRoom) — no longer
+      // captured as separate top-level fields here; restoreProjectSnapshot() backfills them for
+      // any older save whose rooms predate this.
       switchChannels: structuredClone(switchChannels)
     };
   }
@@ -952,12 +1017,13 @@
     groundSlotIds.concat(lethalSlotIds).forEach(id => { if (!groundTileDefs[id]) groundTileDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs[id]); });
     playerDefId = snap.playerDefId || PLAYER_DEF_ID; // older saves predate playerDefId — fall back to the default
     nextActorInstId = snap.nextActorInstId;
-    gravityEnabled = snap.gravityEnabled;
-    wrapHEnabled = snap.wrapHEnabled;
-    wrapVEnabled = snap.wrapVEnabled;
     switchChannels = structuredClone(snap.switchChannels);
     // older saves predate groundSkinBoard/groundSkinRotationBoard on room objects — backfill empty
-    // ones so activateRoom()/rendering never index into an undefined array
+    // ones so activateRoom()/rendering never index into an undefined array. Also backfill
+    // gravityEnabled/wrapHEnabled/wrapVEnabled/cameraMode/editorPanCol (v2.17 moved these from a
+    // single project-wide snap.gravityEnabled/etc — still present on an older save — onto each
+    // room), and pad every board-layer row out to the current BOARD_MAX_COLS so an old, narrower
+    // room doesn't get sparse/undefined cells if its camera is later switched away from Fixed.
     rooms.forEach(r => {
       if (!r.groundSkinBoard) {
         r.groundSkinBoard = [];
@@ -967,6 +1033,12 @@
         r.groundSkinRotationBoard = [];
         for (let y = 0; y < ROWS; y++) r.groundSkinRotationBoard.push(new Array(COLS).fill(0));
       }
+      if (r.gravityEnabled === undefined) r.gravityEnabled = snap.gravityEnabled || false;
+      if (r.wrapHEnabled === undefined) r.wrapHEnabled = snap.wrapHEnabled || false;
+      if (r.wrapVEnabled === undefined) r.wrapVEnabled = snap.wrapVEnabled || false;
+      if (r.cameraMode === undefined) r.cameraMode = "fixed";
+      if (r.editorPanCol === undefined) r.editorPanCol = 0;
+      padRoomBoards(r);
     });
     currentRoomId = null; // avoid activateRoom()'s outgoing-save writing stale state into the rooms just restored
     activateRoom(rooms.some(r => r.id === snap.currentRoomId) ? snap.currentRoomId : rooms[0].id);
@@ -1459,7 +1531,7 @@
     });
   });
   function gameplayTileAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     const key = board[gy][gx];
     return key ? GAMEPLAY_TILE_DEFS[key] : null;
   }
@@ -1604,9 +1676,10 @@
     room.board = structuredClone(CHEESE_HEIST_BOARD);
     room.colorBoard = structuredClone(CHEESE_HEIST_COLORS);
     room.groundSkinBoard = structuredClone(CHEESE_HEIST_SKINS);
+    padRoomBoards(room); // the hand-authored maze data above is only COLS wide
+    room.gravityEnabled = false; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
     rooms.push(room);
     activateRoom(room.id);
-    gravityEnabled = false; wrapHEnabled = false; wrapVEnabled = false;
 
     // The ten custom wall textures this build paints with — added on top of whatever
     // loadExampleGame() already reset groundTileDefs/groundSlotIds to, the same pattern Dungeon
@@ -1698,8 +1771,6 @@
   // the open drop in room 2, on the way to a goal tile. Falling short there just wraps you back
   // to the top for another go, rather than stranding you.
   function buildTunnelTroubleGame() {
-    gravityEnabled = true; wrapHEnabled = false; wrapVEnabled = true;
-
     const groundBg = Object.keys(backgroundTileDefs)[0]; // the built-in "ground" background
     const decorate = (maze) => {
       for (let y = 0; y < maze.length; y++) for (let x = 0; x < maze[y].length; x++) {
@@ -1709,6 +1780,7 @@
 
     // ---- Room 1: "Topside" ----
     const room1 = createEmptyRoom("Topside");
+    room1.gravityEnabled = true; room1.wrapHEnabled = false; room1.wrapVEnabled = true; room1.cameraMode = "fixed";
     rooms.push(room1);
     activateRoom(room1.id);
     paintMazeString(TOPSIDE_MAZE);
@@ -1721,6 +1793,7 @@
 
     // ---- Room 2: "The Dig" ----
     const room2 = createEmptyRoom("The Dig");
+    room2.gravityEnabled = true; room2.wrapHEnabled = false; room2.wrapVEnabled = true; room2.cameraMode = "fixed";
     rooms.push(room2);
     activateRoom(room2.id);
     paintMazeString(THE_DIG_MAZE);
@@ -1781,12 +1854,12 @@
     backgroundTileDefs.bg5 = structuredClone(DUNGEON_DIVING_BG5);
     nextBackgroundId = 6;
 
-    gravityEnabled = true; wrapHEnabled = false; wrapVEnabled = false;
-
     const room1 = createEmptyRoom("Dungeon Entrance");
     room1.board = structuredClone(DUNGEON_DIVING_ROOM1_BOARD);
     room1.colorBoard = structuredClone(DUNGEON_DIVING_ROOM1_COLORS);
     room1.groundSkinBoard = structuredClone(DUNGEON_DIVING_ROOM1_SKINS);
+    padRoomBoards(room1); // the hand-authored board data above is only COLS wide
+    room1.gravityEnabled = true; room1.wrapHEnabled = false; room1.wrapVEnabled = false; room1.cameraMode = "fixed";
     rooms.push(room1);
     activateRoom(room1.id);
     placeExampleActor("a3", 2, 3);
@@ -1796,6 +1869,8 @@
     room2.board = structuredClone(DUNGEON_DIVING_ROOM2_BOARD);
     room2.colorBoard = structuredClone(DUNGEON_DIVING_ROOM2_COLORS);
     room2.groundSkinBoard = structuredClone(DUNGEON_DIVING_ROOM2_SKINS);
+    padRoomBoards(room2);
+    room2.gravityEnabled = true; room2.wrapHEnabled = false; room2.wrapVEnabled = false; room2.cameraMode = "fixed";
     rooms.push(room2);
     activateRoom(room2.id);
     placeExampleActor("a3", 1, 11);
@@ -2632,6 +2707,72 @@
     });
   }
 
+  // v2.17: a single mutually-exclusive choice, not two independent toggles — same swatch pattern
+  // as the temperament/surface pickers above, just three fixed options instead of a data-driven
+  // list. Build/Play are a toggle pair for the currently-open project; Camera is a per-ROOM
+  // setting instead, so it lives here in Game Rules rather than next to that top-bar pair.
+  const CAMERA_MODES = [
+    { key: "fixed", label: "Fixed", color: "#546e7a" },
+    { key: "follow", label: "Follow", color: "#5c6bc0" },
+    { key: "runner", label: "Runner", color: "#ef6c00" }
+  ];
+  function selectCameraMode(mode) {
+    cameraMode = mode;
+    // Switching modes always snaps the Build-mode view back to column 0 — visible and immediate,
+    // never a stale pan left over from a different mode, and it's what keeps cellFromEvent/
+    // pxFromEvent's offset guaranteed to match a Fixed room's forced viewStartCol of 0.
+    editorPanCol = 0;
+    if (mode === "runner" && wrapHEnabled) {
+      // Runner and horizontal wrap fight each other — wrap would let a kid dodge the whole
+      // challenge by looping around instead of keeping up. Resolved live, the same click, no
+      // dialog: the same way every other conflict in this toy resolves (see wrapHEnabled's own
+      // GAME_RULES entry, still there for when Runner is off again).
+      wrapHEnabled = false;
+      log("Runner and horizontal wrap can't both be on — wrap turned off.");
+    }
+    renderGameRuleSwatches();
+    renderCameraSwatches();
+    renderCameraPanRow();
+  }
+  function renderCameraSwatches() {
+    const container = document.getElementById("cameraSwatches");
+    container.innerHTML = "";
+    CAMERA_MODES.forEach(mode => {
+      const isSelected = cameraMode === mode.key;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = mode.color;
+      sw.title = mode.label;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = mode.label;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectCameraMode(mode.key));
+      container.appendChild(sw);
+    });
+  }
+  // Build-mode-only manual panning for a room whose camera isn't Fixed — the real Play-mode
+  // camera (Follow/Runner) is computed separately every tick (see updateCamera()) and never
+  // touches editorPanCol.
+  const PAN_STEP_COLS = COLS / 2;
+  function renderCameraPanRow() {
+    const row = document.getElementById("cameraPanRow");
+    const maxPan = roomCols() - COLS;
+    row.style.display = cameraMode === "fixed" ? "none" : "flex";
+    document.getElementById("panLeftBtn").disabled = editorPanCol <= 0;
+    document.getElementById("panRightBtn").disabled = editorPanCol >= maxPan;
+    document.getElementById("panPositionLabel").textContent =
+      "columns " + editorPanCol + "–" + (editorPanCol + COLS) + " of " + roomCols();
+  }
+  document.getElementById("panLeftBtn").addEventListener("click", () => {
+    editorPanCol = Math.max(0, editorPanCol - PAN_STEP_COLS);
+    renderCameraPanRow();
+  });
+  document.getElementById("panRightBtn").addEventListener("click", () => {
+    editorPanCol = Math.min(roomCols() - COLS, editorPanCol + PAN_STEP_COLS);
+    renderCameraPanRow();
+  });
+
   function currentSelectedDef() {
     if (paintMode === "actor") return actorDefs[selectedActorDefId];
     if (paintMode === "background") return backgroundTileDefs[selectedBackgroundId];
@@ -2839,29 +2980,36 @@
   });
 
   // ============== Physics helpers ==============
+  // v2.17: a room's actually-reachable board width — COLS (one viewport) for a Fixed room, the
+  // full BOARD_MAX_COLS allocation for Follow/Runner. Every board-width boundary check below goes
+  // through this (for the hot room) or colsForCameraMode(room.cameraMode) (for any other room)
+  // rather than the bare COLS constant, which now means "viewport width" specifically.
+  function colsForCameraMode(mode) { return mode === "fixed" ? COLS : BOARD_MAX_COLS; }
+  function roomCols() { return colsForCameraMode(cameraMode); }
+
   // Board edges act solid by default (a hard boundary hit exactly like a solid tile) — unless
   // wrap is switched on for that axis, in which case that edge stops blocking at all and
   // applyWorldWrap() teleports whatever crosses it to the opposite side.
   function geometryAt(gx, gy) {
-    if (gx < 0 || gx >= COLS) return wrapHEnabled ? "none" : "solid";
+    if (gx < 0 || gx >= roomCols()) return wrapHEnabled ? "none" : "solid";
     if (gy < 0 || gy >= ROWS) return wrapVEnabled ? "none" : "solid";
     const tile = gameplayTileAt(gx, gy);
     return tile ? tile.geometry : "none";
   }
   function modifierAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return "none"; // the boundary itself has no modifier
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return "none"; // the boundary itself has no modifier
     const tile = gameplayTileAt(gx, gy);
     return tile ? tile.modifier : "none";
   }
   // The channel color a switch/plate/door/solid cell is tagged with (v2.9), or null for an
   // untagged cell (or one outside the board — a wrapped/solid boundary edge has no channel).
   function colorAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return colorBoard[gy][gx];
   }
   // The named skin (a groundTileDefs id) painted at a cell, or null for the plain built-in icon.
   function groundSkinAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return null;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return groundSkinBoard[gy][gx];
   }
   // A color reads as "on" from either source that can drive it — a permanently-flipped switch,
@@ -2910,8 +3058,9 @@
   // resolveAxis() already stopped the actor there.
   function applyWorldWrap(actor) {
     if (wrapHEnabled) {
-      if (actor.x + actor.w <= 0) actor.x = COLS * TILE;
-      else if (actor.x >= COLS * TILE) actor.x = -actor.w;
+      const worldWidthPx = roomCols() * TILE;
+      if (actor.x + actor.w <= 0) actor.x = worldWidthPx;
+      else if (actor.x >= worldWidthPx) actor.x = -actor.w;
     }
     if (wrapVEnabled) {
       if (actor.y + actor.h <= 0) actor.y = ROWS * TILE;
@@ -3474,7 +3623,7 @@
     // careful with
     const cells = [{ x: gx, y: gy }, { x: gx - 1, y: gy }, { x: gx + 1, y: gy }, { x: gx, y: gy - 1 }, { x: gx, y: gy + 1 }];
     cells.forEach(({ x, y }) => {
-      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+      if (x < 0 || x >= roomCols() || y < 0 || y >= ROWS) return;
       const cellKey = targetBoard[y][x];
       const tile = cellKey ? GAMEPLAY_TILE_DEFS[cellKey] : null;
       if (!tile) return;
@@ -3513,7 +3662,7 @@
     player.warpCooldown = WARP_COOLDOWN_MS;
     const candidates = [];
     for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
+      for (let x = 0; x < roomCols(); x++) {
         if (x === gx && y === gy) continue;
         if (!isCellBlocking(x, y, player)) candidates.push({ x, y });
       }
@@ -3812,6 +3961,30 @@
     }
   }
 
+  // v2.17: Fixed camera never moves (cameraX stays 0). Follow tracks the player, centered,
+  // clamped to the room's real edges. Runner advances on its own at a constant speed, independent
+  // of the player entirely — the Flappy Bird case. Camera behavior is a Play-only concept: Build
+  // mode always shows the manual editorPanCol pan instead (see renderGame()), the same way every
+  // other win/lose mechanic in this toy only actually resolves in Play.
+  function updateCamera(dt) {
+    const maxCameraX = Math.max(0, roomCols() * TILE - COLS * TILE);
+    if (cameraMode === "follow") {
+      const player = actors.find(a => a.isPlayer);
+      if (player) cameraX = Math.max(0, Math.min(maxCameraX, player.x + player.w / 2 - (COLS * TILE) / 2));
+    } else if (cameraMode === "runner") {
+      cameraX = Math.min(maxCameraX, cameraX + RUNNER_SPEED * dt);
+    } else {
+      cameraX = 0;
+    }
+  }
+  // Falling behind a Runner room's own advancing camera is this mode's fail state — reuses the
+  // exact same lethal-hazard reaction a hazard tile already triggers (see triggerLethalHazard);
+  // this is just a new trigger condition feeding into it, not a new reaction.
+  function checkRunnerFailState(player) {
+    if (!player || cameraMode !== "runner" || playSessionEnded) return;
+    if (player.x + player.w <= cameraX) triggerLethalHazard(player);
+  }
+
   function tick(dt) {
     updatePressurePlates();
     const player = actors.find(a => a.isPlayer);
@@ -3825,20 +3998,28 @@
       stepActor(actor, dt, player);
     }
     tickActorContactCooldowns(dt);
+    if (appMode === "play" && !roomTransition) {
+      updateCamera(dt);
+      checkRunnerFailState(player);
+    }
   }
 
   // ============== Board / actor painting ==============
+  // Build mode's own manual pan (editorPanCol) is added on top of the viewport-relative canvas
+  // position — painting always targets whichever slice of a wider-than-COLS room is currently
+  // drawn, exactly matching renderGame()'s Build-mode view (see selectCameraMode(), which keeps
+  // the two from ever disagreeing by zeroing editorPanCol the instant a room goes back to Fixed).
   function cellFromEvent(e) {
     const rect = gameCanvas.getBoundingClientRect();
     const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    return { gx: Math.floor(cx / (rect.width / COLS)), gy: Math.floor(cy / (rect.height / ROWS)) };
+    return { gx: Math.floor(cx / (rect.width / COLS)) + editorPanCol, gy: Math.floor(cy / (rect.height / ROWS)) };
   }
   function pxFromEvent(e) {
     const rect = gameCanvas.getBoundingClientRect();
     const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    return { px: cx / (rect.width / (COLS * TILE)), py: cy / (rect.height / (ROWS * TILE)) };
+    return { px: cx / (rect.width / (COLS * TILE)) + editorPanCol * TILE, py: cy / (rect.height / (ROWS * TILE)) };
   }
 
   function actorAABBAt(px, py) {
@@ -3853,7 +4034,7 @@
   }
 
   function paintGeometryModifierAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
     if (selectedGeometry === "door") {
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       groundSkinBoard[gy][gx] = null; // a door never carries a named ground skin
@@ -3956,7 +4137,7 @@
   // ground tiles are usually painted by dragging across many cells — re-touching an
   // already-painted cell mid-drag needs to stay a harmless no-op, not spin it.
   function rotateGroundSkinAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
     if (!groundSkinBoard[gy][gx]) return;
     pushUndoSnapshot();
     groundSkinRotationBoard[gy][gx] = ((groundSkinRotationBoard[gy][gx] || 0) + 90) % 360;
@@ -4006,8 +4187,9 @@
     rooms.forEach(room => {
       const rb = room.id === currentRoomId ? board : room.board;
       const rc = room.id === currentRoomId ? colorBoard : room.colorBoard;
+      const cols = room.id === currentRoomId ? roomCols() : colsForCameraMode(room.cameraMode);
       for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
+        for (let x = 0; x < cols; x++) {
           if (rc[y][x] !== color || !rb[y][x]) continue;
           const tile = GAMEPLAY_TILE_DEFS[rb[y][x]];
           if (tile && tile.geometry === "door") found.push({ roomId: room.id, gx: x, gy: y });
@@ -4096,7 +4278,7 @@
     log("Deleted \"" + room.name + "\".");
   }
   function paintBackgroundAt(gx, gy) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
     backgroundBoard[gy][gx] = selectedBackgroundId;
   }
   // Erase checks the most-foreground thing at a cell first: an actor, then the gameplay tile,
@@ -4104,7 +4286,7 @@
   // door severs the connection cleanly (see severDoorLink) rather than leaving a stale link
   // behind for a later door to accidentally inherit.
   function eraseAt(gx, gy, px, py) {
-    if (gx < 0 || gx >= COLS || gy < 0 || gy >= ROWS) return;
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
     const hit = actorAABBAt(px, py);
     if (hit) { removeActorById(hit.id); return; }
     if (board[gy][gx]) {
@@ -4678,24 +4860,32 @@
   // Used both for the live room and — during a door transition — for the frozen snapshot of
   // whichever room was just left, so the two can be cross-faded independently of which one is
   // "hot" right now.
-  function renderRoomContents(ctx, boardArg, backgroundBoardArg) {
+  // v2.17: draws one viewport-sized (COLS-wide) window onto a room that may be wider than that —
+  // viewStartCol is which board column lines up with screen column 0. sx is always the on-screen
+  // column (0..COLS-1); bx = sx + viewStartCol is the real board column everything actually reads
+  // from. Every call site (renderGame, in Build or Play) picks viewStartCol appropriately; a plain
+  // call with no third argument (viewStartCol defaulting to 0) reproduces the pre-v2.17 behavior
+  // exactly, for a Fixed room where it's always 0 anyway.
+  function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewStartCol) {
+    viewStartCol = viewStartCol || 0;
     const cell = TILE / ART;
     const now = performance.now();
     const isLive = boardArg === board; // crumble anim only applies to the currently-active room
 
     for (let y = 0; y < ROWS; y++) {
-      for (let x = 0; x < COLS; x++) {
-        const bgId = backgroundBoardArg[y][x];
-        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, x * TILE, y * TILE, TILE, cell);
+      for (let sx = 0; sx < COLS; sx++) {
+        const bx = sx + viewStartCol;
+        const bgId = backgroundBoardArg[y][bx];
+        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, sx * TILE, y * TILE, TILE, cell);
 
-        const key = x + "," + y;
+        const key = bx + "," + y;
         const tanim = isLive ? tileAnimState[key] : null;
         if (tanim) {
           const sample = sampleRecipe(tanim.recipe, now - tanim.t);
           if (sample) {
             ctx.save();
             ctx.globalAlpha = sample.alpha;
-            ctx.translate(x * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
+            ctx.translate(sx * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) ctx.rotate(sample.rot);
             ctx.scale(sample.sx, sample.sy);
             drawGameplayTile(ctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
@@ -4704,25 +4894,25 @@
             continue;
           }
         }
-        const gKey = boardArg[y][x];
+        const gKey = boardArg[y][bx];
         if (gKey && GAMEPLAY_TILE_DEFS[gKey]) {
           const tile = GAMEPLAY_TILE_DEFS[gKey];
           let extra = null;
           if (isLive && tile.geometry === "diggable") {
-            const progress = digProgress[roomCellKey(currentRoomId, x, y)] || 0;
+            const progress = digProgress[roomCellKey(currentRoomId, bx, y)] || 0;
             extra = { digFrac: progress / DIG_DURATION_MS };
           } else if (isLive && tile.geometry === "bomb") {
-            extra = { armed: !!bombArmed[roomCellKey(currentRoomId, x, y)] };
+            extra = { armed: !!bombArmed[roomCellKey(currentRoomId, bx, y)] };
           }
           if (isLive && isColorTaggable(tile.geometry)) {
-            const color = colorBoard[y][x];
+            const color = colorBoard[y][bx];
             if (color) extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
           }
           if (isLive) {
-            const skinId = groundSkinBoard[y][x];
-            if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId], skinRotation: groundSkinRotationBoard[y][x] || 0 });
+            const skinId = groundSkinBoard[y][bx];
+            if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId], skinRotation: groundSkinRotationBoard[y][bx] || 0 });
           }
-          drawGameplayTile(ctx, x * TILE, y * TILE, tile, extra);
+          drawGameplayTile(ctx, sx * TILE, y * TILE, tile, extra);
         }
       }
     }
@@ -4733,7 +4923,11 @@
     for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
   }
 
-  function renderActors(ctx, actorsArg) {
+  // viewOffsetPx (real board pixels, defaults to 0) is subtracted from every actor's true board
+  // position to get its screen position — the same window renderRoomContents draws, just in
+  // continuous pixels rather than cells, since actors don't live on the cell grid.
+  function renderActors(ctx, actorsArg, viewOffsetPx) {
+    viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = performance.now();
     actorsArg.forEach(actor => {
@@ -4791,7 +4985,7 @@
 
       ctx.save();
       ctx.globalAlpha = t.alpha;
-      const centerX = actor.x + actor.w / 2 + t.ox * TILE;
+      const centerX = actor.x - viewOffsetPx + actor.w / 2 + t.ox * TILE;
       const centerY = actor.y + actor.h / 2 + t.oy * TILE;
       ctx.translate(centerX, centerY);
       if (t.rot) ctx.rotate(t.rot);
@@ -4806,24 +5000,29 @@
     gctx.fillStyle = "#111";
     gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
 
+    // v2.17: Build mode always shows the manual editor pan (0 for a Fixed room — see
+    // selectCameraMode); Play shows wherever the room's own camera mode has put cameraX.
+    const viewOffsetPx = appMode === "build" ? editorPanCol * TILE : cameraX;
+    const viewStartCol = Math.floor(viewOffsetPx / TILE);
+
     if (roomTransition) {
       // A true cross-fade: the swap already happened instantly (see beginRoomTransition), so
       // both snapshots are stable for the whole window — just dissolve from one to the other.
       const frac = Math.min(1, (performance.now() - roomTransition.startedAt) / ROOM_TRANSITION_MS);
       gctx.save();
       gctx.globalAlpha = 1 - frac;
-      renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard);
-      renderActors(gctx, roomTransition.fromActors);
+      renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard, viewStartCol);
+      renderActors(gctx, roomTransition.fromActors, viewOffsetPx);
       gctx.restore();
       gctx.save();
       gctx.globalAlpha = frac;
-      renderRoomContents(gctx, board, backgroundBoard);
-      renderActors(gctx, actors);
+      renderRoomContents(gctx, board, backgroundBoard, viewStartCol);
+      renderActors(gctx, actors, viewOffsetPx);
       gctx.restore();
       return;
     }
 
-    renderRoomContents(gctx, board, backgroundBoard);
+    renderRoomContents(gctx, board, backgroundBoard, viewStartCol);
 
     // The empty-socket cue and the start-position outline are Build-only editing affordances —
     // Play just shows the game itself.
@@ -4832,11 +5031,11 @@
       if (actors.some(a => a.isPlayer)) {
         gctx.strokeStyle = "rgba(255,209,102,0.7)";
         gctx.lineWidth = 1.5;
-        gctx.strokeRect(startPos.x + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
+        gctx.strokeRect(startPos.x - viewOffsetPx + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
       }
     }
 
-    renderActors(gctx, actors);
+    renderActors(gctx, actors, viewOffsetPx);
 
     // v2.18: a lethal-hazard death holds the overlay back until its own splat animation has
     // actually played out — otherwise the overlay's dark wash would cover the "big comedic beat"
@@ -4887,7 +5086,9 @@
   // not placed on the board at all, so they shouldn't affect what counts as "empty".
   function isCanvasEmpty() {
     if (actors.length > 0) return false;
-    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x] || backgroundBoard[y][x]) return false;
+    // Checks the room's whole allocated width, not just roomCols() — a Follow/Runner room with
+    // something painted out past column COLS-1 still isn't "empty" even from the Fixed-width view.
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < board[0].length; x++) if (board[y][x] || backgroundBoard[y][x]) return false;
     return true;
   }
   function drawEmptySocketCue(now) {
@@ -4963,6 +5164,8 @@
     renderCustomActorSwatches();
     renderTemperamentPicker();
     renderGameRuleSwatches();
+    renderCameraSwatches();
+    renderCameraPanRow();
     renderPresetSwatches();
     renderPoseTabs();
     renderPixelCanvas();
@@ -4983,6 +5186,7 @@
   if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");
   updateUndoRedoButtons();
 
+
   // ============== Export: standalone playable file ==============
   // The exported file is a second, self-contained HTML document: the current build's data
   // (rooms/tiles/actors/backgrounds) plus just enough runtime to play it, with every editor
@@ -4999,10 +5203,14 @@
   function exportStandaloneGame() {
     if (playerRoomId == null) { log("Place a player first — nothing to export yet."); return; }
 
+    // v2.17: gravity/wrap/camera/pan live on each room object now, not as separate top-level
+    // fields — flush the currently-hot room's own live values into it before cloning below (the
+    // same reason captureProjectSnapshot() calls this), so structuredClone(rooms) doesn't ship a
+    // stale value for whichever room happened to be open at export time.
+    snapshotCurrentRoomState();
     const gameData = {
       rooms: structuredClone(rooms),
       doorLinks: structuredClone(doorLinks),
-      gravityEnabled, wrapHEnabled, wrapVEnabled,
       switchChannels: structuredClone(switchChannels),
       playerRoomId,
       actorDefs: structuredClone(actorDefs),
@@ -5017,7 +5225,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
-      gravityOn, applyWorldWrap,
+      gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
@@ -5043,6 +5251,7 @@
 
     const constantsSource = [
       `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
+      `const BOARD_MAX_COLS = ${BOARD_MAX_COLS}, RUNNER_SPEED = ${RUNNER_SPEED};`,
       `const ACTOR_SIZE = ${ACTOR_SIZE};`,
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
@@ -5142,9 +5351,6 @@
 
   let rooms = GAME_DATA.rooms;
   let doorLinks = GAME_DATA.doorLinks;
-  let gravityEnabled = GAME_DATA.gravityEnabled;
-  let wrapHEnabled = GAME_DATA.wrapHEnabled;
-  let wrapVEnabled = GAME_DATA.wrapVEnabled;
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
   let playerRoomId = GAME_DATA.playerRoomId;
@@ -5154,6 +5360,11 @@
 
   let currentRoomId = null;
   let board = [], backgroundBoard = [], colorBoard = [], groundSkinBoard = [], groundSkinRotationBoard = [], actors = [], startPos = { x: 0, y: 0 };
+  // gravity/wrap/camera/pan live per-room now (see GAME_DATA.rooms) — activateRoom() (shared
+  // runtime source, called just below) populates these from whichever room is hot, the same way
+  // the live editor's own globals work; the values here are placeholders until that first call.
+  let gravityEnabled = false, wrapHEnabled = false, wrapVEnabled = false, cameraMode = "fixed", editorPanCol = 0;
+  let cameraX = 0;
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
@@ -5189,9 +5400,6 @@
   function restartStandaloneGame() {
     rooms = JSON.parse(JSON.stringify(initialGameData.rooms));
     doorLinks = JSON.parse(JSON.stringify(initialGameData.doorLinks));
-    gravityEnabled = initialGameData.gravityEnabled;
-    wrapHEnabled = initialGameData.wrapHEnabled;
-    wrapVEnabled = initialGameData.wrapVEnabled;
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
     plateChannelsActive = {};
     playerRoomId = initialGameData.playerRoomId;
