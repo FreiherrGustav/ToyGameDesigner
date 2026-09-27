@@ -263,7 +263,10 @@ once per actor per frame from `tick(dt)`. Shape, roughly:
    rebound-height formula), the Trampoline geometry object's own stronger,
    minimum-enforced bounce (`isTrampolineGeom`, `TRAMPOLINE_RESTITUTION`/
    `TRAMPOLINE_LAUNCH_SPEED`), hazard/lethal damage, diggable erosion, and
-   hazard-ball's always-bounce.
+   hazard-ball's always-bounce. **`return`s immediately once it resolves one
+   blocking cell** (v2.20.1 fix) — see the dedicated gotcha below on why
+   looping over every cell the AABB overlaps used to let a bounce tunnel a
+   player straight through a multi-tile-wide bouncy floor/wall.
 6. `resolveActorContact(moverActor, otherActor)` handles actor-vs-actor
    contact (player vs. NPC): temperament branches (`stationary`/
    `wanderer`/`chaser`/`fleer`/`collectible`/`PUSHABLE_KIND`/
@@ -347,6 +350,26 @@ When adding a new reaction, or reusing an existing patch for one, check
 deliberate, documented choice (like `slide`/`wind` both legitimately being
 a rushing-air "whoosh," pitched apart via `sounds.wind`'s own pitchMult
 override) never a copy-paste default.
+
+**v2.20.1: a bounce needs to sound like a bounce.** `triggerImpact` (called
+unconditionally from every `resolveAxis` collision, bounce or not) used to
+always fire the generic landing `thud` regardless of whether the tile was
+plain solid or bouncy — a bounce and an ordinary landing were
+indistinguishable by ear, another user-reported bug. Fixed with a 4th
+`triggerImpact(actor, axis, incomingSpeed, isBounce)` parameter that
+suppresses the thud specifically (the visual impact wobble still tracks
+every contact, bounce or not); `resolveAxis` now calls a small
+`bounceSound` (`sounds.boing` for plain bouncy, `sounds.trampolineBoing`
+for the Trampoline object) right at each of its 4 reflection sites,
+player-only (a wandering hazard ball caroming off walls doesn't need a
+boing every hit). The general "does an ordinary footstep/small-hop landing
+really need its own thud" question is left as-is for now — `mag` (the 0-1
+scale `sounds.thud` reads for pitch/volume) saturates to 1 after roughly a
+single tile of fall, so there's currently no clean way to distinguish "a
+kid hopped down one step" from "an actual big fall" without reworking that
+scale; flag it explicitly to the user before changing `IMPACT_NOISE_FLOOR`
+or the thud threshold, since a bigger change risks silencing normal jump
+landing feedback the game already relies on elsewhere.
 
 ### Export pipeline
 
@@ -471,6 +494,43 @@ Tests are throwaway Playwright scripts written fresh each session:
   *starting* height still isn't reliable for a short fall onto plain
   `bouncy`; use a tall, deliberate fall and compare rebound height
   *between* plain bouncy and Trampoline, not against the spawn point.
+- **A bouncy floor/wall/ceiling more than one tile wide used to let the
+  player tunnel straight through it** (v2.20.1 fix, and the actual root
+  cause of a user-reported "warp out the bottom of a ring of bouncy tiles"
+  bug — the earlier v2.20 geometry-defaulting fix in `selectSurfaceModifier`
+  was real but insufficient on its own). Two independent bugs stacked:
+  (1) `resolveAxis`'s cell loop didn't stop after resolving one collision —
+  an actor's AABB routinely spans two columns (or rows) that are BOTH
+  blocking whenever a bouncy surface is more than one tile wide (i.e. any
+  real one), so the loop reflected `vy` twice in the same call: once
+  correctly (positive → negative), then a second time reading its OWN
+  already-flipped negative value as "hit from below," pushing the actor to
+  `(cy+1)*TILE` — the tile's FAR side. Ordinary non-bouncy solid never
+  showed this because its landing branch zeroes `vy` to exactly 0, and
+  neither `vy > 0` nor `vy < 0` fires on a second pass over 0 — only
+  bouncy's nonzero reflected velocity exposed it. Fixed by `return`ing
+  immediately after resolving the first blocking cell per axis call — one
+  AABB only ever needs one resolved collision per axis per frame. (2)
+  Separately, `checkPlayerTileContacts` (written assuming, per its own
+  comment, that "the player never overlaps blocking geometry" since
+  `resolveAxis` pushes it flush to the boundary) fired
+  `triggerBouncyLaunch` — meant only for the non-blocking `none:bouncy`
+  walk-over pad — whenever it saw `modifier === "bouncy"` on ANY cell the
+  AABB overlapped, blocking or not. On uneven/staircase terrain (a
+  hand-painted circle of solid+bouncy tiles is exactly that) the player's
+  AABB can genuinely graze a neighboring solid+bouncy cell it isn't
+  resting on. That falsely set `bouncyCooldown`, which `stepActor`'s
+  `recentlyLaunched` check uses to skip the `MOVE_ACCEL` speed cap
+  entirely — holding a direction key during that ~350ms window let
+  velocity run away completely unbounded (observed vx > 1000px/s), more
+  than enough to fly past a ring's own curve. Fixed by gating all three
+  modifier reactions in that function on `!isBlockingGeometry(geometry,
+  player)`. **When testing any bounce-related mechanic, always test it
+  under active player input (hold a direction, jump repeatedly) in
+  addition to passive drop-and-watch** — the passive case alone won't
+  surface either of these; both needed genuine held input to reproduce (a
+  ring that "stays inside for the full duration" with zero input proves
+  nothing about whether it holds up once a kid actually plays with it).
 - **`WIND_FORCE (1000) < GRAVITY (1450)`** for plain wind/conveyor tiles,
   deliberately — a "none/solid + wind" tile facing straight up will slow a
   fall, never reverse it. A **fan is different since v2.20**: its force
