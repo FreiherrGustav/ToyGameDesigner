@@ -338,6 +338,8 @@
       <div id="temperamentPickerBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">How it acts — <span id="customActorEditingName"></span></div>
         <div class="swatch-row" id="temperamentPickerSwatches"></div>
+        <div class="section-title" style="margin-top:10px;">Voice (optional)</div>
+        <div class="swatch-row" id="voicePickerSwatches"></div>
       </div>
     </div>
 
@@ -1944,62 +1946,234 @@
     return true;
   }
 
-  // ============== Audio (simple beeps) ==============
+  // ============== Audio (v2.18 — Wavesculpt-derived one-shot synthesis) ==============
+  // Every reaction used to be a plain beep() — one oscillator, one exponential decay, distinguished
+  // only by frequency/duration/waveform. This replaces that with a small port of Wavesculpt's own
+  // rack architecture (github: [[synth-patch-reference]]): a "patch" is up to a few oscillators (or
+  // noise), an optional filter, an ADSR-ish envelope, an optional vibrato, and — since every sound
+  // in this toy fires-and-forgets rather than being held — an optional pitch sweep. That's the
+  // exact vocabulary Wavesculpt already uses for its own one-shot game-SFX patches (laser/
+  // explosion/coin/jump/...), ported in as the foundation rather than building a smaller synthesis
+  // system from scratch.
+  //
+  // Deliberately left out of this port: the sustained/held-note path (nothing here is held), key
+  // tracking, pulse-width modulation, and the Acoustic Context FX chain (saturation/chorus/reverb)
+  // — none of which a short percussive one-shot needs, and any of which a sound designer can layer
+  // on top of this foundation later for a specific patch that calls for it.
+  //
+  // The actual patch designs below (envelope shapes, filter cutoffs, pitch contours) are a
+  // first pass, not final sound design — see the v2.18 patch notes' division of labor. What's
+  // meant to be durable is the architecture: SOUND_PATCHES holds the named, swappable patches;
+  // REACTION_PATCH is the reaction table mapping a game reaction to one of them; changing what a
+  // reaction sounds like is a one-line edit to that table, never a change to the reaction's own code.
   let audioCtx = null;
   function getAudioCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
-  function beep(freq, duration, type, volume) {
+  function osc(type, semis, detune, level) { return { type, semis, detune: detune || 0, level }; }
+  function centsToRatio(cents) { return Math.pow(2, cents / 1200); }
+  let noiseBufferCache = null;
+  function getNoiseBuffer(ctx) {
+    if (!noiseBufferCache) {
+      const length = ctx.sampleRate * 2;
+      noiseBufferCache = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = noiseBufferCache.getChannelData(0);
+      for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    return noiseBufferCache;
+  }
+  // Velocity (0-1) scaling curves — ported verbatim from Wavesculpt's rack, so "a light bump and a
+  // hard bump both thunk, just differently" (the v2.6 rule this patch explicitly keeps) reads the
+  // same way in every named patch, not just the one it was originally written for.
+  function velAmpScale(v) { return 0.35 + 0.65 * v; }
+  function velCutoffScale(v) { return Math.pow(2, 0.75 * (v - 1)); }
+  function velEnvAmountScale(v) { return 0.5 + 0.5 * v; }
+  function velVibratoScale(v) { return 0.7 + 0.3 * v; }
+
+  // Plays one named patch as a fire-and-forget one-shot. pitchMult (default 1) transposes the
+  // whole patch — e.g. a custom actor's voice plays a hair off from its designed pitch so three
+  // identical chasers don't all meow in unison at the exact same note. velocity (0-1, default 1)
+  // is the v2.6 hit-strength scaling, ported through unchanged (see the vel*Scale functions above).
+  function playPatch(patchId, pitchMult, velocity) {
+    const patch = SOUND_PATCHES[patchId];
+    if (!patch) return;
+    pitchMult = pitchMult == null ? 1 : pitchMult;
+    velocity = velocity == null ? 1 : velocity;
     try {
       const ctx = getAudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type || "square";
-      osc.frequency.value = freq;
-      gain.gain.value = volume || 0.15;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
       const now = ctx.currentTime;
-      osc.start(now);
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-      osc.stop(now + duration);
+      const rootFreq = patch.rootFreq * pitchMult;
+      const peak = 0.3 * velAmpScale(velocity);
+
+      const mixer = ctx.createGain();
+      mixer.gain.value = 1;
+      const oscNodes = [];
+      patch.oscillators.forEach(o => {
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = o.level;
+        let node;
+        if (o.type === "noise") {
+          node = ctx.createBufferSource();
+          node.buffer = getNoiseBuffer(ctx);
+          node.loop = true;
+        } else {
+          node = ctx.createOscillator();
+          node.type = o.type;
+          node.frequency.value = rootFreq * centsToRatio(o.semis * 100 + o.detune);
+        }
+        node.connect(gainNode);
+        gainNode.connect(mixer);
+        node.start(now);
+        oscNodes.push({ node, cfg: o });
+      });
+
+      let vibrato = null;
+      if (patch.mod) {
+        vibrato = ctx.createOscillator();
+        vibrato.type = "sine";
+        vibrato.frequency.value = patch.mod.rate;
+        const vibratoGain = ctx.createGain();
+        vibratoGain.gain.value = patch.mod.depth * velVibratoScale(velocity);
+        vibrato.connect(vibratoGain);
+        oscNodes.forEach(o => { if (o.node.frequency) vibratoGain.connect(o.node.frequency); });
+        vibrato.start(now);
+      }
+
+      let filterNode = null, tail = mixer;
+      const filterAtShape = (s) => patch.filter.freq * velCutoffScale(velocity) * Math.pow(2, patch.filter.envAmount * velEnvAmountScale(velocity) * s);
+      if (patch.filter) {
+        filterNode = ctx.createBiquadFilter();
+        filterNode.type = patch.filter.type;
+        filterNode.Q.value = patch.filter.q;
+        filterNode.frequency.value = filterAtShape(0);
+        mixer.connect(filterNode);
+        tail = filterNode;
+      }
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      tail.connect(gain);
+      gain.connect(ctx.destination);
+
+      // envelope: 0 -> peak (attack), peak -> peak*sustain (decay), then fade to ~silent (release)
+      // — the same normalized shape Wavesculpt schedules, minus the "hold at sustain" a one-shot
+      // has no note-off to end.
+      const env = patch.env;
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(peak, now + env.attack);
+      gain.gain.linearRampToValueAtTime(Math.max(0.0005, peak * env.sustain), now + env.attack + env.decay);
+      gain.gain.linearRampToValueAtTime(0.0001, now + env.attack + env.decay + env.release);
+      if (filterNode) {
+        filterNode.frequency.setValueAtTime(filterAtShape(0), now);
+        filterNode.frequency.linearRampToValueAtTime(filterAtShape(1), now + env.attack);
+        filterNode.frequency.linearRampToValueAtTime(filterAtShape(env.sustain), now + env.attack + env.decay);
+      }
+
+      if (patch.sweep) {
+        oscNodes.forEach(o => {
+          if (!o.node.frequency) return;
+          const base = rootFreq * centsToRatio(o.cfg.semis * 100 + o.cfg.detune);
+          o.node.frequency.setValueAtTime(Math.max(1, base * patch.sweep.startRatio), now);
+          o.node.frequency.exponentialRampToValueAtTime(Math.max(1, base * patch.sweep.endRatio), now + patch.sweep.time);
+        });
+      }
+
+      const stopAt = now + env.attack + env.decay + env.release + 0.05;
+      oscNodes.forEach(o => o.node.stop(stopAt));
+      if (vibrato) vibrato.stop(stopAt);
     } catch (e) { /* audio not available, ignore */ }
   }
-  const sounds = {
-    footstep: () => beep(220, 0.05, "square", 0.05),
-    // scaled to impact magnitude (0-1): a light hop is a soft, high tap; a fall from height
-    // is a deep, loud, longer-ringing thud. mag is optional — other callers (an editor drag
-    // bump) get the old fixed mid-strength thud by omitting it.
-    thud: (mag) => {
-      const m = mag === undefined ? 0.5 : mag;
-      beep(150 - m * 90, 0.08 + m * 0.16, "square", 0.1 + m * 0.22);
-    },
-    yelp: () => beep(600, 0.15, "sawtooth", 0.2),
-    boing: () => { beep(300, 0.1, "sine", 0.2); setTimeout(() => beep(500, 0.1, "sine", 0.15), 60); },
-    boop: () => beep(440, 0.08, "triangle", 0.15),
-    oof: () => beep(150, 0.1, "square", 0.18),
-    gotcha: () => { beep(700, 0.08, "square", 0.2); setTimeout(() => beep(500, 0.08, "square", 0.2), 90); setTimeout(() => beep(300, 0.15, "square", 0.2), 180); },
-    pop: () => beep(900, 0.1, "sine", 0.2),
-    crumble: () => { beep(200, 0.05, "sawtooth", 0.12); setTimeout(() => beep(140, 0.08, "sawtooth", 0.12), 40); setTimeout(() => beep(90, 0.12, "sawtooth", 0.12), 90); },
-    celebrate: () => { beep(523, 0.08, "square", 0.18); setTimeout(() => beep(659, 0.08, "square", 0.18), 90); setTimeout(() => beep(784, 0.15, "square", 0.2), 180); },
-    jump: () => beep(400, 0.07, "square", 0.12),
-    flip: () => { beep(300, 0.07, "triangle", 0.16); setTimeout(() => beep(600, 0.09, "triangle", 0.16), 70); },
-    // v2.17: a sharp crack immediately followed by a low thump — more "cannon," less "laser zap"
-    // — with a longer overall decay than the old single short beep gave it.
-    shot: () => { beep(550, 0.09, "sawtooth", 0.3); setTimeout(() => beep(110, 0.22, "sawtooth", 0.22), 30); },
-    fuse: () => beep(1000, 0.05, "square", 0.12),
-    // v2.17: louder and deeper, with a third even-lower layer added purely to stretch the decay
-    // into a rumbling tail — a bomb should feel like the biggest bang in the toy.
-    boom: () => { beep(70, 0.5, "sawtooth", 0.35); setTimeout(() => beep(45, 0.45, "sawtooth", 0.28), 70); setTimeout(() => beep(28, 0.4, "sawtooth", 0.18), 160); },
-    warp: () => { beep(500, 0.06, "sine", 0.15); setTimeout(() => beep(900, 0.08, "sine", 0.15), 50); setTimeout(() => beep(650, 0.1, "sine", 0.12), 110); },
-    gameOver: () => { beep(300, 0.15, "sawtooth", 0.2); setTimeout(() => beep(220, 0.15, "sawtooth", 0.2), 150); setTimeout(() => beep(140, 0.35, "sawtooth", 0.22), 300); },
-    // v2.18: a cartoonish flatten-and-pop for the new lethal hazard — a low squash thud, a
-    // high comedic squelch, then two descending plops trailing off — distinct from both plain
-    // hazard's yelp and the somber gameOver stinger that still follows it.
-    splat: () => { beep(90, 0.06, "square", 0.28); setTimeout(() => beep(700, 0.05, "sawtooth", 0.2), 40); setTimeout(() => beep(180, 0.12, "sawtooth", 0.18), 90); setTimeout(() => beep(90, 0.25, "sawtooth", 0.2), 160); }
+
+  // ---- Named patches (section 1/2/2a of the v2.18 patch notes) ------------------------------
+  // First-pass synthesis recipes, not finished sound design — envelope shapes, filter cutoffs and
+  // pitch contours here are all "open to revision by whoever's actually designing the patches."
+  const SOUND_PATCHES = {
+    // -- the 8 named reaction patches the patch notes call out explicitly --
+    thunk: { rootFreq: 130, oscillators: [osc("square", 0, 0, 0.6), osc("sine", -12, 0, 0.4)], filter: { type: "lowpass", freq: 500, q: 0.6, envAmount: -1.5 }, env: { attack: 0.001, decay: 0.09, sustain: 0.15, release: 0.06 }, mod: null, sweep: null },
+    boing: { rootFreq: 300, oscillators: [osc("sine", 0, 0, 0.7)], filter: null, env: { attack: 0.005, decay: 0.12, sustain: 0.3, release: 0.16 }, mod: { rate: 18, depth: 40 }, sweep: { startRatio: 0.6, endRatio: 1.6, time: 0.15 } },
+    whoosh: { rootFreq: 500, oscillators: [osc("noise", 0, 0, 0.8)], filter: { type: "bandpass", freq: 500, q: 1.2, envAmount: 3 }, env: { attack: 0.02, decay: 0.18, sustain: 0.2, release: 0.15 }, mod: null, sweep: null },
+    pop: { rootFreq: 700, oscillators: [osc("sine", 0, 0, 0.7)], filter: null, env: { attack: 0.001, decay: 0.09, sustain: 0, release: 0.04 }, mod: null, sweep: { startRatio: 1, endRatio: 1.8, time: 0.06 } },
+    // needs to land as comedic, not somber (see the patch notes) — a fast downward sweep plus a
+    // heavy wobble under a closing lowpass, aiming for "cartoon squash," not "damage taken."
+    splat: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.5), osc("noise", 0, 0, 0.35)], filter: { type: "lowpass", freq: 900, q: 2, envAmount: -3 }, env: { attack: 0.001, decay: 0.22, sustain: 0.15, release: 0.25 }, mod: { rate: 30, depth: 60 }, sweep: { startRatio: 1.6, endRatio: 0.4, time: 0.22 } },
+    // ported near-verbatim from Wavesculpt's own built-in "Explosion" Sound FX preset — noise + a
+    // deep sub-sine, pushed through a lowpass with a huge envelope amount that snaps open on the
+    // transient and slams shut as it decays.
+    kaboom: { rootFreq: 110, oscillators: [osc("noise", 0, 0, 0.9), osc("sine", -24, 0, 0.4)], filter: { type: "lowpass", freq: 150, q: 0.7, envAmount: 5.5 }, env: { attack: 0.005, decay: 0.5, sustain: 0, release: 0.3 }, mod: null, sweep: null },
+    // adapted from Wavesculpt's "Bonus Chime" — a sine fundamental with a quiet octave-up partner
+    // and a brief upward chirp, the small-reward-cue idiom.
+    ding: { rootFreq: 900, oscillators: [osc("sine", 0, 0, 0.6), osc("sine", 12, 0, 0.3)], filter: null, env: { attack: 0.002, decay: 0.35, sustain: 0.25, release: 0.3 }, mod: null, sweep: { startRatio: 1, endRatio: 1.4, time: 0.06 } },
+    doorCreak: { rootFreq: 250, oscillators: [osc("sawtooth", 0, 0, 0.4), osc("noise", 0, 0, 0.3)], filter: { type: "bandpass", freq: 700, q: 3, envAmount: -3 }, env: { attack: 0.03, decay: 0.3, sustain: 0.3, release: 0.25 }, mod: { rate: 6, depth: 15 }, sweep: { startRatio: 1.3, endRatio: 0.8, time: 0.35 } },
+
+    // -- existing reactions not named in that list, kept as their own distinct patches rather --
+    // -- than folded into one of the 8 above --
+    boop: { rootFreq: 440, oscillators: [osc("triangle", 0, 0, 0.6)], filter: null, env: { attack: 0.002, decay: 0.08, sustain: 0.1, release: 0.05 }, mod: null, sweep: null },
+    oof: { rootFreq: 160, oscillators: [osc("square", 0, 0, 0.55)], filter: { type: "lowpass", freq: 900, q: 0.7, envAmount: -1 }, env: { attack: 0.001, decay: 0.1, sustain: 0.1, release: 0.06 }, mod: null, sweep: null },
+    gotcha: { rootFreq: 700, oscillators: [osc("square", 0, 0, 0.5)], filter: null, env: { attack: 0.001, decay: 0.28, sustain: 0.2, release: 0.15 }, mod: { rate: 22, depth: 20 }, sweep: { startRatio: 1, endRatio: 0.4, time: 0.26 } },
+    crumble: { rootFreq: 200, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: { type: "lowpass", freq: 800, q: 0.8, envAmount: -2.5 }, env: { attack: 0.001, decay: 0.22, sustain: 0.1, release: 0.15 }, mod: { rate: 12, depth: 10 }, sweep: { startRatio: 1.4, endRatio: 0.5, time: 0.24 } },
+    jump: { rootFreq: 392, oscillators: [osc("triangle", 0, 0, 0.7), osc("sine", 0, 0, 0.3)], filter: null, env: { attack: 0.01, decay: 0.18, sustain: 0, release: 0.05 }, mod: null, sweep: { startRatio: 1, endRatio: 2.5, time: 0.15 } },
+    flip: { rootFreq: 300, oscillators: [osc("triangle", 0, 0, 0.6)], filter: null, env: { attack: 0.002, decay: 0.22, sustain: 0.2, release: 0.15 }, mod: null, sweep: { startRatio: 1, endRatio: 2, time: 0.18 } },
+    fuse: { rootFreq: 1000, oscillators: [osc("square", 0, 0, 0.3)], filter: null, env: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, mod: null, sweep: null },
+    yelp: { rootFreq: 600, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: null, env: { attack: 0.002, decay: 0.14, sustain: 0.1, release: 0.08 }, mod: { rate: 20, depth: 30 }, sweep: { startRatio: 1, endRatio: 0.7, time: 0.12 } },
+    gameOver: { rootFreq: 300, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: { type: "lowpass", freq: 1200, q: 0.7, envAmount: -2 }, env: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.5 }, mod: null, sweep: { startRatio: 1, endRatio: 0.45, time: 0.6 } },
+    footstep: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.3)], filter: null, env: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, mod: null, sweep: null },
+
+    // -- v2.18 section 2a: synthesized creature/voice patches — a stylized stand-in, not a --
+    // -- literal animal: pitch-swept tone + vibrato + bandpass filtering, evocative rather than --
+    // -- a real recording. A small curated set; see the patch notes on why this approach hits a --
+    // -- ceiling for a much wider menagerie, and why that's fine for now. --
+    catMeow: { rootFreq: 500, oscillators: [osc("sawtooth", 0, 0, 0.5), osc("triangle", 12, 0, 0.2)], filter: { type: "bandpass", freq: 1200, q: 2.5, envAmount: 0 }, env: { attack: 0.05, decay: 0.15, sustain: 0.5, release: 0.25 }, mod: { rate: 14, depth: 25 }, sweep: { startRatio: 0.7, endRatio: 1.4, time: 0.22 } },
+    dogBark: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.5), osc("noise", 0, 0, 0.2)], filter: { type: "bandpass", freq: 700, q: 1.5, envAmount: 0 }, env: { attack: 0.001, decay: 0.09, sustain: 0.1, release: 0.05 }, mod: { rate: 25, depth: 15 }, sweep: { startRatio: 1.4, endRatio: 0.8, time: 0.08 } },
+    chickenCluck: { rootFreq: 750, oscillators: [osc("square", 0, 0, 0.4), osc("triangle", 7, 0, 0.25)], filter: { type: "bandpass", freq: 1600, q: 2, envAmount: 0 }, env: { attack: 0.001, decay: 0.07, sustain: 0.2, release: 0.06 }, mod: { rate: 35, depth: 60 }, sweep: { startRatio: 1, endRatio: 1.3, time: 0.05 } },
+    genericCreature: { rootFreq: 350, oscillators: [osc("triangle", 0, 0, 0.5), osc("sawtooth", 0, 5, 0.2)], filter: { type: "bandpass", freq: 900, q: 1.8, envAmount: 0 }, env: { attack: 0.03, decay: 0.2, sustain: 0.4, release: 0.3 }, mod: { rate: 9, depth: 20 }, sweep: { startRatio: 1.2, endRatio: 0.8, time: 0.3 } },
   };
+
+  // Voice options offered by the custom-actor picker (section 3) — "none" falls back to whichever
+  // generic reaction patch would otherwise have played (see playActorSound).
+  const VOICE_PATCHES = [
+    { id: "", label: "none" },
+    { id: "catMeow", label: "cat" },
+    { id: "dogBark", label: "dog" },
+    { id: "chickenCluck", label: "chicken" },
+    { id: "genericCreature", label: "creature" },
+  ];
+
+  // The reaction table (v2.18 section 4): which named patch each reaction plays. Redesigning a
+  // reaction's sound is a one-line edit here, never a change to the reaction code that calls it.
+  const REACTION_PATCH = {
+    thud: "thunk", boop: "boop", oof: "oof", gotcha: "gotcha",
+    boing: "boing", slide: "whoosh", wind: "whoosh", warp: "whoosh",
+    pop: "pop", crumble: "crumble",
+    splat: "splat", yelp: "yelp",
+    boom: "kaboom", shot: "kaboom",
+    celebrate: "ding", doorCreak: "doorCreak",
+    jump: "jump", flip: "flip", fuse: "fuse", gameOver: "gameOver", footstep: "footstep",
+  };
+  const sounds = {};
+  Object.keys(REACTION_PATCH).forEach(reactionName => {
+    sounds[reactionName] = () => playPatch(REACTION_PATCH[reactionName]);
+  });
+  // scaled to impact magnitude (0-1): a light hop is a soft, high tap; a fall from height is a
+  // deep, loud, longer-ringing thud. mag is optional — other callers (an editor drag bump) get the
+  // old fixed mid-strength thud by omitting it. Ported to the new engine's velocity (loudness/
+  // brightness) plus a matching pitch shift (harder hits read deeper), rather than beep()'s old
+  // frequency/duration/volume formula — same "light vs. hard" feel, now via the shared patch.
+  sounds.thud = (mag) => {
+    const m = mag === undefined ? 0.5 : mag;
+    playPatch(REACTION_PATCH.thud, 1 - m * 0.35, 0.4 + m * 0.6);
+  };
+
+  // v2.18 section 3: an actor with its own voice (see the custom-actor voice picker) speaks for
+  // itself at its defining moments — a chaser's catch, a hazard hit — instead of the generic
+  // reaction patch everything else uses. This is what actually enables "a chicken being chased by
+  // three cats": the cats meow when they catch it, the chicken clucks when it's hurt, and every
+  // other actor without a voice picked still gets the plain fallback, unchanged.
+  function playActorSound(actor, fallbackReactionName) {
+    const def = actorDefs[actor.defId];
+    if (def && def.voice) playPatch(def.voice, 0.94 + Math.random() * 0.12);
+    else sounds[fallbackReactionName]();
+  }
 
   function log(msg) {
     const el = document.getElementById("log");
@@ -2613,7 +2787,7 @@
       const letter = String.fromCharCode(65 + nextCustomActorLetter++);
       const id = "custom" + letter;
       const name = "Actor " + letter;
-      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name };
+      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name, voice: "" };
       customActorSlotIds.push(id);
       selectCustomActor(id);
       log("New custom actor \"" + name + "\" added — draw it below and pick its temperament.");
@@ -2666,6 +2840,37 @@
         actorDefs[selectedActorDefId].temperament = temp;
         if (isThePlayer) { playerDefId = PLAYER_DEF_ID; selectCustomActor(selectedActorDefId); return; }
         renderAll();
+      });
+      container.appendChild(sw);
+    });
+    renderVoicePicker();
+  }
+
+  // v2.18 section 3: an optional voice for a custom actor, picked from the small set of
+  // synthesized creature patches (SOUND_PATCHES) rather than typed in — the same shelf-of-choices
+  // pattern as every other picker in this toy. "none" (the default) falls back to whichever
+  // generic reaction patch the actor's action would otherwise play (see playActorSound) — this is
+  // what actually lets a custom actor sound distinct: without picking one here, it stays silent-of-
+  // its-own-voice regardless of how expressive its sprite or behavior is.
+  const VOICE_SWATCH_COLORS = { "": "#2f3140", catMeow: "#8d6e63", dogBark: "#6d4c41", chickenCluck: "#ffca28", genericCreature: "#78909c" };
+  function renderVoicePicker() {
+    const container = document.getElementById("voicePickerSwatches");
+    container.innerHTML = "";
+    const def = actorDefs[selectedActorDefId];
+    VOICE_PATCHES.forEach(voice => {
+      const sw = document.createElement("div");
+      const isSelected = (def.voice || "") === voice.id;
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = VOICE_SWATCH_COLORS[voice.id] || "#2f3140";
+      sw.title = voice.label;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = voice.label;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => {
+        def.voice = voice.id;
+        if (voice.id) playPatch(voice.id); // preview it right away, the same instant-feedback every other pick in this toy gives
+        renderVoicePicker();
       });
       container.appendChild(sw);
     });
@@ -3137,6 +3342,19 @@
     return { ax, ay };
   }
 
+  // v2.18: "Whoosh — slippery slide, wind/conveyor, warp" (see the patch notes) — a one-shot cue
+  // on the rising edge of standing on either surface, not a continuous sound, so it plays once on
+  // arrival rather than looping for as long as the tile is stood on. Player-only: a wandering NPC
+  // crossing the same ice patch every few seconds would otherwise turn this into a constant noise.
+  function checkWhooshSurface(actor, windAccel) {
+    if (!actor.isPlayer) return;
+    const onWind = windAccel.ax !== 0 || windAccel.ay !== 0;
+    const onSlippery = !onWind && frictionMultiplierFor(actor) < 1; // both at once plays one whoosh, not two
+    const onSurface = onWind || onSlippery;
+    if (onSurface && !actor.onWhooshSurface) { if (onWind) sounds.wind(); else sounds.slide(); }
+    actor.onWhooshSurface = onSurface;
+  }
+
   function applyAxisFriction(actor, axis, dt, accelInput) {
     const key = axis === "x" ? "vx" : "vy";
     const friction = FRICTION_DECEL * frictionMultiplierFor(actor);
@@ -3379,16 +3597,16 @@
     const temperament = def ? def.temperament : null;
 
     if (temperament === "stationary") {
-      sounds.boop();
+      playActorSound(npcActor, "boop");
       playRecipe(npcActor, "boopPulse");
       pushApart(playerActor, npcActor);
       log("Boop!");
     } else if (temperament === "wanderer") {
-      sounds.oof();
+      playActorSound(npcActor, "oof");
       reflectActorsApart(playerActor, npcActor);
       log("Oof!");
     } else if (temperament === "chaser") {
-      sounds.gotcha();
+      playActorSound(npcActor, "gotcha");
       playRecipe(playerActor, "caughtPunt");
       // Build mode: consumeLifeIfPlaying() is a no-op (returns false) and this plays out exactly
       // as it always has. Play mode: this is one of the two events that cost a life; at zero
@@ -3404,12 +3622,12 @@
         playRecipe(playerActor, "caughtBounceIn");
       }, RECIPES.caughtPunt.duration);
     } else if (temperament === "fleer") {
-      sounds.pop();
+      playActorSound(npcActor, "pop");
       playRecipe(npcActor, "popVanish");
       log("Pop!");
       setTimeout(() => { removeActorById(npcActor.id); }, RECIPES.popVanish.duration);
     } else if (temperament === "collectible") {
-      sounds.pop();
+      playActorSound(npcActor, "pop");
       playRecipe(npcActor, "popVanish");
       addScore(1);
       log("Got it! +1");
@@ -3466,7 +3684,7 @@
   function triggerHazard(actor) {
     if (actor.hazardCooldown > 0) return;
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
-    sounds.yelp();
+    playActorSound(actor, "yelp");
     actor.flashTimer = 1;
     const speed = Math.hypot(actor.vx, actor.vy) || 1;
     const kx = speed > 1 ? -actor.vx / speed : 0;
@@ -3495,7 +3713,7 @@
   function triggerLethalHazard(actor) {
     if (actor.hazardCooldown > 0) return;
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
-    sounds.splat();
+    playActorSound(actor, "splat");
     playRecipe(actor, "splatDisintegrate");
     actor.vx = 0; actor.vy = 0;
     // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — same as
@@ -3539,7 +3757,8 @@
     const key = board[gy][gx];
     if (!key) return;
     const tile = GAMEPLAY_TILE_DEFS[key];
-    sounds.crumble();
+    sounds.pop(); // v2.18: "Pop — collectible gathered, trap tile" — distinct from a dug-through wall's crumble()
+
     tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
     board[gy][gx] = null;
     log("Crumble!");
@@ -3691,6 +3910,7 @@
     const link = doorLinks[roomCellKey(currentRoomId, gx, gy)];
     if (!link) return; // an erased-then-repainted cell without a link — harmless no-op
     player.doorCooldown = ROOM_TRANSITION_MS + 500;
+    sounds.doorCreak(); // v2.18: door transitions were silent before this — see the patch notes
     beginRoomTransition(link);
   }
 
@@ -3834,6 +4054,7 @@
       // friction sees the wind as real, ongoing thrust and stops opposing it, same as it already
       // does for a held movement key.
       const windAccel = windAccelFor(actor);
+      checkWhooshSurface(actor, windAccel);
       let ax = windAccel.ax, ay = windAccel.ay, wantsJump = false;
 
       if (actor.isPlayer) {
@@ -5186,7 +5407,6 @@
   if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");
   updateUndoRedoButtons();
 
-
   // ============== Export: standalone playable file ==============
   // The exported file is a second, self-contained HTML document: the current build's data
   // (rooms/tiles/actors/backgrounds) plus just enough runtime to play it, with every editor
@@ -5227,6 +5447,7 @@
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
+      checkWhooshSurface,
       resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
@@ -5240,7 +5461,8 @@
       drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
-      getAudioCtx, beep,
+      getAudioCtx, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
+      playPatch, playActorSound,
       log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
@@ -5252,6 +5474,8 @@
     const constantsSource = [
       `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
       `const BOARD_MAX_COLS = ${BOARD_MAX_COLS}, RUNNER_SPEED = ${RUNNER_SPEED};`,
+      `const SOUND_PATCHES = ${JSON.stringify(SOUND_PATCHES)};`,
+      `const REACTION_PATCH = ${JSON.stringify(REACTION_PATCH)};`,
       `const ACTOR_SIZE = ${ACTOR_SIZE};`,
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
@@ -5348,6 +5572,7 @@
   ${soundsSource}
 
   let audioCtx = null;
+  let noiseBufferCache = null; // getNoiseBuffer()'s own cache — shared runtime source, declared here by hand
 
   let rooms = GAME_DATA.rooms;
   let doorLinks = GAME_DATA.doorLinks;
