@@ -140,13 +140,72 @@
   .mode-toggle button.active { background: var(--accent); color: #222; font-weight: bold; }
 
   /* ---------- Build / Play top-level switch ---------- */
-  #appModeToggle {
-    max-width: 340px;
+  /* Build/Play are a toggle pair (two states of the open project). Samples is a separate action
+     that replaces what's open entirely, so it sits outside #appModeToggle's row, across a divider
+     — the grouping itself should read as "mode selector, then a separate action". */
+  #topBar {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 14px;
+    max-width: 460px;
     margin: 12px auto 0;
     padding: 0 16px;
   }
+  #appModeToggle {
+    flex: 1;
+    min-width: 0;
+  }
   #appModeToggle button { font-size: 15px; padding: 10px 4px; }
   #modePlayBtn.active { background: #4caf50; color: #fff; }
+  #topBarDivider {
+    width: 1px;
+    background: var(--panel-light);
+    align-self: stretch;
+  }
+  #samplesBtn {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--panel-light);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #samplesBtn:hover { border-color: var(--accent); }
+
+  /* ---------- Samples modal ---------- */
+  #samplesModalOverlay {
+    position: fixed; inset: 0; background: rgba(10, 10, 14, 0.85);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  #samplesModalCard {
+    background: var(--panel); border-radius: 12px; padding: 20px 24px; max-width: 640px;
+    width: 90vw; max-height: 82vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #samplesModalHeader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  #samplesModalHeader h2 { margin: 0; font-size: 18px; color: var(--accent); }
+  #samplesModalCloseBtn {
+    background: none; border: none; color: var(--text); font-size: 22px; line-height: 1;
+    cursor: pointer; padding: 2px 8px;
+  }
+  #samplesModalCloseBtn:hover { color: var(--accent); }
+  #samplesGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 16px;
+  }
+  .sampleTile {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: var(--panel-light); border: 2px solid transparent; border-radius: 10px;
+    padding: 12px 8px; cursor: pointer;
+  }
+  .sampleTile:hover { border-color: var(--accent); }
+  .sampleTile canvas {
+    width: 72px; height: 72px; image-rendering: pixelated; background: #111; border-radius: 6px;
+  }
+  .sampleTile .sampleName { font-size: 12px; text-align: center; line-height: 1.3; }
 
   /* Play mode hides every Build-only editing surface — the palette, the room tabs (no manual
      room-hopping mid-game), and the build-only toolbar buttons (reset/set-start/clear/export) —
@@ -193,11 +252,6 @@
     max-width: 260px;
     line-height: 1.4;
   }
-  /* Deliberately understated — two small text links, not a featured "Examples" section, so
-     opening the tool still leads with the blank canvas rather than a set of choices. */
-  #startersHint a { color: var(--accent); cursor: pointer; text-decoration: none; }
-  #startersHint a:hover { text-decoration: underline; }
-
   #log {
     font-size: 12px;
     color: #bbb;
@@ -215,10 +269,25 @@
 </style>
 </head>
 <body>
-<div id="appModeToggle" class="mode-toggle">
-  <button id="modeBuildBtn" class="active">🛠 Build</button>
-  <button id="modePlayBtn">▶ Play</button>
+<div id="topBar">
+  <div id="appModeToggle" class="mode-toggle">
+    <button id="modeBuildBtn" class="active">🛠 Build</button>
+    <button id="modePlayBtn">▶ Play</button>
+  </div>
+  <div id="topBarDivider" aria-hidden="true"></div>
+  <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
 </div>
+
+<div id="samplesModalOverlay" style="display:none;">
+  <div id="samplesModalCard">
+    <div id="samplesModalHeader">
+      <h2>Sample games</h2>
+      <button id="samplesModalCloseBtn" aria-label="Close">×</button>
+    </div>
+    <div id="samplesGrid"></div>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- Palette / Authoring panel -->
@@ -373,12 +442,6 @@
       Ground and Surface pieces use small built-in icons — no drawing needed, so they always
       read the same way. Paint and Characters are yours to draw; most Objects use a built-in
       icon too. The grid is always live — no separate play mode.
-    </div>
-
-    <div class="hint" id="startersHint">
-      Or start from someone else's build: <a href="#" id="loadCheeseHeist">The Cheese Heist</a>
-      · <a href="#" id="loadTunnelTrouble">Tunnel Trouble</a>
-      · <a href="#" id="loadDungeonDiving">Dungeon Diving</a>
     </div>
   </div>
 
@@ -1488,12 +1551,12 @@
     ], { M: "#616161" }) }
   ];
 
-  // ============== Built-in example games (v2.8) ==============
-  // Two small, hand-authored starting points a kid can open straight into Build mode and
-  // immediately take apart — not a gallery to browse, just two low-key links (see
-  // #startersHint). Their own actor looks get their own defs here, rather than reskinning the
-  // shared TEMPERAMENTS defaults, so loading an example never changes what a plain
-  // "collectible"/"chaser" swatch looks like for anyone who hasn't touched them.
+  // ============== Built-in example games (v2.8, gallery in v2.16) ==============
+  // Small, hand-authored starting points a kid can open straight into Build mode and immediately
+  // take apart — browsable via the Samples modal (see SAMPLE_GAMES). Their own actor looks get
+  // their own defs here, rather than reskinning the shared TEMPERAMENTS defaults, so loading an
+  // example never changes what a plain "collectible"/"chaser" swatch looks like for anyone who
+  // hasn't touched them.
   const EXAMPLE_CHEESE_DEF_ID = "exCheese";
   const EXAMPLE_CAT_DEF_ID = "exCat";
   actorDefs[EXAMPLE_CHEESE_DEF_ID] = { temperament: "collectible", name: "cheese", poses: null, art: CHEESE_ART.slice() };
@@ -1762,9 +1825,18 @@
   // too, not just rooms/doorLinks — invisible as long as no example added its own custom actor/
   // ground content, but Dungeon Diving does, so switching from it to another example never leaves
   // its custom actors/tiles lingering in the palette.
+  // Shared safety gate for anything that fully replaces the current project — New Project's own
+  // button and loading a Sample both funnel through this one check, so a kid mid-build can't
+  // silently lose work to either action without the same chance to back out.
+  function confirmReplaceProject(question) {
+    return confirm(question + " This clears everything — every room, all custom art and actors, and your saved work — and can't be undone.");
+  }
+
   function loadExampleGame(builderFn, label) {
-    if (appMode !== "build") return;
-    if (!confirm("Load \"" + label + "\"? This replaces everything currently on the board.")) return;
+    if (!confirmReplaceProject("Load \"" + label + "\"?")) return false;
+    // Samples is a top-level entry point independent of the Build/Play toggle — a kid can open it
+    // from Play mode too, and loading one always lands back in Build (v2.8's original rule).
+    if (appMode === "play") exitToBuildMode();
     rooms = [];
     nextRoomId = 1;
     doorLinks = {};
@@ -1794,6 +1866,7 @@
     selectActorKind("player");
     renderAll();
     log("Loaded: " + label + ". Take it apart, or just play it.");
+    return true;
   }
 
   // ============== Audio (simple beeps) ==============
@@ -4314,7 +4387,7 @@
 
   document.getElementById("newProjectBtn").addEventListener("click", () => {
     if (appMode !== "build") return;
-    if (!confirm("Start a new project? This clears everything — every room, all custom art and actors, and your saved work — and can't be undone.")) return;
+    if (!confirmReplaceProject("Start a new project?")) return;
     restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT));
     resetScoreAndIntensity();
     resetHistory();
@@ -4340,17 +4413,120 @@
   window.addEventListener("unhandledrejection", (e) => handleFatalError(e.reason));
   document.getElementById("errorOverlayResetBtn").addEventListener("click", () => location.reload());
 
-  document.getElementById("loadCheeseHeist").addEventListener("click", (e) => {
-    e.preventDefault();
-    loadExampleGame(buildCheeseHeistGame, "The Cheese Heist");
-  });
-  document.getElementById("loadTunnelTrouble").addEventListener("click", (e) => {
-    e.preventDefault();
-    loadExampleGame(buildTunnelTroubleGame, "Tunnel Trouble");
-  });
-  document.getElementById("loadDungeonDiving").addEventListener("click", (e) => {
-    e.preventDefault();
-    loadExampleGame(buildDungeonDivingGame, "Dungeon Diving");
+  // ============== Samples modal ==============
+  // Gallery icons are UI chrome, not gameplay actors, so they're drawn straight onto a small
+  // canvas rather than routed through the pat()/ART pipeline that's sized for 8x8 actor sprites —
+  // that leaves room for bigger, more detailed "classic arcade art" icons independent of ART.
+  const SAMPLE_ICON_SIZE = 24;
+  function renderSampleIcon(canvas, drawFn) {
+    canvas.width = SAMPLE_ICON_SIZE;
+    canvas.height = SAMPLE_ICON_SIZE;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    drawFn(ctx);
+  }
+  function drawCheeseHeistIcon(ctx) {
+    ctx.fillStyle = "#ffca28";
+    ctx.beginPath();
+    ctx.moveTo(3, 20);
+    ctx.lineTo(21, 20);
+    ctx.lineTo(12, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#c9960f";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#c9960f";
+    ctx.beginPath(); ctx.arc(10, 14, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(15, 16, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(12, 9, 1.1, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawTunnelTroubleIcon(ctx) {
+    ctx.fillStyle = "#6d5240";
+    ctx.beginPath();
+    ctx.moveTo(3, 21);
+    ctx.lineTo(3, 12);
+    ctx.arc(12, 12, 9, Math.PI, 0);
+    ctx.lineTo(21, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#241f1c";
+    ctx.beginPath();
+    ctx.moveTo(6, 21);
+    ctx.lineTo(6, 13);
+    ctx.arc(12, 13, 6, Math.PI, 0);
+    ctx.lineTo(18, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#a9855f";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(6, 20); ctx.lineTo(19, 7); ctx.stroke();
+    ctx.fillStyle = "#c0392b";
+    ctx.beginPath();
+    ctx.moveTo(15, 5); ctx.lineTo(21, 5); ctx.lineTo(19, 9); ctx.lineTo(17, 9);
+    ctx.closePath(); ctx.fill();
+  }
+  function drawDungeonDivingIcon(ctx) {
+    ctx.fillStyle = "#5b5d6b";
+    ctx.beginPath();
+    ctx.moveTo(4, 21);
+    ctx.lineTo(4, 11);
+    ctx.arc(12, 11, 8, Math.PI, 0);
+    ctx.lineTo(20, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#17181d";
+    ctx.beginPath();
+    ctx.moveTo(7, 21);
+    ctx.lineTo(7, 12);
+    ctx.arc(12, 12, 5, Math.PI, 0);
+    ctx.lineTo(17, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#d9d9e0";
+    ctx.fillRect(11, 6, 2, 12);
+    ctx.fillStyle = "#e0a638";
+    ctx.fillRect(8, 15, 8, 2);
+    ctx.fillStyle = "#7a4a24";
+    ctx.fillRect(10.5, 17, 3, 4);
+  }
+  // The registry a new sample joins with one entry — the modal's grid renders generically off
+  // this list, so it scales from 3 to 10+ samples with no layout changes.
+  const SAMPLE_GAMES = [
+    { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
+    { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
+    { name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
+  ];
+  function renderSamplesModal() {
+    const grid = document.getElementById("samplesGrid");
+    grid.innerHTML = "";
+    SAMPLE_GAMES.forEach(sample => {
+      const tile = document.createElement("div");
+      tile.className = "sampleTile";
+      const canvas = document.createElement("canvas");
+      renderSampleIcon(canvas, sample.draw);
+      const name = document.createElement("div");
+      name.className = "sampleName";
+      name.textContent = sample.name;
+      tile.appendChild(canvas);
+      tile.appendChild(name);
+      tile.addEventListener("click", () => {
+        if (loadExampleGame(sample.builder, sample.name)) closeSamplesModal();
+      });
+      grid.appendChild(tile);
+    });
+  }
+  function openSamplesModal() {
+    renderSamplesModal();
+    document.getElementById("samplesModalOverlay").style.display = "flex";
+  }
+  function closeSamplesModal() {
+    document.getElementById("samplesModalOverlay").style.display = "none";
+  }
+  document.getElementById("samplesBtn").addEventListener("click", openSamplesModal);
+  document.getElementById("samplesModalCloseBtn").addEventListener("click", closeSamplesModal);
+  document.getElementById("samplesModalOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "samplesModalOverlay") closeSamplesModal();
   });
 
   updateModeButtons();
