@@ -534,7 +534,7 @@
   // unlike a switch's permanent flip. Deliberately its own geometry value, not a switch variant.
   const GEOMETRIES = [
     "none", "solid", "diggable", "trap", "goal", "switch", "plate", "door",
-    ...CANNON_ORDER, "bomb", "warp", ...FAN_ORDER, "magnet", "gravitywell", "spawner"
+    ...CANNON_ORDER, "bomb", "warp", ...FAN_ORDER, "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
   // system built it. Ground is plain blocking/hazard geometry with no identity of its own beyond
@@ -547,7 +547,7 @@
   const PALETTE_GROUND_GEOMETRIES = ["none", "solid", "diggable", "trap"];
   const PALETTE_OBJECT_GEOMETRIES = [
     "goal", "switch", "plate", "door", "cannon", "bomb", "warp",
-    "fan", "magnet", "gravitywell", "spawner"
+    "fan", "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
@@ -557,17 +557,22 @@
   // v2.18: "lethal" is a new severity tier on the same hazard mechanism, not a new system — same
   // touch-detection, just a different outcome (see triggerLethalHazard). One modifier value, kid-
   // reskinned as lava/spikes/a bottomless pit by painting over it, not three hardcoded tile types.
-  // v2.19: "spring" is the same bounce mechanism as "bouncy" at a higher restitution — see
-  // BOUNCE_RESTITUTION/SPRING_RESTITUTION and resolveAxis() — not a new mechanic, just a second
-  // tuning of the existing one, the same "second severity tier" shape lethal already established.
-  // "sticky" suspends gravity on contact rather than adding friction — see isStuckToSticky().
-  const MODIFIERS = ["none", "slippery", "bouncy", "spring", "hazard", "lethal", "sticky", ...WIND_ORDER];
-  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "spring", "hazard", "lethal", "sticky", "wind"];
-  // v2.19: "bouncy" itself is unchanged since v2.3 — this only renames how it reads in the palette
-  // (Trampoline is a friendlier, more concrete name for the exact same mechanic than the abstract
-  // "bouncy"), the same way "spring" is that mechanic's own higher-restitution sibling rather than
-  // a new one. Anything not listed here just shows its own id, unchanged.
-  const MODIFIER_LABELS = { bouncy: "trampoline" };
+  // v2.20: "spring" is removed — it was a second, higher-restitution tuning of "bouncy" (a modifier
+  // any kid could paint anywhere), which just meant two palette entries doing the same thing with a
+  // number changed. Its higher-power bounce lives on as the dedicated Trampoline OBJECT instead (see
+  // GEOMETRY_ICONS.trampoline/TRAMPOLINE_RESTITUTION) — a real placed thing with a real sprite, not
+  // an abstract ground finish, which is also a better fit for "extra jumping power" as a kid-visible
+  // upgrade. "bouncy" itself reverts to its original v2.3 name (see MODIFIER_LABELS below) — the
+  // "trampoline" rename now belongs to the object, not the modifier, and reusing it for both was
+  // confusing. "sticky" suspends gravity on contact (isStuckToSticky) AND slows movement in every
+  // direction while touching it, on any geometry (isOnStickyGround) — a floor you trudge through,
+  // not just a wall you can climb.
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", ...WIND_ORDER];
+  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "wind"];
+  // Anything not listed here just shows its own id, unchanged — nothing needs a friendlier label
+  // right now, but the mechanism (MODIFIER_LABELS[modifier] || modifier, see renderSurfaceSwatches)
+  // stays available for the next id that reads as engine-jargon rather than a toy word.
+  const MODIFIER_LABELS = {};
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -577,10 +582,10 @@
     "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
     bomb: "#424242", warp: "#8e24aa",
     fan: "#00acc1", "fan-n": "#00acc1", "fan-e": "#00acc1", "fan-s": "#00acc1", "fan-w": "#00acc1",
-    magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41"
+    magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41", trampoline: "#f9a825"
   };
   const MODIFIER_SWATCH_COLORS = {
-    none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", spring: "#78909c", hazard: "#e53935", lethal: "#4a0000",
+    none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", lethal: "#4a0000",
     sticky: "#cddc39", wind: "#80deea",
     "wind-n": "#80deea", "wind-e": "#80deea", "wind-s": "#80deea", "wind-w": "#80deea"
   };
@@ -608,6 +613,24 @@
     "fan-n": { x: 0, y: -1 }, "fan-e": { x: 1, y: 0 }, "fan-s": { x: 0, y: 1 }, "fan-w": { x: -1, y: 0 }
   };
   const FAN_RANGE_TILES = 5; // how far in front of itself a fan projects wind force
+  // v2.20: force now falls off with distance instead of being flat across the whole range — right
+  // at the fan (i=1) it's FAN_NEAR_FORCE, strong enough to beat GRAVITY outright (so standing right
+  // over/in front of a fan actually lifts you), tapering down to WIND_FORCE by the far edge of its
+  // range (the same "a kid can still fight against it" strength wind/conveyor already had). This is
+  // what makes fan-to-fan hopping climb higher each time instead of topping out at one jump's worth
+  // of height — see fanAccelFor().
+  const FAN_NEAR_FORCE = 1900;
+
+  // v2.20: sticky's own two constants — how much an actor's own movement input is damped while
+  // standing in/on a sticky surface (isOnStickyGround), and how much extra decel is applied when
+  // no input is held (frictionMultiplierFor) so a kid can't just coast across it either. Both much
+  // stronger than slippery's, in the opposite direction — mud, not ice.
+  const STICKY_MOVE_MULT = 0.32;
+  const STICKY_FRICTION_MULT = 5;
+  // v2.20: how long, after actually breaking contact with a sticky wall (isStuckToSticky going
+  // false), gravity takes to ramp back up to full strength — "slowly letting go" instead of an
+  // instant full-weight drop the frame contact ends. See stepActor's stickyReleaseT handling.
+  const STICKY_RELEASE_MS = 500;
 
   // v2.19: a point-source pull, distance-dependent (linear falloff to 0 at the radius edge) unlike
   // wind's fixed vector — one system, two presets. Magnet only pulls specific object types
@@ -621,11 +644,15 @@
   // any side — see isStuckToSticky()/stepActor. Plain high-friction stickiness would be a much
   // smaller, less interesting version of the same idea.
 
-  // v2.19: same mechanism as bouncy (see resolveAxis/triggerBouncyLaunch), a second, higher-
-  // restitution tuning of it — "hit it harder, launch higher" already falls out of reflection
-  // scaling with impact velocity, so this is a naming/tuning task, not new engineering.
-  const SPRING_RESTITUTION = 0.97;
-  const SPRING_LAUNCH_SPEED = 900; // vs BOUNCY_LAUNCH_SPEED's 620 — matches the higher restitution
+  // v2.20: the Trampoline OBJECT's own restitution/launch numbers — a real placed thing (Objects
+  // tab, its own sprite) rather than a ground finish, so "extra jumping power" reads as a kid
+  // finding a special object, not a hidden second tuning of the plain bouncy modifier (that used to
+  // be "spring" — see the MODIFIERS comment above for why it moved here). Reflection alone
+  // (TRAMPOLINE_RESTITUTION) still scales with impact speed same as bouncy; TRAMPOLINE_LAUNCH_SPEED
+  // is a MINIMUM enforced on top, so even a gentle step-on still gets a real, satisfying bounce
+  // instead of reflection's usual "barely fell, barely bounces."
+  const TRAMPOLINE_RESTITUTION = 0.97;
+  const TRAMPOLINE_LAUNCH_SPEED = 900; // vs BOUNCY_LAUNCH_SPEED's 620 — a trampoline is stronger, on purpose
 
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
   const SPAWN_INTERVAL_MS = 2500;
@@ -1457,7 +1484,14 @@
     warp: pat([
       "..MMMM..", ".M....M.", "M.MM...M", "M.M.M..M",
       "M..M.M.M", "M...MM.M", ".M....M.", "..MMMM.."
-    ], { M: GEOMETRY_SWATCH_COLORS.warp })
+    ], { M: GEOMETRY_SWATCH_COLORS.warp }),
+    // v2.20: a real object with a real sprite (per the "Objects get sprites, Ground stays abstract"
+    // rule) — a side-view springboard: dark frame ring, a pale bounce mat across the top, splayed
+    // legs. Distinct from the plain "bouncy" ground modifier's abstract colored square on purpose.
+    trampoline: pat([
+      "MMMMMMMM", "M......M", "MKKKKKKM", "M......M",
+      ".M....M.", "..M..M..", "..M..M..", ".MM..MM."
+    ], { M: GEOMETRY_SWATCH_COLORS.trampoline, K: "#fff59d" })
   };
 
   // Progressive erosion stages for diggable, sampled by how much sustained contact has
@@ -2231,6 +2265,22 @@
     gameOver: { rootFreq: 300, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: { type: "lowpass", freq: 1200, q: 0.7, envAmount: -2 }, env: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.5 }, mod: null, sweep: { startRatio: 1, endRatio: 0.45, time: 0.6 } },
     footstep: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.3)], filter: null, env: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, mod: null, sweep: null },
 
+    // -- v2.20: cannon and bomb were both wired to "kaboom" (the actual explosion sound) —
+    // -- a real bug, not a style choice, since a cannon shot and a bomb blast are opposite
+    // -- physical events (a quick pneumatic launch vs. a heavy detonation). cannonShot is a
+    // -- short, bright, compressed-air "thwip" — noise + a falling square undertone through a
+    // -- tight bandpass — so the two read as distinctly different weight/duration. --
+    cannonShot: { rootFreq: 180, oscillators: [osc("noise", 0, 0, 0.6), osc("square", -12, 0, 0.4)], filter: { type: "bandpass", freq: 900, q: 1.6, envAmount: -2 }, env: { attack: 0.001, decay: 0.1, sustain: 0.05, release: 0.08 }, mod: null, sweep: { startRatio: 1.8, endRatio: 0.6, time: 0.09 } },
+    // A portal shimmer, not another gust of wind — used to share "whoosh" with slide/wind, which
+    // made stepping through a magic door sound identical to standing on a windy tile.
+    warpChime: { rootFreq: 600, oscillators: [osc("sine", 0, 0, 0.5), osc("sine", 19, 0, 0.25)], filter: { type: "bandpass", freq: 1500, q: 2, envAmount: 1 }, env: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.25 }, mod: { rate: 16, depth: 30 }, sweep: { startRatio: 0.6, endRatio: 1.8, time: 0.2 } },
+    // A deeper, longer, more emphatic cousin of "boing" — the Trampoline object's extra bounce
+    // power should be heard as well as felt.
+    trampolineBoing: { rootFreq: 200, oscillators: [osc("sine", 0, 0, 0.8), osc("triangle", -12, 0, 0.3)], filter: null, env: { attack: 0.003, decay: 0.2, sustain: 0.35, release: 0.28 }, mod: { rate: 12, depth: 55 }, sweep: { startRatio: 0.5, endRatio: 1.8, time: 0.22 } },
+    // A rising, bubbly materialize cue for something arriving from a spawner — distinct from
+    // "ding" (a reward) and "pop" (something vanishing), the two nearest existing candidates.
+    materialize: { rootFreq: 400, oscillators: [osc("sine", 0, 0, 0.5), osc("sine", 7, 0, 0.3)], filter: { type: "lowpass", freq: 2000, q: 0.5, envAmount: 1 }, env: { attack: 0.03, decay: 0.18, sustain: 0.3, release: 0.2 }, mod: { rate: 10, depth: 15 }, sweep: { startRatio: 0.5, endRatio: 1.3, time: 0.18 } },
+
     // -- v2.18 section 2a: synthesized creature/voice patches — a stylized stand-in, not a --
     // -- literal animal: pitch-swept tone + vibrato + bandpass filtering, evocative rather than --
     // -- a real recording. A small curated set; see the patch notes on why this approach hits a --
@@ -2253,19 +2303,27 @@
 
   // The reaction table (v2.18 section 4): which named patch each reaction plays. Redesigning a
   // reaction's sound is a one-line edit here, never a change to the reaction code that calls it.
+  // v2.20: boom/shot used to BOTH point at "kaboom" — a cannon shot and a bomb blast sounded
+  // identical, a real bug (see cannonShot above), now split. warp gets its own chime instead of
+  // sharing "whoosh" with slide/wind three ways. trampolineBoing/materialize are new, for the new
+  // Trampoline object and the spawner's own arrival cue.
   const REACTION_PATCH = {
     thud: "thunk", boop: "boop", oof: "oof", gotcha: "gotcha",
-    boing: "boing", slide: "whoosh", wind: "whoosh", warp: "whoosh",
+    boing: "boing", slide: "whoosh", wind: "whoosh", warp: "warpChime",
     pop: "pop", crumble: "crumble",
     splat: "splat", yelp: "yelp",
-    boom: "kaboom", shot: "kaboom",
+    boom: "kaboom", shot: "cannonShot",
     celebrate: "ding", doorCreak: "doorCreak",
     jump: "jump", flip: "flip", fuse: "fuse", gameOver: "gameOver", footstep: "footstep",
+    trampolineBoing: "trampolineBoing", spawn: "materialize",
   };
   const sounds = {};
   Object.keys(REACTION_PATCH).forEach(reactionName => {
     sounds[reactionName] = () => playPatch(REACTION_PATCH[reactionName]);
   });
+  // slide and wind still deliberately share the "whoosh" patch (same rushing-air phenomenon, ice
+  // vs. air current) — pitched apart so the two don't sound literally identical.
+  sounds.wind = () => playPatch(REACTION_PATCH.wind, 1.22);
   // scaled to impact magnitude (0-1): a light hop is a soft, high tap; a fall from height is a
   // deep, loud, longer-ringing thud. mag is optional — other callers (an editor drag bump) get the
   // old fixed mid-strength thud by omitting it. Ported to the new engine's velocity (loudness/
@@ -2525,9 +2583,19 @@
     // four storable orientations, same trick as "cannon" above.
     const isWind = modifier === "wind";
     selectedModifier = isWind ? WIND_ORDER[0] : modifier;
+    // v2.20 fix: "bouncy" only reads as a real trampoline-floor bounce when paired with solid
+    // geometry (see resolveAxis) — paired with "none" it's the separate, non-blocking "walk over it
+    // and get launched" tile instead (triggerBouncyLaunch), which looks identical in the palette but
+    // lets a kid fall straight through what they expected to be a solid bouncy floor. Clicking the
+    // Surface row's bouncy swatch is almost always reaching for the solid version, so if nothing
+    // blocking is already selected, default it to solid — a kid who deliberately wants the walk-over
+    // pad can still pick "none" ground first, same as before. hazard/lethal/sticky are left alone:
+    // each already has a real, distinct, intended reading on "none" ground (puddle/lava/mud).
+    if (modifier === "bouncy" && selectedGeometry === "none") selectedGeometry = "solid";
     selectedGroundSkinId = null; // a flat swatch pick means "just the built-in color, no named skin"
     paintMode = "tile";
     activeTab = "ground";
+    lastGroundGeometry = selectedGeometry;
     updateModeButtons();
     renderAll();
   }
@@ -3354,6 +3422,7 @@
     if (geometry === "solid") return true;
     if (geometry === "diggable") return true;
     if (geometry === "trap") return !actor.isPlayer;
+    if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
     return false;
   }
   // The one place that actually decides "can I move into this cell" — isBlockingGeometry() plus
@@ -3411,6 +3480,23 @@
   // One rule, two ways contact happens: an occupied/overlapped none-geometry tile (walking
   // through ice), or the solid floor an actor is actually resting on (standing on ice). Which
   // one applies falls out of geometry + gravity mode on its own — no per-case special casing.
+  // v2.20: sticky's own two-way contact check, the same shape as the slippery check right below —
+  // walking through a non-blocking sticky tile (mud you trudge through) or standing on a blocking
+  // one's top surface (a sticky floor) both count as "in it." Doesn't care which specific geometry,
+  // unlike isStuckToSticky further down, which only ever fires for a solid+sticky WALL and means
+  // something different (gravity suspended, climbable) — this one just means "movement is slowed."
+  function isOnStickyGround(actor) {
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (!isCellBlocking(cx, cy, actor) && modifierAt(cx, cy) === "sticky") return true;
+    }
+    if (actor.grounded) {
+      for (const { cx, cy } of cellsUnderneath(actor)) {
+        if (isCellBlocking(cx, cy, actor) && modifierAt(cx, cy) === "sticky") return true;
+      }
+    }
+    return false;
+  }
+
   function frictionMultiplierFor(actor) {
     for (const { cx, cy } of overlappedCells(actor)) {
       if (geometryAt(cx, cy) === "none" && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
@@ -3420,6 +3506,9 @@
         if (isCellBlocking(cx, cy, actor) && modifierAt(cx, cy) === "slippery") return SLIPPERY_FRICTION_MULT;
       }
     }
+    // v2.20: mud, not ice — high friction so an actor can't coast to a stop across sticky ground
+    // once it lets off input (see stepActor's own STICKY_MOVE_MULT damping for while input IS held).
+    if (isOnStickyGround(actor)) return STICKY_FRICTION_MULT;
     return 1;
   }
 
@@ -3478,8 +3567,15 @@
   // first fan found. A colored fan only blows while its channel is on — an uncolored one always
   // blows, the same "no color = simple/unconditional, a color = switch-gated" rule every other
   // colorable geometry already follows (see isCellBlocking's solid-gate check).
+  // v2.20: force now falls off linearly with distance instead of being flat across the whole
+  // range — FAN_NEAR_FORCE right at i=1 (strong enough to beat GRAVITY outright), down to
+  // WIND_FORCE by i=FAN_RANGE_TILES (matching plain wind/conveyor's usual strength at the far
+  // edge). This is what lets hopping fan-to-fan climb higher each time — standing right in a fan's
+  // stream actually lifts you, not just slows your fall — and it's also what the "near" flag (used
+  // for the floating-bob render cue, see renderActors) means: close enough to be a real lift, not
+  // just a breeze.
   function fanAccelFor(actor) {
-    let ax = 0, ay = 0;
+    let ax = 0, ay = 0, near = false;
     const ac = Math.floor((actor.x + actor.w / 2) / TILE), ar = Math.floor((actor.y + actor.h / 2) / TILE);
     for (const geom of FAN_ORDER) {
       const dir = FAN_DIRECTIONS[geom];
@@ -3488,13 +3584,18 @@
         const geometry = geometryAt(fx, fy);
         if (geometry === geom) {
           const color = colorAt(fx, fy);
-          if (!color || isChannelOn(color)) { ax += dir.x * WIND_FORCE; ay += dir.y * WIND_FORCE; }
+          if (!color || isChannelOn(color)) {
+            const t = FAN_RANGE_TILES > 1 ? (i - 1) / (FAN_RANGE_TILES - 1) : 0;
+            const strength = FAN_NEAR_FORCE + (WIND_FORCE - FAN_NEAR_FORCE) * t;
+            ax += dir.x * strength; ay += dir.y * strength;
+            if (i <= 2) near = true;
+          }
           break;
         }
         if (geometry === "solid") break; // a wall blocks the airflow before it reaches this far
       }
     }
-    return { ax, ay };
+    return { ax, ay, near };
   }
 
   // v2.19: one point-source-pull system, two presets. Scans a bounded box around the actor
@@ -3530,18 +3631,23 @@
   }
 
   // v2.19: gravity stops applying (not just extra friction) while touching a sticky+solid tile on
-  // any of its 4 sides — checked as an adjacency test, not through resolveAxis's own collision
-  // resolution, since staying stuck has to hold every frame contact continues, not just the instant
-  // of first impact. This is what lets a kid climb: see stepActor's own stuck branch, which treats
-  // movement input like free-roam while stuck rather than platformer jump-only.
+  // a side wall, or its ceiling from below — checked as an adjacency test, not through resolveAxis's
+  // own collision resolution, since staying stuck has to hold every frame contact continues, not
+  // just the instant of first impact. This is what lets a kid climb: see stepActor's own stuck
+  // branch, which treats movement input like free-roam while stuck rather than platformer jump-only.
+  // v2.20 fix: deliberately does NOT check the tile directly under the actor's feet — that's just
+  // standing on a sticky FLOOR (a kid resting on ordinary ground), not clinging to something, and
+  // treating it as "stuck" broke grounded/jumping entirely for anyone who ever stood still on one
+  // (see isOnStickyGround/frictionMultiplierFor for the floor's own, separate "slows you down"
+  // behavior — the two are intentionally different mechanics on the same modifier).
   function isStuckToSticky(actor) {
     const isSticky = (cx, cy) => geometryAt(cx, cy) === "solid" && modifierAt(cx, cy) === "sticky";
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     const leftCol = Math.floor((actor.x - 1) / TILE), rightCol = Math.floor((actor.x + actor.w + 1) / TILE);
-    const topRow = Math.floor((actor.y - 1) / TILE), botRow = Math.floor((actor.y + actor.h + 1) / TILE);
+    const topRow = Math.floor((actor.y - 1) / TILE);
     for (let cy = r0; cy <= r1; cy++) { if (isSticky(leftCol, cy) || isSticky(rightCol, cy)) return true; }
-    for (let cx = c0; cx <= c1; cx++) { if (isSticky(cx, topRow) || isSticky(cx, botRow)) return true; }
+    for (let cx = c0; cx <= c1; cx++) { if (isSticky(cx, topRow)) return true; }
     return false;
   }
 
@@ -3595,14 +3701,15 @@
           if (gateColor && isChannelOn(gateColor)) continue; // a same-colored switch/plate has this gate standing open
         }
         const modifier = modifierAt(cx, cy);
-        // v2.19: spring is the same mechanic as bouncy at a higher restitution (see
-        // SPRING_RESTITUTION) — Trampoline and Spring in the palette, same code path. A hazard
-        // ball (the spawner's default content) always bounces off every wall regardless of the
-        // wall's own modifier — the prototype's "bounces off everything" behavior — rather than
-        // only reacting to a bouncy/spring tile the way the player does.
+        // v2.20: a hazard ball (the spawner's default content) always bounces off every wall
+        // regardless of the wall's own modifier — the prototype's "bounces off everything"
+        // behavior — rather than only reacting to a bouncy tile the way the player does. The
+        // Trampoline geometry object bounces the player (and a hazard ball) too, at its own
+        // stronger restitution — see TRAMPOLINE_RESTITUTION and the extra minimum-launch kick below.
         const isHazardBall = def && def.temperament === HAZARD_BALL_KIND;
-        const bouncy = ((modifier === "bouncy" || modifier === "spring") && actor.isPlayer) || isHazardBall;
-        const restitution = (modifier === "spring" && actor.isPlayer) ? SPRING_RESTITUTION : BOUNCE_RESTITUTION;
+        const isTrampolineGeom = geometry === "trampoline";
+        const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && actor.isPlayer) || isHazardBall;
+        const restitution = isTrampolineGeom ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
         // A blocking lethal tile (a spike floor) is only meant to punish actually stepping on
         // it from above — bumping its side while just walking up next to it, or bonking its
         // underside, stops you like any other solid wall and nothing more. Captured before the
@@ -3622,7 +3729,13 @@
           if (actor.vy > 0) {
             actor.y = cy * TILE - actor.h;
             triggerImpact(actor, "y", actor.vy);
-            if (bouncy) { actor.vy = -actor.vy * restitution; }
+            if (bouncy) {
+              actor.vy = -actor.vy * restitution;
+              // The Trampoline object's whole "extra jumping power" pitch: reflection alone still
+              // scales with impact speed (a gentle step barely bounces, same as plain bouncy), so
+              // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
+              if (isTrampolineGeom) { actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED); sounds.trampolineBoing(); }
+            }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
@@ -3935,15 +4048,13 @@
     log(causedGameOver ? "Splat! Instant game over." : "Splat!");
   }
 
-  // none+bouncy (or none+spring) launches on entry, matching the original top-down "step on it,
-  // get launched" design. Under gravity it's a trampoline (or spring): always launches up,
-  // regardless of how you fell in. Spring is the exact same mechanic at a higher launch speed —
-  // see SPRING_LAUNCH_SPEED — not a new one.
+  // none+bouncy launches on entry, matching the original top-down "step on it, get launched"
+  // design. Under gravity it always launches up, regardless of how you fell in.
   function triggerBouncyLaunch(actor, modifier) {
     if (actor.bouncyCooldown > 0) return;
     actor.bouncyCooldown = 350;
     sounds.boing();
-    const launchSpeed = modifier === "spring" ? SPRING_LAUNCH_SPEED : BOUNCY_LAUNCH_SPEED;
+    const launchSpeed = BOUNCY_LAUNCH_SPEED;
     if (gravityOn()) {
       actor.vy = -launchSpeed;
     } else {
@@ -4176,7 +4287,7 @@
       else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
       if (modifier === "lethal") triggerLethalHazard(player);
       else if (modifier === "hazard") triggerHazard(player);
-      else if (modifier === "bouncy" || modifier === "spring") triggerBouncyLaunch(player, modifier);
+      else if (modifier === "bouncy") triggerBouncyLaunch(player, modifier);
     }
   }
 
@@ -4261,6 +4372,10 @@
       // isStuckToSticky(). Movement input while stuck behaves like free-roam (any direction moves
       // you) rather than jump-only platformer input, which is what actually lets a kid climb.
       const stuck = inGravity && isStuckToSticky(actor);
+      // v2.20: how much a kid's own movement input is damped while standing in/on sticky ground —
+      // see isOnStickyGround/STICKY_MOVE_MULT. Deliberately doesn't touch wind/fan/radial forces
+      // below — mud slows YOUR OWN push, not a conveyor or a fan blowing through it.
+      const stickyMoveMult = isOnStickyGround(actor) ? STICKY_MOVE_MULT : 1;
       // Wind/conveyor (and, v2.19, a fan's projected version of the same force, and a magnet/
       // gravity well's radial pull) fold into the same ax/ay that player input and steering feed
       // into applyAxisFriction, rather than adding straight to velocity beforehand — friction
@@ -4273,6 +4388,7 @@
       checkWhooshSurface(actor, windAccel);
       const radialAccel = radialForceAccelFor(actor);
       const fanAccel = fanAccelFor(actor);
+      actor.nearFan = fanAccel.near; // v2.20: purely a render cue (floating bob) — see renderActors
       let ax = windAccel.ax + radialAccel.ax + fanAccel.ax;
       let ay = windAccel.ay + radialAccel.ay + fanAccel.ay;
       let wantsJump = false;
@@ -4282,20 +4398,26 @@
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
-        if (left && !right) ax += -MOVE_ACCEL; else if (right && !left) ax += MOVE_ACCEL;
+        if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
         if (inGravity && !stuck) {
           wantsJump = keys[" "] || up;
         } else {
-          if (up && !down) ay += -MOVE_ACCEL; else if (down && !up) ay += MOVE_ACCEL;
+          if (up && !down) ay += -MOVE_ACCEL * stickyMoveMult; else if (down && !up) ay += MOVE_ACCEL * stickyMoveMult;
         }
       } else {
         const steer = steeringAccelFor(actor, player);
-        ax += steer.ax;
-        if (!inGravity || stuck) ay += steer.ay;
+        ax += steer.ax * stickyMoveMult;
+        if (!inGravity || stuck) ay += steer.ay * stickyMoveMult;
       }
 
       applyAxisFriction(actor, "x", dt, ax);
       const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
+      // v2.20: sticky ground caps top speed too, not just acceleration — MOVE_ACCEL is high enough
+      // that a kid reaches MAX_SPEED well within a second even at STICKY_MOVE_MULT's damped
+      // acceleration, which would make sticky read as "takes a moment longer to get going" rather
+      // than "actually slower," the opposite of the ask. Capping the ceiling itself is what makes
+      // it read as mud the whole time you're in it, not just at the very start of a step.
+      const effectiveCap = cap * stickyMoveMult;
       // A cannon/bouncy/hazard/bomb-blast launch is deliberately stronger than the normal
       // movement cap — that's the whole point of an impulse or a knockback. Without this, the
       // very next frame's cap-clamp below would silently flatten it straight back down to
@@ -4310,7 +4432,7 @@
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
         // so each axis clamps independently here
-        if (!recentlyLaunched) actor.vx = Math.max(-cap, Math.min(cap, actor.vx));
+        if (!recentlyLaunched) actor.vx = Math.max(-effectiveCap, Math.min(effectiveCap, actor.vx));
         if (wantsJump && actor.grounded) {
           actor.vy = JUMP_VELOCITY;
           actor.jumpCrouch = 1;
@@ -4324,9 +4446,17 @@
           // gravity itself stops applying — the actor hangs exactly where vertical input/forces
           // put it, the same free-roam-style accel path a non-gravity room already uses.
           actor.vy = 0;
+          actor.stickyReleaseT = 0; // v2.20: about to leave — next frame off starts the release ramp at 0
           applyAxisFriction(actor, "y", dt, ay);
         } else {
-          actor.vy += GRAVITY * dt;
+          // v2.20: "slowly letting go" — gravity ramps back up from 0 to full strength over
+          // STICKY_RELEASE_MS after actually breaking contact, instead of slamming to full weight
+          // the very next frame. stickyReleaseT starts (and stays, for anything that's never
+          // touched sticky) at STICKY_RELEASE_MS, i.e. "already fully released" — see the actor
+          // shape's own field default — so this is a no-op for every actor that was never stuck.
+          const releaseScale = Math.min(1, actor.stickyReleaseT / STICKY_RELEASE_MS);
+          actor.stickyReleaseT = Math.min(STICKY_RELEASE_MS, actor.stickyReleaseT + dt * 1000);
+          actor.vy += GRAVITY * releaseScale * dt;
           // vertical wind/fan/radial force still applies under gravity (e.g. a rising air current)
           // — gravity's own integration is a direct velocity add rather than accelInput/friction,
           // so this joins it the same way rather than through ay, which this branch never hands to
@@ -4341,7 +4471,7 @@
         // independently would let a diagonal exceed cap by up to sqrt(2)x
         if (!recentlyLaunched) {
           const speed = Math.hypot(actor.vx, actor.vy);
-          if (speed > cap) { const scale = cap / speed; actor.vx *= scale; actor.vy *= scale; }
+          if (speed > effectiveCap) { const scale = effectiveCap / speed; actor.vx *= scale; actor.vy *= scale; }
         }
       }
     }
@@ -4436,12 +4566,14 @@
 
   // v2.19: advances every spawner tile's countdown and fires it when ready — scans the room's
   // board for "spawner" geometry each tick (cheap at this board size) rather than maintaining a
-  // separate index that painting/erasing would have to keep in sync. Play-only, same as
-  // updateCamera/checkRunnerFailState below: a spawner's countdown is a gameplay mechanic a kid
-  // experiences by pressing Play, not something that should churn out actors mid-edit — and
-  // because Play always resumes from the untouched build snapshot (see
-  // restartPlaySessionFromSnapshot/exitToBuildMode), anything a spawner creates only ever exists
-  // for the current Play session, cleaned up for free on restart or exit.
+  // separate index that painting/erasing would have to keep in sync.
+  // v2.20: this used to be gated Play-only, on the reasoning that a spawner's countdown is a
+  // gameplay mechanic a kid experiences by pressing Play. That directly contradicted the "always
+  // live, no edit/play split" rule (see CLAUDE.md) — a wanderer or chaser already roams the instant
+  // it's placed in Build mode, so a spawner sitting inert until Play was the actual inconsistency,
+  // not a deliberate exception. It now runs unconditionally from tick(), same as every other actor
+  // behavior. updateCamera/checkRunnerFailState right below stay Play-only on purpose: those really
+  // are session concepts (a run's camera, a run's fail state) with no meaning while just tinkering.
   function tickSpawners(dt) {
     const now = performance.now();
     for (let y = 0; y < ROWS; y++) {
@@ -4495,11 +4627,14 @@
       stepActor(actor, dt, player);
     }
     tickActorContactCooldowns(dt);
+    // v2.20: spawners run always-live, Build mode included — see tickSpawners' own comment on why.
+    if (!roomTransition) {
+      tickSpawners(dt);
+      tickSpawnedTTL();
+    }
     if (appMode === "play" && !roomTransition) {
       updateCamera(dt);
       checkRunnerFailState(player);
-      tickSpawners(dt);
-      tickSpawnedTTL();
     }
   }
 
@@ -4869,7 +5004,12 @@
       vx: 0, vy: 0, grounded: false, isPlayer, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
-      cannonCooldown: 0, warpCooldown: 0
+      cannonCooldown: 0, warpCooldown: 0,
+      // v2.20: "already fully released" — see stepActor's own comment on why this is the correct
+      // default rather than 0, and isOnStickyGround/STICKY_RELEASE_MS. nearFan is a pure render
+      // cue, recomputed fresh every frame by fanAccelFor — false here is just the pre-first-frame
+      // value, never read before stepActor sets it for real.
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false
     };
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -4917,9 +5057,16 @@
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false,
       spawnerKey, spawnBornAt: nowMs
     };
     actors.push(actor);
+    // v2.20: an arrival deserves the same "something happened" treatment a despawn already gets
+    // (sounds.pop()/popVanish there) — a materialize chime plus the same bounce-in pop the
+    // chaser-catch respawn already uses (caughtBounceIn), reused rather than inventing a near-
+    // identical second keyframe set for "a thing appearing."
+    sounds.spawn();
+    playRecipe(actor, "caughtBounceIn");
     return actor;
   }
 
@@ -5451,6 +5598,52 @@
   // from. Every call site (renderGame, in Build or Play) picks viewStartCol appropriately; a plain
   // call with no third argument (viewStartCol defaulting to 0) reproduces the pre-v2.17 behavior
   // exactly, for a Fixed room where it's always 0 anyway.
+  // v2.20: the "white wavy lines" a fan's airflow needed to actually read as wind rather than just
+  // an icon with a chevron on it — small dashes flowing outward from the fan along its facing
+  // direction, animated with a perpendicular wobble so they read as moving air, not a static
+  // decoration. Follows the exact same reach/stop rule fanAccelFor() itself uses (walls block it,
+  // FAN_RANGE_TILES caps it) so the visual never promises force that isn't actually there.
+  // Live-room only (isLive) — a frozen room-transition snapshot has no "current time" for the
+  // animation to run against.
+  function drawFanStream(ctx, boardArg, viewStartCol, isLive) {
+    if (!isLive) return;
+    const now = performance.now();
+    for (let y = 0; y < ROWS; y++) {
+      for (let bx = viewStartCol; bx < viewStartCol + COLS; bx++) {
+        const gKey = boardArg[y] && boardArg[y][bx];
+        const geometry = gKey && GAMEPLAY_TILE_DEFS[gKey] ? GAMEPLAY_TILE_DEFS[gKey].geometry : null;
+        if (!FAN_ORDER.includes(geometry)) continue;
+        const color = colorBoard[y][bx];
+        if (color && !isChannelOn(color)) continue; // matches fanAccelFor's own switch-gate check
+        const dir = FAN_DIRECTIONS[geometry];
+        const perpX = -dir.y, perpY = dir.x;
+        for (let i = 1; i <= FAN_RANGE_TILES; i++) {
+          const fx = bx + dir.x * i, fy = y + dir.y * i;
+          if (fy < 0 || fy >= ROWS || fx < 0 || fx >= roomCols()) break;
+          const stopKey = boardArg[fy] && boardArg[fy][fx];
+          const stopGeometry = stopKey && GAMEPLAY_TILE_DEFS[stopKey] ? GAMEPLAY_TILE_DEFS[stopKey].geometry : null;
+          if (stopGeometry === "solid") break; // a wall blocks the airflow before it reaches this far
+          const sx = fx - viewStartCol;
+          if (sx < 0 || sx >= COLS) continue;
+          const phase = now / 260 - i * 0.8;
+          const wobble = Math.sin(phase) * 3;
+          const fade = 1 - (i - 1) / FAN_RANGE_TILES;
+          const cx = sx * TILE + TILE / 2 + perpX * wobble;
+          const cy = fy * TILE + TILE / 2 + perpY * wobble;
+          ctx.save();
+          ctx.globalAlpha = 0.5 * fade * (0.6 + 0.4 * Math.sin(phase * 1.3));
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(cx - dir.x * 6, cy - dir.y * 6);
+          ctx.lineTo(cx + dir.x * 6, cy + dir.y * 6);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+  }
+
   function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewStartCol) {
     viewStartCol = viewStartCol || 0;
     const cell = TILE / ART;
@@ -5507,6 +5700,8 @@
       }
     }
 
+    drawFanStream(ctx, boardArg, viewStartCol, isLive);
+
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth = 1;
     for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * TILE, 0); ctx.lineTo(x * TILE, ROWS * TILE); ctx.stroke(); }
@@ -5561,6 +5756,10 @@
       // movement was leftward, so a side-facing character (hero/princess/ghost, but harmless for
       // the roughly-symmetric blob archetypes too) always faces the way it's actually going.
       t.sx *= (actor.facingDir || 1);
+      // v2.20: a purely visual "floating" cue while genuinely lifted by a fan at close range (see
+      // fanAccelFor's own near-force falloff/near flag) — a gentle sine bob, phase-offset per actor
+      // so several floating things don't all bob in lockstep. Never touches actual physics.
+      if (actor.nearFan) t.oy += Math.sin(now / 160 + actor.id) * 0.05;
 
       const anim = animState[actor.id];
       if (anim) {
@@ -5817,7 +6016,7 @@
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
-      checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky,
+      checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
       resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
@@ -5829,7 +6028,7 @@
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, tickSpawnedTTL, despawnSpawnedActor,
       stepActor, tick,
-      drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, renderRoomContents, renderActors,
+      drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
@@ -5856,10 +6055,11 @@
       `const WIND_FORCE = ${WIND_FORCE};`,
       `const FAN_ORDER = ${JSON.stringify(FAN_ORDER)};`,
       `const FAN_DIRECTIONS = ${JSON.stringify(FAN_DIRECTIONS)};`,
-      `const FAN_RANGE_TILES = ${FAN_RANGE_TILES};`,
+      `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
-      `const SPRING_RESTITUTION = ${SPRING_RESTITUTION}, SPRING_LAUNCH_SPEED = ${SPRING_LAUNCH_SPEED};`,
+      `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
+      `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS};`,
       `const SPAWNER_MAX_CONCURRENT = ${SPAWNER_MAX_CONCURRENT}, SPAWN_TTL_MS = ${SPAWN_TTL_MS};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
