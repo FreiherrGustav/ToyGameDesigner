@@ -293,23 +293,57 @@ for the current mode. Runner mode ties into the lethal-hazard reaction for
 its fail state (`checkRunnerFailState`) rather than inventing a second
 game-over path.
 
-### Fan and Spawner (v2.19, force curve and always-live fixed in v2.20)
+### Fan and Spawner (v2.19, force curve and always-live fixed in v2.20/v2.20.2)
 
 A fan (`fanAccelFor`) projects wind's own force calculation outward from a
 placed Object along its facing direction, scanning up to `FAN_RANGE_TILES`
 cells and stopping at a wall or the fan itself. v2.20 gave it a distance
-falloff instead of one flat force across the whole range:
-`FAN_NEAR_FORCE` (1900, right at the fan — deliberately *more* than
-`GRAVITY`, so standing directly in the stream actually lifts you) linearly
-interpolating down to `WIND_FORCE` (1000, weaker than gravity, same as
-plain wind) by the far edge. This is what lets fan-to-fan hopping climb
-higher each jump instead of topping out — the near-force genuinely
-overpowers gravity, the far-force never does. `fanAccelFor` also returns a
-`near` flag (true within ~2 tiles) purely for the floating-bob render cue
-(`actor.nearFan`, read in `renderActors`) — a cosmetic sine wobble, never
-physics. The animated white "wavy line" VFX along a fan's stream
-(`drawFanStream`) mirrors the exact same reach/stop rule so it never
-visually promises force that isn't actually there.
+falloff instead of one flat force across the whole range: `FAN_NEAR_FORCE`
+(1900, right at the fan — deliberately *more* than `GRAVITY`, so standing
+directly in the stream actually lifts you) linearly interpolating down to
+`WIND_FORCE` (1000, weaker than gravity, same as plain wind) by the far
+edge. **v2.20.2 fix:** the scan used to start at `i = 1` (the cell BETWEEN
+the actor and the fan), never `i = 0` (the actor actually overlapping the
+fan's own cell) — so the exact moment a kid fell into or stood right on a
+fan, the strongest and most expected point, got ZERO force, a cliff-edge
+drop-off at closest approach. Now `i = 0` is the fan's own cell (peak
+`FAN_NEAR_FORCE`) and `i = FAN_RANGE_TILES` is the far edge (plain
+`WIND_FORCE`). This is what lets fan-to-fan hopping climb higher each jump
+instead of topping out — the near-force genuinely overpowers gravity, the
+far-force never does. `fanAccelFor` also returns a `near` flag (true within
+~1 tile) purely for the floating-bob render cue (`actor.nearFan`, read in
+`renderActors`) — a cosmetic sine wobble, never physics.
+
+**v2.20.2: continuous accel alone can't visibly arrest a fast fall.** Even
+though `FAN_NEAR_FORCE` genuinely "beats gravity" on paper, a terminal-
+velocity drop only spends 2-3 frames inside the ~1-tile-deep near zone
+before it's past the fan — ~450px/s² of net excess accel over ~0.03s barely
+dents 750px/s of existing fall speed. Continuous accel made "fall into a
+fan, feel bounced" imperceptible in practice, a real user-reported gap.
+Fixed with a discrete kick layered on top (`FAN_BOUNCE_MIN_SPEED`,
+`FAN_BOUNCE_RESTITUTION`, applied in `stepActor` right where `fanAccelFor`
+is called): when `near` is true and the actor's velocity component along
+the fan's push direction is opposing it beyond `FAN_BOUNCE_MIN_SPEED`, that
+opposing speed is instantly converted into push-back at
+`FAN_BOUNCE_RESTITUTION` — the same "instant, not just gradual" shape
+`TRAMPOLINE_LAUNCH_SPEED` uses for the identical reason. A fast fall takes
+2-3 successive partial kicks to fully arrest (each one isn't restitution
+enough alone, same shape as a real settling bounce) — `actor.fanKickCooldown`
+gates the accompanying `sounds.boing()` to once per episode rather than once
+per frame. **Deliberately a separate cooldown field from `bouncyCooldown`**
+— reusing that one would also flip `stepActor`'s `recentlyLaunched` speed-
+cap skip on, and holding a direction key during that window is exactly the
+mechanism that caused the v2.20.1 tunneling bug elsewhere; a fan kick must
+never disable the movement speed cap.
+
+The animated white "wavy line" VFX (`drawFanStream`) originally spanned
+the whole `FAN_RANGE_TILES` reach in the blow direction, which read as
+"several tiles of dashes" rather than a wind effect at the fan's mouth — a
+second piece of direct feedback. **v2.20.2:** now confined to the single
+tile immediately in front of the fan — 2-3 short wavy lines side by side
+(spaced across the perpendicular axis), each a small sine ripple kept well
+inside that one tile's bounds and animated by phase so they shimmer in
+place, rather than a dashed line marching outward across the whole range.
 
 The spawner (`tickSpawners`/`tickSpawnedTTL`) originally only ran in Play
 mode, reasoned as "a gameplay mechanic a kid experiences by pressing Play."
@@ -534,13 +568,32 @@ Tests are throwaway Playwright scripts written fresh each session:
 - **`WIND_FORCE (1000) < GRAVITY (1450)`** for plain wind/conveyor tiles,
   deliberately — a "none/solid + wind" tile facing straight up will slow a
   fall, never reverse it. A **fan is different since v2.20**: its force
-  falls off with distance (`FAN_NEAR_FORCE = 1900` right at the fan, down
-  to `WIND_FORCE` at the far edge of `FAN_RANGE_TILES`), and right at the
-  fan it's *stronger* than gravity on purpose (so fan-hopping climbs
-  higher). Query `fanAccelFor(x, y)` directly at fixed distances to test
-  the falloff curve itself — physically dropping an actor toward a fan
-  conflates "distance from the fan" with "time elapsed" since both change
-  every frame as it falls, which makes the curve much harder to isolate.
+  falls off with distance (`FAN_NEAR_FORCE = 1900` at `i = 0`, the fan's own
+  cell, down to `WIND_FORCE` at `i = FAN_RANGE_TILES`), and right at the fan
+  it's *stronger* than gravity on purpose (so fan-hopping climbs higher).
+  Query `fanAccelFor(x, y)` directly at fixed distances to test the falloff
+  curve itself — physically dropping an actor toward a fan conflates
+  "distance from the fan" with "time elapsed" since both change every frame
+  as it falls, which makes the curve much harder to isolate, AND (see the
+  next gotcha) continuous accel alone genuinely isn't enough to arrest a
+  fast fall regardless of the curve's shape — check `fanAccelFor`'s raw
+  output for the force curve, and a real physics trace (with the discrete
+  kick engaged) for the felt bounce.
+- **`fanAccelFor`'s distance index `i` starts at 0 (the actor overlapping
+  the fan's own cell), not 1** (v2.20.2 fix — it used to start at 1, so an
+  actor actually standing on/falling into the fan, the single most expected
+  moment for it to matter, got zero force). If a test scans distances with
+  `for (i = 1; i <= FAN_RANGE_TILES; i++)`, it's silently skipping the
+  strongest point on the curve.
+- **A fan's continuous force can't visibly arrest a fast fall on its own —
+  a discrete kick does the real work** (`FAN_BOUNCE_MIN_SPEED`/
+  `FAN_BOUNCE_RESTITUTION` in `stepActor`, v2.20.2). Testing "does falling
+  into an upward fan produce a bounce" by only checking `fanAccelFor`'s
+  returned `ay` proves the force curve is right but not that it's felt —
+  run an actual fall (`enterPlayMode`, drop the player through several
+  tiles onto/through the fan, sample `vy` every frame) and look for `vy`
+  actually going negative (a true reversal), not just a smaller positive
+  number.
 - **`isStuckToSticky` only checks a sticky solid tile's LEFT, RIGHT, and TOP
   sides — never the tile directly under an actor's feet** (fixed in v2.20;
   it originally also checked the bottom-adjacent tile, which meant merely
