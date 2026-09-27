@@ -3710,6 +3710,11 @@
         const isTrampolineGeom = geometry === "trampoline";
         const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && actor.isPlayer) || isHazardBall;
         const restitution = isTrampolineGeom ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
+        // v2.20.1: a bounce needs to SOUND like a bounce, not like an ordinary landing — the two
+        // used to be indistinguishable (both just played the generic thud via triggerImpact).
+        // Player-only, same as the bounce reflection itself only ever mattering for the player —
+        // a wandering hazard ball caroming off every wall doesn't need a boing on every hit.
+        const bounceSound = isTrampolineGeom ? sounds.trampolineBoing : sounds.boing;
         // A blocking lethal tile (a spike floor) is only meant to punish actually stepping on
         // it from above — bumping its side while just walking up next to it, or bonking its
         // underside, stops you like any other solid wall and nothing more. Captured before the
@@ -3718,33 +3723,54 @@
         if (axis === "x") {
           if (actor.vx > 0) {
             actor.x = cx * TILE - actor.w;
-            triggerImpact(actor, "x", actor.vx);
+            triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
+            if (bouncy && actor.isPlayer) bounceSound();
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
-            triggerImpact(actor, "x", actor.vx);
+            triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
+            if (bouncy && actor.isPlayer) bounceSound();
           }
         } else {
           if (actor.vy > 0) {
             actor.y = cy * TILE - actor.h;
-            triggerImpact(actor, "y", actor.vy);
+            triggerImpact(actor, "y", actor.vy, bouncy);
             if (bouncy) {
               actor.vy = -actor.vy * restitution;
               // The Trampoline object's whole "extra jumping power" pitch: reflection alone still
               // scales with impact speed (a gentle step barely bounces, same as plain bouncy), so
               // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
-              if (isTrampolineGeom) { actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED); sounds.trampolineBoing(); }
+              if (isTrampolineGeom) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+              if (actor.isPlayer) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
-            triggerImpact(actor, "y", actor.vy);
+            triggerImpact(actor, "y", actor.vy, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
+            if (bouncy && actor.isPlayer) bounceSound();
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
         else if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
+        // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
+        // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
+        // doing the damage. An actor isn't always exactly tile-aligned, so its AABB routinely spans
+        // TWO columns (for an x-axis call) or two rows (for a y-axis call) — e.g. c0 !== c1 — and
+        // whenever both of those cells are blocking (guaranteed for any multi-tile-wide bouncy
+        // floor/wall/ceiling, i.e. any real one), this loop used to keep going and resolve BOTH in
+        // the same call. The first cell correctly reflects vy (say +373 -> -306, landing on a
+        // bouncy floor). The second cell then re-reads that ALREADY-reflected (now negative) vy,
+        // misreads it as "moving upward into a tile from below," and pushes the actor to y=(cy+1)*
+        // TILE — the tile's FAR side, i.e. straight through it — reflecting a second time (-306 ->
+        // +250.9) so it comes out the other side still falling. Ordinary (non-bouncy) solid tiles
+        // never showed this because their landing branch zeroes vy to exactly 0, and neither
+        // `vy > 0` nor `vy < 0` fires on a second pass over 0 — bouncy's nonzero reflected velocity
+        // is what exposed it. One AABB only ever needs ONE resolved collision per axis per frame;
+        // returning here (rather than looping over every other cell the AABB happens to overlap)
+        // is what actually prevents the tunneling, not just narrows the window for it.
+        return;
       }
     }
   }
@@ -3820,7 +3846,11 @@
     if (!actor.impactMag) return 0;
     return actor.impactMag * Math.exp(-IMPACT_WOBBLE_DECAY * actor.impactWobbleT) * Math.cos(IMPACT_WOBBLE_FREQ * actor.impactWobbleT);
   }
-  function triggerImpact(actor, axis, incomingSpeed) {
+  // v2.20.1: `isBounce` suppresses the generic landing thud — a bounce plays its own dedicated
+  // sound instead (boing/trampolineBoing, right where resolveAxis resolves the bounce itself), so
+  // landing on a bouncy tile no longer sounds identical to landing on a plain one. The visual
+  // impact wobble still tracks every contact exactly as before; only the thud SOUND is skipped.
+  function triggerImpact(actor, axis, incomingSpeed, isBounce) {
     const mag = Math.min(1, Math.abs(incomingSpeed) / 260);
     if (mag <= IMPACT_NOISE_FLOOR) return;
     const currentEnvelope = actor.impactAxis === axis
@@ -3831,7 +3861,7 @@
       actor.impactAxis = axis;
     }
     // a light hop and a fall from height shouldn't sound the same — see sounds.thud()
-    if (axis === "y" && incomingSpeed > 0) sounds.thud(mag);
+    if (axis === "y" && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
   }
 
   // ============== Reaction table (physics terms) ==============
@@ -4285,6 +4315,23 @@
       // already a handled, harmless case on its own (see triggerDoor's own no-op comment).
       else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
       else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
+      // v2.20.1: this function's whole premise (see its own comment above) is "the player never
+      // overlaps blocking geometry" — resolveAxis already pushes it flush to the boundary, zero
+      // overlap, so these modifier reactions were written assuming `geometry` here is always "none"
+      // or similarly non-blocking. That's false on uneven terrain: a hand-drawn ring/circle of
+      // solid+bouncy tiles is a staircase of blocks at different heights, and the player's AABB can
+      // genuinely overlap a NEIGHBORING solid+bouncy cell it's brushing past (not the one it's
+      // resting on) for a frame. Without this guard, that overlap fired triggerBouncyLaunch on top
+      // of resolveAxis's own reflection — and triggerBouncyLaunch sets bouncyCooldown, which
+      // stepActor's recentlyLaunched check uses to skip the MOVE_ACCEL speed cap entirely, so
+      // holding a direction key for the ~350ms cooldown window let velocity accelerate completely
+      // unbounded (observed vx exceeding 1000px/s) — enough to fly straight out past a ring's own
+      // curve before it closes back around. The real user-reported "warp out the bottom of a ring
+      // of bouncy tiles" bug — not the geometry-defaulting one fixed earlier, a second, deeper bug
+      // hiding behind it. Blocking geometry's own bouncy/hazard/lethal reactions belong to
+      // resolveAxis alone; this function must never also react to them.
+      const isBlocking = isBlockingGeometry(geometry, player);
+      if (isBlocking) continue;
       if (modifier === "lethal") triggerLethalHazard(player);
       else if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player, modifier);
