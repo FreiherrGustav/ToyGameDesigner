@@ -34,20 +34,28 @@ user first.**
   before deciding how a kid places them. (Game Rules — gravity/h-wrap/v-wrap
   — are the marker end of this spectrum: whole-room toggles, not painted
   cells; see `GAME_RULES`.)
-- **Modifiers are geometry-agnostic.** `slippery`/`bouncy`/`spring`/
-  `hazard`/`lethal`/`sticky`/`wind` all combine with either `solid` or
-  walkable (`none`) geometry; the combination determines the reading (a
-  solid+bouncy tile is a trampoline, none+hazard is a puddle you walk
-  through, none+lethal is lava, solid+lethal is a spike trap).
+- **Modifiers are geometry-agnostic.** `slippery`/`bouncy`/`hazard`/
+  `lethal`/`sticky`/`wind` all combine with either `solid` or walkable
+  (`none`) geometry; the combination determines the reading (a solid+bouncy
+  tile bounces you off it, none+hazard is a puddle you walk through,
+  none+lethal is lava, solid+lethal is a spike trap, none+sticky is mud you
+  trudge through, solid+sticky is a wall you can climb). v2.20 removed
+  `spring` — it was a second, higher-restitution tuning of `bouncy` with no
+  distinct reading of its own; that "extra bounce power" idea now lives on
+  the dedicated Trampoline *object* instead (see Architecture below), which
+  is a better fit anyway per the very next principle.
 - **Kid-friendly naming, not implementation-jargon.** "Temperament,"
   "geometry," and "channel" all got renamed once already for reading as
   design-jargon rather than words a kid would use (they persist as
   *internal* variable/field names — that's fine, code can stay precise —
   but anything user-facing must read like a toy, not an engine). Watch for
   this recurring — it's an easy mistake to reintroduce. `MODIFIER_LABELS`
-  (e.g. `bouncy` → "trampoline") is the established pattern for renaming a
-  palette-facing label without touching the internal id/serialization
-  format.
+  is the established mechanism for renaming a palette-facing label without
+  touching the internal id/serialization format — it briefly held `bouncy`
+  → "trampoline" in v2.19, reverted in v2.20 once "trampoline" became a
+  real placed object instead (having the same word mean two different
+  things — a modifier's display name AND an unrelated object — was the
+  actual problem users hit, not the renaming mechanism itself).
 - **Characters and Objects get real sprites; Ground stays abstract
   squares.** Identity matters for things with a specific function (what a
   door does, what a chaser does); it doesn't matter for pure terrain. No
@@ -101,7 +109,7 @@ A cell is a small stack of independent layers, not one value:
 **`GEOMETRIES`** (current, see `index.html` for the live list — this drifts
 every patch, don't trust this snapshot blindly):
 `none, solid, diggable, trap, goal, switch, plate, door, cannon-ne/se/sw/nw,
-bomb, warp, fan-n/e/s/w, magnet, gravitywell, spawner`.
+bomb, warp, fan-n/e/s/w, magnet, gravitywell, spawner, trampoline`.
 
 A recurring trick: a geometry family with several storable orientations
 (`CANNON_ORDER`, `FAN_ORDER`, and the modifier-axis `WIND_ORDER`) shows as
@@ -110,10 +118,11 @@ that family rotates it to the next orientation (`cannonRotateStrokeCells`
 tracks this per-stroke). Any new multi-orientation piece should reuse this
 exact pattern, not invent a new one.
 
-**`MODIFIERS`**: `none, slippery, bouncy, spring, hazard, lethal, sticky,
-wind-n/e/s/w`. `MODIFIER_LABELS` remaps `bouncy` → "trampoline" for display
-only — the mechanism to reuse any time an internal id needs a friendlier
-palette name without a serialization-format migration.
+**`MODIFIERS`**: `none, slippery, bouncy, hazard, lethal, sticky,
+wind-n/e/s/w`. `MODIFIER_LABELS` is currently empty (`{}`) — it's the
+mechanism to reuse any time an internal id needs a friendlier palette name
+without a serialization-format migration, not a promise that it's holding
+anything right now.
 
 **`TEMPERAMENTS`** (actor self-steering, palette-selectable in the
 Character tab): `stationary, wanderer, chaser, fleer`. There are also
@@ -128,12 +137,24 @@ piece).
 
 **Important, easy to miss:** not everything in the Objects-tab swatch row
 is an actor. `goal, switch, plate, door, cannon, bomb, warp, fan, magnet,
-gravitywell, spawner` are **geometry tiles** (clicking them calls
-`selectGeometry`, painting `board`); only `pushable` (and collectibles, in
-their own row) are real **actor kinds** (clicking them calls
-`selectActorKind`, setting `selectedActorDefId`/`paintMode = "actor"`).
-This distinction matters a lot for anything that reads `selectedActorDefId`
-— clicking a geometry-tile swatch does **not** change it.
+gravitywell, spawner, trampoline` are **geometry tiles** (clicking them
+calls `selectGeometry`, painting `board`); only `pushable` (and
+collectibles, in their own row) are real **actor kinds** (clicking them
+calls `selectActorKind`, setting `selectedActorDefId`/`paintMode =
+"actor"`). This distinction matters a lot for anything that reads
+`selectedActorDefId` — clicking a geometry-tile swatch does **not** change
+it.
+
+**Trampoline (v2.20)** is a plain, single-orientation geometry tile (no
+`_ORDER` family, unlike cannon/fan) — a real object with a real sprite
+(`GEOMETRY_ICONS.trampoline`), blocking like solid (`isBlockingGeometry`),
+that always bounces the player (and a hazard ball) at `TRAMPOLINE_RESTITUTION`
+(0.97) with a minimum enforced launch speed (`TRAMPOLINE_LAUNCH_SPEED`) on
+top — see `resolveAxis`'s `isTrampolineGeom` branch. It exists specifically
+so "extra bounce power" is a placed, sprite-bearing *thing* a kid finds,
+not a hidden second tuning of the plain `bouncy` modifier (that used to be
+`spring` — see the Non-negotiable principles section above for why it was
+removed instead of kept as a second modifier).
 
 ### Actor shape
 
@@ -206,23 +227,43 @@ once per actor per frame from `tick(dt)`. Shape, roughly:
    `fanAccelFor`. These fold into `ax`/`ay` alongside player input /
    NPC steering (`steeringAccelFor`) — **never add a raw velocity**, or
    `applyAxisFriction` will just eat it back to zero the instant no key is
-   held (the "conveyor doesn't carry a standing player" bug shape).
+   held (the "conveyor doesn't carry a standing player" bug shape). v2.20:
+   both the player-input and steering contributions (not wind/fan/radial)
+   are additionally scaled by `stickyMoveMult` (`STICKY_MOVE_MULT` while
+   `isOnStickyGround(actor)`, else 1) — sticky ground damps a kid's OWN
+   push, not a conveyor or fan blowing through it.
 2. `applyAxisFriction(actor, axis, dt, accelInput)` integrates that axis:
    adds `accelInput*dt` if nonzero, otherwise decays toward 0 by
-   `FRICTION_DECEL * frictionMultiplierFor(actor) * dt`.
+   `FRICTION_DECEL * frictionMultiplierFor(actor) * dt`. `frictionMultiplierFor`
+   also returns `STICKY_FRICTION_MULT` (high — can't coast to a stop) while
+   `isOnStickyGround`, alongside its existing `SLIPPERY_FRICTION_MULT` (low)
+   case. The velocity cap itself (`cap`/`effectiveCap` in `stepActor`) is
+   also scaled down by `stickyMoveMult` — damping acceleration alone barely
+   reads as "slower" once `MOVE_ACCEL` reaches the ordinary cap within a
+   fraction of a second; capping the ceiling is what makes it read as mud
+   the whole time you're in it.
 3. If `gravityOn()` (per-room `gravityEnabled`): normal platformer branch —
    jump, gravity accumulates into `vy` directly (not through `ay`/friction),
    clamped to `MAX_FALL`. If **`isStuckToSticky(actor)`** is true (touching
-   a `sticky` solid wall on any of its 4 sides), gravity is *suspended*
-   entirely that frame (`vy = 0` then free-roam-style `ay` input) — this is
-   why sticky is a wall you climb, not just high friction.
-4. If gravity is off: free-roam 2D movement, single combined speed cap.
+   a `sticky` solid tile via its LEFT, RIGHT, or TOP side — **not the
+   bottom**, see the gotcha below), gravity is *suspended* entirely that
+   frame (`vy = 0` then free-roam-style `ay` input) — this is why sticky is
+   a wall you climb, not just high friction. v2.20: breaking contact starts
+   a `stickyReleaseT` ramp (0 → `STICKY_RELEASE_MS`) that scales gravity
+   back in gradually ("slowly letting go") instead of slamming to full
+   weight the very next frame; an actor that's never touched sticky keeps
+   `stickyReleaseT` at its init value of `STICKY_RELEASE_MS` (= "already
+   fully released"), so this is a no-op for everything else.
+4. If gravity is off: free-roam 2D movement, single combined speed cap
+   (also sticky-scaled, same as #2).
 5. `resolveAxis(actor, axis, dt)` resolves AABB-vs-tile collision per axis
-   separately (not swept), handling solid blocking, `bouncy`/`spring`
-   reflection (restitution scales with impact velocity — **a rebound can
-   never exceed the fall height it came from**, restitution² × drop
-   height is the rough rebound-height formula), hazard/lethal damage,
-   diggable erosion, and hazard-ball's always-bounce.
+   separately (not swept), handling solid blocking, `bouncy` reflection
+   (restitution scales with impact velocity — **a rebound can never exceed
+   the fall height it came from**, restitution² × drop height is the rough
+   rebound-height formula), the Trampoline geometry object's own stronger,
+   minimum-enforced bounce (`isTrampolineGeom`, `TRAMPOLINE_RESTITUTION`/
+   `TRAMPOLINE_LAUNCH_SPEED`), hazard/lethal damage, diggable erosion, and
+   hazard-ball's always-bounce.
 6. `resolveActorContact(moverActor, otherActor)` handles actor-vs-actor
    contact (player vs. NPC): temperament branches (`stationary`/
    `wanderer`/`chaser`/`fleer`/`collectible`/`PUSHABLE_KIND`/
@@ -231,10 +272,14 @@ once per actor per frame from `tick(dt)`. Shape, roughly:
    `if/else if` chain, not data-driven, and that's intentional.
 
 Key constants worth knowing before tuning anything: `GRAVITY = 1450`,
-`MAX_FALL = 750`, `MOVE_ACCEL = 2200`, `WIND_FORCE = 1000` (deliberately
-*less* than gravity — wind/fan can slow a fall, never reverse it, "a kid
-can still fight against it"), `BOUNCE_RESTITUTION = 0.82`,
-`SPRING_RESTITUTION = 0.97`.
+`MAX_FALL = 750`, `MOVE_ACCEL = 2200`, `WIND_FORCE = 1000` (a plain wind/
+conveyor tile's fixed force, deliberately *less* than gravity — it can slow
+a fall, never reverse it, "a kid can still fight against it"),
+`BOUNCE_RESTITUTION = 0.82`, `TRAMPOLINE_RESTITUTION = 0.97`/
+`TRAMPOLINE_LAUNCH_SPEED = 900` (the Trampoline object, stronger than plain
+`bouncy` on purpose), `STICKY_MOVE_MULT = 0.32`/`STICKY_FRICTION_MULT = 5`/
+`STICKY_RELEASE_MS = 500` (sticky ground's own slow-down/no-coast/gradual-
+release numbers).
 
 ### Camera & rooms (v2.17)
 
@@ -244,6 +289,41 @@ much of it is reachable/rendered — `roomCols()` returns the *usable* width
 for the current mode. Runner mode ties into the lethal-hazard reaction for
 its fail state (`checkRunnerFailState`) rather than inventing a second
 game-over path.
+
+### Fan and Spawner (v2.19, force curve and always-live fixed in v2.20)
+
+A fan (`fanAccelFor`) projects wind's own force calculation outward from a
+placed Object along its facing direction, scanning up to `FAN_RANGE_TILES`
+cells and stopping at a wall or the fan itself. v2.20 gave it a distance
+falloff instead of one flat force across the whole range:
+`FAN_NEAR_FORCE` (1900, right at the fan — deliberately *more* than
+`GRAVITY`, so standing directly in the stream actually lifts you) linearly
+interpolating down to `WIND_FORCE` (1000, weaker than gravity, same as
+plain wind) by the far edge. This is what lets fan-to-fan hopping climb
+higher each jump instead of topping out — the near-force genuinely
+overpowers gravity, the far-force never does. `fanAccelFor` also returns a
+`near` flag (true within ~2 tiles) purely for the floating-bob render cue
+(`actor.nearFan`, read in `renderActors`) — a cosmetic sine wobble, never
+physics. The animated white "wavy line" VFX along a fan's stream
+(`drawFanStream`) mirrors the exact same reach/stop rule so it never
+visually promises force that isn't actually there.
+
+The spawner (`tickSpawners`/`tickSpawnedTTL`) originally only ran in Play
+mode, reasoned as "a gameplay mechanic a kid experiences by pressing Play."
+v2.20 removed that gate — it directly contradicted "always live" (a
+wanderer/chaser already roams the instant it's placed in Build mode; the
+spawner sitting inert until Play was the actual bug, not a deliberate
+carve-out). It now runs unconditionally from `tick()`, same as every other
+actor behavior; only genuinely session-scoped things (`updateCamera`,
+`checkRunnerFailState`) stay Play-gated. A spawner still needs nothing
+loaded to work — it falls back to `HAZARD_BALL_DEF_ID` — and any actor kind
+(the default hazard ball, `pushable`, or a full custom character/temperament)
+can be loaded by selecting it and clicking an existing spawner tile
+(`toggleSpawnerContent`); the player itself can't be loaded (spawning
+players makes no sense). Each spawn plays a `materialize` chime
+(`sounds.spawn()`) and reuses the `caughtBounceIn` pop-in keyframe recipe
+— deliberately reused rather than inventing a near-identical second
+"something appearing" animation.
 
 ### Sound (v2.18)
 
@@ -258,6 +338,15 @@ deformation/animation keyframe sequences (`popVanish`, `caughtPunt`, ...)
 `setTimeout`**, not a game-tick-driven delay, so an actor that "pops" is
 still in the `actors` array for ~220ms after the reaction fires before
 `removeActorById` actually runs.
+
+**v2.20 gotcha:** `REACTION_PATCH` had `boom` (bomb) and `shot` (cannon)
+both pointing at `"kaboom"` — two unrelated reactions silently playing the
+identical sound, discovered as a user-reported bug, not caught by any test.
+When adding a new reaction, or reusing an existing patch for one, check
+`REACTION_PATCH` for accidental collisions — a shared patch should be a
+deliberate, documented choice (like `slide`/`wind` both legitimately being
+a rushing-air "whoosh," pitched apart via `sounds.wind`'s own pitchMult
+override) never a copy-paste default.
 
 ### Export pipeline
 
@@ -338,9 +427,20 @@ Tests are throwaway Playwright scripts written fresh each session:
 - **Gravity defaults OFF for every new/empty room.** A fresh "New Project"
   or a room you just created has `gravityEnabled = false`. Any test (or
   manual check) of a gravity-dependent mechanic (sticky wall suspension,
-  a bouncy/spring launch, a fan "fighting" a fall) needs to explicitly
+  a bouncy/Trampoline launch, a fan "fighting" a fall) needs to explicitly
   click the gravity swatch in `#gameRuleSwatches` first, every time, after
   every New Project.
+- **Row/column indices are 0-based and bounded by `ROWS`/`COLS` (18/24 as
+  of v2.20)** — `board[18]` is out of bounds when `ROWS = 18` (valid rows
+  are 0–17). A test that paints a "floor" at row `ROWS` itself (an easy
+  off-by-one when copying an old test) throws `Cannot read properties of
+  undefined` the moment anything reads that row back, not a silent no-op.
+- **Selecting the `bouncy` Surface swatch defaults `selectedGeometry` to
+  `"solid"` if it was `"none"`** (`selectSurfaceModifier`, v2.20 fix) — a
+  deliberate UX default, not a bug, so don't be surprised if a test that
+  expects `"none"` after clicking bouncy sees `"solid"` instead. `sticky`/
+  `slippery`/`hazard`/`lethal` are deliberately NOT defaulted this way —
+  each has its own valid, distinct reading on `"none"` ground.
 - **`paintMode` ("tile" vs "actor") is sticky across tab switches and is
   *not* set by a debug-hook shortcut that only assigns `selectedGeometry`.**
   If a previous action selected an actor (e.g. the player, for a "can this
@@ -362,17 +462,34 @@ Tests are throwaway Playwright scripts written fresh each session:
   is correct product behavior (loading a spawner is the same click-to-place
   gesture, by design) but means "place the player at cell X" tests must
   use a cell that is *not* a spawner tile.
-- **A restitution bounce can't exceed the height it fell from.** Testing
-  "does trampoline/spring launch the player" by checking it clears its
-  *starting* height will fail even when the mechanic works correctly if
-  the fall distance was short — a near-elastic bounce (spring,
-  restitution 0.97) returns close to but not above the drop height. Use a
-  tall, deliberate fall and compare rebound height *between* two
-  restitution values, not against the spawn point.
-- **`WIND_FORCE (1000) < GRAVITY (1450)`**, deliberately. A fan facing
-  straight up will slow a fall, never reverse it. Test a fan's force
-  horizontally (grounded, no gravity fight) unless you're specifically
-  testing the "can't overpower gravity" behavior.
+- **A restitution bounce can't exceed the height it fell from** — this
+  still holds for plain `bouncy` (0.82). The Trampoline OBJECT is the one
+  exception: it enforces a hard minimum launch speed
+  (`TRAMPOLINE_LAUNCH_SPEED`) on top of reflection specifically so a gentle
+  step-on still gets a real bounce — see `resolveAxis`'s `isTrampolineGeom`
+  branch. Testing "does it launch the player" by checking it clears its
+  *starting* height still isn't reliable for a short fall onto plain
+  `bouncy`; use a tall, deliberate fall and compare rebound height
+  *between* plain bouncy and Trampoline, not against the spawn point.
+- **`WIND_FORCE (1000) < GRAVITY (1450)`** for plain wind/conveyor tiles,
+  deliberately — a "none/solid + wind" tile facing straight up will slow a
+  fall, never reverse it. A **fan is different since v2.20**: its force
+  falls off with distance (`FAN_NEAR_FORCE = 1900` right at the fan, down
+  to `WIND_FORCE` at the far edge of `FAN_RANGE_TILES`), and right at the
+  fan it's *stronger* than gravity on purpose (so fan-hopping climbs
+  higher). Query `fanAccelFor(x, y)` directly at fixed distances to test
+  the falloff curve itself — physically dropping an actor toward a fan
+  conflates "distance from the fan" with "time elapsed" since both change
+  every frame as it falls, which makes the curve much harder to isolate.
+- **`isStuckToSticky` only checks a sticky solid tile's LEFT, RIGHT, and TOP
+  sides — never the tile directly under an actor's feet** (fixed in v2.20;
+  it originally also checked the bottom-adjacent tile, which meant merely
+  *standing on* an ordinary sticky floor was misread as "clinging to a
+  wall" — gravity got permanently stuck at `vy = 0`, `grounded` never went
+  true again, and jump input silently stopped working, for anyone who ever
+  stood still on one). Sticky ground's own separate "slows you down" effect
+  is `isOnStickyGround` (any geometry, top-surface-or-walkable-through),
+  deliberately a different function from the wall-climb check.
 - **The level has an implicit solid floor/edges at the board boundary.**
   An actor that free-falls long enough will ground out at the bottom of
   the room and read `vy === 0` for that reason — not because whatever
@@ -383,8 +500,9 @@ Tests are throwaway Playwright scripts written fresh each session:
   `removeActorById` actually removes it from `actors`. Wait past this
   before asserting an actor is gone.
 - **Not every swatch in the Objects tab row is an actor** (see Architecture
-  above — `goal`/`switch`/`plate`/`door`/`cannon`/`bomb`/`warp` are
-  geometry tiles). Clicking one and reading `getSelectedActorDefId()`
+  above — `goal`/`switch`/`plate`/`door`/`cannon`/`bomb`/`warp`/`fan`/
+  `magnet`/`gravitywell`/`spawner`/`trampoline` are geometry tiles).
+  Clicking one and reading `getSelectedActorDefId()`
   afterward will silently return whatever actor def was last actually
   selected, not anything related to the tile you clicked. Only `pushable`
   and the Collectibles-row presets are real loadable/placeable actor defs
