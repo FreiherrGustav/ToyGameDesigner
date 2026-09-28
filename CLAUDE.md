@@ -246,12 +246,23 @@ once per actor per frame from `tick(dt)`. Shape, roughly:
    jump, gravity accumulates into `vy` directly (not through `ay`/friction),
    clamped to `MAX_FALL`. If **`isStuckToSticky(actor)`** is true (touching
    a `sticky` solid tile via its LEFT, RIGHT, or TOP side — **not the
-   bottom**, see the gotcha below), gravity is *suspended* entirely that
-   frame (`vy = 0` then free-roam-style `ay` input) — this is why sticky is
-   a wall you climb, not just high friction. v2.20: breaking contact starts
-   a `stickyReleaseT` ramp (0 → `STICKY_RELEASE_MS`) that scales gravity
-   back in gradually ("slowly letting go") instead of slamming to full
-   weight the very next frame; an actor that's never touched sticky keeps
+   bottom**, see the gotcha below) AND the actor hasn't used up its
+   `STICKY_CLING_MS` window yet, it's fully frozen — `vx`/`vy` both hard to
+   0, no movement input of any kind contributes (see the input section
+   above `stepActor`'s gravity branch). **v2.20.3: sticky is a timed CLING,
+   not indefinite climbing.** The original v2.19/v2.20 shape let free-roam
+   input move the actor in any direction for as long as contact held, which
+   in practice meant holding a direction key let a kid scale a sticky wall
+   forever — direct feedback called this out explicitly ("you certainly
+   shouldn't be able to climb walls that are sticky"). `actor.stickyClingT`
+   counts up only while `isStuckToSticky` is true and resets to 0 the
+   instant contact actually breaks, so a fresh touch (a different wall, or
+   the same one after fully releasing) gets its own full cling. Once
+   `stickyClingT` exceeds `STICKY_CLING_MS` — whether or not contact is
+   still being made — the existing `stickyReleaseT` ramp (0 →
+   `STICKY_RELEASE_MS`) takes over automatically, scaling gravity back in
+   gradually ("slowly letting go") instead of slamming to full weight the
+   very next frame; an actor that's never touched sticky keeps
    `stickyReleaseT` at its init value of `STICKY_RELEASE_MS` (= "already
    fully released"), so this is a no-op for everything else.
 4. If gravity is off: free-roam 2D movement, single combined speed cap
@@ -282,7 +293,39 @@ a fall, never reverse it, "a kid can still fight against it"),
 `TRAMPOLINE_LAUNCH_SPEED = 900` (the Trampoline object, stronger than plain
 `bouncy` on purpose), `STICKY_MOVE_MULT = 0.32`/`STICKY_FRICTION_MULT = 5`/
 `STICKY_RELEASE_MS = 500` (sticky ground's own slow-down/no-coast/gradual-
-release numbers).
+release numbers), `STICKY_CLING_MS = 1000` (how long a sticky WALL freezes
+an actor before the release ramp kicks in on its own — see below).
+
+### Pushables (v2.20.3)
+
+`shovePushables(actor, axis)` is the actor-vs-actor collision path for
+`PUSHABLE_KIND` — a continuous shove every frame contact holds (see its own
+comment for why that's a separate mechanism from the discrete bump-and-
+cooldown reaction `resolveActorContact` gives every other actor pair). It
+attempts to displace the pushable by however far the mover just moved; if
+that displacement would be blocked, the MOVER stops at the pushable's edge
+instead (or, for a vertical mover with `vy > 0`, comes to rest exactly on
+top of it). Two bugs fixed here, both direct feedback:
+
+1. **Landing on a pushable never set `actor.grounded`** — only
+   `resolveAxis`'s own tile-landing branch did that, so jump input was
+   silently ignored for as long as a kid stood on a pushable. The `vy > 0`
+   branch now sets `actor.grounded = true` explicitly when the mover comes
+   to rest on top, the same as landing on a tile would.
+2. **Two pushables could overlap or pass straight through each other** —
+   `shovePushables` used to bail out entirely whenever the MOVER was itself
+   a pushable ("no chaining pushable-into-pushable, for now"). It now runs
+   for every actor regardless of kind, and its `blocked()` check consults a
+   new sibling helper, `actorBlockedByOtherPushables(candidate, selfId,
+   moverId)` (the actor-vs-actor analog of `actorBlockedByTiles`), in
+   addition to tiles. This is what makes stacking work: a falling pushable
+   landing on a resting one hits the same "displacement blocked, come to
+   rest on top" path a mover already used for a single pushable resting on
+   a tile — no chain-push physics needed, since `PUSHABLE_KIND`'s "zero
+   self-driven accel" means a pushable essentially never carries its own
+   horizontal velocity beyond an occasional bounce, so true multi-block
+   chain-pushing (A pushes B pushes C sideways) isn't really exercised by
+   this — it's a low-risk generalization, not a full physics simulation.
 
 ### Camera & rooms (v2.17)
 
@@ -603,6 +646,18 @@ Tests are throwaway Playwright scripts written fresh each session:
   stood still on one). Sticky ground's own separate "slows you down" effect
   is `isOnStickyGround` (any geometry, top-surface-or-walkable-through),
   deliberately a different function from the wall-climb check.
+- **Sticky is a timed cling (`STICKY_CLING_MS`), not indefinite climbing**
+  (v2.20.3 — direct feedback that holding a direction while stuck let a kid
+  scale a sticky wall forever). An actor freezes completely (no movement
+  input of any kind, see `stuck` in `stepActor`) for `STICKY_CLING_MS`,
+  THEN the existing `stickyReleaseT` ramp starts automatically — whether or
+  not contact is still being made. If a test tries to "break contact early"
+  by holding a direction away from the wall while still within the cling
+  window, **nothing happens** — input is fully ignored while `stuck` is
+  true, so the actor won't actually move until the cling timer itself
+  expires. Don't assume pressing away ends the stick early; sample well
+  past `STICKY_CLING_MS` (1000ms) before expecting any release to have
+  started.
 - **The level has an implicit solid floor/edges at the board boundary.**
   An actor that free-falls long enough will ground out at the bottom of
   the room and read `vy === 0` for that reason — not because whatever
