@@ -83,7 +83,7 @@ user first.**
 
 ## Architecture
 
-Everything lives in **one file**: `index.html` (~6,100 lines as of the last
+Everything lives in **one file**: `index.html` (~6,600 lines as of the last
 patch — check current line count, it only grows). No `npm install`, no
 bundler, no `<script src>` to anything but itself. Open it in a browser and
 it runs. This is the whole "app."
@@ -405,28 +405,83 @@ players makes no sense). Each spawn plays a `materialize` chime
 — deliberately reused rather than inventing a near-identical second
 "something appearing" animation.
 
-### Sound (v2.18)
+### Sound (v2.21 — chip engine, replacing the v2.18 Wavesculpt port)
 
-Fully synthesized (Wavesculpt-derived), no samples. `SOUND_PATCHES` are
-named one-shot synth patches; `REACTION_PATCH` maps a reaction name (catch,
-pop, boop, whoosh, doorCreak...) to a patch; `playPatch(patchId, pitchMult,
-velocity)` triggers one; `playActorSound(actor, fallbackReactionName)`
-looks up a custom actor's own `voice` field first, falling back to the
-generic reaction sound. `RECIPES` (separate from sound) are visual
-deformation/animation keyframe sequences (`popVanish`, `caughtPunt`, ...)
-— note `RECIPES.popVanish.duration` (220ms) is a **real wall-clock
-`setTimeout`**, not a game-tick-driven delay, so an actor that "pops" is
-still in the `actors` array for ~220ms after the reaction fires before
-`removeActorById` actually runs.
+Fully synthesized, no samples. The v2.18 placeholder (oscillator "patches"
+ported from Wavesculpt) was replaced wholesale by a tiny NES-2A03-style chip
+synth: `renderChipDesign(design, opt)` renders a finished, hand-tuned
+per-frame sound description (2 pulse channels, 1 triangle, 1 noise — see its
+own header comment for the exact per-frame format) to a `Float32Array`.
+`CHIP_DESIGNS` holds eleven finished designs (`thunk`, `boing`,
+`trampolineBoing`, `pop`, `splat`, `kaboom`, `ding`, `creak`, `wind`,
+`swoosh`, `zip`, `cat`) — **finished per-frame data, not a generator**: they
+were tuned in a separate, unshipped throwaway tool (`sound-designer.html`,
+built in an earlier session, against `chip.js`/`designs.js`, also not
+shipped as-is) and pasted in as plain numbers. `getChipBuffer(name)` renders
+a design to an `AudioBuffer` **once, on first use**, and caches it;
+`playChip(name, pitchMult, velocity)` always plays from that cache — never
+re-renders per trigger. `sounds` is a plain object literal mapping each
+reaction directly to a `playChip(...)` call (see below for why it's written
+as literals, not built from a lookup table).
 
-**v2.20 gotcha:** `REACTION_PATCH` had `boom` (bomb) and `shot` (cannon)
-both pointing at `"kaboom"` — two unrelated reactions silently playing the
-identical sound, discovered as a user-reported bug, not caught by any test.
-When adding a new reaction, or reusing an existing patch for one, check
-`REACTION_PATCH` for accidental collisions — a shared patch should be a
-deliberate, documented choice (like `slide`/`wind` both legitimately being
-a rushing-air "whoosh," pitched apart via `sounds.wind`'s own pitchMult
-override) never a copy-paste default.
+**Not every reaction got a new chip design.** `jump`, `flip`, `fuse`,
+`gameOver`, and three of the four creature voices (`dogBark`,
+`chickenCluck`, `genericCreature` — only `cat` was redesigned) still run on
+the original v2.18 one-shot oscillator engine, kept below the chip engine
+in the same section (`playPatch`, `osc`, `getAudioCtx`, the trimmed
+`SOUND_PATCHES` with just those 7 entries). This is a deliberate, narrow
+exception — nothing was silenced just because it wasn't redesigned yet —
+not a half-finished migration; flag it to the user before either deleting
+this leftover engine or authoring new chip designs to replace it.
+`playActorSound(actor, fallbackReactionName)` is what dispatches per voice:
+`def.voice === "cat"` goes to `playChip("cat", ...)`, any other non-empty
+`def.voice` goes to `playPatch(def.voice, ...)` (the legacy engine), empty
+falls back to the generic reaction sound — see `VOICE_PATCHES` for the
+picker's id/label list.
+
+**The old ~20-entry `REACTION_PATCH` table is gone, consolidated onto the
+new engine's 8 designed families.** Each family's own `use` field (in the
+original `designs.js`) is what decided the consolidation, not guesswork:
+`boing` also covers a plain actor-vs-actor bounce and (via its own
+`trampolineBoing` entry — the family's "fat" tuned variant, not a duplicate
+of plain `boing`) the Trampoline object's launch, keeping the "extra bounce
+power should be heard, not just felt" distinction v2.20.1 gave it; `pop`
+also covers a spawner's arrival (no separate `materialize` sound anymore);
+`splat` also covers being caught by a chaser (same severity tier — a life
+lost — as a lethal hazard, not the old separate `gotcha` patch); `thunk`
+also covers every other physical bump/knock (NPC `boop`/`oof`, a hazard's
+non-lethal knockback, a diggable tile eroding) that used to be its own
+named patch. **`kaboom` deliberately covers both bomb detonation and cannon
+launch** — this looks like it's reintroducing the exact v2.20.1 "cannon and
+bomb sounded identical" bug, but it isn't: the delivered sound design's own
+`use` field says `"bomb explosion, cannon shot"` together, a decision made
+in the design data itself, not by whoever wires up the reaction table. Only
+`wind`/`slide`/`warp` changed in the other direction — they're now three
+genuinely distinct rendered sounds (`wind`/`swoosh`/`zip`, three tuned
+variants of one design family) instead of one shared patch pitched three
+ways, which is what `sounds.wind`'s old pitchMult hack was working around.
+
+**Export-pipeline gotcha, found while building this:** `sounds` must be
+written as literal, self-contained arrow functions
+(`thud: () => playChip("thunk")`), never built by looping over a lookup
+table and closing over the loop variable
+(`sounds[name] = () => playChip(TABLE[name])`). `exportStandaloneGame`
+ships each `sounds.X` function by literal source text (`fn.toString()`) —
+a closure over an outer variable serializes as that variable's *name*, not
+its resolved value, and throws a `ReferenceError` the instant it runs in
+the exported game's own scope, where that outer variable doesn't exist.
+This bit every reaction sound except the couple that were already
+hand-written as literals (`thud`, the old `wind` override) in the v2.18
+engine, undetected until this patch actually loaded an exported game and
+called its sounds directly. Same rule for anything else added to `sounds`
+later — one line per reaction, referencing only literals and globals that
+are also in `runtimeFunctions`/`constantsSource`, never a captured local.
+
+`RECIPES` (separate from sound) are visual deformation/animation keyframe
+sequences (`popVanish`, `caughtPunt`, ...) — note `RECIPES.popVanish.duration`
+(220ms) is a **real wall-clock `setTimeout`**, not a game-tick-driven delay,
+so an actor that "pops" is still in the `actors` array for ~220ms after the
+reaction fires before `removeActorById` actually runs.
 
 **v2.20.1: a bounce needs to sound like a bounce.** `triggerImpact` (called
 unconditionally from every `resolveAxis` collision, bounce or not) used to
