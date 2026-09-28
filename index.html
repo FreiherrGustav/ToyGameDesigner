@@ -2108,31 +2108,269 @@
     return true;
   }
 
-  // ============== Audio (v2.18 — Wavesculpt-derived one-shot synthesis) ==============
-  // Every reaction used to be a plain beep() — one oscillator, one exponential decay, distinguished
-  // only by frequency/duration/waveform. This replaces that with a small port of Wavesculpt's own
-  // rack architecture (github: [[synth-patch-reference]]): a "patch" is up to a few oscillators (or
-  // noise), an optional filter, an ADSR-ish envelope, an optional vibrato, and — since every sound
-  // in this toy fires-and-forgets rather than being held — an optional pitch sweep. That's the
-  // exact vocabulary Wavesculpt already uses for its own one-shot game-SFX patches (laser/
-  // explosion/coin/jump/...), ported in as the foundation rather than building a smaller synthesis
-  // system from scratch.
+  // ============== Audio (v2.21 — chip-engine synthesis, replacing the v2.18 Wavesculpt port) =====
+  // The v2.18 placeholder ("beep" oscillator patches ported from Wavesculpt) is replaced by a tiny
+  // NES-2A03-style chip synth (renderChipDesign, below) playing finished, hand-tuned per-frame
+  // sound data (CHIP_DESIGNS) — designed and tuned in a separate throwaway tool (sound-designer.html,
+  // not shipped) against chip.js/designs.js (also not shipped as-is, see below). Every sound is
+  // rendered once, the first time it's needed, to an AudioBuffer and cached by name (getChipBuffer);
+  // playChip() always plays from that cache, reusing the same v2.6 velocity-to-loudness/
+  // pitchMult-to-playbackRate pattern every reaction sound already used, rather than inventing a
+  // second variation mechanism.
   //
-  // Deliberately left out of this port: the sustained/held-note path (nothing here is held), key
-  // tracking, pulse-width modulation, and the Acoustic Context FX chain (saturation/chorus/reverb)
-  // — none of which a short percussive one-shot needs, and any of which a sound designer can layer
-  // on top of this foundation later for a specific patch that calls for it.
+  // Only the synth core and the FINISHED sound data are shipped here — not chip.js's FamiTracker-
+  // derived render()/compileTrace() path (used only once, offline, to tune Kaboom against a real
+  // explosion recording — never to play it) and not designs.js's parametric "knob" generator logic
+  // (the tuning-time UI, not what a rendered sound needs). That's the ~90KB of tooling down to the
+  // ~5KB of actual per-frame numbers below.
   //
-  // The actual patch designs below (envelope shapes, filter cutoffs, pitch contours) are a
-  // first pass, not final sound design — see the v2.18 patch notes' division of labor. What's
-  // meant to be durable is the architecture: SOUND_PATCHES holds the named, swappable patches;
-  // REACTION_PATCH is the reaction table mapping a game reaction to one of them; changing what a
-  // reaction sounds like is a one-line edit to that table, never a change to the reaction's own code.
+  // Not every old reaction got a new chip design in this pass — see CLAUDE.md's Sound section for
+  // the full consolidation table. jump/flip/fuse/gameOver, and three of the four creature voices
+  // (dog/chicken/generic — only cat was designed against the new engine), still run on the old
+  // one-shot oscillator engine kept below them for exactly that reason: nothing here is silenced
+  // just because it wasn't redesigned yet.
+
+  const CHIP_CPU = 1789773;
+  const CHIP_DUTY = [
+    [0, 1, 0, 0, 0, 0, 0, 0],
+    [0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 1, 1, 1, 1, 0, 0, 0],
+    [1, 0, 0, 1, 1, 1, 1, 1]
+  ];
+  const CHIP_TRI = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+  const CHIP_NOISE_P = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068];
+  const CHIP_PULSE_MIX = [0,0.01160914,0.02293948,0.03400095,0.044803,0.05535466,0.06566453,0.07574082,0.0855914,0.09522375,0.10464505,0.11386216,0.12288165,0.1317098,0.14035264,0.14881595,0.15710526,0.16522589,0.17318292,0.18098125,0.18862559,0.19612045,0.20347018,0.21067894,0.21775076,0.2246895,0.23149888,0.23818249,0.24474378,0.25118607,0.25751258];
+  const CHIP_TND_MIX = [0,0.00669982,0.01334502,0.01993625,0.02647418,0.03295944,0.03939268,0.0457745,0.05210554,0.05838638,0.06461763,0.07079987,0.07693368,0.08301963,0.08905826,0.09505014,0.1009958,0.10689577,0.11275058,0.11856075,0.12432679,0.13004919,0.13572845,0.14136505,0.14695948,0.15251221,0.15802369,0.16349439,0.16892477,0.17431525,0.17966629,0.18497831,0.19025173,0.19548699,0.20068448,0.20584462,0.21096781,0.21605444,0.22110491,0.22611959,0.23109887,0.23604312,0.24095271,0.24582801,0.25066936,0.25547712,0.26025165,0.26499328,0.26970236,0.27437921,0.27902417,0.28363757,0.28821972,0.29277093,0.29729153,0.30178182,0.30624211,0.31067268,0.31507385,0.3194459,0.32378911,0.32810378,0.33239019,0.3366486,0.3408793,0.34508255,0.34925862,0.35340778,0.35753028,0.36162637,0.36569632,0.36974037,0.37375876,0.37775175,0.38171956,0.38566245,0.38958063,0.39347435,0.39734383,0.4011893,0.40501098,0.40880909,0.41258385,0.41633547,0.42006416,0.42377014,0.42745361,0.43111478,0.43475384,0.438371,0.44196646,0.4455404,0.44909302,0.45262452,0.45613508,0.45962488,0.46309411,0.46654295,0.46997158,0.47338017,0.47676891,0.48013797,0.4834875,0.4868177,0.49012871,0.49342071,0.49669386,0.49994833,0.50318426,0.50640183,0.50960118,0.51278247,0.51594585,0.51909147,0.52221949,0.52533004,0.52842328,0.53149935,0.53455839,0.53760054,0.54062595,0.54363474,0.54662706,0.54960305,0.55256283,0.55550653,0.55843429,0.56134624,0.56424251,0.56712321,0.56998848,0.57283844,0.57567321,0.57849292,0.58129768,0.5840876,0.58686282,0.58962345,0.59236959,0.59510136,0.59781888,0.60052226,0.60321161,0.60588703,0.60854863,0.61119653,0.61383082,0.61645161,0.61905901,0.62165311,0.62423403,0.62680185,0.62935667,0.63189861,0.63442775,0.63694419,0.63944802,0.64193934,0.64441825,0.64688483,0.64933919,0.65178139,0.65421155,0.65662975,0.65903607,0.6614306,0.66381343,0.66618465,0.66854434,0.67089258,0.67322945,0.67555505,0.67786944,0.68017272,0.68246495,0.68474623,0.68701662,0.68927621,0.69152508,0.69376329,0.69599093,0.69820807,0.70041478,0.70261113,0.70479721,0.70697308,0.70913881,0.71129448,0.71344014,0.71557589,0.71770177,0.71981786,0.72192423,0.72402095,0.72610807,0.72818568,0.73025382,0.73231257,0.73436198,0.73640213,0.73843308,0.74045488,0.74246761];
+
+  function chipClamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function chipFreq(n) { return 440 * Math.pow(2, (n - 57) / 12); }
+  function chipPeriodF(type, n) { return chipClamp(Math.round(CHIP_CPU / ((type === 2 ? 32 : 16) * chipFreq(n))) - 1, 0, 2047); }
+
+  // One call per 1/60s design frame, oversampled and filtered the same way the console's own
+  // output stage was (a high-pass to remove DC, a low-pass to soften the raw square edges).
+  function makeChipSynth(sr, OS, gain) {
+    const cps = CHIP_CPU / (sr * OS);
+    let p1acc = 0, p2acc = 0, tacc = 0, nacc = 0, p1step = 0, p2step = 0, tstep = 0, lfsr = 1;
+    let hpPrevIn = CHIP_TND_MIX[3 * CHIP_TRI[0]], hpPrevOut = 0, lpPrev = 0;
+    const hpA = Math.exp(-2 * Math.PI * 37 / sr);
+    const lpA = Math.exp(-2 * Math.PI * 14000 / sr);
+    return {
+      frame: function (count, P) {
+        const buf = new Float32Array(count);
+        const T1 = 2 * (P.P1 + 1), T2 = 2 * (P.P2 + 1), TT = P.PT + 1, TN = CHIP_NOISE_P[P.nIdx];
+        const d1 = CHIP_DUTY[P.d1], d2 = CHIP_DUTY[P.d2], v1 = P.v1, v2 = P.v2, triOn = P.triOn, nv = P.nv, short = P.short;
+        for (let s = 0; s < count; s++) {
+          let acc = 0;
+          for (let o = 0; o < OS; o++) {
+            p1acc += cps; while (p1acc >= T1) { p1acc -= T1; p1step = (p1step + 1) & 7; }
+            p2acc += cps; while (p2acc >= T2) { p2acc -= T2; p2step = (p2step + 1) & 7; }
+            if (triOn) { tacc += cps; while (tacc >= TT) { tacc -= TT; tstep = (tstep + 1) & 31; } }
+            nacc += cps;
+            while (nacc >= TN) {
+              nacc -= TN;
+              const fb = (lfsr & 1) ^ ((lfsr >> (short ? 6 : 1)) & 1);
+              lfsr = (lfsr >> 1) | (fb << 14);
+            }
+            const a1 = d1[p1step] ? v1 : 0;
+            const a2 = d2[p2step] ? v2 : 0;
+            const an = (lfsr & 1) ? 0 : nv;
+            acc += CHIP_PULSE_MIX[a1 + a2] + CHIP_TND_MIX[3 * CHIP_TRI[tstep] + 2 * an];
+          }
+          const x = acc / OS;
+          const hp = hpA * (hpPrevOut + x - hpPrevIn);
+          hpPrevIn = x; hpPrevOut = hp;
+          lpPrev = lpA * lpPrev + (1 - lpA) * hp;
+          buf[s] = lpPrev * gain;
+        }
+        return buf;
+      }
+    };
+  }
+
+  function chipJoinChunks(chunks) {
+    let total = 0;
+    for (let k = 0; k < chunks.length; k++) total += chunks[k].length;
+    const samples = new Float32Array(total);
+    let off = 0;
+    for (let k = 0; k < chunks.length; k++) { samples.set(chunks[k], off); off += chunks[k].length; }
+    return samples;
+  }
+
+  // Trims leading/trailing near-silence, a tiny fade-out (no click), and optionally normalizes to
+  // a target peak — every CHIP_DESIGNS entry was tuned against the same peak (0.7, see
+  // getChipBuffer) so the eleven sounds sit at comparable loudness relative to each other.
+  function chipFinishSamples(x, sr, peak) {
+    const th = 1e-4;
+    let a = 0, b = x.length;
+    while (a < b && Math.abs(x[a]) < th) a++;
+    while (b > a && Math.abs(x[b - 1]) < th) b--;
+    if (b <= a) return new Float32Array(1);
+    const y = x.slice(a, b);
+    const fade = Math.min(y.length, Math.round(sr * 0.003));
+    for (let i = 0; i < fade; i++) y[y.length - 1 - i] *= i / fade;
+    if (peak) {
+      let pk = 0;
+      for (let i = 0; i < y.length; i++) { const m = Math.abs(y[i]); if (m > pk) pk = m; }
+      if (pk > 0) { const g = peak / pk; for (let i = 0; i < y.length; i++) y[i] *= g; }
+    }
+    return y;
+  }
+
+  function chipDesignLength(design) {
+    let L = 0;
+    for (let k = 0; k < design.ch.length; k++) L = Math.max(L, design.ch[k].v.length);
+    return L;
+  }
+  function chipAt(arr, i, def) {
+    if (arr == null) return def;
+    if (typeof arr === "number") return arr;
+    return arr.length ? (i < arr.length ? arr[i] : arr[arr.length - 1]) : def;
+  }
+
+  // Renders one finished per-frame sound design (see CHIP_DESIGNS) to a Float32Array of samples —
+  // the trimmed equivalent of chip.js's own renderDesign(), verified bit-identical against it.
+  function renderChipDesign(design, opt) {
+    opt = opt || {};
+    const sr = opt.sampleRate || 44100, OS = opt.oversample || 8;
+    const gain = opt.gain != null ? opt.gain : 1.6, fps = design.fps || 60;
+    const chs = {};
+    for (let k = 0; k < design.ch.length; k++) chs[design.ch[k].t] = design.ch[k];
+    const L = chipDesignLength(design), synth = makeChipSynth(sr, OS, gain);
+    const spf = sr / fps;
+    let cursor = 0;
+    const out = [];
+    function pulse(c, f) {
+      if (!c) return [0, 0, 0];
+      let v = f < c.v.length ? chipClamp(Math.round(c.v[f]), 0, 15) : 0;
+      const per = chipPeriodF(0, chipAt(c.n, f, 57));
+      if (per < 8) v = 0;
+      return [per, v, chipClamp(chipAt(c.d, f, 2) | 0, 0, 3)];
+    }
+    for (let f = 0; f < L; f++) {
+      const a = pulse(chs.p1, f), b = pulse(chs.p2, f), tr = chs.tr, nz = chs.nz;
+      const P = {
+        P1: a[0], v1: a[1], d1: a[2], P2: b[0], v2: b[1], d2: b[2],
+        PT: tr ? chipPeriodF(2, chipAt(tr.n, f, 57)) : 0,
+        triOn: !!(tr && f < tr.v.length && tr.v[f] > 0),
+        nIdx: nz ? 15 - chipClamp(Math.round(chipAt(nz.n, f, 0)), 0, 15) : 15,
+        nv: nz && f < nz.v.length ? chipClamp(Math.round(nz.v[f]), 0, 15) : 0,
+        short: nz ? (chipAt(nz.d, f, 0) ? 1 : 0) : 0
+      };
+      const end = Math.round((f + 1) * spf);
+      out.push(synth.frame(end - cursor, P));
+      cursor = end;
+    }
+    const samples = chipFinishSamples(chipJoinChunks(out), sr, opt.peak);
+    const g = design.gain;
+    if (g != null && g !== 1) for (let q = 0; q < samples.length; q++) samples[q] *= g;
+    return samples;
+  }
+
+  // ---- Finished sound data — the "Copy final JSON" output of sound-designer.html's tuning pass,
+  // not designs.js's generator logic. Each of boing/thunk/pop/splat/ding/creak/cat ships its
+  // family's first ("A") tuned variant; the "whoosh" family's three variants (wind/swoosh/zip) map
+  // 1:1 onto the three separately-named reactions that used to share one "whoosh" patch pre-v2.20;
+  // trampolineBoing reuses the "boing" family's "fat" (C) variant — a deeper, bigger-bodied cousin
+  // of plain "boing" (A) — so the Trampoline object keeps the "extra bounce power should be heard,
+  // not just felt" distinction v2.20.1 gave it, rather than losing it to consolidation; kaboom is
+  // the one fixed, non-parametric entry (FamiTracker track 69 "explode", tuned against a real
+  // recording, unchanged by any knob). ----
+  const CHIP_DESIGNS = {"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904,50.96,50.758,51.223,51.921,52.402,52.436,52.067,51.507,50.996,50.687,50.614,50.716,50.888,51.033,51.09,51.04,50.899,50.702],"v":[14,14,14,14,13,12,11,11,10,9,8,8,7,7,6,6,6,5,5,4,4,4,4,3,2,2,1,1],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[36.0025,32.9986,28.0054,24.0025,22.9994,22.9994,22.9994,22.9994,22.9994,36.0025,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798,20.8798,20.8798,20.8798,34.9994,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798],"v":[15,15,15,15,15,0,0,0,0,10,10,10,10,10,10,0,0,0,0,2,2,2,2,2,2,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,0,6,6,0,0,0,0,2,2,2,15,15,15,2,2,2,2,2,2,2,2,2,2,2],"v":[15,15,15,15,15,15,15,15,15,10,10,10,10,10,10,2,2,2,2,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}};
+
   let audioCtx = null;
   function getAudioCtx() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     return audioCtx;
   }
+
+  // Rendered once per sound name, on first use, and cached as a real AudioBuffer — never re-run
+  // through renderChipDesign on a repeat trigger.
+  const chipBufferCache = {};
+  function getChipBuffer(name) {
+    if (chipBufferCache[name]) return chipBufferCache[name];
+    const design = CHIP_DESIGNS[name];
+    if (!design) return null;
+    const ctx = getAudioCtx();
+    const samples = renderChipDesign(design, { sampleRate: ctx.sampleRate, oversample: 8, peak: 0.7 });
+    const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+    buffer.getChannelData(0).set(samples);
+    chipBufferCache[name] = buffer;
+    return buffer;
+  }
+
+  // Plays a cached chip sound. pitchMult (default 1) sets the AudioBufferSourceNode's playbackRate
+  // — e.g. a custom actor's cat voice plays a hair off pitch so three chasers don't meow in unison
+  // at the exact same note. velocity (0-1, default 1) is the same v2.6 hit-strength loudness curve
+  // every reaction sound already used (a light bump and a hard bump both make a sound, just at
+  // different loudness), ported through unchanged rather than reinvented for the new engine.
+  function playChip(name, pitchMult, velocity) {
+    pitchMult = pitchMult == null ? 1 : pitchMult;
+    velocity = velocity == null ? 1 : velocity;
+    try {
+      const ctx = getAudioCtx();
+      const buffer = getChipBuffer(name);
+      if (!buffer) return;
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.playbackRate.value = pitchMult;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.35 + 0.65 * velocity; // velAmpScale, ported from the v2.18 engine below
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      src.start();
+    } catch (e) { /* audio not available, ignore */ }
+  }
+
+  // The reaction table: which chip sound each reaction plays. v2.21 consolidates the old ~20-entry
+  // REACTION_PATCH onto the new engine's eight designed families (eleven named sounds, counting
+  // the three that reuse the "whoosh" family and the one that reuses "boing" — see CHIP_DESIGNS'
+  // own comment above) — following each family's own `use` field from designs.js below: boing also
+  // covers a plain actor-vs-actor bounce (reflectActorsApart) and, via its own trampolineBoing
+  // entry, the Trampoline object's launch; pop also covers a spawner's arrival (materialize is
+  // gone — its family's `use` text already said "a spawner popping"); splat also covers being
+  // caught by a chaser (same severity tier — a life lost — as a lethal hazard, not the old
+  // separate "gotcha" patch); thunk also covers every other physical bump/knock that used to be
+  // its own named patch (NPC boop/oof, a hazard's non-lethal knockback, a diggable tile eroding);
+  // kaboom deliberately covers both bomb and cannon, per the design file's own
+  // `use: "bomb explosion, cannon shot"` — not a repeat of the v2.20.1 bug that split them, a
+  // decision already made in the delivered sound data, not by this patch.
+  // Written as literal, self-contained arrow functions (not built by looping over a lookup table
+  // and closing over the loop variable) because exportStandaloneGame ships each of these via
+  // fn.toString() — a closure over an outer variable serializes as that variable's NAME, not its
+  // value, and breaks the instant it runs in the exported game's own scope where that variable
+  // doesn't exist. Every entry below is one line, so "changing what a reaction sounds like is a
+  // one-line edit" (the goal the old REACTION_PATCH table was for) still holds.
+  const sounds = {
+    thud: () => playChip("thunk"), // overridden just below for impact-magnitude scaling
+    boop: () => playChip("thunk"), oof: () => playChip("thunk"),
+    yelp: () => playChip("thunk"), crumble: () => playChip("thunk"),
+    boing: () => playChip("boing"), trampolineBoing: () => playChip("trampolineBoing"),
+    pop: () => playChip("pop"), spawn: () => playChip("pop"),
+    splat: () => playChip("splat"), gotcha: () => playChip("splat"),
+    boom: () => playChip("kaboom"), shot: () => playChip("kaboom"),
+    celebrate: () => playChip("ding"),
+    doorCreak: () => playChip("creak"),
+    slide: () => playChip("swoosh"), wind: () => playChip("wind"), warp: () => playChip("zip"),
+  };
+  // scaled to impact magnitude (0-1), exactly as the v2.18 engine did: a light hop is a soft, high
+  // tap; a fall from height is a deep, loud thud. mag is optional — other callers (an editor drag
+  // bump) get the old fixed mid-strength thud by omitting it.
+  sounds.thud = (mag) => {
+    const m = mag === undefined ? 0.5 : mag;
+    playChip("thunk", 1 - m * 0.35, 0.4 + m * 0.6);
+  };
+  // No chip design covers these four yet (see the header comment above) — straight through to the
+  // legacy oscillator engine defined below, unchanged from v2.18.
+  sounds.jump = () => playPatch("jump");
+  sounds.flip = () => playPatch("flip");
+  sounds.fuse = () => playPatch("fuse");
+  sounds.gameOver = () => playPatch("gameOver");
+
+  // ---- Legacy one-shot oscillator engine (v2.18 Wavesculpt port) — kept ONLY for the reactions
+  // with no chip design in this pass (see above): jump/flip/fuse/gameOver, and three of the four
+  // creature voices (dog/chicken/generic; cat moved to the chip engine, see playActorSound). Not a
+  // half-migration left by accident — flag to the user before deleting this rather than silently
+  // dropping sound from something that isn't broken. ----
   function osc(type, semis, detune, level) { return { type, semis, detune: detune || 0, level }; }
   function centsToRatio(cents) { return Math.pow(2, cents / 1200); }
   let noiseBufferCache = null;
@@ -2145,18 +2383,11 @@
     }
     return noiseBufferCache;
   }
-  // Velocity (0-1) scaling curves — ported verbatim from Wavesculpt's rack, so "a light bump and a
-  // hard bump both thunk, just differently" (the v2.6 rule this patch explicitly keeps) reads the
-  // same way in every named patch, not just the one it was originally written for.
   function velAmpScale(v) { return 0.35 + 0.65 * v; }
   function velCutoffScale(v) { return Math.pow(2, 0.75 * (v - 1)); }
   function velEnvAmountScale(v) { return 0.5 + 0.5 * v; }
   function velVibratoScale(v) { return 0.7 + 0.3 * v; }
 
-  // Plays one named patch as a fire-and-forget one-shot. pitchMult (default 1) transposes the
-  // whole patch — e.g. a custom actor's voice plays a hair off from its designed pitch so three
-  // identical chasers don't all meow in unison at the exact same note. velocity (0-1, default 1)
-  // is the v2.6 hit-strength scaling, ported through unchanged (see the vel*Scale functions above).
   function playPatch(patchId, pitchMult, velocity) {
     const patch = SOUND_PATCHES[patchId];
     if (!patch) return;
@@ -2218,9 +2449,6 @@
       tail.connect(gain);
       gain.connect(ctx.destination);
 
-      // envelope: 0 -> peak (attack), peak -> peak*sustain (decay), then fade to ~silent (release)
-      // — the same normalized shape Wavesculpt schedules, minus the "hold at sustain" a one-shot
-      // has no note-off to end.
       const env = patch.env;
       gain.gain.setValueAtTime(0, now);
       gain.gain.linearRampToValueAtTime(peak, now + env.attack);
@@ -2247,117 +2475,40 @@
     } catch (e) { /* audio not available, ignore */ }
   }
 
-  // ---- Named patches (section 1/2/2a of the v2.18 patch notes) ------------------------------
-  // First-pass synthesis recipes, not finished sound design — envelope shapes, filter cutoffs and
-  // pitch contours here are all "open to revision by whoever's actually designing the patches."
   const SOUND_PATCHES = {
-    // -- the 8 named reaction patches the patch notes call out explicitly --
-    thunk: { rootFreq: 130, oscillators: [osc("square", 0, 0, 0.6), osc("sine", -12, 0, 0.4)], filter: { type: "lowpass", freq: 500, q: 0.6, envAmount: -1.5 }, env: { attack: 0.001, decay: 0.09, sustain: 0.15, release: 0.06 }, mod: null, sweep: null },
-    boing: { rootFreq: 300, oscillators: [osc("sine", 0, 0, 0.7)], filter: null, env: { attack: 0.005, decay: 0.12, sustain: 0.3, release: 0.16 }, mod: { rate: 18, depth: 40 }, sweep: { startRatio: 0.6, endRatio: 1.6, time: 0.15 } },
-    whoosh: { rootFreq: 500, oscillators: [osc("noise", 0, 0, 0.8)], filter: { type: "bandpass", freq: 500, q: 1.2, envAmount: 3 }, env: { attack: 0.02, decay: 0.18, sustain: 0.2, release: 0.15 }, mod: null, sweep: null },
-    pop: { rootFreq: 700, oscillators: [osc("sine", 0, 0, 0.7)], filter: null, env: { attack: 0.001, decay: 0.09, sustain: 0, release: 0.04 }, mod: null, sweep: { startRatio: 1, endRatio: 1.8, time: 0.06 } },
-    // needs to land as comedic, not somber (see the patch notes) — a fast downward sweep plus a
-    // heavy wobble under a closing lowpass, aiming for "cartoon squash," not "damage taken."
-    splat: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.5), osc("noise", 0, 0, 0.35)], filter: { type: "lowpass", freq: 900, q: 2, envAmount: -3 }, env: { attack: 0.001, decay: 0.22, sustain: 0.15, release: 0.25 }, mod: { rate: 30, depth: 60 }, sweep: { startRatio: 1.6, endRatio: 0.4, time: 0.22 } },
-    // ported near-verbatim from Wavesculpt's own built-in "Explosion" Sound FX preset — noise + a
-    // deep sub-sine, pushed through a lowpass with a huge envelope amount that snaps open on the
-    // transient and slams shut as it decays.
-    kaboom: { rootFreq: 110, oscillators: [osc("noise", 0, 0, 0.9), osc("sine", -24, 0, 0.4)], filter: { type: "lowpass", freq: 150, q: 0.7, envAmount: 5.5 }, env: { attack: 0.005, decay: 0.5, sustain: 0, release: 0.3 }, mod: null, sweep: null },
-    // adapted from Wavesculpt's "Bonus Chime" — a sine fundamental with a quiet octave-up partner
-    // and a brief upward chirp, the small-reward-cue idiom.
-    ding: { rootFreq: 900, oscillators: [osc("sine", 0, 0, 0.6), osc("sine", 12, 0, 0.3)], filter: null, env: { attack: 0.002, decay: 0.35, sustain: 0.25, release: 0.3 }, mod: null, sweep: { startRatio: 1, endRatio: 1.4, time: 0.06 } },
-    doorCreak: { rootFreq: 250, oscillators: [osc("sawtooth", 0, 0, 0.4), osc("noise", 0, 0, 0.3)], filter: { type: "bandpass", freq: 700, q: 3, envAmount: -3 }, env: { attack: 0.03, decay: 0.3, sustain: 0.3, release: 0.25 }, mod: { rate: 6, depth: 15 }, sweep: { startRatio: 1.3, endRatio: 0.8, time: 0.35 } },
-
-    // -- existing reactions not named in that list, kept as their own distinct patches rather --
-    // -- than folded into one of the 8 above --
-    boop: { rootFreq: 440, oscillators: [osc("triangle", 0, 0, 0.6)], filter: null, env: { attack: 0.002, decay: 0.08, sustain: 0.1, release: 0.05 }, mod: null, sweep: null },
-    oof: { rootFreq: 160, oscillators: [osc("square", 0, 0, 0.55)], filter: { type: "lowpass", freq: 900, q: 0.7, envAmount: -1 }, env: { attack: 0.001, decay: 0.1, sustain: 0.1, release: 0.06 }, mod: null, sweep: null },
-    gotcha: { rootFreq: 700, oscillators: [osc("square", 0, 0, 0.5)], filter: null, env: { attack: 0.001, decay: 0.28, sustain: 0.2, release: 0.15 }, mod: { rate: 22, depth: 20 }, sweep: { startRatio: 1, endRatio: 0.4, time: 0.26 } },
-    crumble: { rootFreq: 200, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: { type: "lowpass", freq: 800, q: 0.8, envAmount: -2.5 }, env: { attack: 0.001, decay: 0.22, sustain: 0.1, release: 0.15 }, mod: { rate: 12, depth: 10 }, sweep: { startRatio: 1.4, endRatio: 0.5, time: 0.24 } },
     jump: { rootFreq: 392, oscillators: [osc("triangle", 0, 0, 0.7), osc("sine", 0, 0, 0.3)], filter: null, env: { attack: 0.01, decay: 0.18, sustain: 0, release: 0.05 }, mod: null, sweep: { startRatio: 1, endRatio: 2.5, time: 0.15 } },
     flip: { rootFreq: 300, oscillators: [osc("triangle", 0, 0, 0.6)], filter: null, env: { attack: 0.002, decay: 0.22, sustain: 0.2, release: 0.15 }, mod: null, sweep: { startRatio: 1, endRatio: 2, time: 0.18 } },
     fuse: { rootFreq: 1000, oscillators: [osc("square", 0, 0, 0.3)], filter: null, env: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, mod: null, sweep: null },
-    yelp: { rootFreq: 600, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: null, env: { attack: 0.002, decay: 0.14, sustain: 0.1, release: 0.08 }, mod: { rate: 20, depth: 30 }, sweep: { startRatio: 1, endRatio: 0.7, time: 0.12 } },
     gameOver: { rootFreq: 300, oscillators: [osc("sawtooth", 0, 0, 0.5)], filter: { type: "lowpass", freq: 1200, q: 0.7, envAmount: -2 }, env: { attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.5 }, mod: null, sweep: { startRatio: 1, endRatio: 0.45, time: 0.6 } },
-    footstep: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.3)], filter: null, env: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 }, mod: null, sweep: null },
 
-    // -- v2.20: cannon and bomb were both wired to "kaboom" (the actual explosion sound) —
-    // -- a real bug, not a style choice, since a cannon shot and a bomb blast are opposite
-    // -- physical events (a quick pneumatic launch vs. a heavy detonation). cannonShot is a
-    // -- short, bright, compressed-air "thwip" — noise + a falling square undertone through a
-    // -- tight bandpass — so the two read as distinctly different weight/duration. --
-    cannonShot: { rootFreq: 180, oscillators: [osc("noise", 0, 0, 0.6), osc("square", -12, 0, 0.4)], filter: { type: "bandpass", freq: 900, q: 1.6, envAmount: -2 }, env: { attack: 0.001, decay: 0.1, sustain: 0.05, release: 0.08 }, mod: null, sweep: { startRatio: 1.8, endRatio: 0.6, time: 0.09 } },
-    // A portal shimmer, not another gust of wind — used to share "whoosh" with slide/wind, which
-    // made stepping through a magic door sound identical to standing on a windy tile.
-    warpChime: { rootFreq: 600, oscillators: [osc("sine", 0, 0, 0.5), osc("sine", 19, 0, 0.25)], filter: { type: "bandpass", freq: 1500, q: 2, envAmount: 1 }, env: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.25 }, mod: { rate: 16, depth: 30 }, sweep: { startRatio: 0.6, endRatio: 1.8, time: 0.2 } },
-    // A deeper, longer, more emphatic cousin of "boing" — the Trampoline object's extra bounce
-    // power should be heard as well as felt.
-    trampolineBoing: { rootFreq: 200, oscillators: [osc("sine", 0, 0, 0.8), osc("triangle", -12, 0, 0.3)], filter: null, env: { attack: 0.003, decay: 0.2, sustain: 0.35, release: 0.28 }, mod: { rate: 12, depth: 55 }, sweep: { startRatio: 0.5, endRatio: 1.8, time: 0.22 } },
-    // A rising, bubbly materialize cue for something arriving from a spawner — distinct from
-    // "ding" (a reward) and "pop" (something vanishing), the two nearest existing candidates.
-    materialize: { rootFreq: 400, oscillators: [osc("sine", 0, 0, 0.5), osc("sine", 7, 0, 0.3)], filter: { type: "lowpass", freq: 2000, q: 0.5, envAmount: 1 }, env: { attack: 0.03, decay: 0.18, sustain: 0.3, release: 0.2 }, mod: { rate: 10, depth: 15 }, sweep: { startRatio: 0.5, endRatio: 1.3, time: 0.18 } },
-
-    // -- v2.18 section 2a: synthesized creature/voice patches — a stylized stand-in, not a --
-    // -- literal animal: pitch-swept tone + vibrato + bandpass filtering, evocative rather than --
-    // -- a real recording. A small curated set; see the patch notes on why this approach hits a --
-    // -- ceiling for a much wider menagerie, and why that's fine for now. --
-    catMeow: { rootFreq: 500, oscillators: [osc("sawtooth", 0, 0, 0.5), osc("triangle", 12, 0, 0.2)], filter: { type: "bandpass", freq: 1200, q: 2.5, envAmount: 0 }, env: { attack: 0.05, decay: 0.15, sustain: 0.5, release: 0.25 }, mod: { rate: 14, depth: 25 }, sweep: { startRatio: 0.7, endRatio: 1.4, time: 0.22 } },
+    // -- v2.18 section 2a: synthesized creature/voice patches for the three not yet redesigned
+    // -- against the chip engine (cat now uses playChip("cat") instead — see playActorSound). --
     dogBark: { rootFreq: 220, oscillators: [osc("square", 0, 0, 0.5), osc("noise", 0, 0, 0.2)], filter: { type: "bandpass", freq: 700, q: 1.5, envAmount: 0 }, env: { attack: 0.001, decay: 0.09, sustain: 0.1, release: 0.05 }, mod: { rate: 25, depth: 15 }, sweep: { startRatio: 1.4, endRatio: 0.8, time: 0.08 } },
     chickenCluck: { rootFreq: 750, oscillators: [osc("square", 0, 0, 0.4), osc("triangle", 7, 0, 0.25)], filter: { type: "bandpass", freq: 1600, q: 2, envAmount: 0 }, env: { attack: 0.001, decay: 0.07, sustain: 0.2, release: 0.06 }, mod: { rate: 35, depth: 60 }, sweep: { startRatio: 1, endRatio: 1.3, time: 0.05 } },
     genericCreature: { rootFreq: 350, oscillators: [osc("triangle", 0, 0, 0.5), osc("sawtooth", 0, 5, 0.2)], filter: { type: "bandpass", freq: 900, q: 1.8, envAmount: 0 }, env: { attack: 0.03, decay: 0.2, sustain: 0.4, release: 0.3 }, mod: { rate: 9, depth: 20 }, sweep: { startRatio: 1.2, endRatio: 0.8, time: 0.3 } },
   };
 
   // Voice options offered by the custom-actor picker (section 3) — "none" falls back to whichever
-  // generic reaction patch would otherwise have played (see playActorSound).
+  // generic reaction sound would otherwise have played (see playActorSound). "cat" is a chip-engine
+  // name (CHIP_DESIGNS), the other three are legacy SOUND_PATCHES ids — playActorSound below is
+  // what actually dispatches to the right engine.
   const VOICE_PATCHES = [
     { id: "", label: "none" },
-    { id: "catMeow", label: "cat" },
+    { id: "cat", label: "cat" },
     { id: "dogBark", label: "dog" },
     { id: "chickenCluck", label: "chicken" },
     { id: "genericCreature", label: "creature" },
   ];
 
-  // The reaction table (v2.18 section 4): which named patch each reaction plays. Redesigning a
-  // reaction's sound is a one-line edit here, never a change to the reaction code that calls it.
-  // v2.20: boom/shot used to BOTH point at "kaboom" — a cannon shot and a bomb blast sounded
-  // identical, a real bug (see cannonShot above), now split. warp gets its own chime instead of
-  // sharing "whoosh" with slide/wind three ways. trampolineBoing/materialize are new, for the new
-  // Trampoline object and the spawner's own arrival cue.
-  const REACTION_PATCH = {
-    thud: "thunk", boop: "boop", oof: "oof", gotcha: "gotcha",
-    boing: "boing", slide: "whoosh", wind: "whoosh", warp: "warpChime",
-    pop: "pop", crumble: "crumble",
-    splat: "splat", yelp: "yelp",
-    boom: "kaboom", shot: "cannonShot",
-    celebrate: "ding", doorCreak: "doorCreak",
-    jump: "jump", flip: "flip", fuse: "fuse", gameOver: "gameOver", footstep: "footstep",
-    trampolineBoing: "trampolineBoing", spawn: "materialize",
-  };
-  const sounds = {};
-  Object.keys(REACTION_PATCH).forEach(reactionName => {
-    sounds[reactionName] = () => playPatch(REACTION_PATCH[reactionName]);
-  });
-  // slide and wind still deliberately share the "whoosh" patch (same rushing-air phenomenon, ice
-  // vs. air current) — pitched apart so the two don't sound literally identical.
-  sounds.wind = () => playPatch(REACTION_PATCH.wind, 1.22);
-  // scaled to impact magnitude (0-1): a light hop is a soft, high tap; a fall from height is a
-  // deep, loud, longer-ringing thud. mag is optional — other callers (an editor drag bump) get the
-  // old fixed mid-strength thud by omitting it. Ported to the new engine's velocity (loudness/
-  // brightness) plus a matching pitch shift (harder hits read deeper), rather than beep()'s old
-  // frequency/duration/volume formula — same "light vs. hard" feel, now via the shared patch.
-  sounds.thud = (mag) => {
-    const m = mag === undefined ? 0.5 : mag;
-    playPatch(REACTION_PATCH.thud, 1 - m * 0.35, 0.4 + m * 0.6);
-  };
-
-  // v2.18 section 3: an actor with its own voice (see the custom-actor voice picker) speaks for
-  // itself at its defining moments — a chaser's catch, a hazard hit — instead of the generic
-  // reaction patch everything else uses. This is what actually enables "a chicken being chased by
-  // three cats": the cats meow when they catch it, the chicken clucks when it's hurt, and every
-  // other actor without a voice picked still gets the plain fallback, unchanged.
+  // v2.18 section 3, updated for the chip engine: an actor with its own voice speaks for itself at
+  // its defining moments — a chaser's catch, a hazard hit — instead of the generic reaction sound
+  // everything else uses. This is what actually enables "a chicken being chased by three cats":
+  // the cats meow when they catch it, the chicken clucks when it's hurt, and every other actor
+  // without a voice picked still gets the plain fallback, unchanged.
   function playActorSound(actor, fallbackReactionName) {
     const def = actorDefs[actor.defId];
-    if (def && def.voice) playPatch(def.voice, 0.94 + Math.random() * 0.12);
+    if (def && def.voice === "cat") playChip("cat", 0.94 + Math.random() * 0.12);
+    else if (def && def.voice) playPatch(def.voice, 0.94 + Math.random() * 0.12);
     else sounds[fallbackReactionName]();
   }
 
@@ -3052,7 +3203,7 @@
   // generic reaction patch the actor's action would otherwise play (see playActorSound) — this is
   // what actually lets a custom actor sound distinct: without picking one here, it stays silent-of-
   // its-own-voice regardless of how expressive its sprite or behavior is.
-  const VOICE_SWATCH_COLORS = { "": "#2f3140", catMeow: "#8d6e63", dogBark: "#6d4c41", chickenCluck: "#ffca28", genericCreature: "#78909c" };
+  const VOICE_SWATCH_COLORS = { "": "#2f3140", cat: "#8d6e63", dogBark: "#6d4c41", chickenCluck: "#ffca28", genericCreature: "#78909c" };
   function renderVoicePicker() {
     const container = document.getElementById("voicePickerSwatches");
     container.innerHTML = "";
@@ -3069,7 +3220,8 @@
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         def.voice = voice.id;
-        if (voice.id) playPatch(voice.id); // preview it right away, the same instant-feedback every other pick in this toy gives
+        if (voice.id === "cat") playChip("cat"); // preview it right away, the same instant-feedback every other pick in this toy gives
+        else if (voice.id) playPatch(voice.id);
         renderVoicePicker();
       });
       container.appendChild(sw);
@@ -6178,6 +6330,8 @@
       playRecipe, sampleRecipe,
       getAudioCtx, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
       playPatch, playActorSound,
+      chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
+      chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
       log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
@@ -6190,7 +6344,13 @@
       `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
       `const BOARD_MAX_COLS = ${BOARD_MAX_COLS}, RUNNER_SPEED = ${RUNNER_SPEED};`,
       `const SOUND_PATCHES = ${JSON.stringify(SOUND_PATCHES)};`,
-      `const REACTION_PATCH = ${JSON.stringify(REACTION_PATCH)};`,
+      `const CHIP_CPU = ${CHIP_CPU};`,
+      `const CHIP_DUTY = ${JSON.stringify(CHIP_DUTY)};`,
+      `const CHIP_TRI = ${JSON.stringify(CHIP_TRI)};`,
+      `const CHIP_NOISE_P = ${JSON.stringify(CHIP_NOISE_P)};`,
+      `const CHIP_PULSE_MIX = ${JSON.stringify(CHIP_PULSE_MIX)};`,
+      `const CHIP_TND_MIX = ${JSON.stringify(CHIP_TND_MIX)};`,
+      `const CHIP_DESIGNS = ${JSON.stringify(CHIP_DESIGNS)};`,
       `const ACTOR_SIZE = ${ACTOR_SIZE};`,
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
@@ -6300,6 +6460,7 @@
 
   let audioCtx = null;
   let noiseBufferCache = null; // getNoiseBuffer()'s own cache — shared runtime source, declared here by hand
+  let chipBufferCache = {}; // getChipBuffer()'s own cache — same reason
 
   let rooms = GAME_DATA.rooms;
   let doorLinks = GAME_DATA.doorLinks;
