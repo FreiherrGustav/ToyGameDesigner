@@ -640,6 +640,13 @@
   // false), gravity takes to ramp back up to full strength — "slowly letting go" instead of an
   // instant full-weight drop the frame contact ends. See stepActor's stickyReleaseT handling.
   const STICKY_RELEASE_MS = 500;
+  // v2.20.3: sticky is a timed CLING, not indefinite climbing — direct feedback that holding a
+  // direction while stuck to a sticky wall let a kid scale it forever, which read as "climbing,"
+  // not "stuck." STICKY_CLING_MS is how long an actor stays frozen in place (no movement input at
+  // all, see stepActor's `stuck` handling) after first touching a sticky wall; once it elapses
+  // (whether or not contact is still being made), gravity starts its existing STICKY_RELEASE_MS
+  // ramp automatically — "clings for a second, then lets go," never "climbs."
+  const STICKY_CLING_MS = 1000;
 
   // v2.19: a point-source pull, distance-dependent (linear falloff to 0 at the radius edge) unlike
   // wind's fixed vector — one system, two presets. Magnet only pulls specific object types
@@ -3804,40 +3811,67 @@
     return false;
   }
 
+  // Whether `candidate`'s current AABB overlaps a DIFFERENT pushable — the actor-vs-actor sibling of
+  // actorBlockedByTiles() above, used the same way by shovePushables(). Excludes `selfId` (the
+  // pushable being tested against its own box makes no sense) and `moverId` (whoever's doing the
+  // pushing/landing this call — never its own obstacle either).
+  function actorBlockedByOtherPushables(candidate, selfId, moverId) {
+    for (const other of actors) {
+      if (other.id === selfId || other.id === moverId) continue;
+      const def = actorDefs[other.defId];
+      if (!def || def.temperament !== PUSHABLE_KIND) continue;
+      if (candidate.x < other.x + other.w && candidate.x + candidate.w > other.x &&
+          candidate.y < other.y + other.h && candidate.y + candidate.h > other.y) return true;
+    }
+    return false;
+  }
+
   // A pushable block is "displaced by contact from the player or other actors" — a real, continuous
   // shove every frame while contact holds, not the discrete bump-and-cooldown reaction other actor
   // pairs get (that reads fine for a one-off "Oof!"/"Boop!", but would make a pushed block jitter
   // in place instead of sliding, since friction decays each cooldown-gated kick before the next
   // one fires). Runs right after the mover's own tile collision on each axis, so the block only
   // gets carried by however far the mover's real movement to occupy this frame.
+  //
+  // v2.20.3: two fixes, both from direct feedback. (1) Landing on top of a pushable never set
+  // actor.grounded — only resolveAxis's own tile-landing did that — so jump input was silently
+  // ignored the whole time a kid stood on one; the vy>0 branch below now sets it explicitly, the
+  // same as landing on a tile would. (2) This function used to bail out entirely whenever the MOVER
+  // was itself a pushable ("no chaining pushable-into-pushable"), so two pushables could freely
+  // overlap or pass through each other and could never stack. It now runs for every actor
+  // regardless of kind, and `blocked()` below checks actorBlockedByOtherPushables() as well as
+  // tiles — a pushable pushed into another pushable now stops at its edge instead of overlapping it
+  // (each occupies its own space), and a falling pushable that lands on a resting one comes to
+  // stop on top of it exactly the way a mover already stopped on top of a single pushable resting
+  // on a tile — no chain-push physics needed, since pushables never carry their own horizontal
+  // velocity (PUSHABLE_KIND's "zero self-driven accel") beyond an occasional bounce.
   function shovePushables(actor, axis) {
-    const moverDef = actorDefs[actor.defId];
-    if (moverDef && moverDef.temperament === PUSHABLE_KIND) return; // no chaining pushable-into-pushable, for now
     for (const other of actors) {
       if (other.id === actor.id) continue;
       const def = actorDefs[other.defId];
       if (!def || def.temperament !== PUSHABLE_KIND) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
       if (axis === "x") {
         if (actor.vx > 0) {
           const delta = (actor.x + actor.w) - other.x;
           other.x += delta;
-          if (actorBlockedByTiles(other)) { other.x -= delta; actor.x = other.x - actor.w; actor.vx = 0; }
+          if (blocked()) { other.x -= delta; actor.x = other.x - actor.w; actor.vx = 0; }
         } else if (actor.vx < 0) {
           const delta = (other.x + other.w) - actor.x;
           other.x -= delta;
-          if (actorBlockedByTiles(other)) { other.x += delta; actor.x = other.x + other.w; actor.vx = 0; }
+          if (blocked()) { other.x += delta; actor.x = other.x + other.w; actor.vx = 0; }
         }
       } else {
         if (actor.vy > 0) {
           const delta = (actor.y + actor.h) - other.y;
           other.y += delta;
-          if (actorBlockedByTiles(other)) { other.y -= delta; actor.y = other.y - actor.h; actor.vy = 0; }
+          if (blocked()) { other.y -= delta; actor.y = other.y - actor.h; actor.vy = 0; actor.grounded = true; }
         } else if (actor.vy < 0) {
           const delta = (other.y + other.h) - actor.y;
           other.y -= delta;
-          if (actorBlockedByTiles(other)) { other.y += delta; actor.y = other.y + other.h; actor.vy = 0; }
+          if (blocked()) { other.y += delta; actor.y = other.y + other.h; actor.vy = 0; }
         }
       }
     }
@@ -4430,10 +4464,19 @@
       if (Math.abs(actor.vy) < 1) actor.vy = 0;
     } else {
       const inGravity = gravityOn();
-      // v2.19: gravity is suspended, not just extra friction, while touching a sticky wall — see
-      // isStuckToSticky(). Movement input while stuck behaves like free-roam (any direction moves
-      // you) rather than jump-only platformer input, which is what actually lets a kid climb.
-      const stuck = inGravity && isStuckToSticky(actor);
+      // v2.20.3: sticky is a timed CLING, not indefinite climbing — touching a sticky wall freezes
+      // the actor in place (no movement input at all, see the input section below) for
+      // STICKY_CLING_MS, then automatically starts letting go (the existing gradual release ramp)
+      // whether or not contact is still being made. The original v2.19 shape (free-roam input for
+      // as long as contact holds) is exactly what let a kid climb a sticky wall indefinitely by
+      // just holding a direction — this replaces that with "stuck for a second," full stop.
+      // stickyClingT counts up only while actually touching, resets the instant contact breaks —
+      // so a NEW touch (a different wall, or the same one after fully letting go) gets its own
+      // full cling, but sliding down alongside the same continuous contact past the cap doesn't
+      // re-freeze every frame.
+      const touchingSticky = inGravity && isStuckToSticky(actor);
+      if (touchingSticky) actor.stickyClingT += dt * 1000; else actor.stickyClingT = 0;
+      const stuck = touchingSticky && actor.stickyClingT <= STICKY_CLING_MS;
       // v2.20: how much a kid's own movement input is damped while standing in/on sticky ground —
       // see isOnStickyGround/STICKY_MOVE_MULT. Deliberately doesn't touch wind/fan/radial forces
       // below — mud slows YOUR OWN push, not a conveyor or a fan blowing through it.
@@ -4475,21 +4518,27 @@
       let ay = windAccel.ay + radialAccel.ay + fanAccel.ay;
       let wantsJump = false;
 
+      // v2.20.3: while actively clinging (`stuck`), no input of any kind contributes — that's the
+      // whole point of a cling instead of a climb. stepActor's own gravity/stuck branch below also
+      // hard-freezes vx/vy to 0 regardless of what ax/ay end up holding, so this is belt-and-braces
+      // (wind/fan/radial forces computed above still get zeroed out there too).
       if (actor.isPlayer) {
         const left = keys["ArrowLeft"] || keys["a"] || keys["A"];
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
-        if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
-        if (inGravity && !stuck) {
-          wantsJump = keys[" "] || up;
-        } else {
-          if (up && !down) ay += -MOVE_ACCEL * stickyMoveMult; else if (down && !up) ay += MOVE_ACCEL * stickyMoveMult;
+        if (!stuck) {
+          if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
+          if (inGravity) {
+            wantsJump = keys[" "] || up;
+          } else {
+            if (up && !down) ay += -MOVE_ACCEL * stickyMoveMult; else if (down && !up) ay += MOVE_ACCEL * stickyMoveMult;
+          }
         }
-      } else {
+      } else if (!stuck) {
         const steer = steeringAccelFor(actor, player);
         ax += steer.ax * stickyMoveMult;
-        if (!inGravity || stuck) ay += steer.ay * stickyMoveMult;
+        if (!inGravity) ay += steer.ay * stickyMoveMult;
       }
 
       applyAxisFriction(actor, "x", dt, ax);
@@ -4525,11 +4574,14 @@
         // not after, or a free-roam actor's "always grounded" never survives re-entry
         actor.grounded = false;
         if (stuck) {
-          // gravity itself stops applying — the actor hangs exactly where vertical input/forces
-          // put it, the same free-roam-style accel path a non-gravity room already uses.
+          // v2.20.3: frozen solid, not just "gravity off" — no input contributed to ax/ay above
+          // while stuck, but any wind/fan/radial force computed earlier this frame still could
+          // have, and the x-axis friction call before this whole block already applied whatever ax
+          // held to vx. Hard-zeroing both here is what actually makes it a cling (can't be nudged
+          // by anything) rather than a wall you can still drift along.
+          actor.vx = 0;
           actor.vy = 0;
-          actor.stickyReleaseT = 0; // v2.20: about to leave — next frame off starts the release ramp at 0
-          applyAxisFriction(actor, "y", dt, ay);
+          actor.stickyReleaseT = 0; // about to start releasing once the cling ends or contact breaks
         } else {
           // v2.20: "slowly letting go" — gravity ramps back up from 0 to full strength over
           // STICKY_RELEASE_MS after actually breaking contact, instead of slamming to full weight
@@ -5092,7 +5144,7 @@
       // default rather than 0, and isOnStickyGround/STICKY_RELEASE_MS. nearFan is a pure render
       // cue, recomputed fresh every frame by fanAccelFor — false here is just the pre-first-frame
       // value, never read before stepActor sets it for real.
-      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0
     };
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -5140,7 +5192,7 @@
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
-      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0,
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       spawnerKey, spawnBornAt: nowMs
     };
     actors.push(actor);
@@ -6110,7 +6162,7 @@
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
-      resolveAxis, actorBlockedByTiles, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
+      resolveAxis, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
@@ -6154,6 +6206,7 @@
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
+      `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
       `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS};`,
       `const SPAWNER_MAX_CONCURRENT = ${SPAWNER_MAX_CONCURRENT}, SPAWN_TTL_MS = ${SPAWN_TTL_MS};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
