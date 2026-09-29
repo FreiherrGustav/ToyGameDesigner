@@ -152,6 +152,20 @@ placed cell* into a real actor (`CARRY_BOMB_KIND` etc.) on the spot. The
 palette/painting story is unchanged; this only matters once something is
 already on the board and gets grabbed.
 
+**v2.21, a second nuance**: bomb, magnet, cannon, fan, and spawner are all
+now **physical** — `isBlockingGeometry` returns true for every one of them,
+same as solid/diggable/Trampoline. Direct feedback: walking straight
+through them (they used to be pure contact-trigger pads, like goal/switch)
+made grabbing one feel glitchy, since there was nothing there to physically
+register the interaction against. Fan and spawner are blocking-only for now
+— not carryable — since both are architecturally tied to a fixed board cell
+(fan's force calc and spawner's whole contents/timer/concurrency-cap system
+scan `geometryAt`, not the `actors` array); making them carryable is a
+bigger, explicitly deferred follow-up, not attempted here. See "Physical
+objects vs. fixtures" and "Grab / carry / drop / throw" below for the full
+story, including what had to change so bomb-arm/cannon-fire still work now
+that touching them no longer means overlapping them.
+
 **Trampoline (v2.20)** is a plain, single-orientation geometry tile (no
 `_ORDER` family, unlike cannon/fan) — a real object with a real sprite
 (`GEOMETRY_ICONS.trampoline`), blocking like solid (`isBlockingGeometry`),
@@ -453,6 +467,81 @@ whether carrying something should affect player movement (slower, lower
 jump), and whether a held object should collide with geometry while
 carried (bonking against walls) instead of staying fully attached. Flag
 either to the user before changing — no evidence yet either way.
+
+### Physical objects vs. fixtures (v2.21)
+
+Direct feedback right after grab/carry shipped: every carryable *except*
+the pushable felt "glitchy" to grab, because bomb/magnet/cannon/trampoline/
+fan/spawner were all pure contact-trigger pads (`isBlockingGeometry`
+returned `false`) — a kid could walk straight through the very thing they
+were trying to grab, so the grab gesture had nothing physical to register
+against. Trampoline was already blocking (see above); this patch made
+**bomb, magnet, cannon, fan, and spawner** blocking too, the same
+`isBlockingGeometry` list solid/diggable/Trampoline already use. This
+surfaced a second, more interesting question from the same feedback: some
+placed objects (door, switch, plate, warp, goal, gravitywell) are the
+opposite on purpose — their *entire function* is being walked onto, and
+making them solid would break them outright. The user asked for these to
+be named as their own category rather than left as an implicit exception
+list. **`FIXTURE_GEOMETRIES`** (`goal, switch, plate, door, warp,
+gravitywell`) is that category — "fixture" as in a kid-friendly word for
+"a thing that's part of the room and doesn't move," parallel to how
+`PUSHABLE_KIND`/`HAZARD_BALL_KIND`/`CARRYABLE_KINDS` name the actor side.
+It documents the boundary at the constant itself rather than only in
+prose, but nothing in the reaction table reads it yet — no code branches
+on "is this a fixture," because "stay a walk-through contact pad, never
+solid, never carryable" is simply what every fixture geometry already does
+by not appearing in `isBlockingGeometry` or `CARRYABLE_KINDS`. If a future
+fixture-only behavior needs its own branch (a kid-facing tooltip, a
+palette grouping), `FIXTURE_GEOMETRIES` is where that check belongs instead
+of a fresh ad hoc list — the point of naming the category now is to have
+one place to extend later, not to duplicate the six-item list again.
+
+**Fan and spawner are blocking-only, deliberately not carryable.** Every
+other carryable in this patch (bomb/magnet/cannon/trampoline) is a single
+self-contained tile whose whole mechanic already lived in one cell, so
+"pick the cell up and turn it into an actor" was a clean lift (see Grab /
+carry / drop / throw above). Fan and spawner aren't: `fanAccelFor` scans
+outward from a fixed `geometryAt` cell along a facing direction, and the
+spawner's contents/cooldown/TTL/concurrency-cap system is keyed to its own
+board position — neither has a "current cell" that could float around
+glued to a player without a much bigger rework of how they store state.
+Making them blocking (so nothing floats through empty air where a fan or
+spawner obviously physically *should* be) was the fix this feedback
+actually asked for; making them carryable is real, separately-scoped
+future work, not attempted here.
+
+**Consequence of blocking the tiles: touch-based triggers had to move from
+"overlap" to "collision."** Bomb-arm and cannon-fire used to fire from
+`checkPlayerTileContacts`, a function whose own comment assumed the player
+never overlaps blocking geometry (true before this patch, since bomb/
+cannon weren't blocking) — it read `modifierAt`/`geometryAt` under the
+player's AABB every frame regardless of whether that cell was walkable.
+Now that bomb/cannon tiles physically stop the player at their edge, that
+overlap never happens, so the trigger moved into `resolveAxis` itself,
+fired at the exact moment a per-axis collision against that geometry is
+resolved (right beside the existing lethal/hazard/Trampoline branches, and
+still before the v2.20.1 tunneling-fix `return`) — `checkPlayerTileContacts`
+and the build-mode drag handler (`clampDragPosition`, via a small shared
+`fireBlockingTileReaction` helper for its two blocking-clamp loops) both
+had their now-dead overlap-based bomb/cannon branches removed in favor of
+this single collision-time call site. Magnet and spawner need no such
+migration — their mechanics were never touch-triggered to begin with
+(magnet pulls at range, spawner fires on its own timer), so making them
+blocking is a pure physics change with nothing else to wire up.
+
+**An emergent interaction worth knowing about, not a bug**: a fan facing
+straight up is now solid, so a player standing on/over it can never
+actually occupy the fan's own cell (the strongest point on its force
+curve, `i = 0`) — the closest it can rest is the cell directly above,
+`i = 1`. `FAN_NEAR_FORCE` (1900) still exceeds `GRAVITY` (1450) at that
+distance, so the player hovers there indefinitely rather than ever
+settling to `grounded = true`. This was verified as a real, stable,
+error-free outcome (not a stuck/undefined state) rather than patched away
+— the user's instruction was specifically to make fans solid, and "hovers
+in the updraft instead of standing in it" is a reasonable reading of that
+for a fan, not a glitch. Flag it to the user before changing `isBlockingGeometry`
+or the fan force curve if this ever needs to read differently.
 
 ### Camera & rooms (v2.17)
 
