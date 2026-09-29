@@ -145,6 +145,13 @@ calls `selectActorKind`, setting `selectedActorDefId`/`paintMode =
 `selectedActorDefId` — clicking a geometry-tile swatch does **not** change
 it.
 
+**v2.21 nuance to the above**: bomb/magnet/cannon/trampoline are still
+painted geometry tiles exactly as described — but a kid can grab one with
+the carry key (see Grab/carry/drop/throw below), which turns *that one
+placed cell* into a real actor (`CARRY_BOMB_KIND` etc.) on the spot. The
+palette/painting story is unchanged; this only matters once something is
+already on the board and gets grabbed.
+
 **Trampoline (v2.20)** is a plain, single-orientation geometry tile (no
 `_ORDER` family, unlike cannon/fan) — a real object with a real sprite
 (`GEOMETRY_ICONS.trampoline`), blocking like solid (`isBlockingGeometry`),
@@ -172,6 +179,11 @@ A live actor (in the `actors` array) looks like:
   spawnerKey, spawnBornAt, ttlPopped,
   // optional, surface-dependent:
   onWhooshSurface,
+  // v2.21, grab/carry/drop/throw (see its own section below):
+  carried,             // true while glued to the player, no physics of its own
+  carrying,            // player only: the id of whatever it's currently carrying, or null
+  fuseArmed,           // carrybomb only: has this specific instance's fuse been lit yet
+  cannonDir,           // carrycannon only: "ne"/"se"/"sw"/"nw", copied from the tile at grab time
 }
 ```
 
@@ -326,6 +338,121 @@ top of it). Two bugs fixed here, both direct feedback:
    horizontal velocity beyond an occasional bounce, so true multi-block
    chain-pushing (A pushes B pushes C sideways) isn't really exercised by
    this — it's a low-risk generalization, not a full physics simulation.
+
+### Grab / carry / drop / throw (v2.21)
+
+The first player-invoked verb in the whole project — every other reaction so
+far happens automatically from contact or movement, never from a kid
+pressing a dedicated key. Still not scripting: it's one more fixed reaction
+(closed to a specific set of object kinds, no authoring), just triggered by
+a keypress instead of a collision. "E" is the key (unchanged from the
+validated prototype, `grab-carry-test.html`).
+
+**State machine**, driven by a pair of `keydown`/`keyup` listeners (not
+per-frame polling like movement — press/release edges matter here):
+not carrying + `keydown` → `tryGrabNearestCarryable` attaches the nearest
+carryable actor or tile within `GRAB_KEY_RANGE`; carrying + `keydown` →
+starts a charge (`grabKeyDownAt = performance.now()`); carrying + `keyup` →
+`heldMs < THROW_TAP_MS` drops at the feet with zero velocity, otherwise
+`throwCarriedObject` fires with speed scaled by how long it was held
+(capped at `THROW_CHARGE_MAX_MS`) in `player.facingDir`'s direction plus a
+fixed `THROW_UPWARD_SPEED` arc. A carried actor is fully exempted from
+physics — `stepActor` early-returns for any `actor.carried` — and instead
+gets its `x`/`y` set directly, every frame, by `tick()`'s own carry-follow
+step (glued just above the player's head). `renderActors` adds a
+charge-shake (scaling with how long the key's been held) as the physical
+cue that holding the key is doing something — the same principle as the
+spawner's own wind-up pulse; without it the charge-to-throw relationship is
+undiscoverable, not just less polished.
+
+**What's carryable**: `PUSHABLE_KIND` (already an ordinary actor, the "does
+carry-and-drop alone feel good" baseline) plus four kinds that normally
+live as painted tiles — bomb, magnet, cannon, trampoline. Grabbing one of
+these picks the *one cell* bodily up off the board (`board[gy][gx] = null`)
+and turns it into a real actor of a matching `CARRY_*_KIND`/`CARRY_*_DEF_ID`
+(`convertGrabbedTileToActor`/`placeCarryableActor`) — same shape as
+`HAZARD_BALL_KIND`, never placed by hand, only ever created this way. Once
+turned into an actor it stays one forever, even after being dropped or
+thrown — never repainted back onto the board. **Deliberate design choice,
+not a migration**: the tile itself is completely unchanged (every existing/
+sample-game board full of painted bombs, magnets, cannons, trampolines
+keeps working exactly as before) and there's no second, differently-named
+palette entry for "the carryable version" — the same swatch a kid already
+knows just becomes grabbable once placed. This was an explicit user call
+("let's keep the interface simple, players will investigate and discover
+on their own") over either a bigger tile-to-actor migration or a parallel
+object category.
+
+**Each kind reuses its tile's own mechanism, never a reimplementation**:
+- **Bomb**: `attachCarryable` arms the fuse the *first* time it's ever
+  grabbed (not on mere contact, unlike the tile) via the exact same
+  wall-clock `setTimeout(..., BOMB_FUSE_MS)` pattern `triggerBombArm`
+  already uses. `detonateCarriedBombAt(roomId, actorId)` finds the actor by
+  id in whichever room it's still in (it's simply abandoned there,
+  detonating unseen, if the player's since left that room), auto-drops it
+  from `player.carrying` first if it's still held ("explodes in your
+  hands"), removes the actor, and calls the *same* `detonateBombAt` the
+  tile uses for the actual blast (tile-clearing, knockback, the boom
+  sound) — no second explosion implementation.
+- **Magnet**: `radialForceAccelFor(actor, player)` (now takes `player`) has
+  a second pull source alongside its tile-scanning loop — a currently
+  *actively held* `CARRY_MAGNET_KIND` actor's own live position, same
+  `MAGNET_FORCE`/falloff math, same `magnetable` restriction (pushable/
+  collectible only, never the player). Resting/dropped, it pulls nothing —
+  "only while actively held" is the whole point, straight from the patch
+  note's "mobile force field" framing.
+- **Cannon**: keeps its orientation (`cannonDir`, copied from the tile
+  geometry string at grab time — `"cannon-ne"` → `"ne"`) as real pose
+  frames (`currentPoseFor` special-cases `CARRY_CANNON_DEF_ID` to pick by
+  direction instead of physics state, the only actor def that does).
+  Dropped/resting, `resolveActorContact`'s `CARRY_CANNON_KIND` branch calls
+  the *same* `triggerCannon` the tile uses, player-only (matching the
+  tile — only `checkPlayerTileContacts`/the Build-mode drag handler ever
+  call it). Not blocking, exactly like the tile.
+- **Trampoline**: the one kind that needed genuinely new physics —
+  `bounceOffTrampolineObjects(actor, axis)`, the actor-vs-actor sibling of
+  `resolveAxis`'s own `isTrampolineGeom` branch, called right after
+  `shovePushables` on both axes. Unlike a pushable, it's never shoved out
+  of the way; landing on its TOP specifically reuses the exact same
+  `TRAMPOLINE_RESTITUTION`/`TRAMPOLINE_LAUNCH_SPEED` formula and sound as
+  the tile. **Deliberate simplification**: bumping its side or underside
+  just blocks (rests), it doesn't bounce on those sides the way the tile's
+  4-directional `resolveAxis` bounce does — the primary "jump on a
+  trampoline" case is what this covers; flag it to the user before trying
+  to make every side bouncy too, since that needs a real actor-vs-actor
+  collision model, not this one.
+
+**`sounds` and the export-time closure-capture gotcha (see Sound section)
+already covered this, but it bit here too while wiring cannon/bomb/magnet
+sounds** — nothing new needed, just confirms the rule holds for any future
+reaction. **A thrown object needs its own `recentlyLaunched` exemption**:
+`throwCarriedObject` sets `obj.bouncyCooldown` (reusing the same field a
+bouncy/Trampoline launch already exempts itself with) specifically because
+`stepActor`'s non-player speed cap (`NPC_MAX_SPEED = 160`, far below any
+real throw speed) would otherwise flatten the throw back down to a slow
+drift within a single frame. Safe to reuse `bouncyCooldown` here — the
+v2.20.1 tunneling risk that field's own comment warns about only exists
+when something holds a directional key during the exemption window, and a
+thrown pushable/bomb/magnet/cannon/trampoline never has steering input of
+its own.
+
+**A latent, pre-existing export bug found and fixed while building this**:
+`spawnActorAt` (already shared into `exportStandaloneGame`'s runtime) does
+`nextActorInstId++`, but nothing in the export template ever declared that
+variable — a spawner firing in an *exported* game threw a `ReferenceError`
+on its very first actor, undetected until this patch's own
+`placeCarryableActor` hit the same missing declaration and a Playwright
+export test actually exercised a spawner rather than just checking the
+page loaded. Fixed by hand-declaring `let nextActorInstId = 1 + <max id
+already in GAME_DATA>;` in the export template, the same "declared here by
+hand" pattern `audioCtx`/`noiseBufferCache`/`chipBufferCache` already use
+for transient runtime-only state.
+
+**Still open, carried over from the prototype, not solved by this patch**:
+whether carrying something should affect player movement (slower, lower
+jump), and whether a held object should collide with geometry while
+carried (bonking against walls) instead of staying fully attached. Flag
+either to the user before changing — no evidence yet either way.
 
 ### Camera & rooms (v2.17)
 
@@ -525,8 +652,9 @@ Build/Play → Rooms → Build/Play mode switching → Project persistence
 (snapshot/undo/autosave/save-load) → Sprite presets → Built-in example
 games → Audio → Canvas setup → Discrete event recipes → Palette UI → Pixel
 editor drawing → Physics helpers → Reaction table → Door transitions →
-Steering → Per-actor physics step → Board/actor painting → Editor drag →
-Reset/start controls → Samples modal → Rendering → Boot → Export → Main
+Steering → Per-actor physics step → Grab/carry/drop/throw → Board/actor
+painting → Editor drag → Reset/start controls → Samples modal → Rendering →
+Boot → Export → Main
 loop.
 
 ## Version labels are not reliable — read the code, not the comment
@@ -730,6 +858,27 @@ Tests are throwaway Playwright scripts written fresh each session:
   selected, not anything related to the tile you clicked. Only `pushable`
   and the Collectibles-row presets are real loadable/placeable actor defs
   from the Objects tab.
+- **`GRAB_KEY_RANGE` (~1.3 tiles) is measured from the player's own
+  center to the target's center** — an actor-vs-actor grab and a
+  grab-off-a-tile-cell both use this, but a kid (or a test) walking at
+  `MAX_SPEED`/`NPC_MAX_SPEED` for even a few hundred ms covers this
+  distance and more, especially toward a NON-blocking tile like cannon/
+  bomb/magnet that a moving actor just walks straight through. A test that
+  walks toward a carryable and then presses the grab key needs either a
+  short, precisely-timed walk or (simplest) to place the player already
+  adjacent before pressing Play — don't assume "walked roughly toward it"
+  lands back in range. Under gravity, this cuts the other way too: a
+  player placed in mid-air starts falling the instant Play begins, so a
+  grab attempted even 100-200ms later may already be out of range of
+  whatever's beside its ORIGINAL placed cell.
+- **A dropped/thrown pushable-or-carryable's landing spot isn't
+  predictable enough to assume in a later step of the same test.** A test
+  that throws an object and then tries to grab something else nearby (by
+  walking there) can end up re-grabbing the just-thrown object instead, if
+  it happened to land closer than the intended target. Prefer teleporting
+  the player via a debug-hook position set (or spacing the two objects/
+  cells much further apart) over chaining "throw, then walk toward the
+  next thing" in one test.
 
 ## Git / commit conventions
 
