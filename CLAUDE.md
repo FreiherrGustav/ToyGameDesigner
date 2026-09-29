@@ -401,40 +401,89 @@ on their own") over either a bigger tile-to-actor migration or a parallel
 object category.
 
 **Each kind reuses its tile's own mechanism, never a reimplementation**:
-- **Bomb**: **held is safe.** The fuse only counts down while the bomb is
-  OUT of the player's hands — dropped or thrown — and picking it back up,
-  even mid-countdown, pauses it again. `pauseBombFuseIfTicking(obj)` /
-  `startOrResumeBombFuse(obj)` are the whole mechanic: `obj.fuseRemainingMs`
-  (defaults to `BOMB_FUSE_MS`) tracks how much fuse is left, `obj.fuseTimerId`
-  is the live `setTimeout` handle while it's actually ticking (`null` while
-  held/paused), and `obj.fuseStartedAt` is when the current running segment
-  began, so pausing can compute exactly how much time has elapsed and
-  subtract it. `attachCarryable` calls `pauseBombFuseIfTicking` for a bomb
-  (a no-op if it was never ticking yet); `dropCarriedObject`/
-  `throwCarriedObject` both call `startOrResumeBombFuse` once the object is
-  no longer held. **This replaced an earlier v2.21 shape** where grabbing
-  armed a real-time fuse immediately and it kept ticking whether held or
-  not ("explodes in your hands" after `BOMB_FUSE_MS` regardless) — direct
-  feedback was that this didn't read as "carryable," it read as "you have a
-  few seconds before this explodes on you no matter what you do." The tile's
-  own touch-based arming (`triggerBombArm`, fired from `resolveAxis` on mere
-  physical contact — see "Physical objects vs. fixtures" below) is
-  untouched: bumping into a live bomb tile still lights it, same landmine
-  feel as always. If a kid grabs an already-armed tile before its timer
-  fires, the conversion already clears `board[gy][gx]`, so the original
-  tile-side timeout finds nothing there when it eventually runs
-  (`detonateBombAt`'s own `if (!tile) return`) and silently no-ops — the
-  grabbed copy starts fresh at `BOMB_FUSE_MS` remaining, fully paused, no
-  double-explosion. `detonateCarriedBombAt(roomId, actorId)` finds the actor
-  by id in whichever room it's still in (it's simply abandoned there,
-  detonating unseen, if the player's since left that room), auto-drops it
-  from `player.carrying` first if it's still held (a thrown/dropped bomb
-  whose fuse ran out while briefly re-grabbed still "explodes in your
-  hands" — held only PAUSES an already-ticking fuse, it doesn't cancel a
-  detonation whose `setTimeout` already fired before the grab registered),
-  removes the actor, and calls the *same* `detonateBombAt` the tile uses for
-  the actual blast (tile-clearing, knockback, the boom sound) — no second
-  explosion implementation.
+- **Bomb**: **held is safe; the tile's own touch-arm hazard is untouched.**
+  Bumping into a live bomb TILE still lights it on mere physical contact,
+  same landmine feel as always (`triggerBombArm`, fired from `resolveAxis`
+  — see "Physical objects vs. fixtures" below), with the same flicker
+  warning it's always had (`drawGameplayTile`'s `extra.armed` alpha-blink,
+  driven by `bombArmed[key]`). Grabbing it is the one thing that changed
+  twice now: `pauseBombFuseIfTicking(obj)` / `startOrResumeBombFuse(obj)`
+  are the whole carry-side mechanic — `obj.fuseRemainingMs` (defaults to
+  `BOMB_FUSE_MS`) tracks how much fuse is left, `obj.fuseTimerId` is the
+  live `setTimeout` handle while actually ticking (`null` while held/
+  paused), `obj.fuseStartedAt` is when the current running segment began so
+  a pause can compute exact elapsed time to subtract. `attachCarryable`
+  calls `pauseBombFuseIfTicking` for a bomb; `dropCarriedObject`/
+  `throwCarriedObject` both call `startOrResumeBombFuse` once it's no
+  longer held. **Replaced an earlier v2.21 shape** where grabbing armed a
+  fresh real-time fuse immediately and it kept ticking whether held or not
+  ("explodes in your hands" regardless) — direct feedback was that this
+  didn't read as carryable, just as a slightly-delayed explosion.
+  **A second round of feedback then caught a gap in that first fix**: the
+  first pass reset ANY grab to a fresh full `BOMB_FUSE_MS`, discarding
+  however far a tile-side touch-arm had already ticked down — so grabbing
+  an already-lit bomb felt like it un-lit the fuse rather than pausing it.
+  `bombArmed[key]` is now `{ armedAt, timerId }`, not just a flag:
+  `convertGrabbedTileToActor`, on grabbing a bomb, checks it, computes the
+  exact remaining time (`BOMB_FUSE_MS - (now - armedAt)`), calls
+  `cancelBombArm(key)` (a new helper — `clearTimeout` the tile-side timer
+  *then* delete the entry, so it can't also fire later against whatever's
+  since been painted over that cell; the four single-cell repaint/erase
+  sites that used to do a bare `delete bombArmed[key]` now call this too,
+  for the same reason) to cancel the original tile timer, and seeds the new
+  actor's `fuseRemainingMs`/`fuseArmed` from that instead of a fresh
+  `BOMB_FUSE_MS` — so "grabbed mid-countdown" genuinely means *paused*
+  mid-countdown, picking up exactly where the tile left off once dropped or
+  thrown again. A bomb grabbed before ever being touched still starts at a
+  full, unarmed `BOMB_FUSE_MS`, same as before. `detonateCarriedBombAt(roomId,
+  actorId)` finds the actor by id in whichever room it's still in (it's
+  simply abandoned there, detonating unseen, if the player's since left
+  that room), auto-drops it from `player.carrying` first if it's still held
+  (only possible if its `setTimeout` fired in the same tick a grab was
+  about to pause it — JS's single-threaded execution makes this a
+  theoretical, not practical, case; kept as a defensive no-op rather than
+  removed), and calls the *same* `detonateBombAt` the tile uses for the
+  tile-clearing/knockback/boom-sound side of the blast — no second
+  explosion implementation for that part.
+
+  **The explosion VISUAL was a separate, real gap**, reported as "the
+  explosion animation is gone": `detonateBombAt`'s own blast effect
+  (`tileAnimState[...] = { recipe: "bombBlast", ... }`) is grid-cell-based
+  and only ever applies where `targetBoard[y][x]` actually has a painted
+  tile — which a carried bomb, sitting freely over ordinary open ground by
+  the time it goes off, usually isn't. The sound and tile-clearing side
+  (for solid neighbors actually in the blast radius) still fired correctly;
+  only the bomb's own on-screen poof was silently skipped. Fixed the same
+  way a "popped" actor already is elsewhere (`popVanish`/
+  `RECIPES.popVanish.duration` — see this doc's own testing gotchas):
+  `detonateCarriedBombAt` now calls `playRecipe(bombActor, "bombBlast")`
+  (position-based, via `animState`, not grid-cell-based, so it works
+  wherever the bomb happens to be) and delays the actual
+  `removeActorById(actorId)` by `RECIPES.bombBlast.duration` instead of
+  splicing the actor out immediately — the bomb visibly plays its own
+  shrink-and-fade blast animation for that ~350ms window before vanishing.
+  (An off-screen room's bomb still gets removed immediately — nobody's
+  watching it pop.) **A carried/dropped bomb also now gets its own ticking
+  warning**, the actor-render equivalent of the tile's flicker:
+  `renderActors` multiplies in the same alpha-flicker formula
+  (`Math.floor(now/120)%2===0 ? 1 : 0.35`) whenever
+  `def.temperament === CARRY_BOMB_KIND && actor.fuseTimerId != null` — which,
+  since `fuseTimerId` is the same field the pause/resume mechanic already
+  tracks, means the flicker and the countdown are always in lockstep with
+  no extra state needed: paused (held) is dark and steady, ticking
+  (dropped/thrown) blinks, automatically.
+
+  **A third, unrelated latent bug found while chasing this one**:
+  `removeActorById` — called by `resolveActorContact`'s own collectible-
+  pickup and fleer-pop reactions, both already-shipped, ordinary Play
+  mechanics — was never added to `exportStandaloneGame`'s
+  `runtimeFunctions` array. Collecting an item (or popping a fleer) in an
+  *exported* game threw a `ReferenceError` the instant it happened, same
+  species of bug as the `nextActorInstId` and `actorDefs` gaps above and
+  below — found here because the new bomb-blast fix's own
+  `removeActorById` call was the first time an export test actually forced
+  the question. Fixed by adding it to the list; every existing pickup path
+  gets it for free.
 - **Magnet**: `radialForceAccelFor(actor, player)` (now takes `player`) has
   a second pull source alongside its tile-scanning loop — a currently
   *actively held* `CARRY_MAGNET_KIND` actor's own live position, same
