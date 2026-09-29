@@ -5696,6 +5696,42 @@
     renderAll();
     log("Deleted \"" + room.name + "\".");
   }
+
+  // Copies the currently open room's board/backgroundBoard/colorBoard/groundSkinBoard/
+  // groundSkinRotationBoard/actors/startPos/Game-Rules-and-Camera exactly, as a brand-new room
+  // appended after it and switched to immediately — the fast path for reusing a hand-painted layout
+  // as a starting point instead of repainting it from scratch. One deliberate exception to "exactly":
+  // the player is never duplicated — `removeAllPlayerInstances`'s own comment already establishes
+  // there's only ever ONE player actor project-wide, so copying it here would leave two actors
+  // simultaneously marked `isPlayer` (one in each room) while `playerRoomId` could still only point
+  // at one of them, an inconsistency nothing else in the codebase is built to tolerate. Every other
+  // actor (pushables, characters, collectibles, spawners and their contents, carryable tiles) comes
+  // along untouched, with fresh ids (`nextActorInstId`) so they never collide with the originals.
+  function duplicateRoom() {
+    snapshotCurrentRoomState(); // flush the hot globals back onto the room object before cloning it
+    const source = rooms.find(r => r.id === currentRoomId);
+    if (!source) return;
+    const cloned = structuredClone({
+      board: source.board, backgroundBoard: source.backgroundBoard, colorBoard: source.colorBoard,
+      groundSkinBoard: source.groundSkinBoard, groundSkinRotationBoard: source.groundSkinRotationBoard,
+      actors: source.actors.filter(a => !a.isPlayer),
+      startPos: source.startPos
+    });
+    cloned.actors.forEach(a => { a.id = nextActorInstId++; });
+    const newRoom = {
+      id: nextRoomId++, name: source.name + " copy",
+      board: cloned.board, backgroundBoard: cloned.backgroundBoard, colorBoard: cloned.colorBoard,
+      groundSkinBoard: cloned.groundSkinBoard, groundSkinRotationBoard: cloned.groundSkinRotationBoard,
+      actors: cloned.actors, startPos: cloned.startPos,
+      gravityEnabled: source.gravityEnabled, wrapHEnabled: source.wrapHEnabled, wrapVEnabled: source.wrapVEnabled,
+      cameraMode: source.cameraMode, editorPanCol: source.editorPanCol
+    };
+    rooms.push(newRoom);
+    activateRoom(newRoom.id);
+    renderRoomTabs();
+    renderAll();
+    log("Duplicated \"" + source.name + "\" as \"" + newRoom.name + "\".");
+  }
   function paintBackgroundAt(gx, gy) {
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
     backgroundBoard[gy][gx] = selectedBackgroundId;
@@ -6734,6 +6770,16 @@
       }
       container.appendChild(wrap);
     });
+    // Sits after every room tab, so it's always the last (rightmost) thing in the row regardless
+    // of how many rooms exist — acts on whichever room is currently open, same as painting/Game
+    // Rules/Camera already do, rather than needing its own per-tab target.
+    const dup = document.createElement("button");
+    dup.className = "tbtn";
+    dup.textContent = "⧉ Duplicate Room";
+    const current = rooms.find(r => r.id === currentRoomId);
+    dup.title = "Copy \"" + (current ? current.name : "this room") + "\" exactly, as a new room";
+    dup.addEventListener("click", duplicateRoom);
+    container.appendChild(dup);
   }
 
   // Minimal Play HUD — lives and score, nothing more. Lives only ever show in Play mode; score
