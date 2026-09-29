@@ -108,7 +108,7 @@ A cell is a small stack of independent layers, not one value:
 
 **`GEOMETRIES`** (current, see `index.html` for the live list — this drifts
 every patch, don't trust this snapshot blindly):
-`none, solid, diggable, trap, goal, switch, plate, door, cannon-ne/se/sw/nw,
+`none, solid, goal, switch, plate, door, cannon-ne/se/sw/nw,
 bomb, warp, fan-n/e/s/w, magnet, gravitywell, spawner, trampoline`.
 
 A recurring trick: a geometry family with several storable orientations
@@ -118,11 +118,12 @@ that family rotates it to the next orientation (`cannonRotateStrokeCells`
 tracks this per-stroke). Any new multi-orientation piece should reuse this
 exact pattern, not invent a new one.
 
-**`MODIFIERS`**: `none, slippery, bouncy, hazard, lethal, sticky,
-wind-n/e/s/w`. `MODIFIER_LABELS` is currently empty (`{}`) — it's the
+**`MODIFIERS`**: `none, slippery, bouncy, hazard, lethal, sticky, diggable,
+trap, wind-n/e/s/w`. `MODIFIER_LABELS` is currently empty (`{}`) — it's the
 mechanism to reuse any time an internal id needs a friendlier palette name
 without a serialization-format migration, not a promise that it's holding
-anything right now.
+anything right now. `diggable`/`trap` joined this list in v2.22 — see
+"Ground merges with Ground Textures; diggable/trap become modifiers" below.
 
 **`TEMPERAMENTS`** (actor self-steering, palette-selectable in the
 Character tab): `stationary, wanderer, chaser, fleer`. There are also
@@ -176,6 +177,117 @@ so "extra bounce power" is a placed, sprite-bearing *thing* a kid finds,
 not a hidden second tuning of the plain `bouncy` modifier (that used to be
 `spring` — see the Non-negotiable principles section above for why it was
 removed instead of kept as a second modifier).
+
+### Ground merges with Ground Textures; diggable/trap become modifiers (v2.22)
+
+Direct feedback: the old Ground tab had four separate rows — flat "Ground"
+swatches (`none`/`solid`/`diggable`/`trap`), "Surface" modifier swatches
+(`slippery`/`bouncy`/`hazard`/`lethal`/`sticky`/`wind`), a "Ground textures"
+row of real-art skins (grass/stone/dirt/snow), and "Lethals" (lava/fire/
+spike). The ask: merge Ground and Ground textures into one row, rename
+Surface to **Ground Effects**, and move `diggable`/`trap` OUT of the
+geometry axis and into Ground Effects too — "so any tile can be made
+diggable or trap or lethal etc," the same geometry-agnostic combining every
+other modifier already had (see "Modifiers are geometry-agnostic" in the
+Non-negotiable principles section — this patch is that principle finally
+applied to the two modifiers that had been left out of it since v2.5).
+
+**The merged Ground row** (`renderGroundSwatches`) now draws, in one
+row: the two flat swatches (`none`, plain gray `solid`) from
+`PALETTE_GROUND_GEOMETRIES` (trimmed to just those two), then every
+`groundSlotIds` skin (real art, same swatch-drawing/`selectGroundSkin`
+click path as before — `renderGroundSkinSwatch(container, id)` is the
+shared per-swatch helper, reused by both this row and Lethals), then the
+"+" custom-texture button. Five new built-in textures ship with this
+patch: **Rubble** (`gndRubble`, `RUBBLE_ART`) is literally the old
+`diggable` geometry's own dedicated icon art (a plain taupe square with a
+few crack specks) — now that diggable has no geometry-level identity of
+its own, that look becomes a normal, paintable ground texture instead, so
+a kid who liked it doesn't lose it. **Brick** (`gndBrick`), **Sand**
+(`gndSand`), and **Crystal** in two colorways (`gndCrystalPink`/
+`gndCrystalCyan`, sharing one `CRYSTAL_FACET_PATTERN` array recolored via
+two different `pat()` legends — the same "one shape, several palettes"
+trick `FIRE_FRAMES`/`LAVA_FRAMES` already used) were direct, explicit
+requests. The old separate "Ground textures" section/row/container
+(`#groundSkinSwatches`) is gone entirely; `renderGroundSwatches` also
+gained a `!selectedGroundSkinId` guard on the flat-swatch highlight so
+picking a skin (which sets `selectedGeometry = "solid"` as a side effect)
+doesn't ALSO show the flat `solid` swatch as selected right next to it —
+harmless when the two lived in separate rows, visually wrong once merged
+into one.
+
+**`diggable` and `trap` move from `GEOMETRIES` to `MODIFIERS`.** Each
+keeps its *exact* old mechanic, just generalized to combine with whatever
+base geometry (normally `solid`, or a solid-based ground texture) it's
+painted over, instead of being its own fixed geometry:
+- **`diggable`**: still blocks like `solid` and still only erodes via
+  sustained player contact (`DIG_DURATION_MS`, `digProgress`, holding
+  Down) — `isBlockingGeometry` doesn't need a branch for it at all anymore
+  (it blocks purely because its base geometry already does); `resolveAxis`
+  checks `modifier === "diggable"` (not a geometry) to run the erosion
+  timer. `DIGGABLE_STAGE_ICONS` (the progressive crack art swapped in via
+  `extra.digFrac`) is unchanged except stage 0 is now the standalone
+  `RUBBLE_ART` constant instead of a now-deleted `GEOMETRY_ICONS.diggable`.
+  Rendering-wise this is otherwise just like any other modifier: a colored
+  ring around the base icon/skin (`MODIFIER_SWATCH_COLORS.diggable`, the
+  same taupe hex the old geometry swatch used) — see `drawGameplayTile`.
+- **`trap`**: still "solid to everyone but the player, who always slips
+  straight through instantly and destroys it on contact" — the exact old
+  asymmetric behavior, now expressed as `isBlockingGeometry(geometry,
+  actor, modifier)` gaining a third parameter and a new first check,
+  `if (modifier === "trap" && actor.isPlayer) return false;`, BEFORE any
+  geometry check. This is the one deliberate exception to "modifiers never
+  block on their own" (see that function's own updated comment) — it
+  doesn't make trap block anything by itself, it makes the player
+  transparent to whatever WOULD otherwise block per the base geometry. An
+  NPC gets no such exception, so `solid:trap` still walls off a patrol
+  path exactly like plain `solid` until the player's own touch clears it
+  for everyone (`checkPlayerTileContacts`'s `modifier === "trap"` branch
+  calls the unchanged `triggerTrap`, which nulls the whole board cell).
+  `isBlockingGeometry`'s signature change means every call site needs the
+  modifier too: `isCellBlocking` (computes it internally from
+  `modifierAt`), `resolveAxis`'s main collision loop, and
+  `checkPlayerTileContacts` all updated; `clampDragPosition`'s own
+  non-blocking drag-contact loop switched its `geometry === "trap"` check
+  to `modifier === "trap"` the same way.
+
+**Backward compat for old saves — two separate gaps, both real:**
+1. A save from before this patch can still have a raw `"diggable:none"` or
+   `"trap:hazard"` board-cell string — a geometry value `GAMEPLAY_TILE_DEFS`'
+   cross-product no longer generates ANY entry for, since `GEOMETRIES` no
+   longer contains those values. Left alone, `gameplayTileAt` would
+   silently return `undefined` for that cell forever (not a crash — the
+   tile just vanishes from the game, permanently, the moment an old
+   project loads). `migrateLegacyGroundEffects(board)`, called on every
+   room's board from `restoreProjectSnapshot` right after `rooms =
+   structuredClone(snap.rooms)`, rewrites any `diggable`/`trap` geometry
+   cell to `solid` + that same value as the modifier —
+   `gameplayKey("solid", geometry)`. **Deliberately lossy**: any modifier
+   that used to be stacked on a `diggable`/`trap` tile (e.g. an old
+   `"trap:hazard"`) is dropped, since a cell only ever holds one Ground
+   Effect now and preserving the tile's PRIMARY mechanic (dig-through /
+   crumble-on-touch) matters far more than a secondary modifier it
+   happened to also carry — a rare, incidental old combo to begin with.
+   The built-in "Tunnel Trouble" sample's own maze-string builder
+   (`paintMazeString`, the `'D'` character) is source code, not a saved
+   project, so it was fixed directly (`gameplayKey("solid", "diggable")`)
+   rather than relying on this migration to catch it.
+2. `groundSlotIds` itself — the ordered list of which texture swatches
+   show up at all — is **also** backward-compat-vulnerable, a level up
+   from the more familiar "does `groundTileDefs[id]` have real content"
+   gap the Rooms section above already covers: `restoreProjectSnapshot`
+   used to do `groundSlotIds = snap.groundSlotIds ? snap.groundSlotIds.slice()
+   : GROUND_SEEDS.map(...)`, which takes the `snap.groundSlotIds` branch
+   for ANY older save (one already exists, just missing the five new
+   ids) — so a returning project's Ground row would stay frozen at
+   whichever built-in textures existed when it was last saved, forever,
+   never gaining Rubble/Brick/Sand/Crystal. Fixed with one more line right
+   after: `GROUND_SEEDS.forEach(seed => { if (!groundSlotIds.includes(seed.id))
+   groundSlotIds.push(seed.id); })` — appends any missing BUILT-IN seed id
+   without touching a kid's own custom ids. **Any future built-in
+   `GROUND_SEEDS`/`LETHAL_SEEDS` addition needs this same append pattern**,
+   not just the existing `groundTileDefs[id]` content-backfill just below
+   it in the same function — two different gaps, both need covering.
 
 ### Actor shape
 
