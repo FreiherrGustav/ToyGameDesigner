@@ -347,9 +347,16 @@
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Things that don't move on their own and do one specific thing the moment you touch them.
-        Pushable block is yours to redraw, like a character; the rest use a built-in icon, same as
-        Ground.
+        Real things in the room — you bump into them, and some of them (not the fan or the
+        spawner) can be picked up and carried around. Pushable block is yours to redraw, like a
+        character; the rest use a built-in icon, same as Ground.
+      </div>
+      <div class="section-title" style="margin-top:10px;">Fixtures</div>
+      <div class="swatch-row" id="fixtureSwatches"></div>
+      <div class="hint" style="margin-top:2px;">
+        Built into the room — a door, a switch, a goal, a gravity well do their job from wherever
+        you put them, so you walk right onto them instead of bumping into them. They never move
+        and can't be carried.
       </div>
       <div class="section-title" style="margin-top:10px;">Collectibles</div>
       <div class="swatch-row" id="collectibleSwatches"></div>
@@ -545,9 +552,12 @@
   // and a bomb belong here exactly as much as a door does. One "cannon" entry still stands in for
   // all four CANNON_ORDER values; "fan" does the same for FAN_ORDER.
   const PALETTE_GROUND_GEOMETRIES = ["none", "solid", "diggable", "trap"];
+  // v2.21: goal/switch/plate/door/warp/gravitywell moved out of this list and into their own
+  // Fixtures row (see FIXTURE_GEOMETRIES/renderFixtureSwatches below) — what's left here is every
+  // geometry that's a real, physical, bumpable object (isBlockingGeometry) or, for magnet/spawner,
+  // at least behaves like a standalone thing rather than a fixed feature of the room itself.
   const PALETTE_OBJECT_GEOMETRIES = [
-    "goal", "switch", "plate", "door", "cannon", "bomb", "warp",
-    "fan", "magnet", "gravitywell", "spawner", "trampoline"
+    "cannon", "bomb", "fan", "magnet", "spawner", "trampoline"
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
@@ -2985,6 +2995,31 @@
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
       drawArtToCtx(c.getContext("2d"), isCannon ? GEOMETRY_ICONS["cannon-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = geometry;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectGeometry(geometry));
+      container.appendChild(sw);
+    });
+  }
+
+  // v2.21: Fixtures get their own row, separate from Objects — same swatch look and the same
+  // selectGeometry click path, just a different, kid-facing category (see FIXTURE_GEOMETRIES'
+  // own comment for why these can never become physical or carryable like the Objects row can).
+  function renderFixtureSwatches() {
+    const container = document.getElementById("fixtureSwatches");
+    container.innerHTML = "";
+    FIXTURE_GEOMETRIES.forEach(geometry => {
+      const isSelected = paintMode === "tile" && activeTab === "object" && selectedGeometry === geometry;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = geometry;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), GEOMETRY_ICONS[geometry], ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
@@ -6635,6 +6670,7 @@
     renderGroundSkinSwatches();
     renderLethalSwatches();
     renderObjectSwatches();
+    renderFixtureSwatches();
     renderCollectibleSwatches();
     renderColorSwatches();
     renderCharacterSwatches();
