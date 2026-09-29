@@ -4885,36 +4885,58 @@
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
-      carried: false, fuseArmed: false, cannonDir: cannonDir || null
+      carried: false, fuseArmed: false, fuseRemainingMs: BOMB_FUSE_MS, fuseTimerId: null, fuseStartedAt: 0,
+      cannonDir: cannonDir || null
     };
     actors.push(actor);
     return actor;
   }
 
+  // Direct feedback: a carried bomb used to keep ticking in real time no matter what, so grabbing
+  // one just meant "you have a few seconds before it explodes in your hands, holding it or not" —
+  // not what "carryable/throwable" should feel like for a bomb specifically. Now HELD is SAFE: the
+  // fuse only counts down while the bomb is out of the player's hands (dropped or thrown), and
+  // picking it back up — even mid-countdown — pauses it again, remembering exactly how much fuse
+  // is left for next time. These two helpers are the whole mechanic; `fuseArmed` still just means
+  // "has this ever been lit," used elsewhere (e.g. sound/UI) to tell a never-touched bomb apart
+  // from one that's merely paused mid-fuse.
+  function pauseBombFuseIfTicking(obj) {
+    if (obj.fuseTimerId == null) return; // not currently ticking — nothing to pause
+    clearTimeout(obj.fuseTimerId);
+    obj.fuseRemainingMs = Math.max(0, obj.fuseRemainingMs - (performance.now() - obj.fuseStartedAt));
+    obj.fuseTimerId = null;
+  }
+  function startOrResumeBombFuse(obj) {
+    if (obj.fuseTimerId != null) return; // already ticking — stay idempotent
+    obj.fuseArmed = true;
+    sounds.fuse();
+    log("Fuse lit — run!");
+    obj.fuseStartedAt = performance.now();
+    const roomId = currentRoomId, actorId = obj.id, remaining = obj.fuseRemainingMs;
+    obj.fuseTimerId = setTimeout(() => detonateCarriedBombAt(roomId, actorId), remaining);
+  }
+
   // Attaches whatever was found to the player: no physics of its own, glued just above the
-  // player's head, updated every frame by tick()'s own carry-follow step. A bomb's fuse starts
-  // right here, the FIRST time it's ever grabbed — not on mere contact — and, once lit, keeps
-  // ticking in real time (setTimeout, the exact mechanism triggerBombArm's tile version already
-  // uses) whether the bomb stays held or gets dropped/thrown, detonating wherever it currently is.
+  // player's head, updated every frame by tick()'s own carry-follow step. A bomb is the one kind
+  // that reacts specially here — see pauseBombFuseIfTicking's own comment.
   function attachCarryable(player, obj) {
     obj.carried = true;
     obj.vx = 0; obj.vy = 0;
     obj.impactMag = 0; // no stale wobble bleeding into the carried render
     player.carrying = obj.id;
     const def = actorDefs[obj.defId];
-    if (def && def.temperament === CARRY_BOMB_KIND && !obj.fuseArmed) {
-      obj.fuseArmed = true;
-      sounds.fuse();
-      log("Fuse lit — run!");
-      const roomId = currentRoomId, actorId = obj.id;
-      setTimeout(() => detonateCarriedBombAt(roomId, actorId), BOMB_FUSE_MS);
+    if (def && def.temperament === CARRY_BOMB_KIND) {
+      pauseBombFuseIfTicking(obj);
+      log("Grabbed the bomb — safe while you're holding it. Drop or throw it to light the fuse.");
     } else {
       log("Grabbed the " + (def ? def.name : "object") + ".");
     }
   }
 
   // Tap: unchanged from the prototype — placed at the player's feet, zero velocity, physics
-  // resumes next frame exactly like anything else that's ever fallen and landed.
+  // resumes next frame exactly like anything else that's ever fallen and landed. A bomb starts (or
+  // resumes) ticking the moment it leaves the player's hands, whether by a drop or a throw — see
+  // startOrResumeBombFuse.
   function dropCarriedObject(player) {
     if (player.carrying == null) return;
     const obj = actors.find(a => a.id === player.carrying);
@@ -4924,6 +4946,8 @@
     obj.x = player.x + player.w / 2 - obj.w / 2;
     obj.y = player.y + player.h - obj.h;
     obj.vx = 0; obj.vy = 0;
+    const def = actorDefs[obj.defId];
+    if (def && def.temperament === CARRY_BOMB_KIND) startOrResumeBombFuse(obj);
     log("Dropped it.");
   }
 
@@ -4955,6 +4979,8 @@
     // v2.20.1 tunneling risk that field's own comment warns about only exists when something
     // holds a direction key during the exemption window, which nothing here ever does.
     obj.bouncyCooldown = 500;
+    const def = actorDefs[obj.defId];
+    if (def && def.temperament === CARRY_BOMB_KIND) startOrResumeBombFuse(obj);
     sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
     log("Threw it!");
   }
@@ -6762,7 +6788,7 @@
       chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
       bounceOffTrampolineObjects, carryableGeometryDirection, isCarryableTileGeometry,
       tryGrabNearestCarryable, convertGrabbedTileToActor, placeCarryableActor, attachCarryable,
-      dropCarriedObject, throwCarriedObject, detonateCarriedBombAt,
+      dropCarriedObject, throwCarriedObject, detonateCarriedBombAt, pauseBombFuseIfTicking, startOrResumeBombFuse,
       log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
