@@ -487,15 +487,28 @@ list. **`FIXTURE_GEOMETRIES`** (`goal, switch, plate, door, warp,
 gravitywell`) is that category — "fixture" as in a kid-friendly word for
 "a thing that's part of the room and doesn't move," parallel to how
 `PUSHABLE_KIND`/`HAZARD_BALL_KIND`/`CARRYABLE_KINDS` name the actor side.
-It documents the boundary at the constant itself rather than only in
-prose, but nothing in the reaction table reads it yet — no code branches
-on "is this a fixture," because "stay a walk-through contact pad, never
-solid, never carryable" is simply what every fixture geometry already does
-by not appearing in `isBlockingGeometry` or `CARRYABLE_KINDS`. If a future
-fixture-only behavior needs its own branch (a kid-facing tooltip, a
-palette grouping), `FIXTURE_GEOMETRIES` is where that check belongs instead
-of a fresh ad hoc list — the point of naming the category now is to have
-one place to extend later, not to duplicate the six-item list again.
+Unlike most of these internal-only categorization constants, this one is
+also **kid-visible**: the Objects tab now shows two separate palette rows
+— "Pick an object" (`PALETTE_OBJECT_GEOMETRIES`, now trimmed to just
+cannon/bomb/fan/magnet/spawner/trampoline plus the pushable actor swatch —
+real, bumpable things) and a new "Fixtures" row directly below it
+(`renderFixtureSwatches`, reading `FIXTURE_GEOMETRIES` itself so the two
+lists can't drift apart), each with its own hint text explaining the
+distinction in the same "walk onto it" vs. "bump into it" language as this
+section's own opening paragraph. `goal`/`switch`/`plate`/`door`/`warp`/
+`gravitywell` used to live inside the single old `PALETTE_OBJECT_GEOMETRIES`
+row undifferentiated from bomb/cannon/etc.; splitting the row was the fix
+for a real gap — the category existed in code (this section, first shipped)
+but wasn't visible in the app itself, which is what a kid or a parent
+skimming the palette actually sees. `renderFixtureSwatches` reuses the
+exact same swatch-drawing/`selectGeometry` click path as
+`renderObjectSwatches`'s own geometry loop (same icons, same selection
+highlighting) — it's a second row, not a second mechanism. No other code
+branches on `FIXTURE_GEOMETRIES` beyond this rendering split and
+`PALETTE_OBJECT_GEOMETRIES`'s own doc comment — "stay a walk-through
+contact pad, never solid, never carryable" is still simply what every
+fixture geometry already does by not appearing in `isBlockingGeometry` or
+`CARRYABLE_KINDS`.
 
 **Fan and spawner are blocking-only, deliberately not carryable.** Every
 other carryable in this patch (bomb/magnet/cannon/trampoline) is a single
