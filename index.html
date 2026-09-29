@@ -385,23 +385,23 @@
     <div id="groundPropertiesBlock" style="display:none;">
       <div class="section-title">Ground</div>
       <div class="swatch-row" id="groundSwatches"></div>
-      <div class="section-title" style="margin-top:10px;">Surface</div>
+      <div class="hint" style="margin-top:2px;">
+        What it looks like, and whether it blocks you — plain none/solid, or a real look like
+        grass, brick, or crystal. Grab one to paint it, or hit + to draw your own.
+      </div>
+
+      <div class="section-title" style="margin-top:10px;">Ground Effects</div>
       <div class="swatch-row" id="surfaceSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Two independent choices, painted together. Ground decides what blocks movement. Surface
-        decides what happens on contact, layered on top — <em>none</em> + <em>none</em> just
-        clears a tile back to empty.
+        Two independent choices, painted together. Ground decides what it looks like and whether
+        it blocks you. Ground Effects decides what happens when you touch it, layered on top —
+        <em>none</em> + <em>none</em> just clears a tile back to empty.
       </div>
       <div class="hint" style="margin-top:6px;">
         Hazard costs one life and knocks you back — you keep going. Lethal costs every life at
-        once, instantly, with no knockback — there's nothing left to fight through.
-      </div>
-
-      <div class="section-title" style="margin-top:10px;">Ground textures</div>
-      <div class="swatch-row" id="groundSkinSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        A real look for solid ground instead of a plain color — grab one to paint it, or hit + to
-        draw your own.
+        once, instantly, with no knockback. Diggable blocks you until you stand there holding Down
+        long enough to dig through. Trap looks solid to everyone else, but crumbles away the
+        instant you touch it.
       </div>
 
       <div class="section-title" style="margin-top:10px;">Lethals</div>
@@ -539,19 +539,26 @@
   // v2.9: pressure plate joins the geometry axis — non-blocking like goal/switch, but its
   // channel-color effect (see CHANNEL_COLORS) only holds while something is actually on it,
   // unlike a switch's permanent flip. Deliberately its own geometry value, not a switch variant.
+  // v2.22: "diggable" and "trap" moved OUT of here and into MODIFIERS below — see that constant's
+  // own comment for why. What's left is genuinely just the geometry axis: what blocks movement /
+  // does the mechanical thing, independent of what a tile looks like or what happens on contact.
   const GEOMETRIES = [
-    "none", "solid", "diggable", "trap", "goal", "switch", "plate", "door",
+    "none", "solid", "goal", "switch", "plate", "door",
     ...CANNON_ORDER, "bomb", "warp", ...FAN_ORDER, "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
   // system built it. Ground is plain blocking/hazard geometry with no identity of its own beyond
-  // "blocks you" or "hurts you" — "none" stays here too, since it's what a pure Surface tile (ice,
+  // "blocks you" or "hurts you" — "none" stays here too, since it's what a pure Ground Effect (ice,
   // wind) needs underneath it, and what "clear this cell" means. Everything else that's painted
   // as a tile (rather than placed as an actor) does one specific, recognizable thing on contact,
   // so it's an Object regardless of how plain or elaborate its own reaction is — a pressure plate
   // and a bomb belong here exactly as much as a door does. One "cannon" entry still stands in for
   // all four CANNON_ORDER values; "fan" does the same for FAN_ORDER.
-  const PALETTE_GROUND_GEOMETRIES = ["none", "solid", "diggable", "trap"];
+  // v2.22: just "none"/"solid" now — the Ground row itself also shows every named ground texture
+  // (grass/stone/brick/sand/crystal/...), but those are groundSlotIds skins layered on top of
+  // "solid", not distinct GEOMETRIES values, so this list doesn't grow with them (see
+  // renderGroundSwatches, which draws both in one merged row).
+  const PALETTE_GROUND_GEOMETRIES = ["none", "solid"];
   // v2.21: goal/switch/plate/door/warp/gravitywell moved out of this list and into their own
   // Fixtures row (see FIXTURE_GEOMETRIES/renderFixtureSwatches below) — what's left here is every
   // geometry that's a real, physical, bumpable object (isBlockingGeometry) or, for magnet/spawner,
@@ -577,8 +584,18 @@
   // confusing. "sticky" suspends gravity on contact (isStuckToSticky) AND slows movement in every
   // direction while touching it, on any geometry (isOnStickyGround) — a floor you trudge through,
   // not just a wall you can climb.
-  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", ...WIND_ORDER];
-  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "wind"];
+  // v2.22: "diggable" and "trap" join the modifier axis, moved out of GEOMETRIES — direct feedback
+  // asked for "any tile [to be] made diggable or trap or lethal", the same geometry-agnostic
+  // combining every other modifier here already had. Each keeps its exact old mechanic (see
+  // isBlockingGeometry/resolveAxis/checkPlayerTileContacts): "diggable" blocks like solid until
+  // sustained player contact (holding Down) erodes it away; "trap" blocks every other actor like
+  // solid but the player always slips straight through instantly, destroying it on contact — a
+  // trapdoor under a patrol path. Both still only really "mean" something paired with a blocking
+  // geometry (solid, or a solid-based ground texture) — paired with "none" they're harmless no-ops,
+  // same as e.g. "sticky" already is geometry-agnostic without every combination being equally
+  // useful.
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", ...WIND_ORDER];
+  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", "wind"];
   // Anything not listed here just shows its own id, unchanged — nothing needs a friendlier label
   // right now, but the mechanism (MODIFIER_LABELS[modifier] || modifier, see renderSurfaceSwatches)
   // stays available for the next id that reads as engine-jargon rather than a toy word.
@@ -587,7 +604,7 @@
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
   const GEOMETRY_SWATCH_COLORS = {
-    none: "#4caf50", solid: "#616161", diggable: "#a1887f", trap: "#8d6e63",
+    none: "#4caf50", solid: "#616161",
     goal: "#ec407a", switch: "#3f51b5", plate: "#00897b", door: "#795548", cannon: "#ff5722",
     "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
     bomb: "#424242", warp: "#8e24aa",
@@ -596,7 +613,11 @@
   };
   const MODIFIER_SWATCH_COLORS = {
     none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", lethal: "#4a0000",
-    sticky: "#cddc39", wind: "#80deea",
+    sticky: "#cddc39",
+    // v2.22: diggable/trap keep the exact swatch colors they had as GEOMETRY_SWATCH_COLORS entries
+    // before this patch moved them to the modifier axis — same taupe/brown identity, just relabeled.
+    diggable: "#a1887f", trap: "#8d6e63",
+    wind: "#80deea",
     "wind-n": "#80deea", "wind-e": "#80deea", "wind-s": "#80deea", "wind-w": "#80deea"
   };
   // Each orientation fires at a true 45° angle — combined with gravity's own per-frame pull,
@@ -1169,6 +1190,27 @@
       switchChannels: structuredClone(switchChannels)
     };
   }
+  // v2.22: "diggable" and "trap" moved from GEOMETRIES to MODIFIERS (see that constant's own
+  // comment) — a raw board cell string from before this patch can still read "diggable:none" or
+  // "trap:hazard", geometry values GAMEPLAY_TILE_DEFS' cross-product no longer generates an entry
+  // for at all, which would otherwise make gameplayTileAt() silently return undefined for that
+  // cell forever (a null board read, not a crash, but the tile visibly vanishes and stops doing
+  // anything). Folds the old geometry into the new modifier slot on "solid" instead — the closest
+  // equivalent to what a plain "diggable"/"trap" tile always blocked like — and drops whatever
+  // modifier used to be stacked on it, since a cell only ever holds one Ground Effect at a time
+  // now; a "diggable:bouncy"/"trap:lethal" combo from before this patch was already a rare,
+  // incidental one, and keeping the tile's PRIMARY mechanic (dig-through / crumble-on-touch) intact
+  // matters far more than the secondary modifier it happened to also carry.
+  function migrateLegacyGroundEffects(board) {
+    for (let y = 0; y < board.length; y++) {
+      for (let x = 0; x < board[y].length; x++) {
+        const key = board[y][x];
+        if (!key) continue;
+        const geometry = key.slice(0, key.indexOf(":"));
+        if (geometry === "diggable" || geometry === "trap") board[y][x] = gameplayKey("solid", geometry);
+      }
+    }
+  }
   // Restores every field captureProjectSnapshot() saved, then re-derives everything downstream
   // of it (hot room pointers, transient runtime state, the palette/canvas render). Deliberately
   // leaves score/lives/appMode alone — those are session state, not project content, and were
@@ -1176,6 +1218,7 @@
   // Project, JSON load) does so itself on top of this.
   function restoreProjectSnapshot(snap) {
     rooms = structuredClone(snap.rooms);
+    rooms.forEach(r => migrateLegacyGroundEffects(r.board));
     doorLinks = structuredClone(snap.doorLinks);
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
     nextRoomId = snap.nextRoomId;
@@ -1207,6 +1250,12 @@
     // as collectibleSlotIds above, so the Ground tab's new rows aren't left empty
     groundTileDefs = snap.groundTileDefs ? structuredClone(snap.groundTileDefs) : structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs);
     groundSlotIds = snap.groundSlotIds ? snap.groundSlotIds.slice() : GROUND_SEEDS.map(s => s.id);
+    // v2.22: an older save's groundSlotIds predates rubble/brick/sand/crystal — append any built-in
+    // seed id it's missing (a kid's own custom ids are untouched) so a returning project's Ground
+    // row gains the new textures instead of silently staying frozen at whichever seeds existed when
+    // it was last saved. Same class of gap as the groundTileDefs content-backfill just below, one
+    // level up (the id LIST, not just a listed id's own content).
+    GROUND_SEEDS.forEach(seed => { if (!groundSlotIds.includes(seed.id)) groundSlotIds.push(seed.id); });
     nextGroundLetter = snap.nextGroundLetter || 0;
     lethalSlotIds = snap.lethalSlotIds ? snap.lethalSlotIds.slice() : LETHAL_SEEDS.map(s => s.id);
     nextLethalLetter = snap.nextLethalLetter || 0;
@@ -1518,18 +1567,12 @@
   // hold, so gameplay tiles use a small consistent icon set rather than custom art). ----
   const GEOMETRY_ICONS = {
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
-    // trap keeps the old diggable's exact look (and behavior) — a crack pattern that always
-    // read as "about to give way", now explicitly framed as a one-touch gag tile.
-    trap: pat([
-      "MMMMMMMM", "MMMKMMMM", "MMKMMMMM", "MKMMMMMM",
-      "MMMMMKMM", "MMMMKMMM", "MMMKMMMM", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.trap, K: "#5d4037" }),
-    // diggable (redefined) starts looking solid — it blocks like a wall until eroded — and
-    // visibly cracks in stages as sustained contact wears it down; see DIGGABLE_STAGE_ICONS.
-    diggable: pat([
-      "MMMMMMMM", "MMM.MMMM", "MMMMMMMM", "MMMMM.MM",
-      "MMMMMMMM", "MM.MMMMM", "MMMMMMMM", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.diggable }),
+    // v2.22: trap/diggable no longer live here — they're modifiers now (MODIFIERS), so a
+    // solid+trap or solid+diggable tile shows the plain "solid" icon above (or a named ground
+    // texture's own art) with a colored ring on top, same as every other modifier already reads —
+    // see drawGameplayTile. Their old dedicated icon art didn't carry over: DIGGABLE_STAGE_ICONS
+    // (below) keeps diggable's own progressive-crack art alive, now as RUBBLE_ART; trap's old
+    // crack-with-dot icon had no other user and is dropped.
     goal: pat([
       "M.......", "MMMM....", "MMMMMM..", "MMMM....",
       "M.......", "M.......", "M.......", "MMMMMMM."
@@ -1587,18 +1630,28 @@
     ], { M: GEOMETRY_SWATCH_COLORS.trampoline, K: "#fff59d" })
   };
 
+  // v2.22: this used to be GEOMETRY_ICONS.diggable's own dedicated icon art (a plain taupe square
+  // with a few crack specks) back when diggable was its own geometry. Now that it's a modifier
+  // (see MODIFIERS), that same art becomes a real, paintable Ground texture instead — "Rubble" —
+  // so a kid who liked the old cracked-stone look can still pick it directly, and a plain "solid"
+  // stays a totally flat gray square. Also still stage 0 of DIGGABLE_STAGE_ICONS just below, same
+  // as it always was.
+  const RUBBLE_ART = pat([
+    "MMMMMMMM", "MMM.MMMM", "MMMMMMMM", "MMMMM.MM",
+    "MMMMMMMM", "MM.MMMMM", "MMMMMMMM", "MMMMMMMM"
+  ], { M: MODIFIER_SWATCH_COLORS.diggable });
   // Progressive erosion stages for diggable, sampled by how much sustained contact has
-  // accumulated (see resolveAxis()) — stage 0 is the same art as GEOMETRY_ICONS.diggable.
+  // accumulated (see resolveAxis()) — stage 0 is RUBBLE_ART.
   const DIGGABLE_STAGE_ICONS = [
-    GEOMETRY_ICONS.diggable,
+    RUBBLE_ART,
     pat([
       "MM.MM.MM", "M.MMMM.M", "MM.MM.MM", "M.MMMM.M",
       "MM.MM.MM", "M.MMMM.M", "MM.MM.MM", "M.MMMM.M"
-    ], { M: GEOMETRY_SWATCH_COLORS.diggable }),
+    ], { M: MODIFIER_SWATCH_COLORS.diggable }),
     pat([
       "M.M.M.M.", ".M.M.M.M", "M.M.M.M.", ".M.M.M.M",
       "M.M.M.M.", ".M.M.M.M", "M.M.M.M.", ".M.M.M.M"
-    ], { M: GEOMETRY_SWATCH_COLORS.diggable })
+    ], { M: MODIFIER_SWATCH_COLORS.diggable })
   ];
 
   // The art currently "active" for a def: its single flat art, or — for a posed actor def —
@@ -1698,6 +1751,24 @@
     "WWWWWWWW", "WIWWWIWW", "WWWSWWWW", "IWWWWWIW",
     "WWWWWWWW", "WSWWIWWW", "WWWWWWSW", "IWWWWWWI"
   ], { W: "#f5f5f5", I: "#b3e5fc", S: "#e1f5fe" });
+  // v2.22: four new Ground textures, direct request — classic offset brick coursing (2-row bricks,
+  // mortar joints staggered by half a brick each course), a stippled sand grain, and a faceted
+  // crystal wall in two colorways sharing one diagonal-facet pattern (recolored, not redrawn,
+  // same "one shape, several palettes" trick FIRE_FRAMES/LAVA_FRAMES already use).
+  const BRICK_ART = pat([
+    "RRRMRRRM", "RRRMRRRM", "MMMMMMMM", "RMRRRMRR",
+    "RMRRRMRR", "MMMMMMMM", "RRRMRRRM", "RRRMRRRM"
+  ], { R: "#a1443a", M: "#8d7b6a" });
+  const SAND_ART = pat([
+    "SSSSDSSS", "SDSSSSDS", "SSSSSDSS", "SSDSSSSS",
+    "DSSSSDSS", "SSSDSSSS", "SSSSSSDS", "SDSSDSSS"
+  ], { S: "#e6d2a0", D: "#c9a866" });
+  const CRYSTAL_FACET_PATTERN = [
+    "LPPDLPPD", "PPDDPPDD", "PDDLPDDL", "DDLPDDLP",
+    "DLPPDLPP", "LPPDLPPD", "PPDDPPDD", "PDDLPDDL"
+  ];
+  const CRYSTAL_PINK_ART = pat(CRYSTAL_FACET_PATTERN, { L: "#f06292", P: "#ad1457", D: "#6a0f3a" });
+  const CRYSTAL_CYAN_ART = pat(CRYSTAL_FACET_PATTERN, { L: "#4dd0e1", P: "#00acc1", D: "#006978" });
 
   // "stationary" doesn't chase or flee anything, so the same blocky, faceless look already built
   // for the "blocker" preset fits it directly — a solid, inert thing to bump into.
@@ -1825,11 +1896,19 @@
   // v2.19: Ground's own named-skin kit — plain textures with no gameplay effect beyond whatever
   // "solid" already means, fixed readable ids for the same reason the collectible seeds above use
   // them (specific, named things, not interchangeable instances of a behavior).
+  // v2.22: Ground and "Ground textures" are now one merged row (see renderGroundSwatches) — Rubble
+  // (diggable's old dedicated icon look, now just a texture like any other) plus brick/sand/crystal
+  // join grass/stone/dirt/snow here, direct request.
   const GROUND_SEEDS = [
     { id: "gndGrass", name: "grass", frames: [GRASS_ART] },
     { id: "gndStone", name: "stone", frames: [STONE_ART] },
     { id: "gndDirt", name: "dirt", frames: [DIRT_ART] },
-    { id: "gndSnow", name: "snow/ice", frames: [SNOW_ART] }
+    { id: "gndSnow", name: "snow/ice", frames: [SNOW_ART] },
+    { id: "gndRubble", name: "rubble", frames: [RUBBLE_ART] },
+    { id: "gndBrick", name: "brick", frames: [BRICK_ART] },
+    { id: "gndSand", name: "sand", frames: [SAND_ART] },
+    { id: "gndCrystalPink", name: "crystal (pink)", frames: [CRYSTAL_PINK_ART] },
+    { id: "gndCrystalCyan", name: "crystal (cyan)", frames: [CRYSTAL_CYAN_ART] }
   ];
   GROUND_SEEDS.forEach(seed => {
     groundTileDefs[seed.id] = { name: seed.name, frames: seed.frames.map(f => f.slice()), frameMs: 0, geometry: "solid", modifier: "none" };
@@ -2018,7 +2097,7 @@
       for (let x = 0; x < maze[y].length; x++) {
         const c = maze[y][x];
         if (c === "#") board[y][x] = gameplayKey("solid", "none");
-        else if (c === "D") board[y][x] = gameplayKey("diggable", "none");
+        else if (c === "D") board[y][x] = gameplayKey("solid", "diggable");
       }
     }
   }
@@ -2818,13 +2897,17 @@
     updateModeButtons();
     renderAll();
   }
-  // Ground pieces don't need identity (v2.14) — a plain colored square communicates "blocks you"
-  // or "hurts you" fine, same as always, so this keeps the flat-swatch style unchanged.
+  // v2.22: Ground and the old separate "Ground textures" row are now one merged row — direct
+  // request ("combine the current ground selection and other ground textures"). Ground pieces
+  // don't need identity (v2.14), so the two flat swatches (none/solid) still just show a plain
+  // colored square; every named texture (grass/brick/crystal/a kid's own...) shows its own real
+  // art, same as it always did in the old separate row — see selectGroundSkin/renderGroundSkin
+  // below, shared unchanged with the Lethals row.
   function renderGroundSwatches() {
     const container = document.getElementById("groundSwatches");
     container.innerHTML = "";
     PALETTE_GROUND_GEOMETRIES.forEach(geometry => {
-      const isSelected = paintMode === "tile" && activeTab === "ground" && selectedGeometry === geometry;
+      const isSelected = paintMode === "tile" && activeTab === "ground" && !selectedGroundSkinId && selectedGeometry === geometry;
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = GEOMETRY_SWATCH_COLORS[geometry];
@@ -2836,6 +2919,23 @@
       sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
     });
+    groundSlotIds.forEach(id => renderGroundSkinSwatch(container, id));
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Create a new ground tile";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", () => {
+      const letter = String.fromCharCode(65 + nextGroundLetter++);
+      const id = "customGnd" + letter;
+      const name = "Ground " + letter;
+      groundTileDefs[id] = { name, frames: [new Array(ART * ART).fill(null)], frameMs: 0, geometry: "solid", modifier: "none" };
+      groundSlotIds.push(id);
+      selectGroundSkin(id);
+      log("New ground tile \"" + name + "\" added — draw it below.");
+    });
+    container.appendChild(plus);
   }
 
   function selectSurfaceModifier(modifier) {
@@ -2897,66 +2997,31 @@
     renderAll();
   }
   // Swatch previews always show frame 0 — animation is a board-rendering effect (see
-  // drawGameplayTile), not something the palette shelf itself needs to act out.
-  function renderGroundSkinSwatches() {
-    const container = document.getElementById("groundSkinSwatches");
-    container.innerHTML = "";
-    groundSlotIds.forEach(id => {
-      const def = groundTileDefs[id];
-      if (!def) return;
-      const sw = document.createElement("div");
-      sw.className = "swatch" + (paintMode === "tile" && selectedGroundSkinId === id ? " selected" : "");
-      sw.style.background = "#111";
-      sw.title = def.name;
-      const c = document.createElement("canvas");
-      c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), def.frames[0], ART);
-      sw.appendChild(c);
-      const label = document.createElement("div");
-      label.className = "lbl";
-      label.textContent = def.name;
-      sw.appendChild(label);
-      sw.addEventListener("click", () => selectGroundSkin(id));
-      container.appendChild(sw);
-    });
-    const plus = document.createElement("div");
-    plus.className = "swatch";
-    plus.title = "Create a new ground tile";
-    plus.style.fontSize = "22px";
-    plus.style.fontWeight = "bold";
-    plus.textContent = "+";
-    plus.addEventListener("click", () => {
-      const letter = String.fromCharCode(65 + nextGroundLetter++);
-      const id = "customGnd" + letter;
-      const name = "Ground " + letter;
-      groundTileDefs[id] = { name, frames: [new Array(ART * ART).fill(null)], frameMs: 0, geometry: "solid", modifier: "none" };
-      groundSlotIds.push(id);
-      selectGroundSkin(id);
-      log("New ground tile \"" + name + "\" added — draw it below.");
-    });
-    container.appendChild(plus);
+  // drawGameplayTile), not something the palette shelf itself needs to act out. v2.22: shared by
+  // the merged Ground row (renderGroundSwatches, above) and the Lethals row (renderLethalSwatches,
+  // below) — both just append these into whichever container they own, same swatch, same click.
+  function renderGroundSkinSwatch(container, id) {
+    const def = groundTileDefs[id];
+    if (!def) return;
+    const sw = document.createElement("div");
+    sw.className = "swatch" + (paintMode === "tile" && selectedGroundSkinId === id ? " selected" : "");
+    sw.style.background = "#111";
+    sw.title = def.name;
+    const c = document.createElement("canvas");
+    c.width = ART; c.height = ART;
+    drawArtToCtx(c.getContext("2d"), def.frames[0], ART);
+    sw.appendChild(c);
+    const label = document.createElement("div");
+    label.className = "lbl";
+    label.textContent = def.name;
+    sw.appendChild(label);
+    sw.addEventListener("click", () => selectGroundSkin(id));
+    container.appendChild(sw);
   }
   function renderLethalSwatches() {
     const container = document.getElementById("lethalSwatches");
     container.innerHTML = "";
-    lethalSlotIds.forEach(id => {
-      const def = groundTileDefs[id];
-      if (!def) return;
-      const sw = document.createElement("div");
-      sw.className = "swatch" + (paintMode === "tile" && selectedGroundSkinId === id ? " selected" : "");
-      sw.style.background = "#111";
-      sw.title = def.name;
-      const c = document.createElement("canvas");
-      c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), def.frames[0], ART);
-      sw.appendChild(c);
-      const label = document.createElement("div");
-      label.className = "lbl";
-      label.textContent = def.name;
-      sw.appendChild(label);
-      sw.addEventListener("click", () => selectGroundSkin(id));
-      container.appendChild(sw);
-    });
+    lethalSlotIds.forEach(id => renderGroundSkinSwatch(container, id));
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Create a new lethal tile";
@@ -3695,19 +3760,25 @@
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
+  //  - the "trap" modifier is present — EXCEPT for the player, who always slips straight through
+  //    instantly regardless of what's underneath (same as the old dedicated "trap" geometry did;
+  //    v2.22 moved it onto the modifier axis — see MODIFIERS — so it now works over ANY base
+  //    geometry, not just its own). NPCs get the base geometry's normal blocking (a trap over
+  //    solid still blocks them like a wall) until the player's touch destroys the tile for
+  //    everyone — see checkPlayerTileContacts/triggerTrap.
   //  - geometry is solid (blocks everyone) — UNLESS it's tagged with a channel color that's
   //    currently on, in which case it's a gate standing open (see isCellBlocking(), which
   //    layers that check on top of this — this function alone doesn't know about colors)
-  //  - geometry is diggable (blocks everyone too, like a wall — only sustained player contact
-  //    erodes it away; see resolveAxis())
-  //  - geometry is trap and the mover isn't the player (the player digs straight through
-  //    instantly, same as the old diggable; NPCs just see a wall)
-  // Modifiers never block on their own — they only change WHAT HAPPENS on contact/collision,
-  // handled inside resolveAxis() (blocking geometry) or checkPlayerTileContacts() (non-blocking).
-  function isBlockingGeometry(geometry, actor) {
+  // "diggable" (v2.22, also now a modifier) does NOT get a branch here — it blocks purely because
+  // its base geometry (normally solid) already does; resolveAxis's own erosion logic is what lets
+  // sustained player contact clear it away, same mechanic as before, just keyed off the modifier
+  // now instead of a dedicated geometry.
+  // Modifiers otherwise never block on their own — they only change WHAT HAPPENS on contact/
+  // collision, handled inside resolveAxis() (blocking geometry) or checkPlayerTileContacts()
+  // (non-blocking).
+  function isBlockingGeometry(geometry, actor, modifier) {
+    if (modifier === "trap" && actor.isPlayer) return false;
     if (geometry === "solid") return true;
-    if (geometry === "diggable") return true;
-    if (geometry === "trap") return !actor.isPlayer;
     if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
     // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
     // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
@@ -3727,7 +3798,8 @@
   // that used to do isBlockingGeometry(geometryAt(cx,cy), actor) should go through this instead.
   function isCellBlocking(cx, cy, actor) {
     const geometry = geometryAt(cx, cy);
-    if (!isBlockingGeometry(geometry, actor)) return false;
+    const modifier = modifierAt(cx, cy);
+    if (!isBlockingGeometry(geometry, actor, modifier)) return false;
     if (geometry === "solid") {
       const color = colorAt(cx, cy);
       if (color && isChannelOn(color)) return false; // a same-colored switch/plate has this gate open
@@ -4011,27 +4083,30 @@
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
         let geometry = geometryAt(cx, cy);
-        if (geometry === "diggable" && actor.isPlayer && (keys["ArrowDown"] || keys["s"] || keys["S"])) {
+        let modifier = modifierAt(cx, cy);
+        // v2.22: diggable moved onto the modifier axis (see MODIFIERS) — isBlockingGeometry
+        // doesn't need a dedicated branch for it anymore (it blocks purely because its base
+        // geometry, normally solid, already does); it's only checked here so sustained player
+        // contact can erode it away, same mechanic/timing as when it was its own geometry.
+        if (modifier === "diggable" && actor.isPlayer && isBlockingGeometry(geometry, actor, modifier) && (keys["ArrowDown"] || keys["s"] || keys["S"])) {
           const key = roomCellKey(currentRoomId, cx, cy);
           const progress = (digProgress[key] || 0) + dt * 1000;
           if (progress >= DIG_DURATION_MS) {
             delete digProgress[key];
-            const modifier = modifierAt(cx, cy);
             sounds.crumble();
-            tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: performance.now(), geometry: "diggable", modifier };
+            tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: performance.now(), geometry, modifier };
             board[cy][cx] = null;
             log("Dug through!");
-            geometry = "none"; // fully eroded — the player passes straight through this frame
+            geometry = "none"; modifier = "none"; // fully eroded — the player passes straight through this frame
           } else {
             digProgress[key] = progress;
           }
         }
-        if (!isBlockingGeometry(geometry, actor)) continue;
+        if (!isBlockingGeometry(geometry, actor, modifier)) continue;
         if (geometry === "solid") {
           const gateColor = colorAt(cx, cy);
           if (gateColor && isChannelOn(gateColor)) continue; // a same-colored switch/plate has this gate standing open
         }
-        const modifier = modifierAt(cx, cy);
         // v2.20: a hazard ball (the spawner's default content) always bounces off every wall
         // regardless of the wall's own modifier — the prototype's "bounces off everything"
         // behavior — rather than only reacting to a bouncy tile the way the player does. The
@@ -4739,15 +4814,17 @@
   }
 
   // Player-only contact reactions for whatever the player is actually overlapping — geometry
-  // that doesn't block (trap/goal/switch/door/warp/bomb/cannon — solid and diggable's own
-  // hazard/bouncy handling, plus diggable's erosion, live in resolveAxis instead, since the
-  // player never overlaps blocking geometry) and any modifier found there. Geometry and
-  // modifier are independent, so both can fire from the same cell.
+  // that doesn't block (goal/switch/door/warp/bomb/cannon — solid and diggable's own hazard/bouncy
+  // handling, plus diggable's erosion, live in resolveAxis instead, since the player never overlaps
+  // blocking geometry) and any modifier found there, including trap (v2.22: the player always
+  // passes straight through a trap-modified cell regardless of its base geometry — see
+  // isBlockingGeometry — so it always shows up here, never in resolveAxis's blocking loop).
+  // Geometry and modifier are independent, so both can fire from the same cell.
   function checkPlayerTileContacts(player) {
     for (const { cx, cy } of overlappedCells(player)) {
       const geometry = geometryAt(cx, cy);
       const modifier = modifierAt(cx, cy);
-      if (geometry === "trap") triggerTrap(cx, cy);
+      if (modifier === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
       else if (geometry === "switch") triggerFlip(player, cx, cy);
       // bomb-arm and cannon-fire moved to resolveAxis (v2.21) — both are now blocking geometry
@@ -4775,7 +4852,7 @@
       // of bouncy tiles" bug — not the geometry-defaulting one fixed earlier, a second, deeper bug
       // hiding behind it. Blocking geometry's own bouncy/hazard/lethal reactions belong to
       // resolveAxis alone; this function must never also react to them.
-      const isBlocking = isBlockingGeometry(geometry, player);
+      const isBlocking = isBlockingGeometry(geometry, player, modifier);
       if (isBlocking) continue;
       if (modifier === "lethal") triggerLethalHazard(player);
       else if (modifier === "hazard") triggerHazard(player);
@@ -5969,7 +6046,7 @@
         const key = "c" + cx + "," + cy;
         if (!dragContactCooldown[key]) {
           let fired = false;
-          if (geometry === "trap") { triggerTrap(cx, cy); fired = true; }
+          if (modifier === "trap") { triggerTrap(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
           else if (geometry === "switch") { triggerFlip(actor, cx, cy); fired = true; }
           else if (geometry === "door") {
@@ -6356,7 +6433,7 @@
       // icon; everything below (gate-open ghosting, the modifier ring...) still applies on top of
       // whatever `icon` ends up being, skin or not.
       icon = currentSkinFrame(extra.skinDef);
-    } else if (tile.geometry === "diggable" && extra && extra.digFrac > 0) {
+    } else if (tile.modifier === "diggable" && extra && extra.digFrac > 0) {
       const stage = Math.min(DIGGABLE_STAGE_ICONS.length - 1, Math.floor(extra.digFrac * DIGGABLE_STAGE_ICONS.length));
       icon = DIGGABLE_STAGE_ICONS[stage];
     }
@@ -6532,7 +6609,7 @@
         if (gKey && GAMEPLAY_TILE_DEFS[gKey]) {
           const tile = GAMEPLAY_TILE_DEFS[gKey];
           let extra = null;
-          if (isLive && tile.geometry === "diggable") {
+          if (isLive && tile.modifier === "diggable") {
             const progress = digProgress[roomCellKey(currentRoomId, bx, y)] || 0;
             extra = { digFrac: progress / DIG_DURATION_MS };
           } else if (isLive && tile.geometry === "bomb") {
@@ -6833,7 +6910,6 @@
     renderBackgroundSwatches();
     renderGroundSwatches();
     renderSurfaceSwatches();
-    renderGroundSkinSwatches();
     renderLethalSwatches();
     renderObjectSwatches();
     renderFixtureSwatches();
