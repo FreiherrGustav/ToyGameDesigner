@@ -4561,15 +4561,28 @@
   // arming from detonation; re-touching an already-armed bomb during that window is a no-op,
   // it doesn't restart or stack the timer. The room is captured by id at arm time so the fuse
   // still resolves correctly even if a kid switches which room they're viewing before it goes
-  // off — see detonateBombAt().
+  // off — see detonateBombAt(). `bombArmed[key]` holds `{ armedAt, timerId }`, not just a flag —
+  // grabbing an already-ticking bomb tile (see convertGrabbedTileToActor) needs `armedAt` to
+  // compute exactly how much fuse is left to carry over into the paused actor, and `timerId` so
+  // that transfer can cancel this original tile-side timer instead of leaving it to fire later
+  // against whatever's since been painted over that cell.
   function triggerBombArm(gx, gy) {
     const key = roomCellKey(currentRoomId, gx, gy);
     if (bombArmed[key]) return;
-    bombArmed[key] = true;
+    const roomId = currentRoomId;
+    const timerId = setTimeout(() => detonateBombAt(roomId, gx, gy), BOMB_FUSE_MS);
+    bombArmed[key] = { armedAt: performance.now(), timerId };
     sounds.fuse();
     log("Fuse lit — run!");
-    const roomId = currentRoomId;
-    setTimeout(() => detonateBombAt(roomId, gx, gy), BOMB_FUSE_MS);
+  }
+  // Cancels a ticking tile-side bomb fuse outright (repainted over, or handed off to a grabbed
+  // actor's own paused fuse instead) — a plain `delete bombArmed[key]` alone leaves the original
+  // setTimeout scheduled, which would otherwise fire later against whatever's at that cell by then.
+  function cancelBombArm(key) {
+    const entry = bombArmed[key];
+    if (!entry) return;
+    clearTimeout(entry.timerId);
+    delete bombArmed[key];
   }
 
   function detonateBombAt(roomId, gx, gy) {
@@ -4876,9 +4889,23 @@
     else if (geometry === "trampoline") defId = CARRY_TRAMPOLINE_DEF_ID;
     else if (CANNON_ORDER.includes(geometry)) defId = CARRY_CANNON_DEF_ID;
     else return null;
+    // A bomb the player merely bumped into (not grabbed) still lights on physical contact — that
+    // landmine-style hazard is untouched, see triggerBombArm — but grabbing it mid-countdown must
+    // hand off the SAME countdown, not reset it: cancel the tile-side timer and carry its exact
+    // remaining time over onto the new actor (paused, since it's now held — see attachCarryable).
+    let transferredFuseMs = null;
+    if (geometry === "bomb") {
+      const armKey = roomCellKey(currentRoomId, gx, gy);
+      const armed = bombArmed[armKey];
+      if (armed) {
+        transferredFuseMs = Math.max(0, BOMB_FUSE_MS - (performance.now() - armed.armedAt));
+        cancelBombArm(armKey);
+      }
+    }
     board[gy][gx] = null;
     colorBoard[gy][gx] = null;
     const actor = placeCarryableActor(defId, gx * TILE + TILE / 2, gy * TILE + TILE / 2, carryableGeometryDirection(geometry));
+    if (transferredFuseMs != null) { actor.fuseArmed = true; actor.fuseRemainingMs = transferredFuseMs; }
     log("Picked up the " + actorDefs[defId].name + "!");
     return actor;
   }
@@ -5001,8 +5028,15 @@
   // correctly even if the bomb's been dropped, thrown, or the player's switched rooms since (in
   // which case it's simply abandoned in its own room and detonates there, unseen, same as the tile
   // version already tolerates a kid wandering off mid-fuse). Reuses detonateBombAt entirely for the
-  // actual blast (tile-clearing, actor knockback, the boom sound) — the bomb OBJECT itself is
-  // consumed by its own blast, same as the validated prototype.
+  // tile-clearing/actor-knockback/boom-sound side of the blast — but detonateBombAt's own
+  // tileAnimState blast VISUAL only ever applies to a painted cell with a real tile in it, which is
+  // exactly what a carried bomb usually ISN'T sitting on by the time it goes off (open ground has no
+  // tile to attach the animation to) — that's why the explosion effect went missing for a carried/
+  // dropped bomb specifically, tile detonations were never affected. Fixed the same way a "popped"
+  // actor already is elsewhere (popVanish/RECIPES.popVanish.duration, see CLAUDE.md's own gotcha on
+  // this): play the blast recipe ON THE ACTOR ITSELF via playRecipe/animState (position-based, not
+  // grid-cell-based, so it works wherever the bomb happens to be) and keep it in the actors array
+  // for the recipe's own duration before actually removing it, instead of splicing it out up front.
   function detonateCarriedBombAt(roomId, actorId) {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
@@ -5016,8 +5050,13 @@
     }
     const gx = Math.floor((bombActor.x + bombActor.w / 2) / TILE);
     const gy = Math.floor((bombActor.y + bombActor.h / 2) / TILE);
-    targetActors.splice(targetActors.indexOf(bombActor), 1);
     detonateBombAt(roomId, gx, gy);
+    if (isHot) {
+      playRecipe(bombActor, "bombBlast");
+      setTimeout(() => removeActorById(actorId), RECIPES.bombBlast.duration);
+    } else {
+      targetActors.splice(targetActors.indexOf(bombActor), 1); // off-screen room — no one's watching it pop
+    }
   }
 
   function stepActor(actor, dt, player) {
@@ -5436,7 +5475,7 @@
       }
       const roomKey = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[roomKey];
-      delete bombArmed[roomKey];
+      cancelBombArm(roomKey);
       board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
       colorBoard[gy][gx] = null;
       groundSkinBoard[gy][gx] = null; // a cannon never carries a named ground skin
@@ -5457,7 +5496,7 @@
       }
       const roomKey = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[roomKey];
-      delete bombArmed[roomKey];
+      cancelBombArm(roomKey);
       board[gy][gx] = gameplayKey(FAN_ORDER[0], selectedModifier);
       colorBoard[gy][gx] = selectedChannelColor;
       groundSkinBoard[gy][gx] = null; // a fan never carries a named ground skin
@@ -5479,7 +5518,7 @@
       }
       const key = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[key];
-      delete bombArmed[key];
+      cancelBombArm(key);
       board[gy][gx] = gameplayKey(selectedGeometry, WIND_ORDER[0]);
       colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
       groundSkinBoard[gy][gx] = null; // wind is picked from the flat Surface swatch, never a named skin
@@ -5490,7 +5529,7 @@
     // fuse that used to belong to whatever was here goes away with it
     const key = roomCellKey(currentRoomId, gx, gy);
     delete digProgress[key];
-    delete bombArmed[key];
+    cancelBombArm(key);
     if (selectedGeometry === "none" && selectedModifier === "none") { board[gy][gx] = null; colorBoard[gy][gx] = null; groundSkinBoard[gy][gx] = null; groundSkinRotationBoard[gy][gx] = 0; return; }
     board[gy][gx] = gameplayKey(selectedGeometry, selectedModifier);
     // A named Ground/Lethal skin (grass/stone/spike/lava/...) is a self-contained pick, same as
@@ -5672,7 +5711,7 @@
     if (board[gy][gx]) {
       const key = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[key];
-      delete bombArmed[key];
+      cancelBombArm(key);
       const tile = GAMEPLAY_TILE_DEFS[board[gy][gx]];
       if (tile && tile.geometry === "door") { severDoorLink(currentRoomId, gx, gy); return; }
       board[gy][gx] = null;
@@ -6528,6 +6567,13 @@
         } else delete animState[actor.id];
       }
       if (actor.flashTimer > 0) t.alpha *= (Math.floor(now / 50) % 2 === 0) ? 0.35 : 1;
+      // A carried/dropped bomb's fuse ticking needs the same visible warning the tile version
+      // already gives (drawGameplayTile's own `extra.armed` flicker) — same alpha flicker, same
+      // 120ms period, just keyed off `fuseTimerId` (actively ticking, not held/paused) instead of
+      // `bombArmed`, since this bomb is a free actor now, not a board cell.
+      if (def.temperament === CARRY_BOMB_KIND && actor.fuseTimerId != null) {
+        t.alpha *= (Math.floor(now / 120) % 2 === 0) ? 1 : 0.35;
+      }
 
       ctx.save();
       ctx.globalAlpha = t.alpha;
@@ -6783,7 +6829,7 @@
       currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
-      triggerGoal, triggerFlip, triggerCannon, triggerBombArm, detonateBombAt, triggerWarp,
+      triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
@@ -6800,7 +6846,7 @@
       bounceOffTrampolineObjects, carryableGeometryDirection, isCarryableTileGeometry,
       tryGrabNearestCarryable, convertGrabbedTileToActor, placeCarryableActor, attachCarryable,
       dropCarriedObject, throwCarriedObject, detonateCarriedBombAt, pauseBombFuseIfTicking, startOrResumeBombFuse,
-      log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
+      removeActorById, log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
 
