@@ -1173,6 +1173,17 @@
     nextRoomId = snap.nextRoomId;
     playerRoomId = snap.playerRoomId;
     actorDefs = structuredClone(snap.actorDefs);
+    // older saves predate the carryable-actor built-ins (v2.21's grab/carry feature) — same
+    // "older saves predate X" fallback pattern as collectibleSlotIds/groundTileDefs below, just for
+    // a handful of actorDefs' own entries instead of a whole separate field. Without this, loading
+    // an old save/autosave silently wipes these on every restore (structuredClone(snap.actorDefs)
+    // just doesn't have them), and the very next time a kid grabs a bomb/magnet/cannon/trampoline
+    // tile, the freshly-created actor's def is undefined — a real crash the moment renderActors
+    // tries to read its art/poses, not something a quick manual test after a fresh boot would ever
+    // surface (a brand-new page load has no autosave old enough to be missing these).
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_BOMB_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_CANNON_DEF_ID, CARRY_TRAMPOLINE_DEF_ID].forEach(id => {
+      if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
+    });
     nextActorDefId = snap.nextActorDefId;
     backgroundTileDefs = structuredClone(snap.backgroundTileDefs);
     nextBackgroundId = snap.nextBackgroundId;
