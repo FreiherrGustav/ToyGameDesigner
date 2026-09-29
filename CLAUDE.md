@@ -677,6 +677,52 @@ for the current mode. Runner mode ties into the lethal-hazard reaction for
 its fail state (`checkRunnerFailState`) rather than inventing a second
 game-over path.
 
+### Duplicate Room (v2.21)
+
+One button, `renderRoomTabs`'s own last child so it's always the rightmost
+thing in the room-tab row regardless of how many rooms exist — acts on
+whichever room is currently open (the hot one), the same target every
+other room-scoped control in that row already implies, rather than needing
+a per-tab button of its own like delete (`×`) has. `duplicateRoom()`
+flushes the hot globals first (`snapshotCurrentRoomState()`, so the copy
+reflects whatever was just painted, not stale data), then `structuredClone`s
+`board`/`backgroundBoard`/`colorBoard`/`groundSkinBoard`/
+`groundSkinRotationBoard`/`startPos`/actors and Game Rules/Camera
+(`gravityEnabled`/`wrapHEnabled`/`wrapVEnabled`/`cameraMode`/`editorPanCol`)
+onto a fresh room object (`nextRoomId++`, name `<original> + " copy"`,
+chains fine — duplicating a duplicate named "room 1 copy" yields "room 1
+copy copy"), pushes it, and switches to it immediately — same
+`rooms.push`/`activateRoom` shape every other room-creation path (an
+auto-generated door-linked room, the built-in sample games) already uses,
+so nothing new needed wiring into undo/redo/autosave/JSON save-load (those
+already snapshot the whole `rooms` array plus its id counters wholesale).
+
+**One deliberate exception to "copied exactly," worth flagging**: the
+player is never duplicated. `removeAllPlayerInstances`'s own comment
+already establishes the project's one hard rule here — there is only ever
+ONE player actor across the *entire project*, not one per room — so
+copying it would leave two actors simultaneously marked `isPlayer` (one in
+each room) while `playerRoomId` could still only point at one of them, an
+inconsistency nothing else in the codebase (camera follow, Play-mode
+start, the room tab's own "•" marker) is built to tolerate. `duplicateRoom`
+filters the player out of the cloned `actors` array before cloning; every
+other actor — pushables, wanderers/chasers/fleers, collectibles, spawners
+and their loaded contents, a grabbed-and-dropped carryable — comes along
+untouched, reassigned a fresh id (`nextActorInstId++`) so it can never
+collide with the original room's copy once both exist side by side.
+`startPos` is copied as-is even though it's really "the player's own reset
+position for this room" (see the Actor-shape section above) — harmless
+dead weight on a room with no player in it, and gets overwritten correctly
+the moment a kid places a fresh player there anyway (`placeNewActor`'s own
+`if (isPlayer) { startPos.x = ...; playerRoomId = currentRoomId; }`).
+
+Build-mode-only, like `deleteRoom`/`createEmptyRoom` already are — nothing
+here belongs in `exportStandaloneGame`'s `runtimeFunctions` (an exported
+game never creates rooms, it only ever plays the ones baked into
+`GAME_DATA`), and the whole `#roomTabRow` this button lives in is already
+hidden outright in Play mode (`body.play-mode #roomTabRow { display:
+none; }`).
+
 ### Fan and Spawner (v2.19, force curve and always-live fixed in v2.20/v2.20.2)
 
 A fan (`fanAccelFor`) projects wind's own force calculation outward from a
