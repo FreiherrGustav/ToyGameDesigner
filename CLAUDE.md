@@ -489,6 +489,42 @@ already in GAME_DATA>;` in the export template, the same "declared here by
 hand" pattern `audioCtx`/`noiseBufferCache`/`chipBufferCache` already use
 for transient runtime-only state.
 
+**A second latent bug, this one live-editor-only and much nastier: `restoreProjectSnapshot`
+never backward-compat-defaulted `actorDefs`' own new built-in entries.**
+`CARRY_BOMB_DEF_ID`/`CARRY_MAGNET_DEF_ID`/`CARRY_CANNON_DEF_ID`/
+`CARRY_TRAMPOLINE_DEF_ID` are seeded into `actorDefs` unconditionally at
+boot — but `restoreProjectSnapshot` (called by `loadAutosave()` right after
+that seeding, on every single page load) does a blind
+`actorDefs = structuredClone(snap.actorDefs);` with no fallback, exactly
+the mistake the Rooms section above calls out in general and the pattern
+right below it (`collectibleSlotIds`/`groundTileDefs`, both "older saves
+predate X, re-derive from `FACTORY_DEFAULT_SNAPSHOT`") was specifically
+meant to prevent. Any autosave/save made before this feature existed
+— which is to say almost anyone's real saved project, autosave included,
+from before this patch — silently wipes those four keys back out of
+`actorDefs` on every subsequent load, forever, until a fresh "New Project."
+The result: `convertGrabbedTileToActor`'s own `actorDefs[defId].name` (no
+null-guard, since the def was assumed to always exist) throws the instant
+a kid grabs a bomb/magnet/cannon/trampoline tile, tripping the app's global
+error boundary ("😵 Oops! Something glitched.") — reported as "pressing E
+on [these] objects gives an error and deletes them," which read at first
+like a grab-logic bug but reproduced on literally every carryable *tile*
+(pushable, being much older, was unaffected) and turned out to have
+nothing to do with grab's own code at all. **Why this evaded testing all
+patch long**: every Playwright test in this session used a fresh browser
+context with empty `localStorage`, so `loadAutosave()` always returned
+false and `actorDefs` was never clobbered — the bug only surfaces on a
+*real* browser carrying forward an *old* save, which no throwaway test
+naturally recreates without deliberately seeding a stale autosave payload
+first. Fixed the same way collectibles/ground tiles already were: right
+after `actorDefs = structuredClone(snap.actorDefs)`, backfill
+`[PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_BOMB_DEF_ID, CARRY_MAGNET_DEF_ID,
+CARRY_CANNON_DEF_ID, CARRY_TRAMPOLINE_DEF_ID].forEach(id => { if
+(!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]); })`.
+**Any future built-in actor def needs the same one-line addition to that
+list** — this is now the established, single place that guards against it,
+same as `collectibleSlotIds`'s own fallback just above it in the function.
+
 **Still open, carried over from the prototype, not solved by this patch**:
 whether carrying something should affect player movement (slower, lower
 jump), and whether a held object should collide with geometry while
