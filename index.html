@@ -728,6 +728,17 @@
   // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
   // plus the four grabbed-off-the-board kinds above.
   const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_BOMB_KIND, CARRY_MAGNET_KIND, CARRY_CANNON_KIND, CARRY_TRAMPOLINE_KIND];
+  // v2.21: the other half of "should this be a physical object" — geometries whose entire job IS
+  // being a fixed spot in the room (a door leads somewhere specific, a goal marks the win point, a
+  // gravity well anchors a vortex). These never become physical/blocking and never become
+  // carryable, on purpose: picking one up would change what it MEANS, not just where it sits, the
+  // opposite of a bomb or a magnet (an object first, whose being carryable doesn't change what it
+  // is). Kid-facing word for this category: "fixtures" — built into the room, do their job from
+  // wherever they're placed, same as a light fixture never gets carried around the house. Not
+  // currently read by any gameplay code (isBlockingGeometry/isCarryableTileGeometry already just
+  // don't list these) — this constant exists so that stays a deliberate, documented omission
+  // instead of an implicit one the next patch might "fix" by accident.
+  const FIXTURE_GEOMETRIES = ["goal", "switch", "plate", "door", "warp", "gravitywell"];
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -3644,6 +3655,17 @@
     if (geometry === "diggable") return true;
     if (geometry === "trap") return !actor.isPlayer;
     if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
+    // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
+    // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
+    // through them made grabbing one feel glitchy, since there was nothing physically there to
+    // register the interaction against). FIXTURE_GEOMETRIES (door/switch/plate/warp/goal/
+    // gravitywell) deliberately stay OUT of this list — their whole function depends on being
+    // walked ONTO/THROUGH, not bumped into; see FIXTURE_GEOMETRIES' own comment.
+    if (geometry === "bomb") return true;
+    if (geometry === "magnet") return true;
+    if (geometry === "spawner") return true;
+    if (CANNON_ORDER.includes(geometry)) return true;
+    if (FAN_ORDER.includes(geometry)) return true;
     return false;
   }
   // The one place that actually decides "can I move into this cell" — isBlockingGeometry() plus
@@ -3996,6 +4018,15 @@
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
         else if (modifier === "hazard" && actor.isPlayer) triggerHazard(actor);
+        // v2.21: bomb-arm and cannon-fire used to be triggered by overlap (checkPlayerTileContacts),
+        // which relied on these tiles being non-blocking — a kid could walk straight into/through
+        // them. Now that they're solid (see isBlockingGeometry), the player is stopped flush
+        // against them and never actually overlaps the cell, so the reaction has to fire right here,
+        // at the moment of collision, instead. Same functions, same cooldown/one-shot-arm guards —
+        // just a different moment to call them from. Cannon also still launches a pushed pushable
+        // that bumps into one, matching what a shove into a cannon tile already did before this.
+        if (geometry === "bomb" && actor.isPlayer) triggerBombArm(cx, cy);
+        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && def.temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry);
         // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
         // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
         // doing the damage. An actor isn't always exactly tile-aligned, so its AABB routinely spans
@@ -4623,8 +4654,10 @@
       if (geometry === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
       else if (geometry === "switch") triggerFlip(player, cx, cy);
-      else if (geometry === "bomb") triggerBombArm(cx, cy);
-      else if (CANNON_DIRECTIONS[geometry]) triggerCannon(player, geometry);
+      // bomb-arm and cannon-fire moved to resolveAxis (v2.21) — both are now blocking geometry
+      // (see isBlockingGeometry), so the player never actually overlaps their cell the way this
+      // function's overlap-based checks need; resolveAxis fires them at the moment of collision
+      // instead, same functions, same guards.
       // v2.9 gave a colored door a channel-gated "locked until switched" behavior; v2.11
       // repurposes a door's color entirely for room-linking instead (see wireColoredDoor), so a
       // door's own color no longer gates whether it functions — an unlinked/orphaned door is
@@ -5115,13 +5148,10 @@
     // A pushable block is "able to be launched by a cannon" same as the player (per the patch
     // note) — the only tile reaction it needs, since it has no lives/goal/door business of its
     // own; everything else it does (falling, colliding, crushing) already comes for free from
-    // being a full physics actor.
-    else if (temperament === PUSHABLE_KIND) {
-      for (const { cx, cy } of overlappedCells(actor)) {
-        const geometry = geometryAt(cx, cy);
-        if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); break; }
-      }
-    }
+    // being a full physics actor. v2.21: this used to be its own overlap-based check here, but
+    // cannon is blocking geometry now (see isBlockingGeometry) — a pushable shoved into one gets
+    // launched by resolveAxis's own bomb/cannon branch instead, the same place the player's own
+    // cannon-fire moved to, so there's nothing left to do here.
     checkActorContacts(actor, actors);
 
     // fell off the world (only meaningful once gravity/holes exist) — recycle to start, no
@@ -5720,13 +5750,22 @@
   function clampDragPosition(actor, targetX, targetY) {
     // resolve one axis at a time, exactly like simulation, but teleporting instead of integrating
     const before = { x: actor.x, y: actor.y };
+    // v2.21: bomb/cannon are blocking geometry now (see isBlockingGeometry) — a dragged actor's
+    // own clamp loop below already finds them the same way it finds solid, so their touch
+    // reactions fire right here, sharing the same "t"+cell cooldown key as the bump sound, rather
+    // than in the non-blocking loop further down where they'd never actually be reached anymore.
+    function fireBlockingTileReaction(cx, cy) {
+      const geometry = geometryAt(cx, cy);
+      if (geometry === "bomb" && actor.isPlayer) triggerBombArm(cx, cy);
+      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && actorDefs[actor.defId].temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry);
+    }
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
       if (isCellBlocking(cx, cy, actor)) {
         if (targetX > before.x) actor.x = Math.min(actor.x, cx * TILE - actor.w);
         else if (targetX < before.x) actor.x = Math.max(actor.x, (cx + 1) * TILE);
         const key = "t" + cx + "," + cy;
-        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); dragContactCooldown[key] = 220; }
+        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); fireBlockingTileReaction(cx, cy); dragContactCooldown[key] = 220; }
       }
     }
     actor.y = targetY;
@@ -5735,7 +5774,7 @@
         if (targetY > before.y) actor.y = Math.min(actor.y, cy * TILE - actor.h);
         else if (targetY < before.y) actor.y = Math.max(actor.y, (cy + 1) * TILE);
         const key = "t" + cx + "," + cy;
-        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); dragContactCooldown[key] = 220; }
+        if (!dragContactCooldown[key]) { triggerBumpFeedback(actor); fireBlockingTileReaction(cx, cy); dragContactCooldown[key] = 220; }
       }
     }
     // non-blocking contact reactions still fire live while dragging, same as gameplay
@@ -5749,8 +5788,6 @@
           if (geometry === "trap") { triggerTrap(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
           else if (geometry === "switch") { triggerFlip(actor, cx, cy); fired = true; }
-          else if (geometry === "bomb") { triggerBombArm(cx, cy); fired = true; }
-          else if (CANNON_DIRECTIONS[geometry]) { triggerCannon(actor, geometry); fired = true; }
           else if (geometry === "door") {
             // relocates the actor into a different room's actor list entirely — bail out of
             // this drag-clamp call immediately rather than keep resolving stale cells against
