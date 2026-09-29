@@ -784,6 +784,14 @@
   // falling behind (see checkRunnerFailState) is what creates the tension the mode is for.
   const RUNNER_SPEED = 130;
   const BOUNCE_RESTITUTION = 0.82;
+  // A plain bouncy WALL (solid+bouncy hit on the x-axis) used to just reflect whatever horizontal
+  // speed the player already had — jumping straight up between two close bouncy walls carries
+  // almost no vx, so the reflection barely moved you: no "vector" quality, direct feedback. These
+  // give a wall bounce its own diagonal character regardless of incoming speed — see resolveAxis's
+  // applyBouncyWallKick. Gravity-mode only (see its own call site comment for why free-roam is left
+  // untouched).
+  const BOUNCY_WALL_KICK = 320;     // minimum horizontal launch speed away from a bouncy wall
+  const BOUNCY_WALL_LIFT = 160;     // upward vy nudge added on every bouncy-wall bounce
   const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
@@ -3983,6 +3991,19 @@
   // accident. Sustained digging wears it down over DIG_DURATION_MS. Progress is keyed by
   // room+cell and never decays on its own, so stepping away and coming back later (or standing
   // there without digging) resumes right where digging left off.
+  // A plain bouncy wall's own "vector" character — see resolveAxis's own call-site comment for why
+  // this exists and why it's scoped the way it is. `dir` is which way the wall kicks the player
+  // (+1/-1, already matching the sign resolveAxis's own reflection just produced), `jumpHeld`
+  // is whether to layer the "pump more height out of it" assist on top. Sets `bouncyCooldown` the
+  // same way triggerBouncyLaunch's own real launch does — a kick above MAX_SPEED would otherwise
+  // get silently flattened by stepActor's ordinary horizontal speed-cap clamp the very next frame.
+  function applyBouncyWallKick(actor, dir, jumpHeld) {
+    if (Math.abs(actor.vx) < BOUNCY_WALL_KICK) actor.vx = dir * BOUNCY_WALL_KICK;
+    actor.bouncyCooldown = 350;
+    actor.vy -= BOUNCY_WALL_LIFT;
+    if (jumpHeld) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
+  }
+
   function resolveAxis(actor, axis, dt) {
     const def = actorDefs[actor.defId];
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
@@ -4030,16 +4051,28 @@
         // underside, stops you like any other solid wall and nothing more. Captured before the
         // y-branch below resets vy, since that's the only place the original direction survives.
         const steppedOnTop = axis === "y" && actor.vy > 0;
+        // Direct feedback: a plain bouncy tile had "no vector quality" — a wall bounce only ever
+        // reflected whatever horizontal speed you already had (near nothing, jumping straight up
+        // between two close bouncy walls), and there was no way to actively pump more height/reach
+        // out of any bounce. Both scoped to the plain `bouncy` modifier specifically, gravity-mode
+        // only (free-roam's own single combined speed cap isn't something this has been checked
+        // against, and the ask was specifically "with gravity on") — Trampoline keeps its own
+        // separate, already-documented "extra bounce power" identity untouched, and a hazard ball's
+        // wall-caroming behavior is unaffected either way.
+        const isPlainBouncyHit = bouncy && modifier === "bouncy" && actor.isPlayer && gravityOn();
+        const jumpHeldForBounce = keys[" "] || keys["ArrowUp"] || keys["w"] || keys["W"];
         if (axis === "x") {
           if (actor.vx > 0) {
             actor.x = cx * TILE - actor.w;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
+            if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
             if (bouncy && actor.isPlayer) bounceSound();
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
+            if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
             if (bouncy && actor.isPlayer) bounceSound();
           }
         } else {
@@ -4052,6 +4085,10 @@
               // scales with impact speed (a gentle step barely bounces, same as plain bouncy), so
               // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
               if (isTrampolineGeom) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+              // Same "jump off it for more lift" assist as a wall bounce, plain-bouncy-floor only —
+              // Trampoline already has its own enforced minimum just above, stacking a second boost
+              // on top would blur the two mechanics' distinct identities.
+              if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
               if (actor.isPlayer) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
@@ -6871,7 +6908,7 @@
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
-      resolveAxis, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
+      resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
@@ -6944,6 +6981,7 @@
       `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
       `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION};`,
+      `const BOUNCY_WALL_KICK = ${BOUNCY_WALL_KICK}, BOUNCY_WALL_LIFT = ${BOUNCY_WALL_LIFT};`,
       `const BOUNCY_LAUNCH_SPEED = ${BOUNCY_LAUNCH_SPEED}, HAZARD_KNOCKBACK_SPEED = ${HAZARD_KNOCKBACK_SPEED};`,
       `const HAZARD_COOLDOWN_MS = ${HAZARD_COOLDOWN_MS}, DIG_DURATION_MS = ${DIG_DURATION_MS};`,
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
