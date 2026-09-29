@@ -325,6 +325,92 @@ a fall, never reverse it, "a kid can still fight against it"),
 release numbers), `STICKY_CLING_MS = 1000` (how long a sticky WALL freezes
 an actor before the release ramp kicks in on its own — see below).
 
+### Bouncy walls get real vector character (v2.21)
+
+Direct feedback: a plain `solid:bouncy` tile had "no vector quality." A
+wall bounce (an x-axis `resolveAxis` collision) only ever reflected
+whatever horizontal speed the player already had — jumping straight up
+between two close bouncy walls carries almost no `vx`, so the reflection
+barely moved you at all. The reported use case: two vertical rows of
+bouncy tiles a few columns apart, jump up into one and expect to carom
+sideways-with-a-bit-of-lift into the other, bounce off that one the same
+way, repeat. A floor/ceiling bounce (y-axis) never had this problem —
+gravity plus restitution already gives it real vertical energy on its
+own — so this is scoped specifically to the x-axis case, and specifically
+to the plain `bouncy` modifier (not Trampoline, not a hazard ball — see
+below).
+
+`applyBouncyWallKick(actor, dir, jumpHeld)`, called from `resolveAxis`
+right after its existing `-vx * restitution` reflection on both x-axis
+branches, is the whole mechanic:
+- **A minimum kick away from the wall** (`BOUNCY_WALL_KICK = 320`,
+  overriding the reflection if it's weaker) — the direct fix for "jumped
+  straight up, got barely reflected." `dir` is +1/-1, already matching the
+  sign the reflection just produced, so this only ever *strengthens* a weak
+  bounce, never fights a strong one.
+- **A slight upward lift** (`actor.vy -= BOUNCY_WALL_LIFT` — `160`) on
+  every such bounce — the "diagonal carom" quality that was missing;
+  without this a wall bounce reads as a flat horizontal ping, with it the
+  trajectory arcs.
+- **`actor.bouncyCooldown = 350`**, the exact `recentlyLaunched` exemption
+  `triggerBouncyLaunch`'s own real launch already uses — `BOUNCY_WALL_KICK`
+  (320) is well above `MAX_SPEED` (220), so without this the ordinary
+  horizontal speed-cap clamp would flatten the kick right back down within
+  a single frame, same reasoning as every other "real impulse" in this file
+  (cannon, bomb-blast, throw).
+- **Holding jump at the moment of the bounce adds a further `JUMP_VELOCITY`
+  on top of whatever the passive kick/lift already produced** (additive,
+  not a clamp — "get more lift and better aim control" was the ask, and a
+  clamp would sometimes *reduce* an already-strong bounce instead of
+  boosting it). The same jump-key set `stepActor`'s own `wantsJump` reads
+  (`" "`/`ArrowUp`/`w`/`W`) is checked directly inside `resolveAxis` via the
+  shared `keys` global — no new input plumbing needed. This never
+  double-fires with an ordinary ground jump: `actor.grounded` stays `false`
+  through any bouncy-tile bounce (only the non-bouncy floor-landing branch
+  ever sets it), so `stepActor`'s own `wantsJump && actor.grounded` gate
+  can't also trigger in the same frame.
+- **The same jump-assist applies to a plain bouncy FLOOR bounce too**
+  (`actor.vy += JUMP_VELOCITY` right after its own restitution reflection,
+  same additive shape) — "jump off the bouncy tiles for more lift" reads
+  as a general bounce-pump ask, not wall-specific. Deliberately gated to
+  `modifier === "bouncy"` only, not Trampoline — Trampoline already has its
+  own enforced minimum launch just above this in the same branch
+  (`TRAMPOLINE_LAUNCH_SPEED`), and stacking a second boost on top would
+  blur the two mechanics' distinct identities (see the Non-negotiable
+  principles section on why `spring` was removed for exactly this "two
+  tunings of the same bounce" reason).
+- **Gravity-mode only** (`gravityOn()` gates the whole thing) — free-roam's
+  own single combined x/y speed cap wasn't audited against this feature,
+  and the report was specifically framed as "with gravity on." Flag it to
+  the user before extending this to free-roam.
+- **Hazard-ball and Trampoline wall/floor contact is completely
+  unaffected** — `isPlainBouncyHit` (the gating flag) requires
+  `modifier === "bouncy"` specifically, so `isTrampolineGeom` bounces and
+  `isHazardBall`'s always-bounce keep their exact pre-existing plain-
+  restitution behavior on every axis.
+
+**Continued opposing input still fights the kick, on purpose, same as
+every other impulse in this codebase** — `bouncyCooldown` only exempts the
+*speed-cap clamp*, it doesn't stop held-direction acceleration from still
+being integrated (that's the literal mechanism, and reusing it here is
+deliberate rather than inventing a second one). A kid holding the
+direction that caused the bounce will keep fighting it exactly like
+holding into a cannon shot or a bomb blast already does; releasing (or
+reversing) the key right at the bounce is what lets the kick actually
+carry through, same intuitive feel as every other launch in the game.
+
+Verified with Playwright: a near-zero-`vx` approach into a bouncy wall now
+produces a real, code-verified kick (~320) plus lift (~-135 `vy`), and
+displaces the player a real distance once input stops fighting it; holding
+jump at the bounce moment adds a further large boost (`vy` well past
+-1000, vs. ~-135 passive); the same jump-assist on a plain bouncy floor
+roughly doubles peak bounce height over the passive case; a Trampoline
+tile's side contact is confirmed unaffected (no `bouncyCooldown` set);
+re-ran the existing "ring of solid+bouncy tiles, gravity on, 4 seconds of
+active held-key input including jump-mashing" tunneling regression (the
+v2.20.1 fix's own test) and it still never warps through; confirmed
+working identically in an exported standalone game.
+
 ### Pushables (v2.20.3)
 
 `shovePushables(actor, axis)` is the actor-vs-actor collision path for
