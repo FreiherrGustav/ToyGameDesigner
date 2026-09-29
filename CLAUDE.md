@@ -196,7 +196,10 @@ A live actor (in the `actors` array) looks like:
   // v2.21, grab/carry/drop/throw (see its own section below):
   carried,             // true while glued to the player, no physics of its own
   carrying,            // player only: the id of whatever it's currently carrying, or null
-  fuseArmed,           // carrybomb only: has this specific instance's fuse been lit yet
+  fuseArmed,           // carrybomb only: has this specific instance's fuse EVER been lit
+  fuseRemainingMs,     // carrybomb only: ms left on the fuse — ticks down only while not held
+  fuseTimerId,         // carrybomb only: the live setTimeout handle, or null while held/paused
+  fuseStartedAt,       // carrybomb only: performance.now() when the current tick segment began
   cannonDir,           // carrycannon only: "ne"/"se"/"sw"/"nw", copied from the tile at grab time
 }
 ```
@@ -398,16 +401,40 @@ on their own") over either a bigger tile-to-actor migration or a parallel
 object category.
 
 **Each kind reuses its tile's own mechanism, never a reimplementation**:
-- **Bomb**: `attachCarryable` arms the fuse the *first* time it's ever
-  grabbed (not on mere contact, unlike the tile) via the exact same
-  wall-clock `setTimeout(..., BOMB_FUSE_MS)` pattern `triggerBombArm`
-  already uses. `detonateCarriedBombAt(roomId, actorId)` finds the actor by
-  id in whichever room it's still in (it's simply abandoned there,
+- **Bomb**: **held is safe.** The fuse only counts down while the bomb is
+  OUT of the player's hands — dropped or thrown — and picking it back up,
+  even mid-countdown, pauses it again. `pauseBombFuseIfTicking(obj)` /
+  `startOrResumeBombFuse(obj)` are the whole mechanic: `obj.fuseRemainingMs`
+  (defaults to `BOMB_FUSE_MS`) tracks how much fuse is left, `obj.fuseTimerId`
+  is the live `setTimeout` handle while it's actually ticking (`null` while
+  held/paused), and `obj.fuseStartedAt` is when the current running segment
+  began, so pausing can compute exactly how much time has elapsed and
+  subtract it. `attachCarryable` calls `pauseBombFuseIfTicking` for a bomb
+  (a no-op if it was never ticking yet); `dropCarriedObject`/
+  `throwCarriedObject` both call `startOrResumeBombFuse` once the object is
+  no longer held. **This replaced an earlier v2.21 shape** where grabbing
+  armed a real-time fuse immediately and it kept ticking whether held or
+  not ("explodes in your hands" after `BOMB_FUSE_MS` regardless) — direct
+  feedback was that this didn't read as "carryable," it read as "you have a
+  few seconds before this explodes on you no matter what you do." The tile's
+  own touch-based arming (`triggerBombArm`, fired from `resolveAxis` on mere
+  physical contact — see "Physical objects vs. fixtures" below) is
+  untouched: bumping into a live bomb tile still lights it, same landmine
+  feel as always. If a kid grabs an already-armed tile before its timer
+  fires, the conversion already clears `board[gy][gx]`, so the original
+  tile-side timeout finds nothing there when it eventually runs
+  (`detonateBombAt`'s own `if (!tile) return`) and silently no-ops — the
+  grabbed copy starts fresh at `BOMB_FUSE_MS` remaining, fully paused, no
+  double-explosion. `detonateCarriedBombAt(roomId, actorId)` finds the actor
+  by id in whichever room it's still in (it's simply abandoned there,
   detonating unseen, if the player's since left that room), auto-drops it
-  from `player.carrying` first if it's still held ("explodes in your
-  hands"), removes the actor, and calls the *same* `detonateBombAt` the
-  tile uses for the actual blast (tile-clearing, knockback, the boom
-  sound) — no second explosion implementation.
+  from `player.carrying` first if it's still held (a thrown/dropped bomb
+  whose fuse ran out while briefly re-grabbed still "explodes in your
+  hands" — held only PAUSES an already-ticking fuse, it doesn't cancel a
+  detonation whose `setTimeout` already fired before the grab registered),
+  removes the actor, and calls the *same* `detonateBombAt` the tile uses for
+  the actual blast (tile-clearing, knockback, the boom sound) — no second
+  explosion implementation.
 - **Magnet**: `radialForceAccelFor(actor, player)` (now takes `player`) has
   a second pull source alongside its tile-scanning loop — a currently
   *actively held* `CARRY_MAGNET_KIND` actor's own live position, same
