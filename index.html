@@ -705,6 +705,29 @@
   // kid it's an object, not a character. Collectibles (v2.15) used to be the other one; they're
   // their own dedicated section now (collectibleSlotIds), not part of this generic kind list.
   const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND];
+  // v2.21: bomb/cannon/magnet/trampoline stay exactly what they've always been — tiles a kid
+  // paints from the Objects palette, painted and rotated the same way as before — but grabbing one
+  // (pressing the carry key near it) picks it bodily up off the board and turns THAT ONE INSTANCE
+  // into a real physics actor of one of these kinds, same shape as HAZARD_BALL_KIND ("never placed
+  // by hand" — see spawnActorAt): a kid never sees these in a swatch, they only ever come from
+  // grabbing a placed tile. Deliberately not a second palette entry alongside the tile (the user's
+  // own call: "let's keep the interface simple, players will investigate and discover on their
+  // own") and deliberately not a full tile-to-actor migration either (every existing/sample-game
+  // board keeps working exactly as painted; only a tile a kid actually grabs ever changes form).
+  // Once turned into an actor it stays one forever, even after being dropped/thrown — never
+  // repainted back onto the board — matching "a thrown object is a normal physics body from that
+  // point on" from the patch note.
+  const CARRY_BOMB_KIND = "carrybomb";
+  const CARRY_MAGNET_KIND = "carrymagnet";
+  const CARRY_CANNON_KIND = "carrycannon";
+  const CARRY_TRAMPOLINE_KIND = "carrytrampoline";
+  const CARRY_BOMB_DEF_ID = "carrybomb";
+  const CARRY_MAGNET_DEF_ID = "carrymagnet";
+  const CARRY_CANNON_DEF_ID = "carrycannon";
+  const CARRY_TRAMPOLINE_DEF_ID = "carrytrampoline";
+  // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
+  // plus the four grabbed-off-the-board kinds above.
+  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_BOMB_KIND, CARRY_MAGNET_KIND, CARRY_CANNON_KIND, CARRY_TRAMPOLINE_KIND];
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -752,6 +775,20 @@
   const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
   const BOMB_BLAST_KNOCKBACK_SPEED = 480;
   const WARP_COOLDOWN_MS = 400;
+
+  // v2.21: grab / carry / drop / throw — the first player-invoked verb in the whole project
+  // (everything else happens automatically from contact or movement). Brought in from a validated
+  // throwaway prototype (grab-carry-test.html): one key attaches the nearest carryable thing
+  // within range, no physics of its own while held, follows the player; pressing it again while
+  // carrying taps to drop (placed at the feet, zero velocity) or, held past a short threshold,
+  // charges a throw released on key-up. See tryGrabOrDrop()/releaseGrabKey() for the actual state
+  // machine and CARRYABLE_KINDS below for what's actually carryable.
+  const GRAB_KEY_RANGE = TILE * 1.3; // reach from the player's own center, actor OR tile-cell center
+  const THROW_TAP_MS = 180;          // released before this = drop, not throw
+  const THROW_CHARGE_MAX_MS = 600;   // no benefit to charging longer than this
+  const THROW_MIN_SPEED = 260;       // a bare toss, right at the tap/throw boundary
+  const THROW_MAX_SPEED = 640;       // a full-charge throw — just under CANNON_LAUNCH_SPEED
+  const THROW_UPWARD_SPEED = 240;    // the "small upward arc" the patch note asks for
 
   // ============== State ==============
   // Two board layers: background (pure art, no gameplay meaning) drawn first, and gameplay
@@ -1664,6 +1701,22 @@
       "..MMMM..", ".MHHHHM.", "MHHHHHHM", "MHHHHHHM",
       "MHHHHHHM", "MHHHHHHM", ".MHHHHM.", "..MMMM.."
     ], { M: "#b71c1c", H: "#ff8a65" })
+  };
+  // v2.21: carried/dropped/thrown forms of the bomb/cannon/magnet/trampoline tiles — same as
+  // HAZARD_BALL_DEF_ID, never placed by hand, only ever created by grabbing a placed tile (see
+  // convertGrabbedTileToActor). Reuses each tile's own GEOMETRY_ICONS art directly rather than
+  // drawing a second sprite for "the same object, now carryable" — it IS the same object.
+  actorDefs[CARRY_BOMB_DEF_ID] = { temperament: CARRY_BOMB_KIND, poses: null, name: "bomb", art: GEOMETRY_ICONS.bomb.slice() };
+  actorDefs[CARRY_MAGNET_DEF_ID] = { temperament: CARRY_MAGNET_KIND, poses: null, name: "magnet", art: GEOMETRY_ICONS.magnet.slice() };
+  actorDefs[CARRY_TRAMPOLINE_DEF_ID] = { temperament: CARRY_TRAMPOLINE_KIND, poses: null, name: "trampoline", art: GEOMETRY_ICONS.trampoline.slice() };
+  // Cannon keeps its 4-orientation art alive as actual pose frames (ne/se/sw/nw) keyed by the
+  // instance's own cannonDir field (set at grab time from whichever way it was painted/rotated) —
+  // currentPoseFor needs a matching branch for this def id, same pattern as the player's stand/
+  // stride/air/crouch poses, just picking by direction instead of by physical state.
+  actorDefs[CARRY_CANNON_DEF_ID] = {
+    temperament: CARRY_CANNON_KIND, name: "cannon",
+    art: GEOMETRY_ICONS["cannon-ne"].slice(),
+    poses: { ne: GEOMETRY_ICONS["cannon-ne"].slice(), se: GEOMETRY_ICONS["cannon-se"].slice(), sw: GEOMETRY_ICONS["cannon-sw"].slice(), nw: GEOMETRY_ICONS["cannon-nw"].slice() }
   };
 
   // One built-in background to start from (the old "ground" brick pattern) so the palette
@@ -3779,7 +3832,7 @@
   // object types (pushable blocks, collectibles) — deliberately not the player, so it reads as
   // "attracts objects" rather than yanking a kid's own character around. Gravity Well pulls every
   // actor, player included — the unparked vortex/black-hole idea.
-  function radialForceAccelFor(actor) {
+  function radialForceAccelFor(actor, player) {
     let ax = 0, ay = 0;
     const centerX = actor.x + actor.w / 2, centerY = actor.y + actor.h / 2;
     const ac = Math.floor(centerX / TILE), ar = Math.floor(centerY / TILE);
@@ -3799,6 +3852,21 @@
         if (dist >= radiusPx || dist < 1) continue;
         const strength = (1 - dist / radiusPx) * (isMagnet ? MAGNET_FORCE : GRAVITY_WELL_FORCE);
         ax += (ddx / dist) * strength; ay += (ddy / dist) * strength;
+      }
+    }
+    // v2.21: a carried magnet OBJECT pulls the same way the tile does, from wherever it currently
+    // is instead of a fixed cell — but ONLY while actively held (see attachCarryable), the "player
+    // becomes a mobile force field" case from the grab/carry patch note. Dropped/resting, it pulls
+    // nothing — same "attracts objects, not the player" magnetable restriction as the tile.
+    if (magnetable && player && player.carrying != null) {
+      const carried = actors.find(a => a.id === player.carrying);
+      if (carried && carried.id !== actor.id && actorDefs[carried.defId] && actorDefs[carried.defId].temperament === CARRY_MAGNET_KIND) {
+        const ddx = (carried.x + carried.w / 2) - centerX, ddy = (carried.y + carried.h / 2) - centerY;
+        const dist = Math.hypot(ddx, ddy);
+        if (dist < radiusPx && dist >= 1) {
+          const strength = (1 - dist / radiusPx) * MAGNET_FORCE;
+          ax += (ddx / dist) * strength; ay += (ddy / dist) * strength;
+        }
       }
     }
     return { ax, ay };
@@ -3969,7 +4037,7 @@
   // pushing/landing this call — never its own obstacle either).
   function actorBlockedByOtherPushables(candidate, selfId, moverId) {
     for (const other of actors) {
-      if (other.id === selfId || other.id === moverId) continue;
+      if (other.id === selfId || other.id === moverId || other.carried) continue;
       const def = actorDefs[other.defId];
       if (!def || def.temperament !== PUSHABLE_KIND) continue;
       if (candidate.x < other.x + other.w && candidate.x + candidate.w > other.x &&
@@ -3999,7 +4067,7 @@
   // velocity (PUSHABLE_KIND's "zero self-driven accel") beyond an occasional bounce.
   function shovePushables(actor, axis) {
     for (const other of actors) {
-      if (other.id === actor.id) continue;
+      if (other.id === actor.id || other.carried) continue;
       const def = actorDefs[other.defId];
       if (!def || def.temperament !== PUSHABLE_KIND) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
@@ -4025,6 +4093,43 @@
           other.y -= delta;
           if (blocked()) { other.y += delta; actor.y = other.y + other.h; actor.vy = 0; }
         }
+      }
+    }
+  }
+
+  // v2.21: a dropped/thrown Trampoline OBJECT is a solid, bouncy platform for every other actor —
+  // the actor-vs-actor sibling of resolveAxis's own tile isTrampolineGeom branch, since a
+  // trampoline can now be carried and placed by hand instead of only painted. Unlike
+  // shovePushables, a trampoline object is never itself shoved out of the way (it's the
+  // springboard, not the spring) — it just blocks, and landing on its TOP specifically bounces the
+  // mover with the exact same restitution/minimum-launch numbers and sound as the tile, rather
+  // than resting on it. Bumping its side or underside just blocks like an ordinary resting object
+  // (a deliberate simplification vs. the tile's own 4-directional bounce — the primary "jump on a
+  // trampoline" case is what this is for; flag it to the user before trying to make every side
+  // bouncy too, since that needs a genuinely new actor-vs-actor collision model, not this one).
+  function bounceOffTrampolineObjects(actor, axis) {
+    for (const other of actors) {
+      if (other.id === actor.id || other.carried) continue;
+      const def = actorDefs[other.defId];
+      if (!def || def.temperament !== CARRY_TRAMPOLINE_KIND) continue;
+      if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
+            actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      if (axis === "x") {
+        if (actor.vx > 0) { actor.x = other.x - actor.w; actor.vx = 0; }
+        else if (actor.vx < 0) { actor.x = other.x + other.w; actor.vx = 0; }
+      } else {
+        if (actor.vy > 0) {
+          actor.y = other.y - actor.h;
+          const actorDef = actorDefs[actor.defId];
+          const bouncy = actor.isPlayer || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
+          triggerImpact(actor, "y", actor.vy, bouncy);
+          if (bouncy) {
+            actor.vy = -actor.vy * TRAMPOLINE_RESTITUTION;
+            actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+            actor.bouncyCooldown = 350;
+            if (actor.isPlayer) sounds.trampolineBoing();
+          } else { actor.vy = 0; actor.grounded = true; }
+        } else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
       }
     }
   }
@@ -4135,6 +4240,10 @@
       return;
     }
     const npcActor = playerActor === moverActor ? otherActor : moverActor;
+    // v2.21: a carried object is glued right above the player's own head (see tick()'s carry-follow
+    // update) — close enough that its AABB can graze the player's. None of the reactions below
+    // should ever fire on something the player is currently holding.
+    if (npcActor.carried) return;
     const def = actorDefs[npcActor.defId];
     const temperament = def ? def.temperament : null;
 
@@ -4198,6 +4307,12 @@
       if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
+    } else if (temperament === CARRY_CANNON_KIND) {
+      // v2.21: a dropped/resting cannon object fires the player exactly like the tile does — same
+      // function, same cooldown, just reusing the direction it was aimed at when grabbed
+      // (cannonDir) instead of a board cell's geometry string. Player-only, matching the tile
+      // (only checkPlayerTileContacts/the Build-mode drag handler ever call triggerCannon).
+      triggerCannon(playerActor, "cannon-" + npcActor.cannonDir);
     }
   }
 
@@ -4601,8 +4716,211 @@
   });
   window.addEventListener("keyup", (e) => { keys[e.key] = false; });
 
+  // ============== Grab / carry / drop / throw (v2.21) ==============
+  // The first player-invoked verb in the whole project — everything else in the reaction table so
+  // far happens automatically from contact or movement, never from a kid pressing a dedicated key.
+  // One key does three things depending on state: not carrying + something carryable in range +
+  // press -> grab it; carrying + a quick tap -> drop it at the feet, zero velocity; carrying + held
+  // past THROW_TAP_MS then released -> throw it, strength scaled by how long it was held (capped at
+  // THROW_CHARGE_MAX_MS). "E" is the key, matching the validated prototype (grab-carry-test.html)
+  // as-is — no reason found to pick a different one.
+  let grabKeyDownAt = null; // performance.now() timestamp of the current press, or null when not held
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "e" && e.key !== "E") return;
+    if (e.repeat) return; // only the real first press starts anything
+    e.preventDefault();
+    const player = actors.find(a => a.isPlayer);
+    if (!player) return;
+    if (player.carrying == null) tryGrabNearestCarryable(player);
+    else grabKeyDownAt = performance.now(); // start charging toward a throw
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key !== "e" && e.key !== "E") return;
+    const player = actors.find(a => a.isPlayer);
+    if (!player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
+    const heldMs = performance.now() - grabKeyDownAt;
+    grabKeyDownAt = null;
+    if (heldMs < THROW_TAP_MS) dropCarriedObject(player);
+    else throwCarriedObject(player, heldMs);
+  });
+
+  // Every carryable geometry a kid can paint — grabbing one picks up that ONE cell, converting it
+  // into a live actor (see convertGrabbedTileToActor). Cannon keeps its own orientation.
+  function carryableGeometryDirection(geometry) {
+    if (CANNON_ORDER.includes(geometry)) return geometry.split("-")[1];
+    return null;
+  }
+  function isCarryableTileGeometry(geometry) {
+    return geometry === "bomb" || geometry === "magnet" || geometry === "trampoline" || CANNON_ORDER.includes(geometry);
+  }
+
+  // Finds whichever's closer within GRAB_KEY_RANGE — an already-live carryable actor (a pushable,
+  // or a bomb/magnet/cannon/trampoline already grabbed once before), or a carryable tile cell — and
+  // attaches it. At most one of each kind of search "wins"; nothing happens if neither is in range.
+  function tryGrabNearestCarryable(player) {
+    const px = player.x + player.w / 2, py = player.y + player.h / 2;
+    let bestActor = null, bestActorD = GRAB_KEY_RANGE;
+    for (const a of actors) {
+      if (a.isPlayer || a.carried) continue;
+      const def = actorDefs[a.defId];
+      if (!def || !CARRYABLE_KINDS.includes(def.temperament)) continue;
+      const d = Math.hypot((a.x + a.w / 2) - px, (a.y + a.h / 2) - py);
+      if (d < bestActorD) { bestActorD = d; bestActor = a; }
+    }
+    if (bestActor) { attachCarryable(player, bestActor); return; }
+
+    const reach = GRAB_KEY_RANGE / TILE;
+    const gx0 = Math.floor(px / TILE - reach), gx1 = Math.floor(px / TILE + reach);
+    const gy0 = Math.floor(py / TILE - reach), gy1 = Math.floor(py / TILE + reach);
+    let bestCell = null, bestCellD = GRAB_KEY_RANGE;
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const geometry = geometryAt(gx, gy);
+        if (!isCarryableTileGeometry(geometry)) continue;
+        const d = Math.hypot((gx * TILE + TILE / 2) - px, (gy * TILE + TILE / 2) - py);
+        if (d < bestCellD) { bestCellD = d; bestCell = { gx, gy, geometry }; }
+      }
+    }
+    if (bestCell) {
+      const newActor = convertGrabbedTileToActor(bestCell.gx, bestCell.gy, bestCell.geometry);
+      if (newActor) attachCarryable(player, newActor);
+    }
+  }
+
+  // Picks a painted bomb/magnet/trampoline/cannon-* cell bodily up off the board and turns it into
+  // a real actor at that cell's center — see CARRYABLE_KINDS' own comment on why this is a
+  // conversion-on-grab rather than a second palette entry or a full tile-to-actor migration.
+  function convertGrabbedTileToActor(gx, gy, geometry) {
+    let defId;
+    if (geometry === "bomb") defId = CARRY_BOMB_DEF_ID;
+    else if (geometry === "magnet") defId = CARRY_MAGNET_DEF_ID;
+    else if (geometry === "trampoline") defId = CARRY_TRAMPOLINE_DEF_ID;
+    else if (CANNON_ORDER.includes(geometry)) defId = CARRY_CANNON_DEF_ID;
+    else return null;
+    board[gy][gx] = null;
+    colorBoard[gy][gx] = null;
+    const actor = placeCarryableActor(defId, gx * TILE + TILE / 2, gy * TILE + TILE / 2, carryableGeometryDirection(geometry));
+    log("Picked up the " + actorDefs[defId].name + "!");
+    return actor;
+  }
+
+  // Same actor shape placeNewActor()/spawnActorAt() build, minus anything player/spawner-specific
+  // — this one's only ever created by a grab, never placed by hand or spawned (same "never placed
+  // by hand" shape as HAZARD_BALL_KIND).
+  function placeCarryableActor(defId, px, py, cannonDir) {
+    const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
+    const actor = {
+      id: nextActorInstId++, defId, x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
+      spawnX: x, spawnY: y,
+      vx: 0, vy: 0, grounded: false, isPlayer: false, facingDir: 1,
+      impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
+      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
+      cannonCooldown: 0, warpCooldown: 0,
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
+      carried: false, fuseArmed: false, cannonDir: cannonDir || null
+    };
+    actors.push(actor);
+    return actor;
+  }
+
+  // Attaches whatever was found to the player: no physics of its own, glued just above the
+  // player's head, updated every frame by tick()'s own carry-follow step. A bomb's fuse starts
+  // right here, the FIRST time it's ever grabbed — not on mere contact — and, once lit, keeps
+  // ticking in real time (setTimeout, the exact mechanism triggerBombArm's tile version already
+  // uses) whether the bomb stays held or gets dropped/thrown, detonating wherever it currently is.
+  function attachCarryable(player, obj) {
+    obj.carried = true;
+    obj.vx = 0; obj.vy = 0;
+    obj.impactMag = 0; // no stale wobble bleeding into the carried render
+    player.carrying = obj.id;
+    const def = actorDefs[obj.defId];
+    if (def && def.temperament === CARRY_BOMB_KIND && !obj.fuseArmed) {
+      obj.fuseArmed = true;
+      sounds.fuse();
+      log("Fuse lit — run!");
+      const roomId = currentRoomId, actorId = obj.id;
+      setTimeout(() => detonateCarriedBombAt(roomId, actorId), BOMB_FUSE_MS);
+    } else {
+      log("Grabbed the " + (def ? def.name : "object") + ".");
+    }
+  }
+
+  // Tap: unchanged from the prototype — placed at the player's feet, zero velocity, physics
+  // resumes next frame exactly like anything else that's ever fallen and landed.
+  function dropCarriedObject(player) {
+    if (player.carrying == null) return;
+    const obj = actors.find(a => a.id === player.carrying);
+    player.carrying = null;
+    if (!obj) return;
+    obj.carried = false;
+    obj.x = player.x + player.w / 2 - obj.w / 2;
+    obj.y = player.y + player.h - obj.h;
+    obj.vx = 0; obj.vy = 0;
+    log("Dropped it.");
+  }
+
+  // Hold-and-release: a velocity impulse in whichever way the player's actually facing (facingDir
+  // already tracks "last real horizontal input, or current vx sign, defaulting forward" — see
+  // stepActor — so this needed no new tracking of its own) plus a small fixed upward arc. Strength
+  // scales linearly with how long the key was held between the tap threshold and the charge cap —
+  // no benefit to holding past THROW_CHARGE_MAX_MS. Once released it's a normal physics body from
+  // here on, same as a drop — no new physics, only the release velocity differs.
+  function throwCarriedObject(player, heldMs) {
+    if (player.carrying == null) return;
+    const obj = actors.find(a => a.id === player.carrying);
+    player.carrying = null;
+    if (!obj) return;
+    obj.carried = false;
+    const chargeFrac = Math.max(0, Math.min(1, (heldMs - THROW_TAP_MS) / (THROW_CHARGE_MAX_MS - THROW_TAP_MS)));
+    const speed = THROW_MIN_SPEED + (THROW_MAX_SPEED - THROW_MIN_SPEED) * chargeFrac;
+    const dir = player.facingDir || 1;
+    obj.x = player.x + player.w / 2 - obj.w / 2;
+    obj.y = player.y + player.h / 2 - obj.h / 2;
+    obj.vx = dir * speed;
+    obj.vy = -THROW_UPWARD_SPEED;
+    // A thrown object's speed is deliberately stronger than the ordinary NPC_MAX_SPEED cap
+    // stepActor's non-player branch clamps to every frame — without an exemption, that clamp
+    // would flatten a real throw back down to a slow drift within the very next frame. Reusing
+    // bouncyCooldown for this (the same field a bouncy-tile/Trampoline launch already exempts
+    // itself with) is safe here specifically because a thrown object has zero self-driven
+    // acceleration of its own (PUSHABLE_KIND/these carryables never take steering input) — the
+    // v2.20.1 tunneling risk that field's own comment warns about only exists when something
+    // holds a direction key during the exemption window, which nothing here ever does.
+    obj.bouncyCooldown = 500;
+    sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
+    log("Threw it!");
+  }
+
+  // A carried bomb's fuse is real wall-clock time (setTimeout), exactly like the tile version's
+  // own triggerBombArm/detonateBombAt — captured by id/room at grab time so it still resolves
+  // correctly even if the bomb's been dropped, thrown, or the player's switched rooms since (in
+  // which case it's simply abandoned in its own room and detonates there, unseen, same as the tile
+  // version already tolerates a kid wandering off mid-fuse). Reuses detonateBombAt entirely for the
+  // actual blast (tile-clearing, actor knockback, the boom sound) — the bomb OBJECT itself is
+  // consumed by its own blast, same as the validated prototype.
+  function detonateCarriedBombAt(roomId, actorId) {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+    const isHot = roomId === currentRoomId;
+    const targetActors = isHot ? actors : room.actors;
+    const bombActor = targetActors.find(a => a.id === actorId);
+    if (!bombActor) return; // already gone — undo, New Project, room reset, etc.
+    if (isHot) {
+      const player = actors.find(a => a.isPlayer);
+      if (player && player.carrying === actorId) player.carrying = null; // "explodes in your hands"
+    }
+    const gx = Math.floor((bombActor.x + bombActor.w / 2) / TILE);
+    const gy = Math.floor((bombActor.y + bombActor.h / 2) / TILE);
+    targetActors.splice(targetActors.indexOf(bombActor), 1);
+    detonateBombAt(roomId, gx, gy);
+  }
+
   function stepActor(actor, dt, player) {
     if (actor.dragging) return; // frozen while the editor is dragging it
+    // v2.21: "no physics of its own while held, follows the player" — its x/y are driven directly
+    // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
+    // attachCarryable's setTimeout) since that's a real-time timer, not part of this per-frame step.
+    if (actor.carried) return;
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
     // v2.15: a custom character made "the player" (see playerDefId) keeps whatever temperament
@@ -4643,7 +4961,7 @@
       // does for a held movement key.
       const windAccel = windAccelFor(actor);
       checkWhooshSurface(actor, windAccel);
-      const radialAccel = radialForceAccelFor(actor);
+      const radialAccel = radialForceAccelFor(actor, player);
       const fanAccel = fanAccelFor(actor);
       actor.nearFan = fanAccel.near; // v2.20: purely a render cue (floating bob) — see renderActors
       // v2.20.2: a discrete "the wind just bounced me" kick, on top of the continuous accel below
@@ -4780,9 +5098,11 @@
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x", dt);
     shovePushables(actor, "x");
+    bounceOffTrampolineObjects(actor, "x");
     actor.y += actor.vy * dt;
     resolveAxis(actor, "y", dt);
     shovePushables(actor, "y");
+    bounceOffTrampolineObjects(actor, "y");
     applyWorldWrap(actor);
 
     // decay physics-driven deformation values — impact deformation now decays as a damped
@@ -4904,6 +5224,20 @@
   function tick(dt) {
     updatePressurePlates();
     const player = actors.find(a => a.isPlayer);
+    // v2.21: the carried object's position is driven directly here, every frame, rather than
+    // through the normal per-actor physics step (stepActor early-returns for it) — "no physics of
+    // its own while held, follows the player." If it's vanished from under us (undo, New Project, a
+    // room switch left it behind in its old room, its own fuse went off) just let go cleanly.
+    if (player && player.carrying != null) {
+      const carried = actors.find(a => a.id === player.carrying);
+      if (carried) {
+        carried.x = player.x + player.w / 2 - carried.w / 2;
+        carried.y = player.y - carried.h - 4;
+        carried.vx = 0; carried.vy = 0;
+      } else {
+        player.carrying = null;
+      }
+    }
     const snapshot = actors.slice();
     for (const actor of snapshot) {
       // a door touched mid-loop already hot-swapped board/backgroundBoard/actors to a
@@ -5296,7 +5630,10 @@
       // default rather than 0, and isOnStickyGround/STICKY_RELEASE_MS. nearFan is a pure render
       // cue, recomputed fresh every frame by fanAccelFor — false here is just the pre-first-frame
       // value, never read before stepActor sets it for real.
-      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0
+      stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
+      // v2.21: `carried` is meaningful on anything carryable (see CARRYABLE_KINDS), `carrying` only
+      // on the player — harmless, unused fields on everyone else, same as e.g. cannonCooldown is.
+      carried: false, carrying: isPlayer ? null : undefined
     };
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -5345,6 +5682,7 @@
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
+      carried: false,
       spawnerKey, spawnBornAt: nowMs
     };
     actors.push(actor);
@@ -6012,6 +6350,11 @@
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = performance.now();
+    // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
+    // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
+    // own wind-up pulse): without it, holding the key down reads as nothing happening until the
+    // object suddenly flies, which isn't discoverable by watching.
+    const chargingPlayer = grabKeyDownAt != null ? actorsArg.find(a => a.isPlayer && a.carrying != null) : null;
     actorsArg.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
@@ -6057,6 +6400,14 @@
       // fanAccelFor's own near-force falloff/near flag) — a gentle sine bob, phase-offset per actor
       // so several floating things don't all bob in lockstep. Never touches actual physics.
       if (actor.nearFan) t.oy += Math.sin(now / 160 + actor.id) * 0.05;
+      if (chargingPlayer && actor.id === chargingPlayer.carrying) {
+        const heldMs = now - grabKeyDownAt;
+        const chargeFrac = Math.max(0, Math.min(1, (heldMs - THROW_TAP_MS) / (THROW_CHARGE_MAX_MS - THROW_TAP_MS)));
+        if (chargeFrac > 0) {
+          t.ox += Math.sin(now / 30 + actor.id) * 0.05 * chargeFrac;
+          t.oy += Math.cos(now / 37 + actor.id) * 0.05 * chargeFrac;
+        }
+      }
 
       const anim = animState[actor.id];
       if (anim) {
@@ -6160,6 +6511,10 @@
   // oscillating wobble value — the crouch frame is a discrete cue, not meant to flicker as
   // the wobble swings through its overshoot/settle cycle.
   function currentPoseFor(actor) {
+    // v2.21: a carried/dropped cannon object picks its sprite by which way it's aimed (set once,
+    // at grab time, from the tile orientation it was painted/rotated to — see cannonDir), not by
+    // physics state the way every other posed actor's stand/stride/air/crouch set is.
+    if (actor.defId === CARRY_CANNON_DEF_ID) return actor.cannonDir || "ne";
     if (!actor.grounded) return "air";
     if (actor.impactMag > 0.3 && actor.impactWobbleT < 0.12 && actor.impactAxis === "y") return "crouch";
     if (Math.abs(actor.vx) > 15) return "stride";
@@ -6332,6 +6687,9 @@
       playPatch, playActorSound,
       chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
       chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
+      bounceOffTrampolineObjects, carryableGeometryDirection, isCarryableTileGeometry,
+      tryGrabNearestCarryable, convertGrabbedTileToActor, placeCarryableActor, attachCarryable,
+      dropCarriedObject, throwCarriedObject, detonateCarriedBombAt,
       log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
     const functionSource = runtimeFunctions.map(fn => fn.toString()).join("\n\n");
@@ -6389,6 +6747,14 @@
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
+      `const CARRY_BOMB_KIND = ${JSON.stringify(CARRY_BOMB_KIND)}, CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)};`,
+      `const CARRY_CANNON_KIND = ${JSON.stringify(CARRY_CANNON_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
+      `const CARRY_BOMB_DEF_ID = ${JSON.stringify(CARRY_BOMB_DEF_ID)}, CARRY_MAGNET_DEF_ID = ${JSON.stringify(CARRY_MAGNET_DEF_ID)};`,
+      `const CARRY_CANNON_DEF_ID = ${JSON.stringify(CARRY_CANNON_DEF_ID)}, CARRY_TRAMPOLINE_DEF_ID = ${JSON.stringify(CARRY_TRAMPOLINE_DEF_ID)};`,
+      `const CARRYABLE_KINDS = ${JSON.stringify(CARRYABLE_KINDS)};`,
+      `const GRAB_KEY_RANGE = ${GRAB_KEY_RANGE};`,
+      `const THROW_TAP_MS = ${THROW_TAP_MS}, THROW_CHARGE_MAX_MS = ${THROW_CHARGE_MAX_MS};`,
+      `const THROW_MIN_SPEED = ${THROW_MIN_SPEED}, THROW_MAX_SPEED = ${THROW_MAX_SPEED}, THROW_UPWARD_SPEED = ${THROW_UPWARD_SPEED};`,
       `const IMPACT_WOBBLE_FREQ = ${IMPACT_WOBBLE_FREQ}, IMPACT_WOBBLE_DECAY = ${IMPACT_WOBBLE_DECAY};`,
       `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
@@ -6462,6 +6828,13 @@
   let noiseBufferCache = null; // getNoiseBuffer()'s own cache — shared runtime source, declared here by hand
   let chipBufferCache = {}; // getChipBuffer()'s own cache — same reason
 
+  // v2.21 fix: spawnActorAt/placeCarryableActor (shared runtime source) both do
+  // nextActorInstId++, but nothing ever declared it here — a real, pre-existing bug (a spawner
+  // firing in an exported game threw a ReferenceError the instant it tried to create its first
+  // actor, found while wiring up grab/carry's own actor creation). Starts past every id already
+  // baked into GAME_DATA so a freshly created actor's id can never collide with one that shipped.
+  let nextActorInstId = 1 + GAME_DATA.rooms.reduce((max, r) => r.actors.reduce((m, a) => Math.max(m, a.id), max), 0);
+
   let rooms = GAME_DATA.rooms;
   let doorLinks = GAME_DATA.doorLinks;
   let spawnerContents = GAME_DATA.spawnerContents;
@@ -6527,6 +6900,7 @@
     lives = DEFAULT_LIVES;
     playSessionEnded = null;
     currentRoomId = null;
+    grabKeyDownAt = null;
     activateRoom(playerRoomId);
     renderPlayHUD();
   }
@@ -6539,6 +6913,28 @@
     keys[e.key] = true;
   });
   window.addEventListener("keyup", (e) => { keys[e.key] = false; });
+
+  // v2.21: grab/carry/drop/throw's own key handling, hand-duplicated here the same way the
+  // movement keys{} listeners above are — see the live builder's matching block for why.
+  let grabKeyDownAt = null;
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "e" && e.key !== "E") return;
+    if (e.repeat || playSessionEnded) return;
+    e.preventDefault();
+    const player = actors.find(a => a.isPlayer);
+    if (!player) return;
+    if (player.carrying == null) tryGrabNearestCarryable(player);
+    else grabKeyDownAt = performance.now();
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key !== "e" && e.key !== "E") return;
+    const player = actors.find(a => a.isPlayer);
+    if (!player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
+    const heldMs = performance.now() - grabKeyDownAt;
+    grabKeyDownAt = null;
+    if (heldMs < THROW_TAP_MS) dropCarriedObject(player);
+    else throwCarriedObject(player, heldMs);
+  });
   gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded) restartStandaloneGame(); });
   gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
 
