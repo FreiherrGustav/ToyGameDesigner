@@ -602,6 +602,255 @@ app's `MONSTER_ART`/`SKELETON_ART`/`TABBY_CAT_ART` constants against the
 uploaded project's raw art data index-by-index (exact match on all three),
 plus the standard 4-sample regression sweep with zero errors.
 
+### A second sprite-editor round: pressure plate reskin, Button, Cannon 2/Bomb 2, Crate, key/star collectibles, bomb/cannon animation (v2.27)
+
+The sprite-editor tool built for the previous round (a standalone
+`sprite-editor.html`, delivered separately, never committed to this repo —
+it exists purely so the user can touch up auto-extracted reference art with
+a proper pixel editor + eyedropper-capable color picker, outside this app)
+came back with a project JSON holding refined versions of a handful of its
+24 extracted icons. The request named eight specific pieces and asked for
+each to land in its own "logical category" — deliberately **not** all 24;
+the other sixteen (wall, door, gate, platform, ladder, bridge, barrel,
+chest, fire, fan, spring, wind, teleporter, moving_platform) were left
+untouched and unwired, same as they've sat since the tool shipped, pending
+a future request that names them specifically.
+
+**Pressure plate reskin + on/off indicator recolor.** The user's fixed
+`plate` art replaces the old hand-drawn `GEOMETRY_ICONS.plate` outright — a
+metal frame over a red indicator strip. The "add the color animation to
+red spot for on/off" ask needed a mechanism this codebase didn't have yet:
+swapping one baked color for another at render time without touching the
+underlying `pat()`-built array. `recoloredArt(art, fromHex, toHex)` is that
+mechanism — a one-line `art.map(c => c === fromHex ? toHex : c)`, general
+enough that any future recolor-on-state need can reuse it rather than
+hand-editing a second copy of an icon. `PLATE_INDICATOR_OFF_HEX` (the red
+the user's art already uses for the indicator) and
+`PLATE_INDICATOR_ON_HEX` (`CHANNEL_COLOR_HEX.green`, not a new color of its
+own — reusing the existing channel-color palette rather than inventing an
+"activated" color nothing else uses) are looked up by `drawGameplayTile`'s
+plate branch: `extra.channelOn ? recoloredArt(icon, OFF_HEX, ON_HEX) :
+icon`. Verified by sampling the actual rendered canvas pixel at the
+indicator strip before and after a player stands on the plate — the pixel
+color measurably changes, confirming the recolor fires at the right
+moment, not just that the code compiles.
+
+**Button — a genuinely new mechanic, not just new art.** The request was
+"works like a pressure plate, but works by pushing into it" with two
+facing states. A plate keys its channel off *overlap* (any actor
+overlapping its cell, checked every tick in `updatePressurePlates()`) — but
+a pushed-into button needs to be **blocking** (that's the whole "push"
+feel), and `isBlockingGeometry` returning true means nothing can ever
+truly overlap it, so the plate's own overlap-scan approach doesn't apply.
+Instead, `pushButtonChannelsActive`/`pushButtonFacing` (two new globals,
+reset every tick the same way `plateChannelsActive` already is, inside
+`updatePressurePlates()` for locality with the other channel-state reset)
+are populated from inside `resolveAxis`'s own per-axis collision
+resolution — the exact same "collision-time trigger" pattern this codebase
+already uses for bomb-arm and cannon-fire (see "Physical objects vs.
+fixtures" above) — rather than an overlap scan that could never fire. Both
+`vx > 0` and `vx < 0` collision branches record which side the actor
+pushed from (`"left"`/`"right"`, i.e. which direction the actor was
+travelling when it made contact) into `pushButtonFacing`, and light the
+button's own channel color for that frame. `isChannelOn(color)` now ORs a
+third source (`switchChannels` permanent, `plateChannelsActive` momentary
+overlap, `pushButtonChannelsActive` momentary push-contact) — a button's
+"on" state lasts only as long as something is actively pressed against it,
+same momentary lifetime as a plate, just keyed by a collision resolution
+instead of an overlap check. **The "two states" ask is handled entirely in
+rendering, no second sprite drawn**: `drawGameplayTile`'s button branch
+mirrors the same icon horizontally (`ctx.scale(-1, 1)` around a
+translated origin) when `facing === "right"`, left unmirrored otherwise —
+one piece of art, two readings, the same "one shape, several orientations"
+economy the cannon/fan rotation families already lean on, just via a
+canvas transform instead of a stored alternate array. Named **"Button"**
+in the palette (`GEOMETRY_LABELS[PUSH_BUTTON_GEOMETRY] = "button"`,
+internal id stays `pushbutton`) rather than reusing "switch" or "plate" —
+neither existing word fit a "push into it" mechanic, and the project's own
+established mechanism for a friendlier palette-facing name without an id
+migration (`GEOMETRY_LABELS`, mirroring the pre-existing
+`MODIFIER_LABELS`) was already there to reuse. This naming choice, and the
+left/right-via-mirroring interpretation of "two states," were both made
+without asking first — flag either back if "button" doesn't read right, or
+if the two states were meant to be visually distinct art rather than a
+mirrored single sprite.
+
+**Cannon 2 / Bomb 2 — parallel families, not forks.** "Will theoretically
+replace the existing cannon... let's add it as a 2nd cannon so I can try
+it out" (same wording for bomb) was a deliberate scoping choice by the
+user: ship the refined art as a genuinely separate, second palette entry
+rather than overwriting the original, so both can be compared/played
+side-by-side before ever deciding to retire the old one. Mechanically
+these are **not** reimplementations — every existing cannon/bomb code path
+was generalized to also recognize the new geometry, via a small set of
+shared predicates rather than literal duplication at each call site:
+`cannonFamilyFor(geometry)` looks up which of `CANNON_FAMILIES`
+(`[CANNON_ORDER, CANNON2_ORDER]`) a given orientation string belongs to,
+`isAnyCannonGeometry` replaces every old `CANNON_ORDER.includes(geometry)`
+exact check, `isBombGeometry` replaces every old `geometry === "bomb"`
+check, and `isCarryBombKind` replaces every old `temperament ===
+CARRY_BOMB_KIND` check on the carried-actor side. Every one of the
+pre-existing call sites that used the old exact-match form was found by
+grep and updated: `isBlockingGeometry`, the bomb-arm/cannon-fire trigger in
+`resolveAxis` (and its `clampDragPosition`/`fireBlockingTileReaction`
+duplicate), `convertGrabbedTileToActor`'s tile-to-actor conversion,
+`currentPoseFor`'s cannon-direction pose lookup, `resolveActorContact`'s
+dropped-cannon-fire branch, `attachCarryable`/`dropCarriedObject`/
+`throwCarriedObject`'s bomb-fuse pause/resume calls, and
+`renderActors`' bomb-flicker check. `CANNON2_ICON_NE` is the one hand-built
+orientation (from the user's fixed art); `rotateArt90CW` (the same helper
+`cannon`/`fan` already use to derive their other three orientations from
+one drawn base) produces the other three — no new rotation logic needed.
+`selectGeometry`/`paintGeometryModifierAt`'s "click again to rotate through
+the family" behavior (`cannonRotateStrokeCells`) was generalized the same
+way, keyed off `cannonFamilyFor` so a click on a `cannon2` tile only ever
+rotates within `CANNON2_ORDER`, never crossing into `CANNON_ORDER`.
+Grabbing a `cannon2`/`bomb2` tile converts it into its own new carried-kind
+actor (`CARRY_CANNON2_KIND`/`CARRY_BOMB2_KIND`, defs `CARRY_CANNON2_DEF_ID`/
+`CARRY_BOMB2_DEF_ID`) — confirmed end to end with Playwright, including a
+bomb2 grabbed mid-arm correctly pausing its already-ticking fuse exactly
+like bomb1 does (the exact "grabbed mid-countdown genuinely means paused"
+behavior documented under Grab/carry/drop/throw above, now proven to hold
+for the generalized `isCarryBombKind` check too, not just the original
+literal one). Palette labels ("cannon 2"/"bomb 2") come from
+`GEOMETRY_LABELS`, same mechanism as Button above. **Backward-compat**: the
+existing documented `actorDefs` backfill list in `restoreProjectSnapshot`
+(the one this doc's Grab/carry/drop/throw section calls out as needing a
+one-line addition for every new built-in actor def) gained
+`CARRY_BOMB2_DEF_ID`/`CARRY_CANNON2_DEF_ID` — verified directly by
+restoring a simulated pre-patch snapshot with both keys stripped out and
+confirming they're backfilled rather than left missing.
+
+**Crate replaces "pushable" as the display name — and exposed a real,
+separate crash in doing so.** The user's fixed crate art replaced
+`actorDefs[PUSHABLE_DEF_ID].art`, and its `.name` field changed from
+`"pushable"` to `"crate"` so the palette shows the friendlier word (the
+internal `PUSHABLE_KIND`/`PUSHABLE_DEF_ID` identifiers are deliberately
+untouched, per the project's own "internal ids can stay engine-jargon"
+convention). This alone should have been a pure cosmetic rename, but it
+broke clicking the crate swatch outright: `selectActorKind(kind)` — the
+handler that actually runs when *any* Objects/Characters swatch is
+clicked — resolves which def to select via
+`findDefaultActorDef(kind)`, which requires `actorDefs[id].name === kind`
+(the temperament string) to match. Renaming the def's `.name` away from
+the literal string `"pushable"` meant `findDefaultActorDef("pushable")`
+could no longer find its own def, returned `undefined`, and
+`activeArtFor(actorDefs[undefined])` threw immediately — a real,
+reproducible crash (confirmed via a targeted Playwright repro before
+touching any code), not a hypothetical. The fragility already had a
+partial fix elsewhere: `renderObjectSwatches` (the code that draws the
+swatch in the first place) already special-cases `PUSHABLE_KIND` to look
+up `PUSHABLE_DEF_ID` directly rather than trust the name-match — but
+`selectActorKind`, the handler wired to the click itself, had never
+gotten the same treatment, presumably because nothing had ever renamed
+pushable's `.name` away from `"pushable"` before now. Fixed by mirroring
+that exact same special case: `selectedActorDefId = kind === "player" ?
+playerDefId : kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID :
+findDefaultActorDef(kind)`. **Any future rename of a built-in def's own
+`.name` away from its temperament string risks this same class of bug for
+whatever OTHER code still leans on `findDefaultActorDef`'s name-match** —
+this fix only covers pushable/crate; a similarly-renamed hazard ball or
+carried-object def would need the identical special case added at this
+same call site. Confirmed fixed via the original repro (zero errors) and
+via a full batch of crate/collectible/cannon2 assertions that had
+previously crashed partway through on this exact bug. **A secondary,
+deliberately-accepted nuance found while backward-compat-testing this**: a
+genuinely old save whose own serialized `actorDefs.pushable.name` literally
+still says `"pushable"` keeps showing "pushable" in the palette forever
+after this patch, never force-renamed to "crate" — because `actorDefs` is
+live, per-project data (same category as a custom character's own name),
+and the backward-compat backfill mechanism only fills in *missing* keys,
+it never overwrites an existing value. Only a brand-new project or a
+built-in sample (both of which take their `actorDefs` from the current
+`FACTORY_DEFAULT_SNAPSHOT`) picks up the new "crate" name automatically.
+This is consistent with how a custom character's name has always worked,
+not a gap — flagging it since it means "crate" won't appear for
+already-published/exported old games without a fresh save.
+
+**Gem/Key/Star as collectibles.** The user's fixed gem art replaced the
+existing `COLLECTIBLE_ART` in place (gem was already a built-in
+collectible; only its art changed). Key and star are new collectible
+presets/seeds: `KEY_ART`/`STAR_ART` alongside the existing per-item arts,
+added to both `COLLECTIBLE_SEEDS` (the persisted per-project slot list) and
+`COLLECTIBLE_PRESETS` (the picker shelf). This is the exact same
+"append-missing-built-in-seed-id" backward-compat gap the Ground section
+above already hit once for `groundSlotIds`/`GROUND_SEEDS` — a save from
+before this patch has its own `collectibleSlotIds` already populated
+(cheese/gem/heart/coin), and a blind `snap.collectibleSlotIds ? ... :
+COLLECTIBLE_SEEDS.map(...)` in `restoreProjectSnapshot` would take the
+"already has a list" branch forever and never gain key/star. Fixed with
+the identical append pattern already established for ground seeds:
+`COLLECTIBLE_SEEDS.forEach(seed => { if
+(!collectibleSlotIds.includes(seed.id)) collectibleSlotIds.push(seed.id);
+})`, right after the existing snap-or-default line. Verified by restoring
+a simulated old snapshot with `collectibleSlotIds` stripped back to its
+pre-patch four entries and confirming key/star get appended rather than
+staying missing. **Any future built-in collectible needs this same
+append line** — now the second confirmed instance of this exact gap
+shape (ground seeds, collectible seeds), worth checking for on any list
+of built-in ids gated behind an "already exists in the save" branch.
+
+**Bomb/cannon animation — an art-override on the existing keyframe
+system, not new sprites drawn per-frame.** "We've made particle and
+explosion, but what I want are animations for our bomb and cannon to make
+them more exciting" was interpreted as: reuse the existing `RECIPES`
+keyframe-deformation system (scale/rotate/translate/fade over a fixed
+duration), but let a recipe instance show a *different* sprite than the
+thing that triggered it, rather than deforming the bomb/cannon's own icon.
+`playRecipe(entity, name, art)` gained an optional third `art` parameter,
+stored alongside the existing `t`/`recipe` fields in `animState`/
+`tileAnimState`; the render loop for both actors and tiles now checks
+`if (anim.art) { art = anim.art; }` before falling back to the triggering
+entity's own icon. Two new baked sprites, `EXPLOSION_ART` and
+`PARTICLE_ART`, are what get shown this way — not because the user's own
+"Particle"/"Explosion" reference art was reused directly (those were
+listed as *already made*, existing pieces from the earlier extraction
+round, not part of this round's fixed-sprite JSON), but because an
+explosion/particle look was needed for exactly this override slot and this
+was the natural place to add it, matching the user's own naming for what
+they wanted to see. **Bomb**: `detonateBombAt`'s existing
+`tileAnimState[...] = { recipe: "bombBlast", ... }` now sets `art:
+EXPLOSION_ART` specifically for the bomb's own cell — a neighboring solid
+wall the same blast also clears still plays the blast recipe on *its own*
+icon, undecorated, since only the bomb's own detonating cell should show
+an explosion sprite, not every tile the blast happens to affect.
+`detonateCarriedBombAt` (the carried/dropped-bomb detonation path, entirely
+separate from the tile path per the existing Grab/carry/drop/throw
+section) got the same `art: EXPLOSION_ART` on its `playRecipe` call.
+**Cannon**: firing now anchors a new `muzzleFlash` recipe (120ms,
+scale-and-fade, `art: PARTICLE_ART`) at the cannon's own board cell via
+`tileAnimState`, not at the fired actor's position via `animState` — a
+flash attached to the fired actor would fly away with it instead of
+staying at the muzzle. This needed `triggerCannon(actor, geometry, cx,
+cy)` to gain two new optional parameters so it has cell coordinates to
+anchor to; both tile-based call sites (the direct-collision trigger in
+`resolveAxis`, and the build-mode-drag `fireBlockingTileReaction` path)
+pass them through. **Deliberately left out**: the one call site with no
+board-cell context — a *dropped/resting* carried cannon actor firing the
+player who bumps it (`resolveActorContact`'s `CARRY_CANNON_KIND`/
+`CARRY_CANNON2_KIND` branch) — has no fixed cell to anchor a
+`tileAnimState` flash to, and forcing an `animState`-based flash onto the
+actor being fired (rather than the player being launched) would need a
+different anchor entity than what's cleanly available at that call site;
+flag this to the user before attempting it, since it's a real gap in
+"every way a cannon can fire gets a flash," not an oversight that was
+already fixed elsewhere. Verified with Playwright: the cannon flash
+mechanically fires (`muzzleFlash` observed live in `tileAnimState` at the
+moment of collision) for the two tile-triggered paths that now have it;
+the bomb detonation's explosion-sprite-override renders without errors on
+both the tile and carried paths; the full 4-sample regression sweep plus a
+fresh export (with bomb2/cannon2/crate/key/star all painted into a room)
+both run error-free.
+
+**Scope note, stated explicitly rather than left implicit**: of the 24
+icons the sprite-editor tool extracts, only these 8 — plate, button (new),
+cannon2, bomb2, crate, gem, key, star — were wired into the live game this
+round, exactly matching what the request named. The other 16 fixed
+sprites sitting in the user's uploaded JSON (wall, door, gate, platform,
+ladder, bridge, barrel, chest, fire, fan, spring, wind, teleporter,
+moving_platform) were not touched, not integrated, and don't yet correspond
+to any mechanic in this engine — they're future work, not an oversight.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
