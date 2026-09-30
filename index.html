@@ -2445,6 +2445,133 @@
     return room;
   }
 
+  // v2.29: a fifth example, built entirely around the new v2.28 "objects bounce off bouncy/
+  // Trampoline tiles" work — a comedic "the elevator is broken, ride the physics contraption
+  // instead" sample rather than a maze or a chase. Two rooms, each its own floor. Sized against
+  // the REAL numbers each launcher can produce, not guessed: a plain solid+bouncy tile's rebound
+  // caps out around 4 tiles of rise (MAX_FALL=750 reaches terminal velocity well before a tall
+  // shaft's bottom, and BOUNCE_RESTITUTION=0.82 applied to that capped speed is what actually
+  // limits it, not the fall height alone past that point); a Trampoline OBJECT's own enforced
+  // TRAMPOLINE_LAUNCH_SPEED=900 minimum gives a much bigger, GUARANTEED ~8.7 tiles regardless of
+  // impact speed; a cannon's 45°, CANNON_LAUNCH_SPEED=700 shot rises only ~2.6 tiles but covers
+  // ~5.3 tiles horizontally before its apex — each piece placed to fit what it can actually do,
+  // confirmed with a real Playwright physics trace before any coordinate was treated as final.
+  function fillWorstElevatorRect(b, x0, y0, x1, y1, geometry, modifier) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) b[y][x] = gameplayKey(geometry, modifier);
+  }
+  function buildWorstElevatorGame() {
+    // ---- Room 1: "The Lobby" ----
+    // The whole shaft floor is bouncy on its left two-thirds — landing anywhere in that span
+    // (missing the wind corridor entirely) just bounces you again, so there's no softlock, only
+    // another try. The wind corridor deliberately spans nearly the whole shaft width (cols 1-9,
+    // not a narrow lane) since a kid's real fall column depends on how long they held a direction
+    // key on the way down — a narrow lane would make the intended route depend on hitting an exact
+    // column, which isn't how any other bounce/wind mechanic in this file is tuned (see the
+    // fan/trampoline testing gotchas' own "test under active input, not just passive drop" rule —
+    // the same principle in reverse: BUILD it wide enough that active input still lands inside it).
+    //
+    // The platform sits at row 14 (not higher) for a real, verified reason: a full-height fall
+    // off the start ledge reaches terminal velocity (MAX_FALL) before impact, so the bounce off
+    // row 17 rebounds close to its real measured max — a Playwright trace of the actual bounce
+    // (not the theoretical restitution formula) showed its apex only reaching about row 12.4, well
+    // short of where the first draft of this room put the platform (row 11 — unreachable, verified
+    // by tracing a "hold right the whole way down" run that flew straight past it and landed back
+    // on the plain floor at row 17 instead). Row 14 sits comfortably below that real apex, so the
+    // descending half of the bounce — still carried sideways by the wind the whole time — settles
+    // onto it with real margin to spare, rather than needing to hit an exact peak.
+    const room1 = createEmptyRoom("The Lobby");
+    room1.gravityEnabled = true; room1.wrapHEnabled = false; room1.wrapVEnabled = false; room1.cameraMode = "fixed";
+    rooms.push(room1);
+    activateRoom(room1.id);
+
+    fillWorstElevatorRect(board, 0, 0, 23, 0, "solid", "none");    // ceiling
+    fillWorstElevatorRect(board, 0, 1, 0, 16, "solid", "none");    // left wall
+    fillWorstElevatorRect(board, 23, 1, 23, 16, "solid", "none");  // right wall
+    fillWorstElevatorRect(board, 0, 17, 9, 17, "solid", "bouncy"); // the "elevator floor" under the wind — bounces, always
+    fillWorstElevatorRect(board, 10, 17, 23, 17, "solid", "none"); // rest of the floor, plain — a safe walk-back if you undershoot
+    fillWorstElevatorRect(board, 1, 4, 3, 4, "solid", "none");     // starting ledge
+    fillWorstElevatorRect(board, 1, 5, 9, 16, "none", "wind-e");   // wide wind corridor, blows right, open the whole way down
+    // The platform's left edge (col 13) is deliberately past the bounce's own apex column (traced
+    // at ~col 12.6) — starting it any earlier would put it in the path of the STILL-RISING bounce,
+    // which would just bonk its underside (an ascending actor can only hit a platform from below,
+    // never land on top of one) instead of catching the player on the way back down.
+    fillWorstElevatorRect(board, 13, 14, 21, 14, "solid", "none"); // the platform — switch/barrier/cannon all live on row 13, on top of this
+    board[8][5] = gameplayKey("spawner", "none"); // a stray hazard ball, loose in the wind itself — a moving hazard, not a wall
+
+    board[13][14] = gameplayKey("switch", "none");
+    colorBoard[13][14] = "red";
+    // A bomb, one row ABOVE the row-13 walkway rather than sitting in it — bombs are physical
+    // (blocking) since v2.21, so one placed directly in the walkway would stop every player dead
+    // until it either got jumped over or blew up in their face, on every single playthrough. Up
+    // here it's a genuine "maybe" — a curious kid has to jump up into it on purpose to set it off.
+    // A real, verified consequence if they do: detonateBombAt clears any cardinally-solid neighbor,
+    // and the platform's own row-14 floor sits directly below this cell, so blowing it up punches
+    // a real hole straight through the platform, dropping the walkway (and the kid, if they're
+    // standing near it when it goes) back down to the base floor — genuinely the game's own
+    // "ridiculous contraption" physics turned into a discoverable trap, not a bug; confirmed via a
+    // real Playwright trace to be fully recoverable (the bounce/wind route back up is untouched).
+    board[12][16] = gameplayKey(BOMB2_GEOMETRY, "none");
+    board[13][18] = gameplayKey("barrier", "none");
+    colorBoard[13][18] = "red";
+    board[13][20] = gameplayKey("cannon2-nw", "none"); // fires up-and-left; its rising arc sweeps straight through the door above
+    // Placed from a real physics trace (a 45°, vx=vy=495 cannon launch, no held key): the arc
+    // rises about 2 tiles and drifts about 2 tiles horizontally over roughly its first 200ms,
+    // then lingers near that (dx=-2, dy=2.5) point for a further ~100ms as it crosses its own
+    // apex — col 18/row 11 sits squarely inside that window, confirmed against the actual sampled
+    // trajectory (relative to the cannon's own row 13) rather than hand-derived from the constants
+    // alone.
+    board[11][18] = gameplayKey("door", "none");
+
+    placeExampleActor(PLAYER_DEF_ID, 2, 3);
+
+    // ---- Room 2: "The Penthouse (Probably)" ----
+    // A Trampoline OBJECT, not a painted bouncy tile — its enforced minimum launch is what makes
+    // a single, guaranteed ~8.7-tile leap possible at all; a plain bouncy tile here would depend
+    // on impact speed the way room 1's does, and there's no tall drop available to build that
+    // speed up from a standing start on a short floor.
+    //
+    // No shelf sits above the trampoline itself — a real physics trace showed why that matters:
+    // a rising actor can only ever hit the UNDERSIDE of a platform in its way, never land on top
+    // of one (the same lesson room 1's platform placement already learned), so anything solid
+    // directly over the launch pad would just cap the bounce short instead of letting it through.
+    // And a passive, no-key-held bounce off the trampoline drifts sideways NOT AT ALL — with no
+    // wind here to force it, straight up is straight up, straight back down is the same column —
+    // so a single goal tile can only ever be reached by a bounce that carries at least some real
+    // sideways drift, which only ever comes from the player actively holding a direction key
+    // through the bounce (confirmed directly: a passive drop-in bounce returns to the exact
+    // takeoff column every time). Since a kid holding right on the way TO a trampoline they've
+    // just discovered is the overwhelmingly likely case, not an edge case, a whole ROW of goal
+    // tiles spans the room's width at the bounce's typical crossing height, rather than one single
+    // spot — a real physics trace of several plausible reactions (never letting go at all, letting
+    // go the instant the bounce fires, stalling out before ever reaching the pad) showed the
+    // column where the rising arc actually crosses this height lands anywhere from right above the
+    // pad to past col 19, with real gaps in between depending on exactly when the key came up (the
+    // same launch-exemption that lets a bounce/throw briefly ignore the normal speed cap makes the
+    // range wide and genuinely gappy, not a smooth curve four widely-spaced sample points could
+    // safely bracket) — a continuous row is what actually guarantees the win regardless of how a
+    // kid happens to let go, matching this level's whole "ridiculous contraption" spirit anyway.
+    const room2 = createEmptyRoom("The Penthouse (Probably)");
+    room2.gravityEnabled = true; room2.wrapHEnabled = false; room2.wrapVEnabled = false; room2.cameraMode = "fixed";
+    rooms.push(room2);
+    activateRoom(room2.id);
+
+    fillWorstElevatorRect(board, 0, 0, 23, 0, "solid", "none");
+    fillWorstElevatorRect(board, 0, 1, 0, 16, "solid", "none");
+    fillWorstElevatorRect(board, 23, 1, 23, 16, "solid", "none");
+    fillWorstElevatorRect(board, 0, 17, 23, 17, "solid", "none"); // plain floor this time — one dramatic bounce is enough
+
+    board[16][3] = gameplayKey("door", "none");
+    board[17][7] = gameplayKey("trampoline", "none"); // set into the floor itself, like a real trap door
+    board[17][9] = gameplayKey("spawner", "none");    // another loose hazard ball, right by the launch pad
+    fillWorstElevatorRect(board, 7, 9, 20, 9, "goal", "none"); // a whole row — see why above
+
+    doorLinks[roomCellKey(room1.id, 18, 11)] = { toRoomId: room2.id, toX: 3, toY: 16 };
+    doorLinks[roomCellKey(room2.id, 3, 16)] = { toRoomId: room1.id, toX: 18, toY: 11 };
+
+    activateRoom(room1.id);
+    return room1;
+  }
+
   // v2.19.3: a third example, contributed as a finished two-room dungeon-crawler build --
   // hand-drawn custom characters, a custom (unused, blank) lethal tile slot, five custom
   // backgrounds, and six door pairs, five colored plus one colorless. Its one bug (the
@@ -6805,6 +6932,34 @@
     ctx.fillRect(11.25, 8, 1.5, 13);
     ctx.fillRect(14.5, 10, 1.5, 11);
   }
+  function drawWorstElevatorIcon(ctx) {
+    // A frayed, sparking cable holding up a dented elevator car — the joke is entirely visual,
+    // same "the icon IS the pitch" approach as every other sample icon here.
+    ctx.strokeStyle = "#616161";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(12, 1);
+    ctx.lineTo(10, 4);
+    ctx.lineTo(13, 6);
+    ctx.lineTo(9, 9);
+    ctx.stroke();
+    ctx.fillStyle = "#ffca28";
+    ctx.beginPath();
+    ctx.moveTo(9, 5); ctx.lineTo(13, 5); ctx.lineTo(10, 9); ctx.lineTo(12, 9);
+    ctx.lineTo(8, 14); ctx.lineTo(10, 8.5); ctx.lineTo(8, 8.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#616161";
+    ctx.fillRect(5, 10, 14, 12);
+    ctx.fillStyle = "#37474f";
+    ctx.fillRect(7, 12, 10, 8);
+    ctx.fillStyle = "#8a9eba";
+    ctx.fillRect(9, 14, 2.5, 4.5);
+    ctx.fillRect(12.5, 14, 2.5, 4.5);
+    ctx.fillStyle = "#616161";
+    ctx.beginPath(); ctx.arc(6.5, 21, 1.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(17.5, 21, 1.4, 0, Math.PI * 2); ctx.fill();
+  }
   // The registry a new sample joins with one entry — the modal's grid renders generically off
   // this list, so it scales from 3 to 10+ samples with no layout changes.
   const SAMPLE_GAMES = [
@@ -6812,6 +6967,7 @@
     { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
     { name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
     { name: "The Monster's Den", builder: buildMonstersDenGame, draw: drawMonstersDenIcon },
+    { name: "The World's Worst Elevator", builder: buildWorstElevatorGame, draw: drawWorstElevatorIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
