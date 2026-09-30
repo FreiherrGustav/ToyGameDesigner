@@ -538,22 +538,21 @@
   // axis still needs four distinct storable values (a cell has to remember which way it
   // points), but the palette shows a single "cannon" swatch — see PALETTE_GEOMETRIES and
   // paintGeometryModifierAt()'s place-then-rotate handling.
-  const CANNON_ORDER = ["cannon-ne", "cannon-se", "cannon-sw", "cannon-nw"]; // 90° clockwise each step
-  // v2.27: a second cannon, added specifically so the user can try user-refined replacement art
-  // side by side with the original before committing to swapping it in for good — same exact
-  // mechanics/orientation family shape as CANNON_ORDER, just its own separate swatch/rotation
-  // family (see CANNON_FAMILIES/cannonFamilyFor) so rotating one never jumps a tile into the
-  // other's orientation set.
+  // v2.27 shipped a second cannon (internal id kept as "cannon2-*") so the user could try
+  // user-refined replacement art side by side with the original before committing; v2.27.2
+  // removed the original after the user confirmed they liked the replacement — see
+  // migrateLegacyCannonBomb() below for how any old "cannon-ne"-style board content or an
+  // already-materialized carried-cannon actor from before that decision gets carried forward
+  // onto this one. CANNON_FAMILIES/cannonFamilyFor kept as a one-family array rather than
+  // collapsed away, since a future second cannon would want the exact same machinery again.
   const CANNON2_ORDER = ["cannon2-ne", "cannon2-se", "cannon2-sw", "cannon2-nw"];
-  const CANNON_FAMILIES = [CANNON_ORDER, CANNON2_ORDER];
+  const CANNON_FAMILIES = [CANNON2_ORDER];
   function cannonFamilyFor(geometry) { return CANNON_FAMILIES.find(order => order.includes(geometry)) || null; }
   function isAnyCannonGeometry(geometry) { return cannonFamilyFor(geometry) != null; }
-  // v2.27: a second bomb, same "try the new art side by side" reasoning as cannon2 above — no
-  // orientation family to duplicate (a bomb is a single fixed sprite), so this is just one more
-  // literal geometry value; isBombGeometry() is the one shared predicate every bomb-specific call
-  // site now checks instead of a bare `geometry === "bomb"`.
+  // v2.27 shipped a second bomb ("bomb2") the same "try it side by side" way as cannon2 above;
+  // v2.27.2 removed the original the same way — see migrateLegacyCannonBomb() below.
   const BOMB2_GEOMETRY = "bomb2";
-  function isBombGeometry(geometry) { return geometry === "bomb" || geometry === BOMB2_GEOMETRY; }
+  function isBombGeometry(geometry) { return geometry === BOMB2_GEOMETRY; }
   // v2.27: a new wall-mounted push switch — "works like a pressure plate, but by pushing into it"
   // (direct request) — see resolveAxis's x-axis branches, isColorTaggable, and drawGameplayTile's
   // own PUSH_BUTTON_GEOMETRY branch for the full mechanic. Named "Button" in the palette to avoid
@@ -572,7 +571,7 @@
   // does the mechanical thing, independent of what a tile looks like or what happens on contact.
   const GEOMETRIES = [
     "none", "solid", "goal", "switch", "plate", "door", "barrier", PUSH_BUTTON_GEOMETRY,
-    ...CANNON_ORDER, ...CANNON2_ORDER, "bomb", BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
+    ...CANNON2_ORDER, BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
     "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
@@ -582,7 +581,7 @@
   // as a tile (rather than placed as an actor) does one specific, recognizable thing on contact,
   // so it's an Object regardless of how plain or elaborate its own reaction is — a pressure plate
   // and a bomb belong here exactly as much as a door does. One "cannon" entry still stands in for
-  // all four CANNON_ORDER values; "fan" does the same for FAN_ORDER.
+  // all four CANNON2_ORDER values; "fan" does the same for FAN_ORDER.
   // v2.22: just "none"/"solid" now — the Ground row itself also shows every named ground texture
   // (grass/stone/brick/sand/crystal/...), but those are groundSlotIds skins layered on top of
   // "solid", not distinct GEOMETRIES values, so this list doesn't grow with them (see
@@ -595,14 +594,14 @@
   // v2.23: "barrier" joins this row — see "Barrier: a moveable wall/door" — a real physical thing
   // you bump into while its channel is off, exactly like cannon/bomb/fan/magnet/spawner already are.
   const PALETTE_OBJECT_GEOMETRIES = [
-    "cannon", "cannon2", "bomb", BOMB2_GEOMETRY, "fan", "magnet", "spawner", "trampoline", "barrier",
+    "cannon2", BOMB2_GEOMETRY, "fan", "magnet", "spawner", "trampoline", "barrier",
     PUSH_BUTTON_GEOMETRY
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
   // value is actually selected/placed. Whether it reads as wind or conveyor is purely which
   // geometry it's paired with (none = air current, solid = conveyor belt) — no separate mechanic.
-  const WIND_ORDER = ["wind-n", "wind-e", "wind-s", "wind-w"]; // clockwise each step, like CANNON_ORDER
+  const WIND_ORDER = ["wind-n", "wind-e", "wind-s", "wind-w"]; // clockwise each step, like CANNON2_ORDER
   // v2.18: "lethal" is a new severity tier on the same hazard mechanism, not a new system — same
   // touch-detection, just a different outcome (see triggerLethalHazard). One modifier value, kid-
   // reskinned as lava/spikes/a bottomless pit by painting over it, not three hardcoded tile types.
@@ -632,18 +631,19 @@
   // right now, but the mechanism (MODIFIER_LABELS[modifier] || modifier, see renderSurfaceSwatches)
   // stays available for the next id that reads as engine-jargon rather than a toy word.
   const MODIFIER_LABELS = {};
-  // v2.27: same mechanism, geometry side — cannon2/bomb2 read as "cannon 2"/"bomb 2" (a second
-  // option to compare, not a typo of the original) and PUSH_BUTTON_GEOMETRY reads as "button" (so
+  // v2.27 gave cannon2/bomb2 "cannon 2"/"bomb 2" labels while both stood side by side with the
+  // originals; v2.27.2 removed the originals, so these now read as plain "cannon"/"bomb" — the
+  // internal ids stay "cannon2-*"/"bomb2" (no reason to churn every save's board data just to
+  // rename an id nobody but the code ever sees). PUSH_BUTTON_GEOMETRY still reads as "button" (so
   // it never looks like a second "Switch" swatch with different behavior) — see renderObjectSwatches.
-  const GEOMETRY_LABELS = { cannon2: "cannon 2", [BOMB2_GEOMETRY]: "bomb 2", [PUSH_BUTTON_GEOMETRY]: "button" };
+  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
   const GEOMETRY_SWATCH_COLORS = {
     none: "#4caf50", solid: "#616161",
-    goal: "#ec407a", switch: "#3f51b5", plate: "#00897b", door: "#795548", cannon: "#ff5722",
-    "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
-    bomb: "#424242", warp: "#8e24aa",
+    goal: "#ec407a", switch: "#3f51b5", plate: "#00897b", door: "#795548",
+    warp: "#8e24aa",
     fan: "#00acc1", "fan-n": "#00acc1", "fan-e": "#00acc1", "fan-s": "#00acc1", "fan-w": "#00acc1",
     magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41", trampoline: "#f9a825",
     barrier: "#546e7a"
@@ -662,12 +662,6 @@
   // only comes back down once gravity actually wins out. Math.SQRT1_2 = 1/√2, the unit-vector
   // component of a 45° angle.
   const CANNON_DIRECTIONS = {
-    "cannon-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
-    "cannon-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
-    "cannon-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
-    "cannon-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 },
-    // v2.27: cannon2 fires at the exact same four 45° angles as cannon — it's a second look on the
-    // same mechanic, not a different one.
     "cannon2-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
     "cannon2-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
     "cannon2-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
@@ -791,27 +785,21 @@
   // Once turned into an actor it stays one forever, even after being dropped/thrown — never
   // repainted back onto the board — matching "a thrown object is a normal physics body from that
   // point on" from the patch note.
-  const CARRY_BOMB_KIND = "carrybomb";
   const CARRY_MAGNET_KIND = "carrymagnet";
-  const CARRY_CANNON_KIND = "carrycannon";
   const CARRY_TRAMPOLINE_KIND = "carrytrampoline";
-  const CARRY_BOMB_DEF_ID = "carrybomb";
   const CARRY_MAGNET_DEF_ID = "carrymagnet";
-  const CARRY_CANNON_DEF_ID = "carrycannon";
   const CARRY_TRAMPOLINE_DEF_ID = "carrytrampoline";
-  // v2.27: bomb2/cannon2's own carried forms — separate kind/def ids so a grabbed bomb2/cannon2
-  // keeps ITS OWN art once carried, rather than a grabbed one suddenly turning into the original
-  // tile's look (see convertGrabbedTileToActor, currentPoseFor).
+  // v2.27 gave bomb2/cannon2 their own carried kind/def ids (kept, unrenamed, after v2.27.2
+  // removed the original bomb/cannon and their own carried kinds — no reason to churn these,
+  // since the internal id was never kid-facing to begin with).
   const CARRY_BOMB2_KIND = "carrybomb2";
   const CARRY_CANNON2_KIND = "carrycannon2";
   const CARRY_BOMB2_DEF_ID = "carrybomb2";
   const CARRY_CANNON2_DEF_ID = "carrycannon2";
-  // v2.27: every "is this carried thing a bomb" check below needs to recognize bomb2's own carried
-  // kind too — one shared predicate instead of repeating the `=== CARRY_BOMB_KIND` check five times.
-  function isCarryBombKind(temperament) { return temperament === CARRY_BOMB_KIND || temperament === CARRY_BOMB2_KIND; }
+  function isCarryBombKind(temperament) { return temperament === CARRY_BOMB2_KIND; }
   // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
   // plus the grabbed-off-the-board kinds above.
-  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_BOMB_KIND, CARRY_MAGNET_KIND, CARRY_CANNON_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND];
+  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_MAGNET_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND];
   // v2.21: the other half of "should this be a physical object" — geometries whose entire job IS
   // being a fixed spot in the room (a door leads somewhere specific, a goal marks the win point, a
   // gravity well anchors a vortex). These never become physical/blocking and never become
@@ -1303,6 +1291,71 @@
       }
     }
   }
+  // v2.27.2: cannon2/bomb2 were shipped as a second option to compare against the original
+  // cannon/bomb side by side; once the user picked the new art and asked for the old one gone,
+  // the original geometry values (and their own CARRY_*_KIND actor forms) were deleted from the
+  // codebase outright rather than just hidden from the palette — same "fully replace, don't keep
+  // a hidden legacy branch forever" precedent as the old stick-figure preset and the old plate
+  // icon. That means any already-painted "cannon-ne"/"cannon-se"/"cannon-sw"/"cannon-nw"/"bomb"
+  // board cell, or any already-materialized carried actor of the old carrycannon/carrybomb kind
+  // (from a grab that happened before this decision), needs to land on the new equivalent on
+  // load — otherwise a returning project would either silently lose those tiles (gameplayTileAt
+  // returns undefined for a geometry GAMEPLAY_TILE_DEFS no longer generates any entry for, same
+  // failure shape migrateLegacyGroundEffects above already guards against) or crash the moment
+  // renderActors reads an actorDefs entry that no longer exists. Orientation carries over exactly
+  // (both families share the same ne/se/sw/nw suffixes), and a carried actor's own live fuse/
+  // cannonDir fields are untouched — only its defId changes, same object otherwise.
+  function migrateLegacyCannonBomb(room) {
+    const board = room.board;
+    for (let y = 0; y < board.length; y++) {
+      for (let x = 0; x < board[y].length; x++) {
+        const key = board[y][x];
+        if (!key) continue;
+        const sep = key.indexOf(":");
+        const geometry = key.slice(0, sep);
+        const modifier = key.slice(sep + 1);
+        if (geometry.startsWith("cannon-")) {
+          board[y][x] = gameplayKey(geometry.replace("cannon-", "cannon2-"), modifier);
+        } else if (geometry === "bomb") {
+          board[y][x] = gameplayKey(BOMB2_GEOMETRY, modifier);
+        }
+      }
+    }
+    room.actors.forEach(actor => {
+      if (actor.defId === "carrycannon") actor.defId = CARRY_CANNON2_DEF_ID;
+      else if (actor.defId === "carrybomb") actor.defId = CARRY_BOMB2_DEF_ID;
+    });
+  }
+  // v2.27.1: the crate rename and gem art refresh never actually reached a returning project.
+  // Every OTHER backward-compat fix in restoreProjectSnapshot backfills a MISSING actorDefs key —
+  // but pushable and colGem both already existed before this patch, so `!actorDefs[id]` is false
+  // for them and the old factory content (name "pushable", its old brown crate-cut art; the old
+  // cyan gem art) shadows the new one forever, on every load, exactly the nuance CLAUDE.md already
+  // flagged as a risk but underestimated how immediately real testing would hit it. Fixed the same
+  // way migrateLegacyGroundEffects just above upgrades stale board content: detect the EXACT old
+  // factory art (proof nothing was ever hand-edited) and only then swap in the new default — a
+  // kid's own repaint of either is left completely alone, same as every other actorDefs entry.
+  const LEGACY_PUSHABLE_ART = pat([
+    "MMMMMMMM", "M.MMMM.M", "MM.MM.MM", "MMM.M.MM",
+    "MMM.M.MM", "MM.MM.MM", "M.MMMM.M", "MMMMMMMM"
+  ], { M: "#8d6e63" });
+  const LEGACY_GEM_ART = pat([
+    "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
+    ".MMMMMM.", "..MMMM..", "...MM...", "........"
+  ], { M: "#26c6da" });
+  function artEquals(a, b) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((c, i) => c === b[i]);
+  }
+  function migrateStaleFactoryArt(actorDefs) {
+    const push = actorDefs[PUSHABLE_DEF_ID];
+    if (push && push.name === "pushable" && artEquals(push.art, LEGACY_PUSHABLE_ART)) {
+      actorDefs[PUSHABLE_DEF_ID] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[PUSHABLE_DEF_ID]);
+    }
+    const gem = actorDefs["colGem"];
+    if (gem && artEquals(gem.art, LEGACY_GEM_ART)) {
+      actorDefs["colGem"] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs["colGem"]);
+    }
+  }
   // Restores every field captureProjectSnapshot() saved, then re-derives everything downstream
   // of it (hot room pointers, transient runtime state, the palette/canvas render). Deliberately
   // leaves score/lives/appMode alone — those are session state, not project content, and were
@@ -1311,11 +1364,13 @@
   function restoreProjectSnapshot(snap) {
     rooms = structuredClone(snap.rooms);
     rooms.forEach(r => migrateLegacyGroundEffects(r.board));
+    rooms.forEach(r => migrateLegacyCannonBomb(r));
     doorLinks = structuredClone(snap.doorLinks);
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
     nextRoomId = snap.nextRoomId;
     playerRoomId = snap.playerRoomId;
     actorDefs = structuredClone(snap.actorDefs);
+    migrateStaleFactoryArt(actorDefs);
     // older saves predate the carryable-actor built-ins (v2.21's grab/carry feature) — same
     // "older saves predate X" fallback pattern as collectibleSlotIds/groundTileDefs below, just for
     // a handful of actorDefs' own entries instead of a whole separate field. Without this, loading
@@ -1324,9 +1379,11 @@
     // tile, the freshly-created actor's def is undefined — a real crash the moment renderActors
     // tries to read its art/poses, not something a quick manual test after a fresh boot would ever
     // surface (a brand-new page load has no autosave old enough to be missing these).
-    // v2.27: bomb2/cannon2's own carried-form def ids added to this same list — any future built-in
-    // actor def needs the same one-line addition here (see this comment's own note further up).
-    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_BOMB_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_CANNON_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID].forEach(id => {
+    // v2.27: bomb2/cannon2's own carried-form def ids added to this same list, then kept here
+    // (unrenamed) after v2.27.2 removed the original bomb/cannon def ids entirely — any future
+    // built-in actor def needs the same one-line addition here (see this comment's own note
+    // further up).
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID].forEach(id => {
       if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
     });
     nextActorDefId = snap.nextActorDefId;
@@ -1629,16 +1686,9 @@
   // A real cannon barrel angled at 45°, widening into a carriage with two wheels — pointing
   // up-and-right (NE) as drawn; the other three orientations are this same art rotated 90° at
   // a time (NE -> SE -> SW -> NW, matching CANNON_ORDER's rotation sequence).
-  const CANNON_ICON_NE = pat([
-    "......MM", ".....MM.", "....MM..", "...MMM..",
-    "..MMMMM.", ".MMMMMMM", "..W...W.", "........"
-  ], { M: "#37474f", W: "#1b1b1b" });
-  const CANNON_ICON_SE = rotateArt90CW(CANNON_ICON_NE);
-  const CANNON_ICON_SW = rotateArt90CW(CANNON_ICON_SE);
-  const CANNON_ICON_NW = rotateArt90CW(CANNON_ICON_SW);
-  // v2.27: user-refined cannon art from the reference sheet — drawn pointing the same NE
-  // direction as CANNON_ICON_NE above, so it can reuse the exact same rotateArt90CW derivation
-  // for its other three orientations (see CANNON2_ORDER).
+  // v2.27.2: this used to be drawn alongside the original hand-drawn cannon (CANNON_ICON_NE,
+  // pointing the same NE direction so both could reuse rotateArt90CW the same way) — the original
+  // was removed once the user confirmed they preferred this one; see CANNON2_ORDER.
   const CANNON2_ICON_NE = pat([
     "......AB", ".....CCB", ".ABCCBBB", "BBBDBAA.",
     "BAAAAA..", ".A..A...", "..CB....", ".ABBB..."
@@ -1696,20 +1746,12 @@
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
     ], { M: "#4e342e", K: GEOMETRY_SWATCH_COLORS.door, k: "#ffd166" }),
-    "cannon-ne": CANNON_ICON_NE,
-    "cannon-se": CANNON_ICON_SE,
-    "cannon-sw": CANNON_ICON_SW,
-    "cannon-nw": CANNON_ICON_NW,
     "cannon2-ne": CANNON2_ICON_NE,
     "cannon2-se": CANNON2_ICON_SE,
     "cannon2-sw": CANNON2_ICON_SW,
     "cannon2-nw": CANNON2_ICON_NW,
-    bomb: pat([
-      "..K.....", "...M....", "..MMM...", ".MMMMM..",
-      "MMMMMMM.", "MMMMMMM.", ".MMMMM..", "..MMM..."
-    ], { M: "#2b2b2b", K: "#ffab00" }),
-    // v2.27: user-refined bomb art from the reference sheet — same "second one to compare
-    // side by side" reasoning as cannon2.
+    // v2.27.2: this used to be drawn alongside an older bomb icon under the plain "bomb" key —
+    // removed once the user confirmed they preferred this one; see BOMB2_GEOMETRY.
     [BOMB2_GEOMETRY]: pat([
       ".....AB.", "....A...", "...CD...", "..CCDD..",
       ".CECDDD.", ".CCDDDD.", "..DDDD..", "...DD..."
@@ -1948,27 +1990,19 @@
       "MHHHHHHM", "MHHHHHHM", ".MHHHHM.", "..MMMM.."
     ], { M: "#b71c1c", H: "#ff8a65" })
   };
-  // v2.21: carried/dropped/thrown forms of the bomb/cannon/magnet/trampoline tiles — same as
+  // v2.21: carried/dropped/thrown forms of the magnet/trampoline/bomb2/cannon2 tiles — same as
   // HAZARD_BALL_DEF_ID, never placed by hand, only ever created by grabbing a placed tile (see
   // convertGrabbedTileToActor). Reuses each tile's own GEOMETRY_ICONS art directly rather than
   // drawing a second sprite for "the same object, now carryable" — it IS the same object.
-  actorDefs[CARRY_BOMB_DEF_ID] = { temperament: CARRY_BOMB_KIND, poses: null, name: "bomb", art: GEOMETRY_ICONS.bomb.slice() };
   actorDefs[CARRY_MAGNET_DEF_ID] = { temperament: CARRY_MAGNET_KIND, poses: null, name: "magnet", art: GEOMETRY_ICONS.magnet.slice() };
   actorDefs[CARRY_TRAMPOLINE_DEF_ID] = { temperament: CARRY_TRAMPOLINE_KIND, poses: null, name: "trampoline", art: GEOMETRY_ICONS.trampoline.slice() };
+  actorDefs[CARRY_BOMB2_DEF_ID] = { temperament: CARRY_BOMB2_KIND, poses: null, name: "bomb", art: GEOMETRY_ICONS[BOMB2_GEOMETRY].slice() };
   // Cannon keeps its 4-orientation art alive as actual pose frames (ne/se/sw/nw) keyed by the
   // instance's own cannonDir field (set at grab time from whichever way it was painted/rotated) —
   // currentPoseFor needs a matching branch for this def id, same pattern as the player's stand/
   // stride/air/crouch poses, just picking by direction instead of by physical state.
-  actorDefs[CARRY_CANNON_DEF_ID] = {
-    temperament: CARRY_CANNON_KIND, name: "cannon",
-    art: GEOMETRY_ICONS["cannon-ne"].slice(),
-    poses: { ne: GEOMETRY_ICONS["cannon-ne"].slice(), se: GEOMETRY_ICONS["cannon-se"].slice(), sw: GEOMETRY_ICONS["cannon-sw"].slice(), nw: GEOMETRY_ICONS["cannon-nw"].slice() }
-  };
-  // v2.27: bomb2/cannon2's own carried forms — same shape as their originals above, just pointed
-  // at the cannon2/bomb2 icons so a grabbed one keeps its own look.
-  actorDefs[CARRY_BOMB2_DEF_ID] = { temperament: CARRY_BOMB2_KIND, poses: null, name: "bomb 2", art: GEOMETRY_ICONS[BOMB2_GEOMETRY].slice() };
   actorDefs[CARRY_CANNON2_DEF_ID] = {
-    temperament: CARRY_CANNON2_KIND, name: "cannon 2",
+    temperament: CARRY_CANNON2_KIND, name: "cannon",
     art: GEOMETRY_ICONS["cannon2-ne"].slice(),
     poses: { ne: GEOMETRY_ICONS["cannon2-ne"].slice(), se: GEOMETRY_ICONS["cannon2-se"].slice(), sw: GEOMETRY_ICONS["cannon2-sw"].slice(), nw: GEOMETRY_ICONS["cannon2-nw"].slice() }
   };
@@ -2320,7 +2354,7 @@
     decorate(THE_DIG_MAZE);
     const doorIn = { x: 2, y: 2 };
     board[doorIn.y][doorIn.x] = gameplayKey("door", "none");
-    board[13][10] = gameplayKey("cannon-ne", "none");
+    board[13][10] = gameplayKey("cannon2-ne", "none");
     board[12][21] = gameplayKey("goal", "none");
 
     doorLinks[roomCellKey(room1.id, doorOut.x, doorOut.y)] = { toRoomId: room2.id, toX: doorIn.x, toY: doorIn.y };
@@ -3172,10 +3206,9 @@
   // rotate handling). Objects don't carry an independent Surface choice — see the hint text in
   // the Object tab — so picking one always resets the modifier back to none.
   function selectGeometry(geometry) {
-    const isCannon = geometry === "cannon";
     const isCannon2 = geometry === "cannon2";
     const isFan = geometry === "fan";
-    selectedGeometry = isCannon ? CANNON_ORDER[0] : isCannon2 ? CANNON2_ORDER[0] : isFan ? FAN_ORDER[0] : geometry;
+    selectedGeometry = isCannon2 ? CANNON2_ORDER[0] : isFan ? FAN_ORDER[0] : geometry;
     selectedGroundSkinId = null; // a flat swatch pick means "just the built-in icon, no named skin"
     paintMode = "tile";
     activeTab = PALETTE_GROUND_GEOMETRIES.includes(geometry) ? "ground" : "object";
@@ -3379,23 +3412,22 @@
       container.appendChild(sw);
     });
     PALETTE_OBJECT_GEOMETRIES.forEach(geometry => {
-      const isCannon = geometry === "cannon";
       const isCannon2 = geometry === "cannon2";
       const isFan = geometry === "fan";
       const isSelected = paintMode === "tile" && activeTab === "object" &&
-        (isCannon ? CANNON_ORDER.includes(selectedGeometry) : isCannon2 ? CANNON2_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
+        (isCannon2 ? CANNON2_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = "#111";
-      // v2.27: GEOMETRY_LABELS covers the three new palette entries whose kid-facing name needs
-      // to read differently from their internal geometry string (cannon2/bomb2 as "cannon 2"/
-      // "bomb 2" so they read as a second option to try, not a typo; pushbutton as "button" so it
-      // never looks like a second, differently-behaving "switch" swatch) — same established
-      // display-name-without-touching-the-id mechanism as MODIFIER_LABELS.
+      // v2.27: GEOMETRY_LABELS covers palette entries whose kid-facing name needs to read
+      // differently from their internal geometry string (cannon2/bomb2 read as plain "cannon"/
+      // "bomb" post-v2.27.2; pushbutton as "button" so it never looks like a second,
+      // differently-behaving "switch" swatch) — same established display-name-without-touching-
+      // the-id mechanism as MODIFIER_LABELS.
       sw.title = GEOMETRY_LABELS[geometry] || geometry;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), isCannon ? GEOMETRY_ICONS["cannon-ne"] : isCannon2 ? GEOMETRY_ICONS["cannon2-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
+      drawArtToCtx(c.getContext("2d"), isCannon2 ? GEOMETRY_ICONS["cannon2-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
@@ -4878,17 +4910,12 @@
       if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
-    } else if (temperament === CARRY_CANNON_KIND || temperament === CARRY_CANNON2_KIND) {
+    } else if (temperament === CARRY_CANNON2_KIND) {
       // v2.21: a dropped/resting cannon object fires the player exactly like the tile does — same
       // function, same cooldown, just reusing the direction it was aimed at when grabbed
       // (cannonDir) instead of a board cell's geometry string. Player-only, matching the tile
       // (only checkPlayerTileContacts/the Build-mode drag handler ever call triggerCannon).
-      // v2.27: the geometry-string prefix has to match which family this actor was actually
-      // grabbed from — both families fire identical direction vectors either way (see
-      // CANNON_DIRECTIONS), but building the right string keeps this correct in spirit, not just
-      // by coincidence.
-      const prefix = temperament === CARRY_CANNON2_KIND ? "cannon2-" : "cannon-";
-      triggerCannon(playerActor, prefix + npcActor.cannonDir);
+      triggerCannon(playerActor, "cannon2-" + npcActor.cannonDir);
     }
   }
 
@@ -5393,11 +5420,9 @@
   // conversion-on-grab rather than a second palette entry or a full tile-to-actor migration.
   function convertGrabbedTileToActor(gx, gy, geometry) {
     let defId;
-    if (geometry === "bomb") defId = CARRY_BOMB_DEF_ID;
-    else if (geometry === BOMB2_GEOMETRY) defId = CARRY_BOMB2_DEF_ID;
+    if (geometry === BOMB2_GEOMETRY) defId = CARRY_BOMB2_DEF_ID;
     else if (geometry === "magnet") defId = CARRY_MAGNET_DEF_ID;
     else if (geometry === "trampoline") defId = CARRY_TRAMPOLINE_DEF_ID;
-    else if (CANNON_ORDER.includes(geometry)) defId = CARRY_CANNON_DEF_ID;
     else if (CANNON2_ORDER.includes(geometry)) defId = CARRY_CANNON2_DEF_ID;
     else return null;
     // A bomb the player merely bumped into (not grabbed) still lights on physical contact — that
@@ -7342,7 +7367,7 @@
     // v2.21: a carried/dropped cannon object picks its sprite by which way it's aimed (set once,
     // at grab time, from the tile orientation it was painted/rotated to — see cannonDir), not by
     // physics state the way every other posed actor's stand/stride/air/crouch set is.
-    if (actor.defId === CARRY_CANNON_DEF_ID || actor.defId === CARRY_CANNON2_DEF_ID) return actor.cannonDir || "ne";
+    if (actor.defId === CARRY_CANNON2_DEF_ID) return actor.cannonDir || "ne";
     if (!actor.grounded) return "air";
     if (actor.impactMag > 0.3 && actor.impactWobbleT < 0.12 && actor.impactAxis === "y") return "crouch";
     if (Math.abs(actor.vx) > 15) return "stride";
@@ -7551,9 +7576,8 @@
       `const ACTOR_SIZE = ${ACTOR_SIZE};`,
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
-      `const CANNON_ORDER = ${JSON.stringify(CANNON_ORDER)};`,
       `const CANNON2_ORDER = ${JSON.stringify(CANNON2_ORDER)};`,
-      `const CANNON_FAMILIES = [CANNON_ORDER, CANNON2_ORDER];`,
+      `const CANNON_FAMILIES = [CANNON2_ORDER];`,
       `const BOMB2_GEOMETRY = ${JSON.stringify(BOMB2_GEOMETRY)};`,
       `const PUSH_BUTTON_GEOMETRY = ${JSON.stringify(PUSH_BUTTON_GEOMETRY)};`,
       `const PLATE_INDICATOR_OFF_HEX = ${JSON.stringify(PLATE_INDICATOR_OFF_HEX)}, PLATE_INDICATOR_ON_HEX = ${JSON.stringify(PLATE_INDICATOR_ON_HEX)};`,
@@ -7595,10 +7619,8 @@
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
       `const BARRIER_SLIDE_MS = ${BARRIER_SLIDE_MS};`,
-      `const CARRY_BOMB_KIND = ${JSON.stringify(CARRY_BOMB_KIND)}, CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)};`,
-      `const CARRY_CANNON_KIND = ${JSON.stringify(CARRY_CANNON_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
-      `const CARRY_BOMB_DEF_ID = ${JSON.stringify(CARRY_BOMB_DEF_ID)}, CARRY_MAGNET_DEF_ID = ${JSON.stringify(CARRY_MAGNET_DEF_ID)};`,
-      `const CARRY_CANNON_DEF_ID = ${JSON.stringify(CARRY_CANNON_DEF_ID)}, CARRY_TRAMPOLINE_DEF_ID = ${JSON.stringify(CARRY_TRAMPOLINE_DEF_ID)};`,
+      `const CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
+      `const CARRY_MAGNET_DEF_ID = ${JSON.stringify(CARRY_MAGNET_DEF_ID)}, CARRY_TRAMPOLINE_DEF_ID = ${JSON.stringify(CARRY_TRAMPOLINE_DEF_ID)};`,
       `const CARRYABLE_KINDS = ${JSON.stringify(CARRYABLE_KINDS)};`,
       `const GRAB_KEY_RANGE = ${GRAB_KEY_RANGE};`,
       `const THROW_TAP_MS = ${THROW_TAP_MS}, THROW_CHARGE_MAX_MS = ${THROW_CHARGE_MAX_MS};`,
