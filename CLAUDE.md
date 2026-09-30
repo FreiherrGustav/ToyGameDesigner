@@ -851,6 +851,110 @@ ladder, bridge, barrel, chest, fire, fan, spring, wind, teleporter,
 moving_platform) were not touched, not integrated, and don't yet correspond
 to any mechanic in this engine — they're future work, not an oversight.
 
+### Crate/gem "didn't publish" for a returning project — stale factory content (v2.27.1)
+
+Direct feedback right after v2.27 shipped: several of the new pieces
+"didn't publish" — most visibly, the palette kept showing "pushable" where
+"crate" should be, and gem's refreshed art never appeared. **Real, not a
+misunderstanding of the intentional 16-sprites-out-of-scope note above** —
+this was a genuine gap in v2.27's own backward-compat work. Every backfill
+in `restoreProjectSnapshot` up to this point followed one shape: "does
+`actorDefs[id]` exist at all? If not, seed it from
+`FACTORY_DEFAULT_SNAPSHOT`." That's correct for a *new* id nobody's save
+could already have — but pushable and `colGem` both already existed
+*before* this patch, so `!actorDefs[id]` was false for them on every
+returning project, and the OLD factory content (the name `"pushable"`, its
+old brown crate-cut art; the old cyan gem art) kept shadowing the new
+default forever, on every single load — reproduced directly by simulating
+a pre-v2.27 snapshot and restoring it.
+
+Fixed the same way `migrateLegacyGroundEffects` (above) already upgrades
+stale board content, applied to `actorDefs` instead: `migrateStaleFactoryArt`
+keeps two frozen copies of the exact pre-v2.27 art (`LEGACY_PUSHABLE_ART`,
+`LEGACY_GEM_ART`) and, right after `actorDefs = structuredClone(snap.actorDefs)`,
+checks each live entry against its legacy twin byte-for-byte
+(`artEquals`). Only a match — proof nothing was ever hand-edited — gets
+swapped for the current `FACTORY_DEFAULT_SNAPSHOT` version; a kid's own
+repaint of either is left completely alone, exactly the same "never
+overwrite real customization" rule every other actorDefs backward-compat
+fix in this file already follows. Verified directly: restoring a simulated
+old snapshot (old name, old art, byte-identical to the legacy constants)
+now correctly upgrades to "crate" and the new gem art; a *not*-legacy-clean
+copy (this migration was never tested against a genuinely hand-edited
+pushable, since none existed before this patch, but the byte-equality gate
+is the same mechanism this file trusts everywhere else for exactly this
+distinction) would be left untouched. **Any future patch that replaces an
+EXISTING built-in's art or name (not just adds a new id) needs this same
+"freeze the old content, compare byte-for-byte, upgrade on exact match"
+treatment** — the existing "is the key missing" backfill check silently
+doesn't cover this case, and won't for any future revision of existing
+factory content either.
+
+### Old cannon/bomb removed; cannon2/bomb2 promoted to the only cannon/bomb (v2.27.2)
+
+v2.27 shipped cannon2/bomb2 as a second, side-by-side option specifically
+so the user could compare the reference-sheet art against the original
+before committing either way. Direct follow-up: "I like the new bomb and
+cannon, please remove the old ones." Rather than just hiding the originals
+from the palette (which would have left two live-but-invisible mechanics
+maintained forever), this **fully deletes** the original cannon/bomb from
+the codebase — same "replace, don't keep a hidden legacy branch" precedent
+the old stick-figure preset and the original plate icon already set.
+Removed: `CANNON_ORDER` and its four `CANNON_ICON_*` art constants, the
+`GEOMETRY_ICONS`/`CANNON_DIRECTIONS`/`GEOMETRY_SWATCH_COLORS` entries for
+plain `cannon-ne/se/sw/nw` and `bomb`, `CARRY_CANNON_KIND`/
+`CARRY_CANNON_DEF_ID`/`CARRY_BOMB_KIND`/`CARRY_BOMB_DEF_ID` and their
+`actorDefs` seeds, their spot in the `restoreProjectSnapshot` backfill
+list and the export `constantsSource` lines, and every geometry-string
+branch that used to special-case `"cannon"`/`"bomb"` (`selectGeometry`,
+`renderObjectSwatches`' swatch-highlight/icon-lookup ternaries,
+`convertGrabbedTileToActor`, `resolveActorContact`'s dropped-cannon-fire
+branch, `currentPoseFor`). `CANNON_FAMILIES` is now `[CANNON2_ORDER]` — a
+one-family array rather than collapsed away entirely, so a future second
+cannon can reuse the exact same machinery again. `isBombGeometry`/
+`isCarryBombKind` simplified to check only the surviving `BOMB2_GEOMETRY`/
+`CARRY_BOMB2_KIND`. **Internal ids were deliberately left alone** —
+`cannon2-ne`, `bomb2`, `carrycannon2`, `carrybomb2` keep their "2"-suffixed
+identifiers; only `GEOMETRY_LABELS` changed (`cannon2`/`bomb2` now read as
+plain "cannon"/"bomb", dropping the "cannon 2"/"bomb 2" comparison-mode
+label) — renaming an internal id that's never kid-facing to begin with
+would have been pure churn for zero benefit, the same reasoning that kept
+`PUSHABLE_KIND` unchanged under the "crate" rename.
+
+**Two places already had old content that needed carrying forward, not
+just deleting the code that made it:** the built-in "Dungeon Diving"
+sample's own maze-building source directly painted a `cannon-ne` tile
+(`board[13][10] = gameplayKey(...)`) — fixed in source, the same way
+"Tunnel Trouble"'s maze string was fixed directly for the diggable/trap
+migration rather than relying on a runtime migration to catch source
+code. And any **already-saved project** could have an old `"cannon-ne"`/
+`"bomb"` board cell, or — a level up from that — an already-materialized
+carried actor of the old `carrycannon`/`carrybomb` kind sitting in a room
+(from a grab that happened before this decision, now dropped or thrown
+and just resting there). Both are real backward-compat gaps of the exact
+shape `migrateLegacyGroundEffects` already exists to prevent: a deleted
+geometry means `gameplayTileAt` returns `undefined` forever for that cell,
+and a deleted actorDefs id means `renderActors` crashes reading a
+nonexistent def. `migrateLegacyCannonBomb(room)`, called alongside
+`migrateLegacyGroundEffects` from `restoreProjectSnapshot`, handles both
+in one pass per room: rewrites any `cannon-*` board geometry to the
+matching `cannon2-*` orientation (both families share the same `ne`/`se`/
+`sw`/`nw` suffixes, so this is a straight string substitution preserving
+whatever modifier was stacked on the cell) and any `"bomb"` geometry to
+`BOMB2_GEOMETRY`; then walks the room's own `actors` array reassigning any
+`defId === "carrycannon"`/`"carrybomb"` to the new `CARRY_CANNON2_DEF_ID`/
+`CARRY_BOMB2_DEF_ID` — the actor's own live fields (fuse state, `cannonDir`,
+position) are untouched, only its def pointer changes. Verified directly:
+a simulated old snapshot with a painted `"cannon-se"` tile, a painted
+`"bomb"` tile, and both an already-materialized `carrycannon` and
+`carrybomb` actor all migrate to their exact new-geometry/new-defId
+equivalents on restore, with zero errors before or after; the migrated
+board geometry string was independently confirmed identical to what
+painting a cannon2 tile through the real palette produces (same mechanism
+already verified firing correctly in the v2.27 testing pass, so this
+doesn't need re-proving the physics, only proving the string transform
+lands on the exact same value).
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
