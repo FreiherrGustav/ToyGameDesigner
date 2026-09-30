@@ -216,6 +216,32 @@ doesn't ALSO show the flat `solid` swatch as selected right next to it —
 harmless when the two lived in separate rows, visually wrong once merged
 into one.
 
+**v2.24 fix: Ground and Ground Effects genuinely combine now** — they
+didn't, right up until a kid reported it. `selectSurfaceModifier` used to
+unconditionally clear `selectedGroundSkinId` on every click, and
+`selectGroundSkin` used to unconditionally overwrite `selectedModifier`
+with the skin's own default (`"none"` for every plain texture) — so
+whichever row you clicked *last* silently won, and picking grass then
+bouncy (or the reverse order) always painted just one or the other, never
+both. Fixed by making the two axes actually independent: a Ground Effect
+pick no longer touches the selected skin at all, and a Ground texture pick
+only forces the modifier when the skin has a real one of its own to offer
+— a Lethal (lava/fire/spike), whose whole identity IS being lethal, per
+its own "tagged lethal automatically" hint text. A plain texture's `"none"`
+was never a meaningful reading to force onto whatever effect a kid had
+already chosen, so it's left alone now. The flat `none`/`solid` swatches
+are unaffected — picking one is still an explicit "no skin," same as ever.
+**One thing this reopens, not yet addressed**: `drawGameplayTile`'s
+modifier ring is suppressed whenever a skin is present (`!skinned` in its
+own condition) — reasoned in v2.20 as "redundant clutter" back when a
+skin+modifier combo other than a skin's own baked-in default was
+unreachable anyway. It's reachable now, so a kid painting grass+bouncy
+gets zero Build-mode visual cue that the bouncy effect is even there,
+until they touch it in Play. Flag this to the user before changing the
+ring-suppression rule — it was a deliberate call for the skin's-own-default
+case, and it's not yet clear whether they'd want a cue back just for a
+non-default combo specifically, or leave discovery to touching it.
+
 **`diggable` and `trap` move from `GEOMETRIES` to `MODIFIERS`.** Each
 keeps its *exact* old mechanic, just generalized to combine with whatever
 base geometry (normally `solid`, or a solid-based ground texture) it's
