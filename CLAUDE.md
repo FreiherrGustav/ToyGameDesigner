@@ -507,6 +507,66 @@ standard export pipeline (tested via The Monster's Den, and separately via
 a project with the skeleton preset applied to the player) produces a
 working, error-free standalone game in both cases.
 
+### Custom pixel-editor colors (v2.25)
+
+Direct feedback right after the monster/skeleton/slime/tabby-cat presets
+shipped: the reference sheet's colors didn't exactly match any of the 12
+fixed swatches (`PALETTE_COLORS`) the pixel editor has always offered, so
+there was no way to touch up a preset's art to match it more closely once
+grabbed. **The pixel-art format itself was never the limiter** — `paintPixel`
+already stores a literal hex string (or `null` for transparent) directly
+per cell (`currentArt[py*ART+px] = currentColor`), no palette-index
+indirection — so this was purely a UI gap: `renderColorRow()` only ever
+rendered the 12 hardcoded swatches, with no way to add another one.
+
+**The fix**: a "+" swatch at the end of the color row (`renderColorRow`,
+styled like the existing swatches with a dashed border to read as "add"
+rather than "select") opens a hidden native `<input type="color">`
+(`#customColorPicker`) via a synthetic `.click()`. Picking a color deliberately
+uses the browser's own OS color-picker rather than a hand-built hex/RGB
+UI — zero extra markup or dependencies, and every browser's native picker
+already ships an eyedropper that can sample a color directly from a
+reference image elsewhere on screen, which is exactly the "match this
+exactly" use case that prompted the ask. On the picker's `change` event,
+the hex is appended to `customColors` (deduped — picking the same color
+twice doesn't add a second identical swatch) and immediately selected as
+`currentColor`. `customColors` is a plain ordered array, rendered right
+after `PALETTE_COLORS` in the same swatch loop — a custom color behaves
+exactly like a built-in one from that point on: click to select, paint
+with it, it persists in the row.
+
+**Persistence**: `customColors` is wired into `captureProjectSnapshot`/
+`restoreProjectSnapshot` (the "four places" pattern's #3 — see the Rooms
+section above), with the usual `snap.customColors ? ... : []` backward-compat
+default for a save from before this patch. It's a project-global, not
+per-room, so it needs nothing in `activateRoom`/`snapshotCurrentRoomState`.
+It's also deliberately **not** wired into `enterPlayMode`'s `buildSnapshot`/
+`restartPlaySessionFromSnapshot`/`exitToBuildMode` — that path only covers
+state Play mode can actually mutate (rooms, doorLinks, spawnerContents,
+switchChannels), and painting sprites isn't possible in Play mode at all,
+the same reason `actorDefs`/`groundTileDefs`/`customActorSlotIds` aren't in
+that path either.
+
+**No export-pipeline changes needed, for the same reason the character
+presets above needed none**: `exportStandaloneGame` only ever ships the
+*resolved* art (literal hex strings already baked into each `actorDefs`/
+`groundTileDefs`/`backgroundTileDefs` entry) — it has no notion of "the
+editor's available colors" to begin with, custom or otherwise. Verified
+directly: picked a custom color, painted the player with it, exported a
+standalone game, and confirmed the exported HTML's `GAME_DATA` contains
+the exact custom hex and the exported game plays back error-free with it
+rendering correctly.
+
+Verified with Playwright: the color row renders the 13 built-in swatches
+(12 colors + the eraser) plus the new "+" button; picking a custom color
+adds exactly one new persistent swatch and selects it; painting with it
+stores the precise hex in the art array; re-picking the same color doesn't
+duplicate the swatch; `captureProjectSnapshot`/`restoreProjectSnapshot`
+round-trips `customColors` correctly; restoring a snapshot missing the
+field (simulating an older save) defaults cleanly to an empty array with
+no crash; all four built-in sample games still load and play with zero
+errors after this change.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
