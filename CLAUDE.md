@@ -1040,6 +1040,143 @@ tunneling regression against the player specifically after this change
 (the two `bouncy`-related call sites are shared code) — it still never
 warps through.
 
+### The World's Worst Elevator (v2.29)
+
+A sixth built-in sample, and the first one explicitly comedic rather than a
+maze or a chase — the request was for "a ridiculous physics contraption,"
+built specifically to put the v2.28 object-bounce work (and the whole
+bouncy/wind/cannon/bomb toolkit) on display at once, with the game itself
+providing zero of the usual structure (no scripted sequence, no "correct
+path" enforcement — the reaction table is still the only logic that exists,
+same as every other sample). `buildWorstElevatorGame()`/
+`drawWorstElevatorIcon()`, registered in `SAMPLE_GAMES` like every other
+sample. Two rooms ("The Lobby" and "The Penthouse (Probably)") since this
+engine has no vertical camera scroll (`ROWS = 18` is a hard per-room
+ceiling) — a "vertical shaft" has to be built as stacked rooms linked by a
+door, not one tall room, the same constraint every prior sample's room
+count already reflects.
+
+**Every placement in this room is sized against a REAL measured number,
+not the constants alone** — this sample generated more corrective
+Playwright tracing than any prior one, because hand-deriving where a
+bounce or a cannon shot actually lands from the physics constants directly
+turned out to be unreliable in three separate, concrete ways below. The
+lesson generalizes: for any future sample that chains multiple
+launch/bounce mechanics together, trace the actual trajectory before
+placing the next piece, not just once but after each placement change,
+since a launch mechanic's real landing point routinely differs from the
+naive restitution-formula prediction.
+
+**Room 1, "The Lobby"**: a starting ledge (row 4, cols 1-3) over a wide
+open wind corridor (rows 5-16, cols 1-9, `none:wind-e` — walkable, not a
+floor, so a falling actor passes freely through it while the wind modifier
+still pushes it sideways) sitting over a bouncy floor segment (row 17,
+cols 0-9, `solid:bouncy`); the rest of row 17 (cols 10-23) is a plain,
+non-bouncy floor — a safe walk-back if a bounce undershoots. A platform
+(row 14, cols 13-21) carries a switch, a barrier (both colored red, the
+switch permanently opens the barrier on contact), an optional bomb toy,
+and a cannon2 that fires the final leg up into the room's exit door.
+
+**Bug found and fixed: a straight fall off the start ledge, holding right
+the whole way down, landed directly on the intended platform's door
+BEFORE ever engaging the wind or bounce** — confirmed via a real
+Playwright trace (the exact "hold right the entire descent" pattern a kid
+actually plays) that showed the natural fall-drift alone (no wind
+involved) carries the player about 5-7 tiles sideways over a ~13-row fall,
+which is enough on its own to reach a platform placed too close to the
+start. A first fix attempt (sealing the platform with a ceiling directly
+above it) was caught as flawed by re-reasoning about the SAME columns the
+fall already drifts into, before ever re-testing it — the ceiling would
+have just become a new, unintended landing spot rather than closing
+anything. The actual fix: the platform's LEFT edge sits at col 13, several
+tiles past where the wind corridor even ends (col 9) — confirmed by trace
+that a plain drift-fall, with no wind, never reaches that far, so nothing
+short-circuits the sequence; only the wind's much stronger, sustained push
+gets a falling player that far right.
+
+**A second, subtler placement bug in the same platform: an ascending
+actor can only ever hit a platform's UNDERSIDE, never land on its top** —
+worth restating here since it cost a full redesign pass. The platform was
+first placed at row 11, assuming the bounce's rebound would comfortably
+clear it; a real trace of the actual bounce (not the textbook restitution
+formula) showed its apex only reaching about row 12.4 — short of row 11 —
+so the bounce sailed underneath it every time and the player just fell
+back down past the whole platform onto the plain floor at row 17 instead.
+Moved to row 14, well below the real measured apex, so the DESCENDING
+half of the arc (still carried sideways by the wind) settles onto it with
+real margin, instead of needing to clip an exact peak height. The
+platform's own left edge (col 13) does double duty here too: it sits past
+the bounce's own apex COLUMN (traced at ~col 12.6), so the still-rising
+half of the arc never even reaches the platform's footprint to begin
+with — only the falling half, past the apex, ever does.
+
+**A bomb, but not in the walkway.** Bomb2 tiles are physical (blocking, per
+v2.21) — one dropped directly into the row-13 walkway (the first attempt)
+stopped every single player dead until they either jumped it or it blew up
+in their face, which is a much stronger interaction than "maybe bombs" was
+asking for. Moved one row up (row 12, directly above the walkway) instead —
+a kid has to jump up into it on purpose to set it off, a genuine "maybe."
+Confirmed via trace what actually happens if they do: `detonateBombAt`
+clears any cardinally-solid neighbor, and the platform's own row-14 floor
+sits directly below this cell, so the explosion punches a real hole
+straight through the platform, dropping it (and the kid, if they're
+standing near it) back down to the base floor — the game's own "ridiculous
+contraption" physics turned into a discoverable trap, not a bug, and
+confirmed fully recoverable (the bounce/wind route back up is untouched by
+the hole).
+
+**Room 2, "The Penthouse (Probably)"**: a plain floor, a Trampoline OBJECT
+(not a painted bouncy tile — its enforced minimum launch is what makes a
+single ~8.7-tile leap possible without a tall drop to build speed from
+first), and — the one piece of this room that took the most rework — the
+goal.
+
+**Bug found and fixed: a single goal tile, placed where hand-calculation
+suggested the bounce would land, missed under multiple different
+realistic play patterns, in different ways each time.** A trampoline
+bounce with genuinely zero held input drifts sideways NOT AT ALL (straight
+up, straight back down the same column — confirmed directly, since there's
+no wind in this room to force any drift the way room 1's bounce has). So a
+goal reachable at all requires the player to be actively holding a
+direction key through the bounce — a real assumption to make explicit, not
+an edge case: a kid walking toward a trampoline they've just discovered is
+the overwhelmingly likely case. But three different plausible reactions —
+holding right forever without ever letting go, letting go the instant the
+bounce fires, and letting go too early to even reach the pad at all — were
+each traced and produced three genuinely different outcomes: the
+"never let go" case drifted the ascent as far as ~col 20 by the time it
+reached goal height (the same launch-exemption that lets a bounce/throw
+briefly ignore the normal speed cap is what makes this drift so much
+larger than a normal walk would); the "let go at the bounce" case crossed
+that height back around col 13; and the "let go too early" case never
+reached the trampoline at all (friction alone stops it a fraction of a
+tile short — not a softlock, just needs one more tap of the key, same as
+approaching any obstacle in this engine). A first attempt at four
+individually-placed goal tiles, spaced to bracket these three traced
+points, still missed the middle ("let go at the bounce") case outright —
+its actual crossing column fell into the gap between two of the four
+guesses, proving the range is genuinely gappy under this exemption
+mechanic, not a smooth curve four sample points could safely bracket.
+Fixed with a whole ROW of goal tiles (row 9, cols 7-20) rather than trying
+to out-guess the exact landing column — confirmed by re-tracing all three
+scenarios again, all three now win. A continuous row of goals also just
+suits this level's own "ridiculous contraption" spirit rather than reading
+as a workaround.
+
+**No shelf sits directly above the trampoline itself**, for the same
+underside-only-blocks-ascent reason room 1's platform placement already
+established — anything solid there would cap the bounce short instead of
+ever letting the player past it.
+
+Verified with Playwright: the full intended sequence (fall → wind → bounce
+→ land on the platform → switch opens the barrier → cannon → exit door →
+trampoline → goal) completes end to end under multiple realistic input
+patterns (sustained held-right the whole way, and releasing right at the
+moment each bounce/launch fires); the bomb toy arms and detonates above
+the platform with zero errors; the standard 5-sample regression sweep (now
+6 including this one) and a fresh export both run error-free, including a
+3-second held-right playthrough of the exported standalone game.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
