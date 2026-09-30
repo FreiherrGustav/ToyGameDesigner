@@ -438,6 +438,75 @@ every 400ms) before and after the fix, not just a single before/after
 screenshot — the first version's "stuck" reading was a real, reproducible
 zero, not a timing fluke.
 
+### New character presets from a reference sprite sheet: monster, skeleton, slime, tabby cat (v2.24)
+
+The user supplied an external 8x8-labeled pixel-art reference sheet (47
+icons across Characters/Objects/Terrain/Structures/Hazards/FX) and asked
+for four specific pieces to become playable character presets: monster,
+skeleton (explicitly to **replace** the old stick-figure preset), slime,
+and cat. Extraction used programmatic grid detection (background-color-
+distance masking plus row/column content-band profiling) rather than
+manual coordinate guessing, verified against a rendered contact sheet
+before any art was touched.
+
+**The sheet's sprites are natively ~16x16, not actually 8x8 despite the
+sheet's own label** — this engine's whole pixel-art system (`ART = 8`,
+`pat()`, every existing `CHARACTER_PRESETS` entry) is hard-fixed to 8x8,
+so each of the four was hand-redrawn at the engine's real resolution
+following the reference's silhouette/color-blocking/readability, the same
+"matched pixel-for-pixel AT the engine's resolution, not the reference's"
+approach `HERO_POSES`/`PRINCESS_POSES`/`GHOST_POSES` already established.
+None of the four got per-pose art (`HERO_POSES`-style stand/walk/jump
+frames) — the reference only ever supplied one static image per creature,
+and the existing `blocker`/`wanderer`/`chaser`/`fleer`/`cat` presets are
+the established precedent for a single-`art` preset with no poses, so
+these four followed that same simpler shape rather than inventing motion
+frames with nothing to base them on. `MONSTER_ART`, `SKELETON_ART`,
+`SLIME_ART`, and `TABBY_CAT_ART` are defined right after the existing
+`CAT_ART` constant, each built with the same `pat(rows, legend)` helper
+every other preset already uses.
+
+**"Cat" needed a naming decision.** The engine already has a built-in
+`CAT_ART` (deep red, used as the fixed chaser look in Cheese Heist, Tunnel
+Trouble, and The Monster's Den) — silently overwriting it with the
+reference sheet's own differently-colored cat would have reskinned every
+sample's monster without anyone asking for that. The new sprite is a
+separate preset, `"tabby cat"` / `TABBY_CAT_ART`, sitting right next to
+the original `"cat"` in `CHARACTER_PRESETS` — both are picker options, and
+the original `CAT_ART`/`"cat"` preset is completely untouched, still the
+one every built-in sample's chaser actor def points at.
+
+**Skeleton replaces the stick figure outright, not alongside it.** The
+old `STICK_LEGEND`/`STICK_POSES` constants (the very first player art this
+project ever had, dating to before hero/princess/ghost existed) are
+deleted entirely — confirmed via a full-file grep that nothing else
+referenced them before removing — and `"stick figure"` no longer appears
+in `CHARACTER_PRESETS` at all. This was an explicit user instruction
+("skeleton, to replace the stick figure"), not an inference; nothing else
+about the preset list's shape changed as a result — `CHARACTER_PRESETS`
+still holds one entry per name, monster/skeleton/slime slotting in where
+poses-less entries already lived, right before `blocker`.
+
+**No export-pipeline changes were needed.** A preset is purely a
+Build-mode convenience — clicking one just copies its `art`/`poses` onto
+whichever `actorDefs[defId]` is currently selected (`renderPresetSwatches`,
+pre-existing code, untouched by this patch). Once applied, the resulting
+def is a completely ordinary entry in `actorDefs`, serialized and restored
+by the same snapshot/export machinery every custom character already goes
+through — there's no separate "preset" concept once the art has been
+picked. Verified directly: applied the skeleton preset to the player,
+exported a standalone game, and confirmed the exported HTML both contains
+the new art's color data and plays back error-free with the skeleton
+sprite rendering correctly on screen.
+
+Verified with Playwright: all four new presets (`monster`, `skeleton`,
+`slime`, `tabby cat`) appear in the character preset shelf alongside the
+untouched originals; `stick figure` no longer appears anywhere; all four
+existing built-in sample games still load and play with zero errors; the
+standard export pipeline (tested via The Monster's Den, and separately via
+a project with the skeleton preset applied to the player) produces a
+working, error-free standalone game in both cases.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
