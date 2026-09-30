@@ -457,6 +457,7 @@
       <div id="pixelEditor">
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
         <div id="colorRow"></div>
+        <input type="color" id="customColorPicker" style="display:none;">
         <div class="toolbar">
           <button class="tbtn" id="clearArt">Clear art</button>
         </div>
@@ -886,6 +887,12 @@
   let nextGroundLetter = 0;
   let lethalSlotIds = [];
   let nextLethalLetter = 0;
+  // v2.25: hex colors a kid has picked with the pixel editor's custom-color "+" swatch, in pick
+  // order — appended to PALETTE_COLORS in the color row, never removed. The pixel-art format
+  // itself already stores a literal hex string per pixel (see paintPixel), so this list is purely
+  // a UI convenience (which extra swatches show up to reuse) — no serialization-format change,
+  // no export-pipeline wiring needed, since an exported game only ever reads the resolved art.
+  let customColors = [];
   // Which named skin (if any) the NEXT tile paint should stamp — set by selectGroundSkin/
   // selectLethalSkin, cleared by the plain flat-swatch pickers (selectGeometry/
   // selectSurfaceModifier) so painting a flat "solid" afterward doesn't keep leaving a stray
@@ -1202,6 +1209,7 @@
       groundTileDefs: structuredClone(groundTileDefs),
       groundSlotIds: groundSlotIds.slice(), nextGroundLetter,
       lethalSlotIds: lethalSlotIds.slice(), nextLethalLetter,
+      customColors: customColors.slice(),
       playerDefId,
       nextActorInstId,
       // v2.17: gravity/wrap/camera moved onto each room object (see createEmptyRoom) — no longer
@@ -1279,6 +1287,7 @@
     nextGroundLetter = snap.nextGroundLetter || 0;
     lethalSlotIds = snap.lethalSlotIds ? snap.lethalSlotIds.slice() : LETHAL_SEEDS.map(s => s.id);
     nextLethalLetter = snap.nextLethalLetter || 0;
+    customColors = snap.customColors ? snap.customColors.slice() : []; // older saves predate custom colors
     groundSlotIds.concat(lethalSlotIds).forEach(id => { if (!groundTileDefs[id]) groundTileDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs[id]); });
     playerDefId = snap.playerDefId || PLAYER_DEF_ID; // older saves predate playerDefId — fall back to the default
     nextActorInstId = snap.nextActorInstId;
@@ -3695,7 +3704,7 @@
   function renderColorRow() {
     const row = document.getElementById("colorRow");
     row.innerHTML = "";
-    PALETTE_COLORS.forEach(color => {
+    PALETTE_COLORS.concat(customColors).forEach(color => {
       const sw = document.createElement("div");
       sw.className = "colorSwatch" + (color === currentColor ? " selected" : "");
       sw.style.background = color || "repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 8px 8px";
@@ -3703,7 +3712,36 @@
       sw.addEventListener("click", () => { currentColor = color; renderColorRow(); });
       row.appendChild(sw);
     });
+    // v2.25: "+" opens the browser's own native color picker (<input type="color">, hidden in the
+    // HTML) rather than building a custom hex/RGB UI — zero extra dependencies or markup, and every
+    // browser's native picker already has an eyedropper for matching a color from a reference image
+    // on screen, which is exactly what this was asked for (fixing a preset to match a reference sheet
+    // exactly). The picked color is appended to customColors so it stays available as an ordinary
+    // swatch afterward, not just used once.
+    const plus = document.createElement("div");
+    plus.className = "colorSwatch";
+    plus.style.display = "flex";
+    plus.style.alignItems = "center";
+    plus.style.justifyContent = "center";
+    plus.style.fontSize = "14px";
+    plus.style.fontWeight = "bold";
+    plus.style.background = "#3a3f4a";
+    plus.style.border = "2px dashed #777";
+    plus.style.color = "#ccc";
+    plus.textContent = "+";
+    plus.title = "Pick a custom color";
+    plus.addEventListener("click", () => {
+      document.getElementById("customColorPicker").value = currentColor || "#888888";
+      document.getElementById("customColorPicker").click();
+    });
+    row.appendChild(plus);
   }
+  document.getElementById("customColorPicker").addEventListener("change", (e) => {
+    const hex = e.target.value;
+    if (!PALETTE_COLORS.includes(hex) && !customColors.includes(hex)) customColors.push(hex);
+    currentColor = hex;
+    renderColorRow();
+  });
 
   const POSE_TABS = [
     { key: "stand", label: "Stand" }, { key: "stride", label: "Stride" },
