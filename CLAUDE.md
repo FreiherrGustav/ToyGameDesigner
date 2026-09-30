@@ -289,6 +289,129 @@ painted over, instead of being its own fixed geometry:
    not just the existing `groundTileDefs[id]` content-backfill just below
    it in the same function — two different gaps, both need covering.
 
+### Barrier: a moveable wall/door (v2.23)
+
+Direct feedback: `plate` could toggle a channel and wire up to a matching
+switch/door/solid, but nothing in the shipped samples ever demonstrated
+*why* a kid would want that — the mechanism existed with no purpose behind
+it. The ask was two things at once: give plate/switch a real reason to
+exist, and add a genuinely "moveable" wall/door, since the existing
+channel-gated `solid` just goes instantly non-blocking with a faint ghost
+outline — never actually reads as something that *moves*.
+
+**`barrier`** is a new Object geometry (`PALETTE_OBJECT_GEOMETRIES`, real
+sprite — a portcullis: a frame top and bottom with four vertical bars,
+plain and mechanical on purpose, since its *channel color* is what tells a
+kid which switch/plate controls it, the same corner-badge convention every
+other color-taggable tile already uses). Mechanically it's `solid`'s own
+channel-gate rule, generalized: blocks unless its channel is on. That
+generalization is `isChannelGateGeometry(geometry)` (`solid` or `barrier`),
+now shared by `isCellBlocking` and `resolveAxis` in place of each having
+its own inline `geometry === "solid"` check — the one thing this feature
+actually changes about existing wall-gating code, and a pure refactor: a
+plain gated solid wall behaves identically to before. `isColorTaggable`
+gains `barrier` alongside `solid`/`switch`/`plate`/`door`/fan. Not
+carryable (`CARRYABLE_KINDS` doesn't list it) and not a Fixture (it DOES
+physically block while closed, unlike goal/switch/door/warp/gravitywell,
+which is exactly why it lives in the Objects row instead) — see "Physical
+objects vs. fixtures" above for why that distinction matters.
+
+**The actual "moveable" part is `drawGameplayTile`'s own barrier branch**:
+instead of `solid`'s instant ghost-outline, the portcullis sprite is
+clipped to the tile and translated straight up as it opens (straight back
+down as it closes), so it genuinely looks like it slides into a slot above
+rather than just fading. `BARRIER_SLIDE_MS` (350) is how long a full
+open/close takes. Purely visual — the tile's actual blocking is still the
+same instant `isChannelOn()` read every other gate already uses; nothing
+about *when* a kid can walk through changes, only what it looks like while
+that happens. The timing input is `channelStateSince` (color ->
+`{ on, since }`), recomputed once a tick by `updateChannelTransitions()`
+(called right after `updatePressurePlates()`, so it sees the current
+frame's fresh plate state) — a cheap, unconditional 5-entry loop over
+`CHANNEL_COLORS`, the same "just always run it" choice `updatePressurePlates`
+itself already makes. Transient, never persisted, same lifecycle as
+`plateChannelsActive` (reset in `clearTransientRuntimeState`/
+`restartStandaloneGame`) — nothing physics-facing ever reads it.
+
+**A pressure plate can now genuinely trap something**, not just gate a
+wall — this is the actual payoff the whole feature was built to
+demonstrate (see "The Monster's Den" sample below for it in practice).
+`updatePressurePlates()` already keys a plate's channel on *any* actor
+overlapping it (player, pushable, or an NPC — "any actor works... no
+weight/mass comparison needed" per its own v2.9 comment), so a chaser
+crossing a plate holds a barrier open exactly as well as the player
+standing on it does. Lure something across a plate positioned just before
+a barrier's doorway, then clear the plate yourself (walk past, don't
+linger) — the channel drops the instant nothing overlaps it, and the
+barrier reseals with whatever crossed it now on the far side. Verified
+directly: an actor placed on a plate opens its barrier; moved fully past
+the barrier and off the plate, the channel drops and the SAME barrier that
+let it in now blocks it from leaving too. No inversion or new state
+machine needed — this is `solid`'s original v2.9 gate rule, unchanged,
+just given a second physical form kids can literally watch move.
+
+### The Monster's Den (v2.23)
+
+A fifth built-in sample, built specifically to demonstrate Barrier/plate
+having a real purpose: a monster sealed in its own den, a goal inside with
+it, and a room full of tools — not required, just offered — for surviving
+the chase once it's out. `buildMonstersDenGame()`/`MONSTERS_DEN_MAZE`,
+registered in `SAMPLE_GAMES` with its own icon
+(`drawMonstersDenIcon` — a dark archway, a portcullis, two glowing eyes).
+Free-roam (no gravity), the same choice Cheese Heist's own cat-chase
+already made — a top-down hunt reads more naturally than platformer jump
+arcs for "something is hunting you."
+
+**The forced beat**: the den's one doorway is a red Barrier, openable only
+by a red switch elsewhere in the room. Reaching the goal *requires*
+finding and flipping that switch — and because a switch's flip is
+permanent (unlike a plate), that release is for the rest of the game, not
+a momentary window. This is the literal "switch opens a door, the monster
+chases you" beat from the original ask.
+
+**The offered tools**, none required to win: a second Barrier/Plate pair
+(orange) at a chokepoint doubles as a trap, per the mechanism above — lure
+the monster through, clear the plate yourself, and it reseals behind
+whatever crossed it; a pushable block sits in the open, ready to shove
+into the monster's path; retreating back through the den's own single
+doorway under pressure already reads as "leading it into a dead end," just
+approached from the far side, so no separate dead-end structure was built
+on top of it. A collectible sits right next to the monster as deliberate
+bait (risk/reward, not a literal AI lure — chasers only ever steer toward
+the player, never toward items) and a second, safer one sits out in the
+open. The room is deliberately not a puzzle with one correct solution —
+every tool here is something to experiment with, matching this whole toy's
+"kids compose, they don't solve" stance; the monster is a piece to play
+with, not a wall to get past. Getting caught costs a life and punts the
+player back to start (the existing `chaser` reaction, `resolveActorContact`
+— "eaten" is a setback here, not an instant loss), verified directly:
+standing next to the released monster does cost a life, so the danger is
+real, not cosmetic.
+
+**A real chaser-pathing gotcha, found building this and worth knowing
+for any future pen/den design**: the den was first built as a tall 7-row
+box with a single-row doorway partway down one side. The monster never
+came out — 0px of movement over two full seconds once released. Cause: a
+`chaser` has no pathfinding at all, only a straight accel toward wherever
+the player currently is right now (`steeringAccelFor`) — with the player
+positioned diagonally from the den, that accel vector doesn't point along
+the doorway's own row, so the monster drove itself straight into a corner
+of the pen (pressed against the south wall, one row off from the door) and
+sat there indefinitely with genuinely zero net velocity, not just visibly
+stuck. Cheese Heist's own chamber already learned a version of this lesson
+("a through-passage, not a dead-end pen," gapped on two sides so a cat
+always has a route toward whichever half of the maze the player is in);
+this room applies the more general fix — **a den/pen's interior should
+share a row or column with its own doorway everywhere inside it**, not
+just at one point along an otherwise taller/wider box. `MONSTERS_DEN_MAZE`
+makes the den exactly one row tall for this reason: wherever the monster
+is inside it, it's already on the doorway's own row, so the straight-line
+accel that already works for every other direction also works for finding
+the exit. Confirmed with a direct physics trace (position/velocity sampled
+every 400ms) before and after the fix, not just a single before/after
+screenshot — the first version's "stuck" reading was a real, reproducible
+zero, not a timing fluke.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
