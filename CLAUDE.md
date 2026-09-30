@@ -955,6 +955,91 @@ already verified firing correctly in the v2.27 testing pass, so this
 doesn't need re-proving the physics, only proving the string transform
 lands on the exact same value).
 
+### Thrown/dropped objects now bounce off bouncy and Trampoline tiles (v2.28)
+
+Direct request: "I want objects to be able to interact with each other —
+if I throw an object at a bouncy tile, it should bounce off it." Before
+building anything, this was investigated rather than assumed, since a lot
+of what "objects interacting" could mean already existed:
+
+- **Sticky ground and wind/fan force already applied to any physics
+  object**, verified directly (not just read) by calling
+  `windAccelFor`/`isOnStickyGround`/`frictionMultiplierFor` with a
+  synthetic non-player actor — all three are purely positional, with no
+  `isPlayer` gate anywhere in them. `stepActor`'s own main branch already
+  folds their output into `ax`/`ay` unconditionally for every actor except
+  `stationary`/`collectible` temperaments, so a thrown pushable, a dropped
+  magnet, or a hazard ball already gets slowed by mud and blown by a fan
+  exactly like the player does. Nothing needed changing here.
+- **Object-vs-object collision already existed**, and already gives a real
+  reaction: `checkActorContacts` runs every frame for every actor, and
+  `resolveActorContact`'s very first branch — "neither actor is the
+  player" — routes straight to `reflectActorsApart`, an elastic-ish bounce
+  (real velocity reflection plus a separation nudge and a sound) that
+  fires for any two non-player actors that touch, gated only by a 500ms
+  per-pair cooldown. Verified directly: two "wanderer" NPCs given contact
+  velocity reflect apart correctly. Pushable-vs-pushable is a distinct,
+  *already-correct* case — `shovePushables`'s own continuous
+  displacement keeps two crates in flush contact rather than truly
+  overlapping, so they push each other rather than bouncing, which is the
+  right feel for a shoved crate and was confirmed to still work
+  unchanged. Nothing needed changing here either.
+- **The one real, confirmed gap**: `resolveAxis`'s own `bouncy` flag
+  (`((modifier === "bouncy" || isTrampolineGeom) && actor.isPlayer) ||
+  isHazardBall`) — and its exact counterpart in `bounceOffTrampolineObjects`
+  for a *dropped Trampoline object* — only ever bounced the player (plus a
+  hazard ball's own unconditional always-bounce). The function's own
+  pre-existing comment said as much outright: "only for the player; NPCs
+  only ever react to geometry, never to modifiers." A thrown/dropped
+  pushable, magnet, Trampoline object, bomb2, or cannon2 hitting a
+  solid+bouncy tile or a Trampoline tile just stopped dead — confirmed by
+  reproducing it directly (a pushable given real velocity into a
+  solid+bouncy wall settled at `vx = 0`, no reflection at all) before
+  touching any code.
+
+**The fix**: `isPhysicsObject = def && CARRYABLE_KINDS.includes(def.temperament)`
+— reusing the existing `CARRYABLE_KINDS` list as-is (it's already exactly
+"pushable + every carried-tile kind," the precise set of things a kid can
+throw) rather than inventing a second, parallel list that could drift out
+of sync. `bouncy` becomes `((modifier === "bouncy" || isTrampolineGeom) &&
+(actor.isPlayer || isPhysicsObject)) || isHazardBall`, and every
+`bounceSound()` call site in `resolveAxis` (both x-axis branches, both
+y-axis branches) and in `bounceOffTrampolineObjects` picked up the same
+`|| isPhysicsObject` — a thrown crate caroming off a bouncy wall should be
+heard, not just felt, the same reasoning every other reaction in this file
+already follows. Landing on a Trampoline tile/object from above, a
+physics object also picks up the tile's own enforced
+`TRAMPOLINE_LAUNCH_SPEED` minimum for free, since that logic already lived
+inside the same `if (bouncy)` block — verified directly: a pushable
+dropped onto a Trampoline tile launches at exactly `-900`
+(`TRAMPOLINE_LAUNCH_SPEED`), not a weaker scaled-by-impact-speed bounce.
+
+**Deliberately untouched, matching the user's own scoping**: a wandering/
+chasing/fleeing/stationary NPC still doesn't bounce off a bouncy tile —
+only genuinely thrown/dropped *objects* gained the reaction, characters
+didn't, and nothing in the request asked for that. The player-only
+"vector kick" polish (`applyBouncyWallKick`, the jump-assist,
+`isPlainBouncyHit`) stays exactly player-gated too — those explicitly read
+held keys and are about a *kid's* aim/timing, which doesn't apply to an
+inanimate thrown object; only the base restitution reflection (and its
+sound) widened.
+
+**Testing note, worth keeping in mind for any future bounce-adjacent
+work**: a pushable's own friction (`FRICTION_DECEL = 1800`) is strong
+enough that a naive test — spawn it some tiles away from a bouncy wall,
+give it velocity, wait — will show it stopping from friction alone long
+before it ever reaches the wall (at `vx = 250`, it travels only a few
+tiles before friction alone zeroes it out). The reliable way to test any
+bounce reaction on a non-steering physics object is to teleport it to
+within 1px of the target tile (using the actor's own real `w`/`h`, not a
+guessed size) immediately before giving it velocity, the same lesson this
+doc's own "gotchas" section already has for fan/trampoline testing, now
+confirmed to apply here too. Re-ran the existing v2.20.1 "ring of
+solid+bouncy tiles, gravity on, 4 seconds of active held-key input"
+tunneling regression against the player specifically after this change
+(the two `bouncy`-related call sites are shared code) — it still never
+warps through.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
