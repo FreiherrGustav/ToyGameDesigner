@@ -4509,14 +4509,25 @@
         // behavior — rather than only reacting to a bouncy tile the way the player does. The
         // Trampoline geometry object bounces the player (and a hazard ball) too, at its own
         // stronger restitution — see TRAMPOLINE_RESTITUTION and the extra minimum-launch kick below.
+        // v2.28: a thrown/dropped physics object (pushable/magnet/trampoline-object/bomb2/cannon2 —
+        // CARRYABLE_KINDS, reused as-is rather than a new list) now bounces off bouncy/Trampoline
+        // tiles too, same restitution math as the player — direct request: "if I throw an object at
+        // a bouncy tile, it should bounce off it." A wandering/chasing/fleeing/stationary NPC still
+        // doesn't (this file's own comment on resolveAxis already drew that line deliberately —
+        // "NPCs only ever react to geometry, never to modifiers" — and nothing in this ask changes
+        // that; only genuinely thrown/dropped OBJECTS gained the reaction, not characters).
         const isHazardBall = def && def.temperament === HAZARD_BALL_KIND;
+        const isPhysicsObject = def && CARRYABLE_KINDS.includes(def.temperament);
         const isTrampolineGeom = geometry === "trampoline";
-        const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && actor.isPlayer) || isHazardBall;
+        const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && (actor.isPlayer || isPhysicsObject)) || isHazardBall;
         const restitution = isTrampolineGeom ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
         // v2.20.1: a bounce needs to SOUND like a bounce, not like an ordinary landing — the two
         // used to be indistinguishable (both just played the generic thud via triggerImpact).
-        // Player-only, same as the bounce reflection itself only ever mattering for the player —
-        // a wandering hazard ball caroming off every wall doesn't need a boing on every hit.
+        // v2.28: now plays for a bouncing physics object too, not just the player — a thrown crate
+        // caroming off a bouncy wall should be heard, same reasoning as every other "make it heard,
+        // not just felt" reaction in this file. Still skipped for a hazard ball's own constant
+        // wall-caroming (isHazardBall alone, not isPhysicsObject) — that one bounces off EVERY wall,
+        // and a boing on every single hit would be constant noise, not a discrete event.
         const bounceSound = isTrampolineGeom ? sounds.trampolineBoing : sounds.boing;
         // A blocking lethal tile (a spike floor) is only meant to punish actually stepping on
         // it from above — bumping its side while just walking up next to it, or bonking its
@@ -4539,7 +4550,7 @@
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
-            if (bouncy && actor.isPlayer) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
             // v2.27: approaching from the left and pushing rightward INTO it — one of the push-
             // button's own two "which side pushed me" states (see PUSH_BUTTON_GEOMETRY). Any actor
             // counts, same "no weight/mass comparison" rule plate already uses — captured here,
@@ -4556,7 +4567,7 @@
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
-            if (bouncy && actor.isPlayer) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
             // The button's other state — approached from the right, pushed leftward into it.
             if (geometry === PUSH_BUTTON_GEOMETRY) {
               pushButtonFacing[roomCellKey(currentRoomId, cx, cy)] = "right";
@@ -4578,14 +4589,14 @@
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
-              if (actor.isPlayer) bounceSound();
+              if (actor.isPlayer || isPhysicsObject) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
             triggerImpact(actor, "y", actor.vy, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
-            if (bouncy && actor.isPlayer) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
@@ -4724,13 +4735,16 @@
         if (actor.vy > 0) {
           actor.y = other.y - actor.h;
           const actorDef = actorDefs[actor.defId];
-          const bouncy = actor.isPlayer || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
+          // v2.28: same widening as resolveAxis's tile-Trampoline branch — a thrown/dropped
+          // physics object landing on a Trampoline OBJECT bounces too, not just the player/hazard ball.
+          const actorIsPhysicsObject = actorDef && CARRYABLE_KINDS.includes(actorDef.temperament);
+          const bouncy = actor.isPlayer || actorIsPhysicsObject || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
           triggerImpact(actor, "y", actor.vy, bouncy);
           if (bouncy) {
             actor.vy = -actor.vy * TRAMPOLINE_RESTITUTION;
             actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
-            if (actor.isPlayer) sounds.trampolineBoing();
+            if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
           } else { actor.vy = 0; actor.grounded = true; }
         } else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
       }
