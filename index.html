@@ -539,6 +539,26 @@
   // points), but the palette shows a single "cannon" swatch — see PALETTE_GEOMETRIES and
   // paintGeometryModifierAt()'s place-then-rotate handling.
   const CANNON_ORDER = ["cannon-ne", "cannon-se", "cannon-sw", "cannon-nw"]; // 90° clockwise each step
+  // v2.27: a second cannon, added specifically so the user can try user-refined replacement art
+  // side by side with the original before committing to swapping it in for good — same exact
+  // mechanics/orientation family shape as CANNON_ORDER, just its own separate swatch/rotation
+  // family (see CANNON_FAMILIES/cannonFamilyFor) so rotating one never jumps a tile into the
+  // other's orientation set.
+  const CANNON2_ORDER = ["cannon2-ne", "cannon2-se", "cannon2-sw", "cannon2-nw"];
+  const CANNON_FAMILIES = [CANNON_ORDER, CANNON2_ORDER];
+  function cannonFamilyFor(geometry) { return CANNON_FAMILIES.find(order => order.includes(geometry)) || null; }
+  function isAnyCannonGeometry(geometry) { return cannonFamilyFor(geometry) != null; }
+  // v2.27: a second bomb, same "try the new art side by side" reasoning as cannon2 above — no
+  // orientation family to duplicate (a bomb is a single fixed sprite), so this is just one more
+  // literal geometry value; isBombGeometry() is the one shared predicate every bomb-specific call
+  // site now checks instead of a bare `geometry === "bomb"`.
+  const BOMB2_GEOMETRY = "bomb2";
+  function isBombGeometry(geometry) { return geometry === "bomb" || geometry === BOMB2_GEOMETRY; }
+  // v2.27: a new wall-mounted push switch — "works like a pressure plate, but by pushing into it"
+  // (direct request) — see resolveAxis's x-axis branches, isColorTaggable, and drawGameplayTile's
+  // own PUSH_BUTTON_GEOMETRY branch for the full mechanic. Named "Button" in the palette to avoid
+  // colliding with the existing permanent-toggle "Switch" — see isColorTaggable's own comment.
+  const PUSH_BUTTON_GEOMETRY = "pushbutton";
   // v2.19: fan is a discrete, switchable Object built entirely on top of the existing wind force
   // calculation (WIND_FORCE/windAt) — same "one swatch, four storable orientations" trick as cannon
   // and wind itself, just on the geometry axis instead of the modifier axis, since a fan is a thing
@@ -551,8 +571,9 @@
   // own comment for why. What's left is genuinely just the geometry axis: what blocks movement /
   // does the mechanical thing, independent of what a tile looks like or what happens on contact.
   const GEOMETRIES = [
-    "none", "solid", "goal", "switch", "plate", "door", "barrier",
-    ...CANNON_ORDER, "bomb", "warp", ...FAN_ORDER, "magnet", "gravitywell", "spawner", "trampoline"
+    "none", "solid", "goal", "switch", "plate", "door", "barrier", PUSH_BUTTON_GEOMETRY,
+    ...CANNON_ORDER, ...CANNON2_ORDER, "bomb", BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
+    "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
   // system built it. Ground is plain blocking/hazard geometry with no identity of its own beyond
@@ -574,7 +595,8 @@
   // v2.23: "barrier" joins this row — see "Barrier: a moveable wall/door" — a real physical thing
   // you bump into while its channel is off, exactly like cannon/bomb/fan/magnet/spawner already are.
   const PALETTE_OBJECT_GEOMETRIES = [
-    "cannon", "bomb", "fan", "magnet", "spawner", "trampoline", "barrier"
+    "cannon", "cannon2", "bomb", BOMB2_GEOMETRY, "fan", "magnet", "spawner", "trampoline", "barrier",
+    PUSH_BUTTON_GEOMETRY
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
@@ -610,6 +632,10 @@
   // right now, but the mechanism (MODIFIER_LABELS[modifier] || modifier, see renderSurfaceSwatches)
   // stays available for the next id that reads as engine-jargon rather than a toy word.
   const MODIFIER_LABELS = {};
+  // v2.27: same mechanism, geometry side — cannon2/bomb2 read as "cannon 2"/"bomb 2" (a second
+  // option to compare, not a typo of the original) and PUSH_BUTTON_GEOMETRY reads as "button" (so
+  // it never looks like a second "Switch" swatch with different behavior) — see renderObjectSwatches.
+  const GEOMETRY_LABELS = { cannon2: "cannon 2", [BOMB2_GEOMETRY]: "bomb 2", [PUSH_BUTTON_GEOMETRY]: "button" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -639,7 +665,13 @@
     "cannon-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
     "cannon-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
     "cannon-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
-    "cannon-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
+    "cannon-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 },
+    // v2.27: cannon2 fires at the exact same four 45° angles as cannon — it's a second look on the
+    // same mechanic, not a different one.
+    "cannon2-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
+    "cannon2-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
+    "cannon2-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
+    "cannon2-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
   };
   // Cardinal, not diagonal like cannon — a sustained push reads better along a straight axis
   // than at 45°, and it needs to work standing still on a "none" floor (an air current) just as
@@ -767,9 +799,19 @@
   const CARRY_MAGNET_DEF_ID = "carrymagnet";
   const CARRY_CANNON_DEF_ID = "carrycannon";
   const CARRY_TRAMPOLINE_DEF_ID = "carrytrampoline";
+  // v2.27: bomb2/cannon2's own carried forms — separate kind/def ids so a grabbed bomb2/cannon2
+  // keeps ITS OWN art once carried, rather than a grabbed one suddenly turning into the original
+  // tile's look (see convertGrabbedTileToActor, currentPoseFor).
+  const CARRY_BOMB2_KIND = "carrybomb2";
+  const CARRY_CANNON2_KIND = "carrycannon2";
+  const CARRY_BOMB2_DEF_ID = "carrybomb2";
+  const CARRY_CANNON2_DEF_ID = "carrycannon2";
+  // v2.27: every "is this carried thing a bomb" check below needs to recognize bomb2's own carried
+  // kind too — one shared predicate instead of repeating the `=== CARRY_BOMB_KIND` check five times.
+  function isCarryBombKind(temperament) { return temperament === CARRY_BOMB_KIND || temperament === CARRY_BOMB2_KIND; }
   // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
-  // plus the four grabbed-off-the-board kinds above.
-  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_BOMB_KIND, CARRY_MAGNET_KIND, CARRY_CANNON_KIND, CARRY_TRAMPOLINE_KIND];
+  // plus the grabbed-off-the-board kinds above.
+  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_BOMB_KIND, CARRY_MAGNET_KIND, CARRY_CANNON_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND];
   // v2.21: the other half of "should this be a physical object" — geometries whose entire job IS
   // being a fixed spot in the room (a door leads somewhere specific, a goal marks the win point, a
   // gravity well anchors a vortex). These never become physical/blocking and never become
@@ -788,6 +830,20 @@
   // own independent channel instead, and makes a matching-colored door/solid tile listen to it.
   const CHANNEL_COLORS = ["red", "orange", "green", "blue", "purple"];
   const CHANNEL_COLOR_HEX = { red: "#e53935", orange: "#fb8c00", green: "#43a047", blue: "#1e88e5", purple: "#8e24aa" };
+  // v2.27: the pressure plate's own baked-in indicator-strip color (see GEOMETRY_ICONS.plate) reads
+  // red for "off" as drawn; drawGameplayTile's plate branch swaps it to this green (reusing the same
+  // green CHANNEL_COLOR_HEX.green already means everywhere else in this file) whenever the plate's
+  // channel is on — a real red/green light, not just the uniform alpha-dim every other switch/plate
+  // still uses on its own.
+  const PLATE_INDICATOR_OFF_HEX = "#eb370c";
+  const PLATE_INDICATOR_ON_HEX = CHANNEL_COLOR_HEX.green;
+  // Swaps every pixel matching `fromHex` in an 8x8 art array to `toHex`, leaving everything else
+  // (including transparency) untouched — used to recolor just the plate's indicator strip rather
+  // than the whole icon, and kept generic enough to reuse for any future "one part of this icon
+  // needs to change color" need instead of hand-building a second full art array per state.
+  function recoloredArt(art, fromHex, toHex) {
+    return art.map(c => c === fromHex ? toHex : c);
+  }
   const PLAYER_COLOR = "#ffd166";
   const PLAYER_DEF_ID = "player";
 
@@ -990,6 +1046,13 @@
   // pressure plate currently has something on it — see isChannelOn(). Unlike switchChannels,
   // this is fully recomputed every tick (updatePressurePlates()), never persisted.
   let plateChannelsActive = {};
+  // v2.27: same shape/lifecycle as plateChannelsActive above, but populated from resolveAxis's own
+  // collision resolution instead of a raw overlap scan (a push-button is blocking, so an actor
+  // touching it is flush against its edge, never truly overlapping it — see resolveAxis's x-axis
+  // branches). pushButtonFacing tracks which side (left/right) last pushed each cell, purely for
+  // drawGameplayTile's own mirrored-icon render — see PUSH_BUTTON_GEOMETRY.
+  let pushButtonChannelsActive = {};
+  let pushButtonFacing = {};
   // v2.23: color -> { on, since } — when each channel's own isChannelOn() reading last flipped,
   // recomputed once a tick by updateChannelTransitions(). Purely a render-timing aid for Barrier's
   // slide animation (see "Barrier: a moveable wall/door" below) — nothing physics-facing reads
@@ -1124,6 +1187,7 @@
     animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
+    pushButtonChannelsActive = {}; pushButtonFacing = {};
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
@@ -1260,7 +1324,9 @@
     // tile, the freshly-created actor's def is undefined — a real crash the moment renderActors
     // tries to read its art/poses, not something a quick manual test after a fresh boot would ever
     // surface (a brand-new page load has no autosave old enough to be missing these).
-    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_BOMB_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_CANNON_DEF_ID, CARRY_TRAMPOLINE_DEF_ID].forEach(id => {
+    // v2.27: bomb2/cannon2's own carried-form def ids added to this same list — any future built-in
+    // actor def needs the same one-line addition here (see this comment's own note further up).
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_BOMB_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_CANNON_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID].forEach(id => {
       if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
     });
     nextActorDefId = snap.nextActorDefId;
@@ -1272,6 +1338,12 @@
     // fresh into actorDefs above (structuredClone(snap.actorDefs) won't have them, so re-derive
     // from COLLECTIBLE_SEEDS instead of leaving the Objects tab's Collectibles row empty)
     collectibleSlotIds = snap.collectibleSlotIds ? snap.collectibleSlotIds.slice() : COLLECTIBLE_SEEDS.map(s => s.id);
+    // v2.27: an older save's collectibleSlotIds predates key/star — same append-missing-built-in-seed
+    // gap groundSlotIds/GROUND_SEEDS already had fixed (see that fix's own comment below): taking the
+    // snap.collectibleSlotIds branch above for ANY older save (one already exists, just missing the
+    // two new ids) would otherwise leave the Collectibles row frozen at whichever seeds existed when
+    // it was last saved, forever. A kid's own custom collectible ids are untouched.
+    COLLECTIBLE_SEEDS.forEach(seed => { if (!collectibleSlotIds.includes(seed.id)) collectibleSlotIds.push(seed.id); });
     collectibleSlotIds.forEach(id => { if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]); });
     nextCollectibleLetter = snap.nextCollectibleLetter || 0;
     // older saves predate groundTileDefs entirely — same re-derive-from-the-factory-seeds fallback
@@ -1564,6 +1636,16 @@
   const CANNON_ICON_SE = rotateArt90CW(CANNON_ICON_NE);
   const CANNON_ICON_SW = rotateArt90CW(CANNON_ICON_SE);
   const CANNON_ICON_NW = rotateArt90CW(CANNON_ICON_SW);
+  // v2.27: user-refined cannon art from the reference sheet — drawn pointing the same NE
+  // direction as CANNON_ICON_NE above, so it can reuse the exact same rotateArt90CW derivation
+  // for its other three orientations (see CANNON2_ORDER).
+  const CANNON2_ICON_NE = pat([
+    "......AB", ".....CCB", ".ABCCBBB", "BBBDBAA.",
+    "BAAAAA..", ".A..A...", "..CB....", ".ABBB..."
+  ], { A: "#3b4658", B: "#4d5c71", C: "#8a9eba", D: "#687287" });
+  const CANNON2_ICON_SE = rotateArt90CW(CANNON2_ICON_NE);
+  const CANNON2_ICON_SW = rotateArt90CW(CANNON2_ICON_SE);
+  const CANNON2_ICON_NW = rotateArt90CW(CANNON2_ICON_SW);
 
   // v2.19: one fan icon (pointing north, its "fan-n" orientation), the other 3 generated the same
   // way cannon's are — a circular housing with a chevron showing which way it blows.
@@ -1594,13 +1676,22 @@
       "...M....", "..MMM...", "...M....", "...M....",
       "...M....", "...M....", "..MMM...", "...M...."
     ], { M: GEOMETRY_SWATCH_COLORS.switch }),
-    // A flat pressable pad, not a lever — reads as "step here" rather than "touch once", the
-    // visual half of what keeps it distinct from switch (see checkPlayerTileContacts's total
-    // absence of a plate branch — it's driven by updatePressurePlates() instead, every tick).
+    // v2.27: user-refined art from the reference sheet, replacing the old plain gray frame — a
+    // metal plate with a colored indicator strip down the middle (PLATE_INDICATOR_HEX, below),
+    // which drawGameplayTile's plate branch recolors red/green for off/on — see that branch's own
+    // comment for why this ships as a color swap rather than the old uniform alpha-dim alone.
     plate: pat([
-      "........", "........", "MMMMMMMM", "M......M",
-      "M......M", "M......M", "MMMMMMMM", "........"
-    ], { M: GEOMETRY_SWATCH_COLORS.plate }),
+      "........", "AAAAAAAA", "ABAAAABA", "ABCCCCBA",
+      "AAAAAAAA", "DDDDDDDD", "........", "........"
+    ], { A: "#8a9eba", B: "#687287", C: "#eb370c", D: "#3b4658" }),
+    // v2.27: new "Button" Object — a wall-mounted push switch, activated by shoving into it from
+    // the side (see the resolveAxis x-axis branches' own pushButtonChannelsActive comment) rather
+    // than walked onto like plate. Same reference-sheet SWITCH art as the base; drawGameplayTile
+    // mirrors it left/right depending which side last pushed it (PUSH_BUTTON_GEOMETRY).
+    pushbutton: pat([
+      "........", "..ABC...", "..BCD...", "..CDD...",
+      "EEFEFEE.", "GFHFHFG.", "GGGGGGG.", "........"
+    ], { A: "#f46583", B: "#eb370c", C: "#e41606", D: "#f3383b", E: "#4d5c71", F: "#3b4658", G: "#687287", H: "#000000" }),
     door: pat([
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
@@ -1609,10 +1700,20 @@
     "cannon-se": CANNON_ICON_SE,
     "cannon-sw": CANNON_ICON_SW,
     "cannon-nw": CANNON_ICON_NW,
+    "cannon2-ne": CANNON2_ICON_NE,
+    "cannon2-se": CANNON2_ICON_SE,
+    "cannon2-sw": CANNON2_ICON_SW,
+    "cannon2-nw": CANNON2_ICON_NW,
     bomb: pat([
       "..K.....", "...M....", "..MMM...", ".MMMMM..",
       "MMMMMMM.", "MMMMMMM.", ".MMMMM..", "..MMM..."
     ], { M: "#2b2b2b", K: "#ffab00" }),
+    // v2.27: user-refined bomb art from the reference sheet — same "second one to compare
+    // side by side" reasoning as cannon2.
+    [BOMB2_GEOMETRY]: pat([
+      ".....AB.", "....A...", "...CD...", "..CCDD..",
+      ".CECDDD.", ".CCDDDD.", "..DDDD..", "...DD..."
+    ], { A: "#efb027", B: "#eb370c", C: "#4d5c71", D: "#3b4658", E: "#8a9eba" }),
     "fan-n": FAN_ICON_N, "fan-e": FAN_ICON_E, "fan-s": FAN_ICON_S, "fan-w": FAN_ICON_W,
     // A classic horseshoe magnet — silver tips at the open top end, red arms and base.
     magnet: pat([
@@ -1701,10 +1802,21 @@
   ], { M: "#ffca28", W: "#fff8e1", K: "#2b2b2b" });
   // The default "gem" collectible (v2.15: one of several collectible sprites now — see
   // collectibleSlotIds — not the single shared collectible look it used to be).
+  // v2.27: replaced with user-refined art from the reference sheet (a faceted blue gem), in place
+  // of the original flat cyan diamond.
   const COLLECTIBLE_ART = pat([
-    "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
-    ".MMMMMM.", "..MMMM..", "...MM...", "........"
-  ], { M: "#26c6da" });
+    "........", "..ABCBB.", ".ABDCCBA", "..BBBEB.",
+    "...BBE..", "...CEE..", "....B...", "........"
+  ], { A: "#82e5f9", B: "#0ab2f7", C: "#46cff6", D: "#def3fd", E: "#2f6fe2" });
+  // v2.27: two more collectible sprites from the same reference sheet, joining gem/heart/coin/cheese.
+  const KEY_ART = pat([
+    "........", "....AAB.", "...A..B.", "...AAAB.",
+    "....BA..", "..BC....", "..A.....", "........"
+  ], { A: "#f9d941", B: "#fcef78", C: "#efb027" });
+  const STAR_ART = pat([
+    "...A....", "...B....", "..CBA...", "CCDBAAC.",
+    ".CBAAC..", "..BCA...", "..A.B...", ".C...C.."
+  ], { A: "#f9d941", B: "#fcef78", C: "#efb027", D: "#ffffff" });
   // Pixel-matched to the kid-supplied reference heart image.
   const HEART_ART = pat([
     ".MM..MM.", "MMMMMMMM", "MMMMMMMM", "MMMMMMMM",
@@ -1814,14 +1926,16 @@
     poses: { stand: HERO_POSES.stand.slice(), stride: HERO_POSES.stride.slice(), air: HERO_POSES.air.slice(), crouch: HERO_POSES.crouch.slice() },
     name: "hero"
   };
-  // A crate, not a creature — reads as "physical object" rather than "actor with intent",
-  // matching that it never steers itself (see PUSHABLE_KIND).
+  // v2.27: user-refined art from the reference sheet — a real wooden crate, replacing the old
+  // placeholder brown-brick-pattern square. Renamed "crate" too (the internal id/kind stays
+  // PUSHABLE_KIND/PUSHABLE_DEF_ID — see OBJECT_ACTOR_KINDS' own comment on why the palette label
+  // now reads from def.name instead of the raw kind string).
   actorDefs[PUSHABLE_DEF_ID] = {
-    temperament: PUSHABLE_KIND, poses: null, name: "pushable",
+    temperament: PUSHABLE_KIND, poses: null, name: "crate",
     art: pat([
-      "MMMMMMMM", "M.MMMM.M", "MM.MM.MM", "MMM.M.MM",
-      "MMM.M.MM", "MM.MM.MM", "M.MMMM.M", "MMMMMMMM"
-    ], { M: "#8d6e63" })
+      "ABBBBBBA", "BACCCCAB", "BCACCACB", "BCCAACCB",
+      "BCCAACCB", "BCACCACB", "BACCCCAB", "ABBBBBBA"
+    ], { A: "#9c4f26", B: "#cb7a33", C: "#6e3618" })
   };
   // v2.19: the spawner's default content when nothing's been loaded into it — a plain physical
   // hazard, not a character with intent (no temperament picker offers this kind, same as pushable
@@ -1849,6 +1963,14 @@
     temperament: CARRY_CANNON_KIND, name: "cannon",
     art: GEOMETRY_ICONS["cannon-ne"].slice(),
     poses: { ne: GEOMETRY_ICONS["cannon-ne"].slice(), se: GEOMETRY_ICONS["cannon-se"].slice(), sw: GEOMETRY_ICONS["cannon-sw"].slice(), nw: GEOMETRY_ICONS["cannon-nw"].slice() }
+  };
+  // v2.27: bomb2/cannon2's own carried forms — same shape as their originals above, just pointed
+  // at the cannon2/bomb2 icons so a grabbed one keeps its own look.
+  actorDefs[CARRY_BOMB2_DEF_ID] = { temperament: CARRY_BOMB2_KIND, poses: null, name: "bomb 2", art: GEOMETRY_ICONS[BOMB2_GEOMETRY].slice() };
+  actorDefs[CARRY_CANNON2_DEF_ID] = {
+    temperament: CARRY_CANNON2_KIND, name: "cannon 2",
+    art: GEOMETRY_ICONS["cannon2-ne"].slice(),
+    poses: { ne: GEOMETRY_ICONS["cannon2-ne"].slice(), se: GEOMETRY_ICONS["cannon2-se"].slice(), sw: GEOMETRY_ICONS["cannon2-sw"].slice(), nw: GEOMETRY_ICONS["cannon2-nw"].slice() }
   };
 
   // One built-in background to start from (the old "ground" brick pattern) so the palette
@@ -1940,7 +2062,9 @@
     { id: "colCheese", name: "cheese", art: CHEESE_ART },
     { id: "colGem", name: "gem", art: COLLECTIBLE_ART },
     { id: "colHeart", name: "heart", art: HEART_ART },
-    { id: "colCoin", name: "coin", art: COIN_ART, spin: true }
+    { id: "colCoin", name: "coin", art: COIN_ART, spin: true },
+    { id: "colKey", name: "key", art: KEY_ART },
+    { id: "colStar", name: "star", art: STAR_ART }
   ];
   COLLECTIBLE_SEEDS.forEach(seed => {
     actorDefs[seed.id] = { temperament: "collectible", art: seed.art.slice(), poses: null, name: seed.name, spin: !!seed.spin };
@@ -2008,7 +2132,9 @@
     { name: "gem", art: COLLECTIBLE_ART },
     { name: "heart", art: HEART_ART },
     { name: "coin", art: COIN_ART },
-    { name: "cheese", art: CHEESE_ART }
+    { name: "cheese", art: CHEESE_ART },
+    { name: "key", art: KEY_ART },
+    { name: "star", art: STAR_ART }
   ];
   const BACKGROUND_PRESETS = [
     { name: "ground", art: pat([
@@ -2874,6 +3000,20 @@
   const pctx = pixelCanvas.getContext("2d");
   const PIXEL_DISPLAY_SCALE = pixelCanvas.width / ART;
 
+  // v2.27: user-refined FX art from the reference sheet — not placeable sprites, used purely as
+  // the visual for bombBlast/muzzleFlash below (see each recipe's own "art override" plumbing:
+  // RECIPES entries stay pure keyframe data, the art to draw during them is passed in separately
+  // at the call site, same shape as tileAnimState/animState already carry other per-instance
+  // extras like `geometry`).
+  const EXPLOSION_ART = pat([
+    "A..B...B", ".C..B.C.", "..BADB..", ".AEFGEB.",
+    ".BEGFEA.", "..BDAB..", ".C.B..C.", "B...B..A"
+  ], { A: "#910e0a", B: "#e41606", C: "#f3383b", D: "#eb370c", E: "#f67209", F: "#ffffff", G: "#f9d941" });
+  const PARTICLE_ART = pat([
+    "...A....", "..B.B...", "A.....A.", "...C....",
+    "..CAC...", "...C....", "A.....A.", "...A...."
+  ], { A: "#f9d941", B: "#fcef78", C: "#efb027" });
+
   // ============== Discrete event recipes (catch/pop/celebrate/boop/crumble) ==============
   // Routine movement (lean, squash, crouch) is physics-driven now, computed straight from
   // velocity every frame — see stepActor(). These few recipes remain only for the handful of
@@ -2928,6 +3068,15 @@
       { t: 0.3, sx: 1.6, sy: 1.6, rot: 0.1, ox: 0, oy: 0, alpha: 1 },
       { t: 1, sx: 2.2, sy: 2.2, rot: 0.2, ox: 0, oy: 0, alpha: 0 }
     ]},
+    // v2.27: a quick flash at a cannon's mouth the instant it fires — EXPLOSION_ART's own
+    // "one shape, several reactions" fit (see its own comment) covers a muzzle flash too, no need
+    // for a second still image; short and punchy (120ms) since it's a one-frame accent, not the
+    // bomb's own multi-beat blast.
+    muzzleFlash: { duration: 120, keyframes: [
+      { t: 0, sx: 0.6, sy: 0.6, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.4, sx: 1.1, sy: 1.1, rot: 0.15, ox: 0, oy: 0, alpha: 1 },
+      { t: 1, sx: 1.4, sy: 1.4, rot: 0.3, ox: 0, oy: 0, alpha: 0 }
+    ]},
     warpPop: { duration: 250, keyframes: [
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
       { t: 0.4, sx: 0.3, sy: 0.3, rot: 0.3, ox: 0, oy: 0, alpha: 0.3 },
@@ -2944,7 +3093,10 @@
       { t: 1, sx: 0.4, sy: 0.4, rot: 3.2, ox: 0, oy: -0.3, alpha: 0 }
     ]}
   };
-  function playRecipe(entity, name) { animState[entity.id] = { recipe: name, t: performance.now() }; }
+  // v2.27: optional 3rd `art` param — an art-override sprite to draw instead of the entity's own
+  // (see renderActors' own animState-consuming block) — omitted by every pre-existing call site,
+  // so this is additive, not a behavior change for anything already using playRecipe.
+  function playRecipe(entity, name, art) { animState[entity.id] = { recipe: name, t: performance.now(), art }; }
   function sampleRecipe(name, elapsedMs) {
     const recipe = RECIPES[name];
     if (!recipe) return null;
@@ -3021,8 +3173,9 @@
   // the Object tab — so picking one always resets the modifier back to none.
   function selectGeometry(geometry) {
     const isCannon = geometry === "cannon";
+    const isCannon2 = geometry === "cannon2";
     const isFan = geometry === "fan";
-    selectedGeometry = isCannon ? CANNON_ORDER[0] : isFan ? FAN_ORDER[0] : geometry;
+    selectedGeometry = isCannon ? CANNON_ORDER[0] : isCannon2 ? CANNON2_ORDER[0] : isFan ? FAN_ORDER[0] : geometry;
     selectedGroundSkinId = null; // a flat swatch pick means "just the built-in icon, no named skin"
     paintMode = "tile";
     activeTab = PALETTE_GROUND_GEOMETRIES.includes(geometry) ? "ground" : "object";
@@ -3207,34 +3360,46 @@
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = "#111";
-      sw.title = kind;
+      // v2.27: label reads from the def's own name, not the raw internal kind string — every
+      // other OBJECT_ACTOR_KINDS entry already keeps def.name === kind (findDefaultActorDef relies
+      // on that match), so this is a no-op for them; it's what lets pushable's own def.name ("crate")
+      // show as "crate" in the palette without renaming the PUSHABLE_KIND/PUSHABLE_DEF_ID internals
+      // (kid-friendly naming stays a display-layer concern — see MODIFIER_LABELS for the established
+      // precedent of exactly this kind of rename).
+      sw.title = def.name;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
       drawArtToCtx(c.getContext("2d"), def.art, ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = kind;
+      label.textContent = def.name;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectObjectActorKind(kind));
       container.appendChild(sw);
     });
     PALETTE_OBJECT_GEOMETRIES.forEach(geometry => {
       const isCannon = geometry === "cannon";
+      const isCannon2 = geometry === "cannon2";
       const isFan = geometry === "fan";
       const isSelected = paintMode === "tile" && activeTab === "object" &&
-        (isCannon ? CANNON_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
+        (isCannon ? CANNON_ORDER.includes(selectedGeometry) : isCannon2 ? CANNON2_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = "#111";
-      sw.title = geometry;
+      // v2.27: GEOMETRY_LABELS covers the three new palette entries whose kid-facing name needs
+      // to read differently from their internal geometry string (cannon2/bomb2 as "cannon 2"/
+      // "bomb 2" so they read as a second option to try, not a typo; pushbutton as "button" so it
+      // never looks like a second, differently-behaving "switch" swatch) — same established
+      // display-name-without-touching-the-id mechanism as MODIFIER_LABELS.
+      sw.title = GEOMETRY_LABELS[geometry] || geometry;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), isCannon ? GEOMETRY_ICONS["cannon-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
+      drawArtToCtx(c.getContext("2d"), isCannon ? GEOMETRY_ICONS["cannon-ne"] : isCannon2 ? GEOMETRY_ICONS["cannon2-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = geometry;
+      label.textContent = GEOMETRY_LABELS[geometry] || geometry;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
@@ -3368,7 +3533,12 @@
     activeTab = OBJECT_ACTOR_KINDS.includes(kind) ? "object" : "character";
     if (activeTab === "object") { lastObjectActorKind = kind; lastObjectAxis = "actor"; }
     else { lastCharacterActorKind = kind; }
-    selectedActorDefId = kind === "player" ? playerDefId : findDefaultActorDef(kind);
+    // v2.27: pushable needs the same special case renderObjectSwatches already uses —
+    // findDefaultActorDef(kind) requires actorDefs[id].name === kind exactly, which broke the
+    // moment pushable's own def.name became "crate" instead of "pushable" (a real crash, caught
+    // by testing the crate rename rather than assumed safe from renderObjectSwatches' OWN
+    // pre-existing special case alone — this is a second, separate lookup with the same gap).
+    selectedActorDefId = kind === "player" ? playerDefId : kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID : findDefaultActorDef(kind);
     selectedPoseKey = "stand";
     currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
     updateModeButtons();
@@ -3933,11 +4103,12 @@
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return groundSkinBoard[gy][gx];
   }
-  // A color reads as "on" from either source that can drive it — a permanently-flipped switch,
-  // or a pressure plate currently occupied — see the state comments on switchChannels/
-  // plateChannelsActive for why they're tracked so differently underneath.
+  // A color reads as "on" from any source that can drive it — a permanently-flipped switch, a
+  // pressure plate currently occupied, or a push-button currently pushed — see the state comments
+  // on switchChannels/plateChannelsActive/pushButtonChannelsActive for why they're tracked so
+  // differently underneath.
   function isChannelOn(color) {
-    return !!switchChannels[color] || !!plateChannelsActive[color];
+    return !!switchChannels[color] || !!plateChannelsActive[color] || !!pushButtonChannelsActive[color];
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
@@ -3971,11 +4142,16 @@
     // register the interaction against). FIXTURE_GEOMETRIES (door/switch/plate/warp/goal/
     // gravitywell) deliberately stay OUT of this list — their whole function depends on being
     // walked ONTO/THROUGH, not bumped into; see FIXTURE_GEOMETRIES' own comment.
-    if (geometry === "bomb") return true;
+    if (isBombGeometry(geometry)) return true;
     if (geometry === "magnet") return true;
     if (geometry === "spawner") return true;
-    if (CANNON_ORDER.includes(geometry)) return true;
+    if (isAnyCannonGeometry(geometry)) return true;
     if (FAN_ORDER.includes(geometry)) return true;
+    // v2.27: the new push-button Object — solid so a kid bumps into it rather than walking
+    // through, exactly the same "physical object" reasoning as bomb/cannon/magnet/spawner above;
+    // being blocking is also WHAT makes "push into it" a meaningful gesture at all (see
+    // resolveAxis's own pushButtonChannelsActive comment).
+    if (geometry === PUSH_BUTTON_GEOMETRY) return true;
     return false;
   }
   // v2.23: the two geometries whose blocking is gated by a channel color rather than fixed —
@@ -4332,12 +4508,29 @@
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
             if (bouncy && actor.isPlayer) bounceSound();
+            // v2.27: approaching from the left and pushing rightward INTO it — one of the push-
+            // button's own two "which side pushed me" states (see PUSH_BUTTON_GEOMETRY). Any actor
+            // counts, same "no weight/mass comparison" rule plate already uses — captured here,
+            // not in a separate overlap scan, because a blocking tile means the actor is flush
+            // against its edge, never truly overlapping it (same reasoning bomb-arm/cannon-fire
+            // already moved on for the same reason — see "Physical objects vs. fixtures").
+            if (geometry === PUSH_BUTTON_GEOMETRY) {
+              pushButtonFacing[roomCellKey(currentRoomId, cx, cy)] = "left";
+              const color = colorAt(cx, cy);
+              if (color) pushButtonChannelsActive[color] = true;
+            }
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
             if (bouncy && actor.isPlayer) bounceSound();
+            // The button's other state — approached from the right, pushed leftward into it.
+            if (geometry === PUSH_BUTTON_GEOMETRY) {
+              pushButtonFacing[roomCellKey(currentRoomId, cx, cy)] = "right";
+              const color = colorAt(cx, cy);
+              if (color) pushButtonChannelsActive[color] = true;
+            }
           }
         } else {
           if (actor.vy > 0) {
@@ -4372,8 +4565,8 @@
         // at the moment of collision, instead. Same functions, same cooldown/one-shot-arm guards —
         // just a different moment to call them from. Cannon also still launches a pushed pushable
         // that bumps into one, matching what a shove into a cannon tile already did before this.
-        if (geometry === "bomb" && actor.isPlayer) triggerBombArm(cx, cy);
-        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && def.temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry);
+        if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
+        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && def.temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry, cx, cy);
         // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
         // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
         // doing the damage. An actor isn't always exactly tile-aligned, so its AABB routinely spans
@@ -4685,12 +4878,17 @@
       if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
-    } else if (temperament === CARRY_CANNON_KIND) {
+    } else if (temperament === CARRY_CANNON_KIND || temperament === CARRY_CANNON2_KIND) {
       // v2.21: a dropped/resting cannon object fires the player exactly like the tile does — same
       // function, same cooldown, just reusing the direction it was aimed at when grabbed
       // (cannonDir) instead of a board cell's geometry string. Player-only, matching the tile
       // (only checkPlayerTileContacts/the Build-mode drag handler ever call triggerCannon).
-      triggerCannon(playerActor, "cannon-" + npcActor.cannonDir);
+      // v2.27: the geometry-string prefix has to match which family this actor was actually
+      // grabbed from — both families fire identical direction vectors either way (see
+      // CANNON_DIRECTIONS), but building the right string keeps this correct in spirit, not just
+      // by coincidence.
+      const prefix = temperament === CARRY_CANNON2_KIND ? "cannon2-" : "cannon-";
+      triggerCannon(playerActor, prefix + npcActor.cannonDir);
     }
   }
 
@@ -4844,7 +5042,11 @@
   // rises well above what gravity can cancel in a single frame, so it climbs, arcs over at its
   // apex, and only then does gravity's steady pull actually win out and bring it back down —
   // ordinary projectile motion, not special-cased physics; see CANNON_DIRECTIONS.
-  function triggerCannon(actor, geometry) {
+  // v2.27: optional cx/cy — when the caller has the cannon's own board cell handy (the two tile-
+  // collision call sites do; a dropped/resting carried-cannon actor's own contact reaction, which
+  // has no cell, doesn't), a quick muzzle-flash plays right at the cannon's mouth instead of on
+  // the actor being launched — a flash needs to stay put, not fly off with whatever it just fired.
+  function triggerCannon(actor, geometry, cx, cy) {
     if (actor.cannonCooldown > 0) return;
     actor.cannonCooldown = CANNON_COOLDOWN_MS;
     const dir = CANNON_DIRECTIONS[geometry];
@@ -4854,6 +5056,7 @@
     actor.impactMag = 0.7;
     actor.impactWobbleT = 0;
     actor.impactAxis = "y";
+    if (cx != null && cy != null) tileAnimState[cx + "," + cy] = { recipe: "muzzleFlash", t: performance.now(), geometry, modifier: "none", art: PARTICLE_ART };
     log("Shot!");
   }
 
@@ -4907,7 +5110,10 @@
       if (!tile) return;
       const isBombItself = x === gx && y === gy;
       if (!isBombItself && tile.geometry !== "solid") return;
-      if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
+      // v2.27: the bomb's OWN cell shows EXPLOSION_ART instead of scaling up its own icon (see the
+      // tile-anim render loop's art-override); a cleared solid NEIGHBOR keeps its old look (the
+      // wall itself deforming), since that's a wall being destroyed, not the explosion itself.
+      if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier, art: isBombItself ? EXPLOSION_ART : undefined };
       targetBoard[y][x] = null;
     });
 
@@ -5142,11 +5348,11 @@
   // Every carryable geometry a kid can paint — grabbing one picks up that ONE cell, converting it
   // into a live actor (see convertGrabbedTileToActor). Cannon keeps its own orientation.
   function carryableGeometryDirection(geometry) {
-    if (CANNON_ORDER.includes(geometry)) return geometry.split("-")[1];
+    if (isAnyCannonGeometry(geometry)) return geometry.split("-")[1];
     return null;
   }
   function isCarryableTileGeometry(geometry) {
-    return geometry === "bomb" || geometry === "magnet" || geometry === "trampoline" || CANNON_ORDER.includes(geometry);
+    return isBombGeometry(geometry) || geometry === "magnet" || geometry === "trampoline" || isAnyCannonGeometry(geometry);
   }
 
   // Finds whichever's closer within GRAB_KEY_RANGE — an already-live carryable actor (a pushable,
@@ -5188,16 +5394,20 @@
   function convertGrabbedTileToActor(gx, gy, geometry) {
     let defId;
     if (geometry === "bomb") defId = CARRY_BOMB_DEF_ID;
+    else if (geometry === BOMB2_GEOMETRY) defId = CARRY_BOMB2_DEF_ID;
     else if (geometry === "magnet") defId = CARRY_MAGNET_DEF_ID;
     else if (geometry === "trampoline") defId = CARRY_TRAMPOLINE_DEF_ID;
     else if (CANNON_ORDER.includes(geometry)) defId = CARRY_CANNON_DEF_ID;
+    else if (CANNON2_ORDER.includes(geometry)) defId = CARRY_CANNON2_DEF_ID;
     else return null;
     // A bomb the player merely bumped into (not grabbed) still lights on physical contact — that
     // landmine-style hazard is untouched, see triggerBombArm — but grabbing it mid-countdown must
     // hand off the SAME countdown, not reset it: cancel the tile-side timer and carry its exact
     // remaining time over onto the new actor (paused, since it's now held — see attachCarryable).
+    // bombArmed is keyed purely by cell, not by which bomb geometry sits there, so this applies to
+    // bomb2 exactly the same way.
     let transferredFuseMs = null;
-    if (geometry === "bomb") {
+    if (isBombGeometry(geometry)) {
       const armKey = roomCellKey(currentRoomId, gx, gy);
       const armed = bombArmed[armKey];
       if (armed) {
@@ -5266,7 +5476,7 @@
     obj.impactMag = 0; // no stale wobble bleeding into the carried render
     player.carrying = obj.id;
     const def = actorDefs[obj.defId];
-    if (def && def.temperament === CARRY_BOMB_KIND) {
+    if (def && isCarryBombKind(def.temperament)) {
       pauseBombFuseIfTicking(obj);
       log("Grabbed the bomb — safe while you're holding it. Drop or throw it to light the fuse.");
     } else {
@@ -5288,7 +5498,7 @@
     obj.y = player.y + player.h - obj.h;
     obj.vx = 0; obj.vy = 0;
     const def = actorDefs[obj.defId];
-    if (def && def.temperament === CARRY_BOMB_KIND) startOrResumeBombFuse(obj);
+    if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     log("Dropped it.");
   }
 
@@ -5321,7 +5531,7 @@
     // holds a direction key during the exemption window, which nothing here ever does.
     obj.bouncyCooldown = 500;
     const def = actorDefs[obj.defId];
-    if (def && def.temperament === CARRY_BOMB_KIND) startOrResumeBombFuse(obj);
+    if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
     log("Threw it!");
   }
@@ -5355,7 +5565,7 @@
     const gy = Math.floor((bombActor.y + bombActor.h / 2) / TILE);
     detonateBombAt(roomId, gx, gy);
     if (isHot) {
-      playRecipe(bombActor, "bombBlast");
+      playRecipe(bombActor, "bombBlast", EXPLOSION_ART);
       setTimeout(() => removeActorById(actorId), RECIPES.bombBlast.duration);
     } else {
       targetActors.splice(targetActors.indexOf(bombActor), 1); // off-screen room — no one's watching it pop
@@ -5581,6 +5791,11 @@
   // see PUSHABLE_KIND), no weight/mass comparison needed, per the patch note.
   function updatePressurePlates() {
     plateChannelsActive = {};
+    // v2.27: reset here too (once a tick, before physics runs) — resolveAxis's x-axis branches
+    // repopulate it fresh every frame something is actually pushed against a button, the same
+    // "recomputed from scratch, never toggled by an event" shape plateChannelsActive itself uses,
+    // just fed by collision contact instead of an overlap scan.
+    pushButtonChannelsActive = {};
     for (const actor of actors) {
       for (const { cx, cy } of overlappedCells(actor)) {
         if (geometryAt(cx, cy) === "plate") {
@@ -5748,7 +5963,10 @@
     // v2.23: barrier joins solid as the two geometries a color actually GATES (see
     // isChannelGateGeometry) rather than merely switches on/off (fan) or uses for room-linking
     // (door).
-    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || geometry === "barrier" || FAN_ORDER.includes(geometry);
+    // v2.27: the new push-button Object joins switch/plate as a third way to drive a channel —
+    // "Button" in the palette specifically so it never reads as a second "Switch" swatch with
+    // different behavior (a real point of confusion this naming choice was picked to avoid).
+    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || geometry === "barrier" || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -5778,25 +5996,30 @@
       createDoorAt(gx, gy);
       return;
     }
-    if (CANNON_ORDER.includes(selectedGeometry)) {
+    if (isAnyCannonGeometry(selectedGeometry)) {
       // one click places a cannon; a fresh click on an already-placed cannon rotates it 90°
       // instead of re-placing it. cannonRotateStrokeCells makes this click-based rather than
       // drag-based: a mousemove lingering on the same cell during one continuous stroke must
       // not spin the cannon over and over just from hovering — see the stroke-reset in the
       // mousedown/touchstart handlers.
+      // v2.27: rotation stays within whichever family (cannon vs cannon2) is actually selected —
+      // cannonFamilyFor looks up the matching CANNON_ORDER/CANNON2_ORDER array so a cannon2 tile
+      // never rotates into a cannon1 orientation or vice versa.
+      const family = cannonFamilyFor(selectedGeometry);
       const strokeKey = gx + "," + gy;
       if (cannonRotateStrokeCells.has(strokeKey)) return;
       cannonRotateStrokeCells.add(strokeKey);
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
-      if (existingTile && CANNON_ORDER.includes(existingTile.geometry)) {
-        const next = CANNON_ORDER[(CANNON_ORDER.indexOf(existingTile.geometry) + 1) % CANNON_ORDER.length];
+      const existingFamily = existingTile ? cannonFamilyFor(existingTile.geometry) : null;
+      if (existingFamily === family) {
+        const next = family[(family.indexOf(existingTile.geometry) + 1) % family.length];
         board[gy][gx] = gameplayKey(next, selectedModifier);
         return;
       }
       const roomKey = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[roomKey];
       cancelBombArm(roomKey);
-      board[gy][gx] = gameplayKey(CANNON_ORDER[0], selectedModifier);
+      board[gy][gx] = gameplayKey(family[0], selectedModifier);
       colorBoard[gy][gx] = null;
       groundSkinBoard[gy][gx] = null; // a cannon never carries a named ground skin
       groundSkinRotationBoard[gy][gx] = 0;
@@ -6223,8 +6446,8 @@
     // than in the non-blocking loop further down where they'd never actually be reached anymore.
     function fireBlockingTileReaction(cx, cy) {
       const geometry = geometryAt(cx, cy);
-      if (geometry === "bomb" && actor.isPlayer) triggerBombArm(cx, cy);
-      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && actorDefs[actor.defId].temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry);
+      if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
+      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && actorDefs[actor.defId].temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry, cx, cy);
     }
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
@@ -6681,7 +6904,7 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 2, y + 2, TILE - 4, TILE - 4);
       ctx.restore();
-    } else if (tile.geometry === "bomb" && extra && extra.armed) {
+    } else if (isBombGeometry(tile.geometry) && extra && extra.armed) {
       ctx.save();
       ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
@@ -6693,11 +6916,38 @@
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() * 0.02);
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
-    } else if ((tile.geometry === "switch" || tile.geometry === "plate") && extra && extra.color) {
-      // dim until its own channel is on — the switch/plate itself shows the state it drives
+    } else if (tile.geometry === "switch" && extra && extra.color) {
+      // dim until its own channel is on — the switch itself shows the state it drives
       ctx.save();
       ctx.globalAlpha = extra.channelOn ? 1 : 0.55;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
+    } else if (tile.geometry === "plate" && extra && extra.color) {
+      // v2.27: a real red/green indicator light, not just the uniform alpha-dim every other
+      // switch/plate still uses — the plate's own reference art already reads as "a light strip
+      // on a panel," so recoloring just that strip (see PLATE_INDICATOR_OFF_HEX/_ON_HEX) is a
+      // closer match to what it's asking to be than dimming the whole icon would be. Kept
+      // alongside the same channelOn-driven alpha dim underneath so it still reads at a glance
+      // even for a kid who can't distinguish red from green.
+      ctx.save();
+      ctx.globalAlpha = extra.channelOn ? 1 : 0.7;
+      const litIcon = extra.channelOn ? recoloredArt(icon, PLATE_INDICATOR_OFF_HEX, PLATE_INDICATOR_ON_HEX) : icon;
+      drawArtScaled(ctx, litIcon, x, y, TILE, cell);
+      ctx.restore();
+    } else if (tile.geometry === PUSH_BUTTON_GEOMETRY && extra && extra.color) {
+      // v2.27: shows which side last pushed it by mirroring the same base art horizontally —
+      // "two states, left and right" without needing a second hand-drawn sprite — plus the same
+      // channelOn alpha-dim every switch/plate already uses. See pushButtonFacing/
+      // pushButtonChannelsActive (resolveAxis's x-axis branches) for how facing/on are decided.
+      ctx.save();
+      ctx.globalAlpha = extra.channelOn ? 1 : 0.55;
+      if (extra.facing === "right") {
+        ctx.translate(x + TILE, y);
+        ctx.scale(-1, 1);
+        drawArtScaled(ctx, icon, 0, 0, TILE, cell);
+      } else {
+        drawArtScaled(ctx, icon, x, y, TILE, cell);
+      }
       ctx.restore();
     } else if (tile.geometry === "barrier") {
       // A moveable wall/door: slides straight up out of the tile as it opens, straight back down
@@ -6845,7 +7095,13 @@
             ctx.translate(sx * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) ctx.rotate(sample.rot);
             ctx.scale(sample.sx, sample.sy);
-            drawGameplayTile(ctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
+            // v2.27: an optional art override (see EXPLOSION_ART/PARTICLE_ART, detonateBombAt,
+            // triggerCannon) — draws that art directly instead of re-rendering the tile's own
+            // geometry, for a recipe that's showing a distinct FX sprite rather than deforming
+            // the tile that triggered it. Every existing tileAnimState entry omits `art`, so this
+            // is a no-op for all of them.
+            if (tanim.art) drawArtScaled(ctx, tanim.art, -TILE / 2, -TILE / 2, TILE, cell);
+            else drawGameplayTile(ctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
             ctx.restore();
             if (sample.done) delete tileAnimState[key];
             continue;
@@ -6858,7 +7114,7 @@
           if (isLive && tile.modifier === "diggable") {
             const progress = digProgress[roomCellKey(currentRoomId, bx, y)] || 0;
             extra = { digFrac: progress / DIG_DURATION_MS };
-          } else if (isLive && tile.geometry === "bomb") {
+          } else if (isLive && isBombGeometry(tile.geometry)) {
             extra = { armed: !!bombArmed[roomCellKey(currentRoomId, bx, y)] };
           } else if (isLive && tile.geometry === "spawner") {
             const spawnerKey = roomCellKey(currentRoomId, bx, y);
@@ -6878,6 +7134,12 @@
                 const target = state ? (state.on ? 1 : 0) : 0;
                 const start = 1 - target;
                 extra.slideFrac = start + (target - start) * Math.min(1, elapsed / BARRIER_SLIDE_MS);
+              }
+              // v2.27: which side last pushed this button — see resolveAxis's x-axis branches,
+              // where pushButtonFacing is actually set; defaults to "left" (the base, unmirrored
+              // art) for a button that's never been pushed yet.
+              if (tile.geometry === PUSH_BUTTON_GEOMETRY) {
+                extra.facing = pushButtonFacing[roomCellKey(currentRoomId, bx, y)] || "left";
               }
             }
           }
@@ -6914,7 +7176,7 @@
       const def = actorDefs[actor.defId];
       if (!def) return;
       const posed = !!def.poses;
-      const art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
+      let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
 
       let t;
       if (posed) {
@@ -6970,6 +7232,10 @@
         if (sample) {
           t.sx *= sample.sx; t.sy *= sample.sy; t.rot += sample.rot;
           t.ox += sample.ox; t.oy += sample.oy; t.alpha *= sample.alpha;
+          // v2.27: same optional art override as the tile-anim loop above — a carried bomb's own
+          // blast (detonateCarriedBombAt) shows EXPLOSION_ART instead of the bomb sprite scaling
+          // up, so it actually reads as an explosion rather than a bomb ballooning.
+          if (anim.art) art = anim.art;
           if (sample.done) delete animState[actor.id];
         } else delete animState[actor.id];
       }
@@ -6978,7 +7244,7 @@
       // already gives (drawGameplayTile's own `extra.armed` flicker) — same alpha flicker, same
       // 120ms period, just keyed off `fuseTimerId` (actively ticking, not held/paused) instead of
       // `bombArmed`, since this bomb is a free actor now, not a board cell.
-      if (def.temperament === CARRY_BOMB_KIND && actor.fuseTimerId != null) {
+      if (isCarryBombKind(def.temperament) && actor.fuseTimerId != null) {
         t.alpha *= (Math.floor(now / 120) % 2 === 0) ? 1 : 0.35;
       }
 
@@ -7076,7 +7342,7 @@
     // v2.21: a carried/dropped cannon object picks its sprite by which way it's aimed (set once,
     // at grab time, from the tile orientation it was painted/rotated to — see cannonDir), not by
     // physics state the way every other posed actor's stand/stride/air/crouch set is.
-    if (actor.defId === CARRY_CANNON_DEF_ID) return actor.cannonDir || "ne";
+    if (actor.defId === CARRY_CANNON_DEF_ID || actor.defId === CARRY_CANNON2_DEF_ID) return actor.cannonDir || "ne";
     if (!actor.grounded) return "air";
     if (actor.impactMag > 0.3 && actor.impactWobbleT < 0.12 && actor.impactAxis === "y") return "crouch";
     if (Math.abs(actor.vx) > 15) return "stride";
@@ -7238,6 +7504,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
@@ -7285,6 +7552,13 @@
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
       `const CANNON_ORDER = ${JSON.stringify(CANNON_ORDER)};`,
+      `const CANNON2_ORDER = ${JSON.stringify(CANNON2_ORDER)};`,
+      `const CANNON_FAMILIES = [CANNON_ORDER, CANNON2_ORDER];`,
+      `const BOMB2_GEOMETRY = ${JSON.stringify(BOMB2_GEOMETRY)};`,
+      `const PUSH_BUTTON_GEOMETRY = ${JSON.stringify(PUSH_BUTTON_GEOMETRY)};`,
+      `const PLATE_INDICATOR_OFF_HEX = ${JSON.stringify(PLATE_INDICATOR_OFF_HEX)}, PLATE_INDICATOR_ON_HEX = ${JSON.stringify(PLATE_INDICATOR_ON_HEX)};`,
+      `const CARRY_BOMB2_KIND = ${JSON.stringify(CARRY_BOMB2_KIND)}, CARRY_CANNON2_KIND = ${JSON.stringify(CARRY_CANNON2_KIND)};`,
+      `const CARRY_BOMB2_DEF_ID = ${JSON.stringify(CARRY_BOMB2_DEF_ID)}, CARRY_CANNON2_DEF_ID = ${JSON.stringify(CARRY_CANNON2_DEF_ID)};`,
       `const WIND_ORDER = ${JSON.stringify(WIND_ORDER)};`,
       `const WIND_DIRECTIONS = ${JSON.stringify(WIND_DIRECTIONS)};`,
       `const WIND_FORCE = ${WIND_FORCE};`,
@@ -7337,6 +7611,8 @@
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
       `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
       `const RECIPES = ${JSON.stringify(RECIPES)};`,
+      `const EXPLOSION_ART = ${JSON.stringify(EXPLOSION_ART)};`,
+      `const PARTICLE_ART = ${JSON.stringify(PARTICLE_ART)};`,
       `const appMode = "play"; // exported games are always Play — there is no Build mode here`,
       `const IS_STANDALONE_EXPORT = true;`
     ].join("\n  ");
@@ -7415,6 +7691,8 @@
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
+  let pushButtonChannelsActive = {};
+  let pushButtonFacing = {};
   let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
@@ -7467,6 +7745,7 @@
     spawnerRuntime = {};
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
     plateChannelsActive = {}; channelStateSince = {};
+    pushButtonChannelsActive = {}; pushButtonFacing = {};
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
     actorContactCooldown = {}; dragContactCooldown = {};
