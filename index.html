@@ -347,9 +347,9 @@
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Real things in the room — you bump into them, and some of them (not the fan or the
-        spawner) can be picked up and carried around. Pushable block is yours to redraw, like a
-        character; the rest use a built-in icon, same as Ground.
+        Real things in the room — you bump into them, and some of them (not the fan, the spawner,
+        or the barrier) can be picked up and carried around. Pushable block is yours to redraw,
+        like a character; the rest use a built-in icon, same as Ground.
       </div>
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
       <div class="swatch-row" id="fixtureSwatches"></div>
@@ -370,7 +370,14 @@
         <div class="hint" style="margin-top:2px;">
           For a switch or plate — none: a switch flips gravity, a plate does nothing. Pick a color
           instead and it turns that color on (a switch keeps it on; a plate only while something's
-          standing on it) — any matching-colored wall over in Ground listens for it.
+          standing on it) — any matching-colored wall over in Ground, or barrier over here in
+          Objects, listens for it.
+        </div>
+        <div class="hint" style="margin-top:6px;">
+          For a barrier, color means the same thing it means for a wall over in Ground: none and
+          it always blocks, forever, with no way to open it. Pick a color and it slides open while
+          that channel is on, and slides shut again the moment it turns off — a switch holds it
+          open for good, a plate only while something is actually standing on it.
         </div>
         <div class="hint" style="margin-top:6px;">
           For a door, color means something different: it's how the door decides where it leads.
@@ -543,7 +550,7 @@
   // own comment for why. What's left is genuinely just the geometry axis: what blocks movement /
   // does the mechanical thing, independent of what a tile looks like or what happens on contact.
   const GEOMETRIES = [
-    "none", "solid", "goal", "switch", "plate", "door",
+    "none", "solid", "goal", "switch", "plate", "door", "barrier",
     ...CANNON_ORDER, "bomb", "warp", ...FAN_ORDER, "magnet", "gravitywell", "spawner", "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
@@ -563,8 +570,10 @@
   // Fixtures row (see FIXTURE_GEOMETRIES/renderFixtureSwatches below) — what's left here is every
   // geometry that's a real, physical, bumpable object (isBlockingGeometry) or, for magnet/spawner,
   // at least behaves like a standalone thing rather than a fixed feature of the room itself.
+  // v2.23: "barrier" joins this row — see "Barrier: a moveable wall/door" — a real physical thing
+  // you bump into while its channel is off, exactly like cannon/bomb/fan/magnet/spawner already are.
   const PALETTE_OBJECT_GEOMETRIES = [
-    "cannon", "bomb", "fan", "magnet", "spawner", "trampoline"
+    "cannon", "bomb", "fan", "magnet", "spawner", "trampoline", "barrier"
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
@@ -609,7 +618,8 @@
     "cannon-ne": "#ff5722", "cannon-se": "#ff5722", "cannon-sw": "#ff5722", "cannon-nw": "#ff5722",
     bomb: "#424242", warp: "#8e24aa",
     fan: "#00acc1", "fan-n": "#00acc1", "fan-e": "#00acc1", "fan-s": "#00acc1", "fan-w": "#00acc1",
-    magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41", trampoline: "#f9a825"
+    magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41", trampoline: "#f9a825",
+    barrier: "#546e7a"
   };
   const MODIFIER_SWATCH_COLORS = {
     none: "#555568", slippery: "#29b6f6", bouncy: "#ff9800", hazard: "#e53935", lethal: "#4a0000",
@@ -825,6 +835,10 @@
   const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
   const BOMB_BLAST_KNOCKBACK_SPEED = 480;
   const WARP_COOLDOWN_MS = 400;
+  // v2.23: how long Barrier's slide animation takes to fully open/close — see
+  // updateChannelTransitions()/drawGameplayTile's own barrier branch. Purely visual; the tile's
+  // actual blocking is still the same instant isChannelOn() check every other gate already uses.
+  const BARRIER_SLIDE_MS = 350;
 
   // v2.21: grab / carry / drop / throw — the first player-invoked verb in the whole project
   // (everything else happens automatically from contact or movement). Brought in from a validated
@@ -969,6 +983,12 @@
   // pressure plate currently has something on it — see isChannelOn(). Unlike switchChannels,
   // this is fully recomputed every tick (updatePressurePlates()), never persisted.
   let plateChannelsActive = {};
+  // v2.23: color -> { on, since } — when each channel's own isChannelOn() reading last flipped,
+  // recomputed once a tick by updateChannelTransitions(). Purely a render-timing aid for Barrier's
+  // slide animation (see "Barrier: a moveable wall/door" below) — nothing physics-facing reads
+  // this, blocking itself stays the same instant on/off isChannelOn() check it always was. Same
+  // transient, never-persisted lifecycle as plateChannelsActive above.
+  let channelStateSince = {};
   let actors = [];           // continuous actors: {id, defId, x, y, w, h, vx, vy, grounded, isPlayer, ...} — hot room's own
   let nextActorInstId = 1;
 
@@ -1096,7 +1116,7 @@
   function clearTransientRuntimeState() {
     animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
-    spawnerRuntime = {};
+    spawnerRuntime = {}; channelStateSince = {};
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
@@ -1627,7 +1647,15 @@
     trampoline: pat([
       "MMMMMMMM", "M......M", "MKKKKKKM", "M......M",
       ".M....M.", "..M..M..", "..M..M..", ".MM..MM."
-    ], { M: GEOMETRY_SWATCH_COLORS.trampoline, K: "#fff59d" })
+    ], { M: GEOMETRY_SWATCH_COLORS.trampoline, K: "#fff59d" }),
+    // v2.23: a portcullis — a frame top and bottom with four vertical bars between, the clearest
+    // "this is a moveable barrier" shape at 8x8. Deliberately plain/mechanical (no color-of-its-own
+    // beyond the frame) since its channel color is what actually tells a kid which switch/plate
+    // controls it — see the small corner badge every color-taggable tile already gets.
+    barrier: pat([
+      "MMMMMMMM", "M.M.M.MM", "M.M.M.MM", "M.M.M.MM",
+      "M.M.M.MM", "M.M.M.MM", "M.M.M.MM", "MMMMMMMM"
+    ], { M: GEOMETRY_SWATCH_COLORS.barrier })
   };
 
   // v2.22: this used to be GEOMETRY_ICONS.diggable's own dedicated icon art (a plain taupe square
@@ -2144,6 +2172,87 @@
 
     activateRoom(room1.id);
     return room1;
+  }
+
+  // v2.23: a fourth example, built to finally give "plate" (and the new Barrier object) a real,
+  // demonstrated purpose. Direct feedback: plate could toggle a channel and wire up to a few
+  // other tiles, but nothing in the shipped samples ever showed WHY a kid would want that. This
+  // room is the answer: the goal sits inside a monster's den, sealed behind a Barrier that only a
+  // switch (permanent) can open — flipping it is what lets the monster loose for good, the literal
+  // "switch opens a door, the monster chases you" beat. From there the room OFFERS, but doesn't
+  // require, several ways to actually survive the chase and get back out: a second Barrier pairs
+  // with a Plate at a chokepoint, so luring the monster across the plate and then clearing it
+  // yourself reseals the barrier behind it — a real trap, not just a wall the monster happens to
+  // bump into; a pushable block sits out in the open, ready to shove into the monster's path; and
+  // retreating back through the den's own single doorway under pressure already IS "leading it
+  // into a dead end," just approached from the other side. The room is deliberately NOT a puzzle
+  // with one correct solution — every tool here is something to experiment with, per this whole
+  // toy's own "kids compose, they don't solve" philosophy; the monster is a piece to play with, not
+  // a wall to get past. Free-roam (no gravity): a top-down chase reads far more naturally than a
+  // platformer jump arc for "avoid the monster while it hunts you," the same choice Cheese Heist's
+  // own cats already made.
+  // The den is deliberately shallow — a single interior row (y=6), the same row as its own
+  // doorway — not the 7-tall box an earlier pass used. A chaser here has no pathfinding, only a
+  // straight accel toward wherever the player currently is (see steeringAccelFor); a taller den
+  // let it wedge into a corner that shared no row with the doorway and simply never find its way
+  // out (caught in testing — the "moved 0px in two seconds" symptom of a chaser with no working
+  // line to the exit). Cheese Heist's own cat chamber already learned this lesson (a through-
+  // passage, never a dead-end pen); this room applies it the other way — one row wide is the
+  // simplest way to guarantee the doorway is always on whatever row the monster is already on.
+  const MONSTERS_DEN_MAZE = [
+    "########################",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#.............########.#",
+    "#....................#.#",
+    "#.............########.#",
+    "#......................#",
+    "#......................#",
+    "#........##............#",
+    "#.......#..............#",
+    "#.......#..#...........#",
+    "#........##............#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "########################"
+  ];
+  function buildMonstersDenGame() {
+    const room = createEmptyRoom("The Monster's Den");
+    room.gravityEnabled = false; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+    rooms.push(room);
+    activateRoom(room.id);
+    paintMazeString(MONSTERS_DEN_MAZE);
+
+    // The den's one doorway: sealed by a red Barrier until the red switch is flipped. A switch's
+    // flip is permanent (unlike a plate), so this release — and the chase that follows — is for
+    // the rest of the game, not a momentary window.
+    board[6][14] = gameplayKey("barrier", "none");
+    colorBoard[6][14] = "red";
+    board[14][3] = gameplayKey("switch", "none");
+    colorBoard[14][3] = "red";
+    board[6][20] = gameplayKey("goal", "none");
+
+    // The trap: an orange Barrier/Plate pair at a chokepoint the monster is likely to cross while
+    // hunting the player. isChannelOn("orange") only cares whether ANYONE currently overlaps the
+    // plate cell (see updatePressurePlates) — the monster's own overlap holds the barrier open just
+    // as well as the player's does — so luring it through, then clearing the plate yourself,
+    // reseals the doorway with the monster on the wrong side of it.
+    board[11][11] = gameplayKey("barrier", "none");
+    colorBoard[11][11] = "orange";
+    board[11][12] = gameplayKey("plate", "none");
+    colorBoard[11][12] = "orange";
+
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 18, 6); // the monster, waiting in its den
+    placeExampleActor("colGem", 16, 6);           // bait, right next to it
+    placeExampleActor("colCoin", 5, 9);           // a safer pickup out in the open
+    placeExampleActor(PUSHABLE_DEF_ID, 10, 4);    // ready to shove into the monster's path
+    placeExampleActor(PLAYER_DEF_ID, 2, 2);
+
+    activateRoom(room.id);
+    return room;
   }
 
   // v2.19.3: a third example, contributed as a finished two-room dungeon-crawler build --
@@ -3766,9 +3875,10 @@
   //    geometry, not just its own). NPCs get the base geometry's normal blocking (a trap over
   //    solid still blocks them like a wall) until the player's touch destroys the tile for
   //    everyone — see checkPlayerTileContacts/triggerTrap.
-  //  - geometry is solid (blocks everyone) — UNLESS it's tagged with a channel color that's
-  //    currently on, in which case it's a gate standing open (see isCellBlocking(), which
-  //    layers that check on top of this — this function alone doesn't know about colors)
+  //  - geometry is solid or barrier (both block everyone) — UNLESS tagged with a channel color
+  //    that's currently on, in which case it's a gate standing open (see isCellBlocking(), which
+  //    layers that check on top of this — this function alone doesn't know about colors; see also
+  //    isChannelGateGeometry())
   // "diggable" (v2.22, also now a modifier) does NOT get a branch here — it blocks purely because
   // its base geometry (normally solid) already does; resolveAxis's own erosion logic is what lets
   // sustained player contact clear it away, same mechanic as before, just keyed off the modifier
@@ -3779,6 +3889,9 @@
   function isBlockingGeometry(geometry, actor, modifier) {
     if (modifier === "trap" && actor.isPlayer) return false;
     if (geometry === "solid") return true;
+    // v2.23: barrier is a real, sprite-bearing Object version of the same "channel-gated wall"
+    // idea solid already has — see isChannelGateGeometry(), "Barrier: a moveable wall/door" below.
+    if (geometry === "barrier") return true;
     if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
     // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
     // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
@@ -3793,6 +3906,10 @@
     if (FAN_ORDER.includes(geometry)) return true;
     return false;
   }
+  // v2.23: the two geometries whose blocking is gated by a channel color rather than fixed —
+  // solid (the plain Ground wall) and barrier (the dedicated moveable-wall/door Object). Shared by
+  // isCellBlocking and resolveAxis so the two never drift apart on which geometries this applies to.
+  function isChannelGateGeometry(geometry) { return geometry === "solid" || geometry === "barrier"; }
   // The one place that actually decides "can I move into this cell" — isBlockingGeometry() plus
   // the color-gate exception a plain geometry check can't know about on its own. Every call site
   // that used to do isBlockingGeometry(geometryAt(cx,cy), actor) should go through this instead.
@@ -3800,7 +3917,7 @@
     const geometry = geometryAt(cx, cy);
     const modifier = modifierAt(cx, cy);
     if (!isBlockingGeometry(geometry, actor, modifier)) return false;
-    if (geometry === "solid") {
+    if (isChannelGateGeometry(geometry)) {
       const color = colorAt(cx, cy);
       if (color && isChannelOn(color)) return false; // a same-colored switch/plate has this gate open
     }
@@ -4103,7 +4220,7 @@
           }
         }
         if (!isBlockingGeometry(geometry, actor, modifier)) continue;
-        if (geometry === "solid") {
+        if (isChannelGateGeometry(geometry)) {
           const gateColor = colorAt(cx, cy);
           if (gateColor && isChannelOn(gateColor)) continue; // a same-colored switch/plate has this gate standing open
         }
@@ -5401,6 +5518,19 @@
       }
     }
   }
+  // v2.23: records the moment each channel's own isChannelOn() reading last flipped, purely so
+  // Barrier's render-time slide animation has something to animate FROM — called right after
+  // updatePressurePlates() so it sees this frame's fresh plate state, not last frame's. Cheap
+  // (CHANNEL_COLORS is 5 entries) and runs unconditionally every tick, same as updatePressurePlates
+  // itself, regardless of whether any barrier is even on the board.
+  function updateChannelTransitions() {
+    const now = performance.now();
+    CHANNEL_COLORS.forEach(color => {
+      const on = isChannelOn(color);
+      const prev = channelStateSince[color];
+      if (!prev || prev.on !== on) channelStateSince[color] = { on, since: now };
+    });
+  }
 
   // v2.17: Fixed camera never moves (cameraX stays 0). Follow tracks the player, centered,
   // clamped to the room's real edges. Runner advances on its own at a constant speed, independent
@@ -5478,6 +5608,7 @@
 
   function tick(dt) {
     updatePressurePlates();
+    updateChannelTransitions();
     const player = actors.find(a => a.isPlayer);
     // v2.21: the carried object's position is driven directly here, every frame, rather than
     // through the normal per-actor physics step (stepActor early-returns for it) — "no physics of
@@ -5542,7 +5673,10 @@
   function isColorTaggable(geometry) {
     // v2.19: a fan is switchable the same way a solid/door segment is — no color = always on,
     // a color = only blows while that channel is on (see fanAccelFor).
-    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || FAN_ORDER.includes(geometry);
+    // v2.23: barrier joins solid as the two geometries a color actually GATES (see
+    // isChannelGateGeometry) rather than merely switches on/off (fan) or uses for room-linking
+    // (door).
+    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || geometry === "barrier" || FAN_ORDER.includes(geometry);
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -6310,12 +6444,40 @@
     ctx.fillStyle = "#7a4a24";
     ctx.fillRect(10.5, 17, 3, 4);
   }
+  // A dark den archway, a portcullis (echoing the real Barrier icon) across its mouth, and a pair
+  // of eyes glowing from inside — the monster is waiting, but the gate is what actually matters.
+  function drawMonstersDenIcon(ctx) {
+    ctx.fillStyle = "#3e2f28";
+    ctx.beginPath();
+    ctx.moveTo(4, 21);
+    ctx.lineTo(4, 11);
+    ctx.arc(12, 11, 8, Math.PI, 0);
+    ctx.lineTo(20, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#0d0906";
+    ctx.beginPath();
+    ctx.moveTo(7, 21);
+    ctx.lineTo(7, 12);
+    ctx.arc(12, 12, 5, Math.PI, 0);
+    ctx.lineTo(17, 21);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#ff5252";
+    ctx.beginPath(); ctx.arc(10, 15, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(14, 15, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#8d99a6";
+    ctx.fillRect(8, 10, 1.5, 11);
+    ctx.fillRect(11.25, 8, 1.5, 13);
+    ctx.fillRect(14.5, 10, 1.5, 11);
+  }
   // The registry a new sample joins with one entry — the modal's grid renders generically off
   // this list, so it scales from 3 to 10+ samples with no layout changes.
   const SAMPLE_GAMES = [
     { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
     { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
     { name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
+    { name: "The Monster's Den", builder: buildMonstersDenGame, draw: drawMonstersDenIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
@@ -6464,6 +6626,18 @@
       ctx.save();
       ctx.globalAlpha = extra.channelOn ? 1 : 0.55;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
+    } else if (tile.geometry === "barrier") {
+      // A moveable wall/door: slides straight up out of the tile as it opens, straight back down
+      // as it closes, instead of solid's own instant ghost-outline — "moveable" is the whole point
+      // of this Object, so it needs to visibly travel, not just fade. Clipped to the tile bounds so
+      // it reads as sliding INTO a slot above rather than floating up over whatever's drawn there.
+      const slideFrac = extra && extra.slideFrac || 0;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, TILE, TILE);
+      ctx.clip();
+      drawArtScaled(ctx, icon, x, y - slideFrac * TILE, TILE, cell);
       ctx.restore();
     } else {
       drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
@@ -6622,7 +6796,18 @@
           }
           if (isLive && isColorTaggable(tile.geometry)) {
             const color = colorBoard[y][bx];
-            if (color) extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
+            if (color) {
+              extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
+              // v2.23: how far along Barrier's slide is, from channelStateSince's last-flip
+              // timestamp — purely a render input, see drawGameplayTile's own barrier branch.
+              if (tile.geometry === "barrier") {
+                const state = channelStateSince[color];
+                const elapsed = state ? performance.now() - state.since : BARRIER_SLIDE_MS;
+                const target = state ? (state.on ? 1 : 0) : 0;
+                const start = 1 - target;
+                extra.slideFrac = start + (target - start) * Math.min(1, elapsed / BARRIER_SLIDE_MS);
+              }
+            }
           }
           if (isLive) {
             const skinId = groundSkinBoard[y][bx];
@@ -6980,7 +7165,7 @@
     gameData.rooms.forEach(r => resetActorsToSpawn(r.actors, r.startPos));
 
     const runtimeFunctions = [
-      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isCellBlocking, isColorTaggable,
+      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
@@ -6990,7 +7175,7 @@
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
-      updatePressurePlates,
+      updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, tickSpawnedTTL, despawnSpawnedActor,
@@ -7063,6 +7248,7 @@
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
+      `const BARRIER_SLIDE_MS = ${BARRIER_SLIDE_MS};`,
       `const CARRY_BOMB_KIND = ${JSON.stringify(CARRY_BOMB_KIND)}, CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)};`,
       `const CARRY_CANNON_KIND = ${JSON.stringify(CARRY_CANNON_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
       `const CARRY_BOMB_DEF_ID = ${JSON.stringify(CARRY_BOMB_DEF_ID)}, CARRY_MAGNET_DEF_ID = ${JSON.stringify(CARRY_MAGNET_DEF_ID)};`,
@@ -7157,6 +7343,7 @@
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
+  let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
   let backgroundTileDefs = GAME_DATA.backgroundTileDefs;
@@ -7207,7 +7394,7 @@
     spawnerContents = JSON.parse(JSON.stringify(initialGameData.spawnerContents));
     spawnerRuntime = {};
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
-    plateChannelsActive = {};
+    plateChannelsActive = {}; channelStateSince = {};
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
     actorContactCooldown = {}; dragContactCooldown = {};
