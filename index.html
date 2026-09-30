@@ -1904,14 +1904,21 @@
   // just for a single flat pose each (like WANDERER_ART/CHASER_ART/CAT_ART above) rather than a
   // full stand/stride/air/crouch set — the reference sheet only supplied one static image per
   // creature, no walk-cycle frames to derive poses from.
+  // v2.26: monster/skeleton/tabby-cat redrawn again, this time by the user directly — the v2.25
+  // custom color picker (see its own section in CLAUDE.md) let them touch these up in the live app
+  // to match the reference sheet more closely than the original hand-translation below managed.
+  // Fixed by hand-editing a custom actor slot per creature (applying the preset, then repainting),
+  // saving the project, and sending the JSON back — the exact art each slot ended up holding is
+  // reproduced verbatim here (round-trip-verified against the saved project's raw hex data before
+  // committing), not re-eyeballed from a screenshot.
   const MONSTER_ART = pat([
-    ".GGGGGG.", "GGGGGGGG", "GGDGGDGG", "GGWGGWGG",
-    "GGNNNNGG", "GGGGGGGG", "GRRYYRRG", ".GG..GG."
-  ], { G: "#4aaf46", D: "#1e3928", W: "#e8f5d0", N: "#5c4a34", R: "#c1544a", Y: "#d9c14a" });
+    ".AAAAAA.", ".AAAAAA.", "AABAABAA", "AACDDCAA",
+    "AAEEEEAA", "A.AAAA.A", "A.FGGF.A", ".AA..AA."
+  ], { A: "#4aaf46", B: "#1e3928", C: "#e8f5d0", D: "#8b4513", E: "#01bc04", F: "#c1544a", G: "#d9c14a" });
   const SKELETON_ART = pat([
-    ".WWWWWW.", "WWWWWWWW", "WWKWWKWW", "WWWIIWWW",
-    "WIWIIWIW", ".WIIIIW.", "WK.II.KW", "KW.WW.WK"
-  ], { W: "#f4f6f8", K: "#0f1114", I: "#bcd4ea" });
+    ".AAAAB..", ".ACACB..", ".ABBBB..", "..ADE...",
+    ".DFDFF..", "B.BBB.B.", "..F.D...", ".BB.BB.."
+  ], { A: "#f4f6f8", B: "#ffffff", C: "#000000", D: "#bcd4ea", E: "#f0f4f5", F: "#bddde5" });
   const SLIME_ART = pat([
     "..RRRR..", ".RPPRRR.", "RRRRRRRR", "RRWRRWRR",
     "RRRRRRRR", "RRDRRDRR", ".RRRRRR.", "..RRRR.."
@@ -1920,9 +1927,9 @@
   // Cheese Heist/Tunnel Trouble/The Monster's Den; this is a second, separate cat preset, not a
   // reskin of it (overwriting CAT_ART would have silently changed the monster in every sample).
   const TABBY_CAT_ART = pat([
-    "..P..P..", ".PPGGPP.", "PGGGGGGP", ".GYGGYG.",
-    ".GGGGGG.", "G.GWWG.G", "G.GWWG.G", ".G.GG.G."
-  ], { P: "#c24a78", G: "#5c6570", Y: "#e8d24a", W: "#e8eef5" });
+    "..A...A.", "..BCDCB.", "..EDDDD.", "..EFDGE.",
+    "..EEEEE.", "D..CHD..", "D.CCHD..", ".DCDD.D."
+  ], { A: "#ff00ff", B: "#ec5faa", C: "#808080", D: "#5c6570", E: "#696969", F: "#ffff00", G: "#e8d24a", H: "#e8eef5" });
 
   // v2.15: collectibles get their own dedicated, multi-sprite kit in the Objects tab — cheese and
   // the gem were already the built-in "grab a sprite" looks, now joined by a heart and a coin —
