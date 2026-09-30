@@ -3061,7 +3061,12 @@
     // pad can still pick "none" ground first, same as before. hazard/lethal/sticky are left alone:
     // each already has a real, distinct, intended reading on "none" ground (puddle/lava/mud).
     if (modifier === "bouncy" && selectedGeometry === "none") selectedGeometry = "solid";
-    selectedGroundSkinId = null; // a flat swatch pick means "just the built-in color, no named skin"
+    // v2.24 fix: this used to also clear selectedGroundSkinId, which meant a kid could never
+    // actually combine a Ground texture with a Ground Effect — picking grass, then bouncy, silently
+    // dropped grass back to a flat "solid" the instant you painted, even though the two rows are
+    // pitched as "independent choices, painted together" right there in the hint text. Whatever
+    // skin is currently selected (if any) now survives a Ground Effect pick untouched — Ground and
+    // Ground Effects are genuinely two separate axes now, not one that resets the other.
     paintMode = "tile";
     activeTab = "ground";
     lastGroundGeometry = selectedGeometry;
@@ -3096,7 +3101,15 @@
   function selectGroundSkin(id) {
     const def = groundTileDefs[id];
     selectedGeometry = def.geometry;
-    selectedModifier = def.modifier;
+    // v2.24 fix: used to unconditionally overwrite selectedModifier, which meant picking ANY
+    // texture — including a plain Ground one like grass/stone, whose own def.modifier is just
+    // "none" — silently wiped out a Ground Effect a kid had already picked (bouncy, hazard,
+    // whatever), the other half of the same "can't combine skin + effect" bug. Only actually force
+    // the modifier for a skin that has a real one of its own to offer — a Lethal (lava/fire/spike),
+    // whose entire identity IS being lethal, per its own "tagged lethal automatically" hint text.
+    // A plain texture's "none" is not a meaningful reading to force onto the current pick; leave
+    // whatever Ground Effect is already selected alone so it can combine with the new texture.
+    if (def.modifier !== "none") selectedModifier = def.modifier;
     selectedGroundSkinId = id;
     paintMode = "tile";
     activeTab = "ground";
