@@ -567,6 +567,41 @@ field (simulating an older save) defaults cleanly to an empty array with
 no crash; all four built-in sample games still load and play with zero
 errors after this change.
 
+### Monster/skeleton/tabby-cat art, user-refined (v2.26)
+
+Direct payoff of the v2.25 custom color picker: the user used it in the
+live app to touch up the v2.24 hand-translated monster/skeleton/tabby-cat
+presets against their reference sheet, then sent the saved project's JSON
+back for the fix to land in `index.html`. Each creature had been edited on
+its own dedicated custom actor slot (apply the preset, then repaint) —
+`customA`/`customB`/`customC` in the sent project held the fixed monster/
+skeleton/tabby-cat art respectively, cleanly separated from the player's
+own def and from `exCat` (an unrelated sample-game actor, correctly
+ignored per the user's "ignore everything else").
+
+**One real ambiguity, resolved by asking rather than guessing**: the
+player's own art ALSO held an edited monster (apparently used as a second
+scratch canvas), differing from `customA`'s by 2 pixels — a couple of
+brighter-green highlight pixels near the top of the head present on the
+player but not on `customA`. Nothing in the request disambiguated which
+was the intended final version, so this was flagged back to the user
+rather than picked arbitrarily; they chose `customA` (the version without
+the extra highlight pixels).
+
+**Fidelity, not re-interpretation**: the fix was applied by extracting the
+exact hex-per-pixel `art` array from each relevant `actorDefs` entry,
+mechanically deriving a `pat()` row/legend representation from it, and
+verifying programmatically that feeding that representation back through
+`pat()` reproduces the original array bit-for-bit before ever touching
+`index.html` — the whole point of having added a custom color picker was
+exact-match fidelity, so eyeballing a screenshot and re-drawing by hand
+would have defeated the purpose. `MONSTER_ART`/`SKELETON_ART`/
+`TABBY_CAT_ART` were replaced in place; `SLIME_ART` was left untouched
+(not mentioned in the fix). Verified with Playwright, comparing the live
+app's `MONSTER_ART`/`SKELETON_ART`/`TABBY_CAT_ART` constants against the
+uploaded project's raw art data index-by-index (exact match on all three),
+plus the standard 4-sample regression sweep with zero errors.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
