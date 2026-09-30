@@ -1481,33 +1481,17 @@
   // Continuous procedural deformation (skew/scale) reads fine on a blocky sprite but looks
   // broken on a thin articulated figure — a stick figure skewed along one axis just looks
   // wrong, not "landed hard." Humanoid presets ship with real hand-drawn poses instead,
-  // switched by physical state (see currentPoseFor()) rather than deformed continuously.
-  // v2.15: a hand-supplied reference image for "stand" (a round hollow head, a full-width
-  // T-pose arm bar, and legs splayed at the hip) — matched pixel-for-pixel — with stride/air/
-  // crouch derived from it in the same visual language (same head every frame; only the
-  // arms/legs below it change) since only the idle pose came with reference art.
-  const STICK_LEGEND = { M: "#fffaff" };
-  const STICK_POSES = {
-    stand: pat([
-      "...MM...", "..M..M..", "..M..M..", "...MM...",
-      ".MMMMMM.", "...MM...", "..M..M..", "..M..M.."
-    ], STICK_LEGEND),
-    stride: pat([
-      "...MM...", "..M..M..", "..M..M..", "...MM...",
-      ".MMMMMM.", "...MM...", "..M....M", ".M....M."
-    ], STICK_LEGEND),
-    air: pat([
-      "...MM...", "..M..M..", "..M..M..", "...MM...",
-      "MMMMMMMM", "..MMMM..", "..M..M..", "........"
-    ], STICK_LEGEND),
-    crouch: pat([
-      "...MM...", "..M..M..", "..M..M..", "...MM...",
-      "..MMMM..", ".MMMMMM.", "MM....MM", "........"
-    ], STICK_LEGEND)
-  };
+  // switched by physical state (see currentPoseFor()) rather than deformed continuously. The
+  // stick figure that first established this (a hand-supplied "stand" reference — round hollow
+  // head, full-width T-pose arm bar, legs splayed at the hip — with stride/air/crouch derived in
+  // the same visual language) was retired in v2.24, replaced in the preset shelf by "skeleton"
+  // (see MONSTER_ART and friends below, near CAT_ART) — a direct request, not a bug; its own
+  // STICK_POSES/STICK_LEGEND data is gone with it, not just unlisted, since nothing else ever
+  // referenced it.
 
-  // v2.16: three more hand-supplied reference characters (stand only, same as the stick figure
-  // above) — head/face/body kept IDENTICAL across all four poses (there was no reference art for
+  // v2.16: three more hand-supplied reference characters (stand only, same restraint as that
+  // original stick figure) — head/face/body kept IDENTICAL across all four poses (there was no
+  // reference art for
   // anything but standing, and re-drawing a detailed face four times risks it drifting between
   // frames); only the legs (the bottom row) change to suggest stride/air/crouch, the same "only
   // vary what physics-derived poses need to" restraint the stick figure's own derived poses used.
@@ -1904,6 +1888,33 @@
     "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
   ], { M: "#ef5350", K: "#2b2b2b" });
 
+  // v2.24: four more "grab a sprite" presets, hand-translated from a kid-supplied reference sheet
+  // (a set of ~16x16 icons, not literally 8x8 despite how the sheet itself was labeled) down to
+  // this engine's real ART=8 resolution — same "matched pixel-for-pixel AT the engine's own
+  // resolution, not the reference's" approach HERO_POSES/PRINCESS_POSES/GHOST_POSES already used,
+  // just for a single flat pose each (like WANDERER_ART/CHASER_ART/CAT_ART above) rather than a
+  // full stand/stride/air/crouch set — the reference sheet only supplied one static image per
+  // creature, no walk-cycle frames to derive poses from.
+  const MONSTER_ART = pat([
+    ".GGGGGG.", "GGGGGGGG", "GGDGGDGG", "GGWGGWGG",
+    "GGNNNNGG", "GGGGGGGG", "GRRYYRRG", ".GG..GG."
+  ], { G: "#4aaf46", D: "#1e3928", W: "#e8f5d0", N: "#5c4a34", R: "#c1544a", Y: "#d9c14a" });
+  const SKELETON_ART = pat([
+    ".WWWWWW.", "WWWWWWWW", "WWKWWKWW", "WWWIIWWW",
+    "WIWIIWIW", ".WIIIIW.", "WK.II.KW", "KW.WW.WK"
+  ], { W: "#f4f6f8", K: "#0f1114", I: "#bcd4ea" });
+  const SLIME_ART = pat([
+    "..RRRR..", ".RPPRRR.", "RRRRRRRR", "RRWRRWRR",
+    "RRRRRRRR", "RRDRRDRR", ".RRRRRR.", "..RRRR.."
+  ], { R: "#d1333c", P: "#f6a8ae", W: "#fbeef0", D: "#8e1f27" });
+  // Named distinctly from CAT_ART above — that one's already the built-in chaser look baked into
+  // Cheese Heist/Tunnel Trouble/The Monster's Den; this is a second, separate cat preset, not a
+  // reskin of it (overwriting CAT_ART would have silently changed the monster in every sample).
+  const TABBY_CAT_ART = pat([
+    "..P..P..", ".PPGGPP.", "PGGGGGGP", ".GYGGYG.",
+    ".GGGGGG.", "G.GWWG.G", "G.GWWG.G", ".G.GG.G."
+  ], { P: "#c24a78", G: "#5c6570", Y: "#e8d24a", W: "#e8eef5" });
+
   // v2.15: collectibles get their own dedicated, multi-sprite kit in the Objects tab — cheese and
   // the gem were already the built-in "grab a sprite" looks, now joined by a heart and a coin —
   // rather than one shared default def a kid could only ever redraw in place. Fixed, readable ids
@@ -1967,12 +1978,15 @@
     { name: "hero", poses: HERO_POSES },
     { name: "princess", poses: PRINCESS_POSES },
     { name: "ghost", poses: GHOST_POSES },
-    { name: "stick figure", poses: STICK_POSES },
+    { name: "monster", art: MONSTER_ART },
+    { name: "skeleton", art: SKELETON_ART },
+    { name: "slime", art: SLIME_ART },
     { name: "blocker", art: STATIONARY_ART },
     { name: "wanderer", art: WANDERER_ART },
     { name: "chaser", art: CHASER_ART },
     { name: "fleer", art: FLEER_ART },
-    { name: "cat", art: CAT_ART }
+    { name: "cat", art: CAT_ART },
+    { name: "tabby cat", art: TABBY_CAT_ART }
   ];
   const COLLECTIBLE_PRESETS = [
     { name: "gem", art: COLLECTIBLE_ART },
