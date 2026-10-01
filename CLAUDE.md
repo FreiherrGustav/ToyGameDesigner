@@ -3383,6 +3383,156 @@ backward-compat concerns, and changes to it don't need any of the
 generated `pat()` calls `index.html` pastes in) changes. It's committed
 for safekeeping/versioning, not because it's become part of the engine.
 
+## Button absorbs Switch's exact job and moves into Fixtures (v2.37)
+
+Direct follow-up right after the v2.31.2 switch-reflip fix shipped: "Ah,
+we've been talking about different items. Move the 'button' to the
+fixtures and have it replace the switch currently there giving all of the
+abilities we've discussed including the right/left animations." The
+v2.31.2 investigation had correctly found and fixed a real bug in the
+`"switch"` geometry, but the user's actual project (and actual intent) had
+never used `"switch"` at all — only Button (`pushbutton`) + Gate
+(`barrier`). This patch is the real fix for what the user has been asking
+for the whole time: fold Switch's entire permanent-toggle mechanic into
+Button, move Button into the Fixtures row (walk-onto, not bump-into), and
+retire `"switch"` outright.
+
+**Scope, decided by reading every call site touching either geometry
+before writing anything** (not re-confirmed with the user — proceeding on
+a confident, internally-consistent reading, per this session's own
+pattern of making a judgment call and letting feedback redirect it, the
+same way v2.27.2's cannon/bomb removal was its own full-replacement
+precedent): Button fully takes over Switch's job — permanent toggle
+(colored → flips `switchChannels[color]`; uncolored → flips the room's
+shared gravity), the v2.31.2 edge-trigger fix (no more re-flip while
+lingering), and the "a thrown/pushed object can trigger it too"
+(`checkPhysicsObjectSwitchContacts`) widening. Button keeps its own
+distinct v2.27 art and its left/right mirror-rendering trick, but the
+mirror now reads **on/off channel state**, not "which side was last
+pushed from" — the same "one sprite, two readings via a canvas transform"
+economy, just driven by a different piece of state. Button moves from
+`PALETTE_OBJECT_GEOMETRIES` (bump-into, blocking) into
+`FIXTURE_GEOMETRIES` (walk-onto, non-blocking) — the "push into it"
+mechanic that justified Button's own name is gone; it reads and acts
+exactly like Switch always did, kid-interaction-wise. Button's own
+momentary push-contact machinery (`pushButtonChannelsActive`/
+`pushButtonFacing`, populated from inside `resolveAxis`'s collision
+resolution — see the v2.27 section above) is deleted outright, not left
+dead, since nothing can ever collide with a non-blocking Fixture anymore.
+`"switch"` itself — the geometry id, `SWITCH_OFF_ART`/`SWITCH_ON_ART`, the
+`GEOMETRY_ICONS.switch` entry, every `geometry === "switch"` branch — is
+removed completely. Same "replace, don't keep a hidden legacy branch"
+precedent the old stick-figure preset and the cannon/bomb → cannon2/bomb2
+promotion already set.
+
+**What actually changed, mechanically:**
+- `GEOMETRIES` drops `"switch"`; `PALETTE_OBJECT_GEOMETRIES` drops
+  `PUSH_BUTTON_GEOMETRY`; `FIXTURE_GEOMETRIES` gains it in Switch's old
+  slot.
+- `isBlockingGeometry` loses its `PUSH_BUTTON_GEOMETRY → true` branch
+  entirely — a Button is never blocking now.
+- `isColorTaggable` drops `"switch"` from its list (Button was already
+  there).
+- `checkPlayerTileContacts`'s switch-handling branch and
+  `checkPhysicsObjectSwitchContacts`'s geometry check both switched from
+  `"switch"` to `PUSH_BUTTON_GEOMETRY` — their bodies, including the
+  `switchTouchedCells` edge-trigger mechanism from v2.31.2, are otherwise
+  completely unchanged; that fix now protects Button for free. The build-
+  mode drag handler's non-blocking-contact loop got the same geometry-
+  string swap.
+- `resolveAxis`'s two x-axis collision branches that used to populate
+  `pushButtonFacing`/`pushButtonChannelsActive` on a bump are deleted —
+  there's no collision left to resolve against a Fixture.
+  `updatePressurePlates`'s `pushButtonChannelsActive = {}` reset line goes
+  with it. `isChannelOn` drops that OR term, now reading just
+  `switchChannels[color] || plateChannelsActive[color]`.
+- `pushButtonChannelsActive`/`pushButtonFacing` globals are deleted from
+  both the live-editor declaration block and the export template's
+  duplicate, from `clearTransientRuntimeState`, and from the export
+  template's `restartStandaloneGame` reset line.
+- `drawGameplayTile`'s old separate `"switch"` branch (picking between the
+  two baked `SWITCH_OFF_ART`/`SWITCH_ON_ART` sprites) and old
+  `PUSH_BUTTON_GEOMETRY` branch (facing-based mirror, momentary alpha-dim)
+  are merged into one: Button's own icon, mirrored via `ctx.scale(-1, 1)`
+  when `on` is true, unmirrored when false — `on` is `extra.channelOn` for
+  a colored Button, `gravityOn()` for an uncolored one, the exact "the
+  tile shows the state it drives" rule Switch always used. No more
+  alpha-dim flicker — that was Button's old *momentary* "actively pressed"
+  tell, which no longer applies to a permanent toggle.
+  `renderRoomContents`'s old `extra.facing = pushButtonFacing[...]` block
+  is gone; the existing `isColorTaggable` branch already supplies
+  `extra.color`/`extra.channelOn` for the colored case and nothing extra
+  is needed for the uncolored one.
+- `SWITCH_OFF_ART`/`SWITCH_ON_ART` constants and the
+  `GEOMETRY_ICONS.switch` entry are deleted outright.
+- `renderFixtureSwatches` now reads `GEOMETRY_LABELS[geometry] || geometry`
+  for both the swatch title and its on-screen label (previously it used
+  the raw geometry string directly, which for Switch's old neighbors was
+  already a label-less match but would have shown the literal string
+  `"pushbutton"` once Button joined this row without this fix).
+- Three kid-facing `.hint` text blocks were reworded from "switch" to
+  "Button" language: the Fixtures row's own hint, and two hints in
+  `#objectColorBlock`/`#groundColorBlock` explaining what a switch/plate's
+  channel color does.
+- The dead `GEOMETRY_SWATCH_COLORS.switch` entry (confirmed via grep to
+  have no remaining reader) was removed alongside everything else.
+
+**Backward compat**: a pre-v2.37 save can still have a raw `"switch"`
+board-cell string — a geometry value `GAMEPLAY_TILE_DEFS`' own
+cross-product no longer generates any entry for, the same "tile vanishes
+forever" failure shape every migration in this file exists to prevent.
+`migrateLegacySwitchToButton(board)`, called from `restoreProjectSnapshot`
+alongside the existing `migrateLegacyCannonBomb`/`migrateLegacyFacingObjects`
+calls, rewrites any `"switch"` geometry cell to `PUSH_BUTTON_GEOMETRY`,
+preserving whatever modifier (and, since `colorBoard` is a separate layer
+untouched by this migration, whatever channel color) the cell already
+carried — `switchChannels` is keyed purely by color, never by which
+geometry drove it, so an old red switch and a newly-painted red Button
+read the exact same channel state with nothing else to migrate. The two
+built-in samples that used `"switch"` in their own source (The Monster's
+Den, The World's Worst Elevator) were fixed directly to paint
+`"pushbutton"` instead, the same "fix source code directly rather than
+rely purely on the runtime migration" precedent every prior geometry
+retirement in this file has followed.
+
+**Export pipeline**: `SWITCH_OFF_ART`/`SWITCH_ON_ART`'s two
+`constantsSource` lines (the latter of which was the actual root cause of
+the v2.31.1 "switch never worked in an exported game" regression) are both
+removed, since nothing reads either constant anymore. `pushButtonChannelsActive`/
+`pushButtonFacing`'s declarations and their `restartStandaloneGame` reset
+line are removed from the export template. Every function this change
+touches (`checkPlayerTileContacts`, `checkPhysicsObjectSwitchContacts`,
+`resolveAxis`, `drawGameplayTile`, `isChannelOn`, `isBlockingGeometry`,
+`isColorTaggable`) was already shared into the export via
+`runtimeFunctions` from earlier patches, so no new export-side gaps were
+introduced.
+
+Verified with Playwright across three separate test passes: (1) basic
+structure — `GEOMETRIES`/`FIXTURE_GEOMETRIES`/`PALETTE_OBJECT_GEOMETRIES`
+array membership is correct, the Fixtures row renders a "button" swatch,
+clicking it paints `pushbutton` geometry, and `isBlockingGeometry` returns
+`false` for it; (2) live behavior — a colored Button permanently gates a
+colored Gate via walk-onto with the v2.31.2 edge-trigger fix holding
+(channel stays ON after 1.2s of lingering, well past the 500ms
+`flipCooldown`), an uncolored Button flips room gravity on touch, and
+stepping fully off then back onto a Button correctly re-toggles it a
+second time (not stuck one-way); (3) the exact user-uploaded project
+(`my-project_3.json`, already containing `pushbutton`+`barrier` tiles)
+loads with zero errors, its Button is confirmed non-blocking, walking
+onto it permanently flips the red channel and opens the matching red Gate,
+the channel survives 1.2s of lingering AND survives stepping away
+entirely (permanent, unlike a plate) — this is the direct confirmation
+that the user's own originally-reported problem ("I can't make it do
+that, nor does it activate the gates") is now fixed. Also verified: the
+backward-compat migration correctly upgrades a hand-injected legacy
+`"switch"` board cell (colored and uncolored) to `pushbutton` with its
+color tag intact; the full sample regression sweep (all 5 built-ins,
+including The Monster's Den's and The World's Worst Elevator's own
+Button/Gate puzzles) and a fresh export (painting a Button+Gate through
+the real UI, then loading and playing the exported file past
+`flipCooldown`) both run error-free; and a final debug-hook-free sanity
+pass confirms `window.__toyDebug` leaves no trace.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
