@@ -2087,6 +2087,28 @@
     "..EEEEE.", "D..CHD..", "D.CCHD..", ".DCDD.D."
   ], { A: "#ff00ff", B: "#ec5faa", C: "#808080", D: "#5c6570", E: "#696969", F: "#ffff00", G: "#e8d24a", H: "#e8eef5" });
 
+  // v2.30: two more single-flat-pose presets, exported straight from the standalone sprite editor
+  // tool (not committed to this repo, see CLAUDE.md's own note on it) — a kid painted these from
+  // scratch rather than them coming from a reference sheet. Both happen to share a name with an
+  // EXISTING preset below (`hero`/`princess`, both pose-based, from v2.16) — same shape of
+  // collision TABBY_CAT_ART hit against CAT_ART above, flagged back rather than silently
+  // overwritten. Resolution this time, by explicit user choice: rather than picking different
+  // names for the new ones, the two ORIGINAL v2.16 presets were renamed instead ("Gary" for the
+  // old hero look, "Pink blob" for the old princess look — see CHARACTER_PRESETS below), freeing
+  // up "Princess"/"Hero" for these. Safe to rename purely cosmetically: a preset's `name` field is
+  // only ever read as a tooltip label (`sw.title = preset.name` in renderPresetSwatches) with
+  // nothing else matching against it — unlike an actorDefs entry's own `.name`, which the crate
+  // rename (see CLAUDE.md v2.27) found IS load-bearing elsewhere. HERO_POSES/PRINCESS_POSES
+  // themselves are untouched; Gary/Pink blob still animate exactly as hero/princess always did.
+  const PRINCESS_ART = pat([
+    "..ABBA..", ".BCCBBB.", ".BDEDEB.", "BBDDDDBB",
+    ".FFFGFF.", "D.FFFF.D", "..HHHH..", ".FFFFFF."
+  ], { A: "#0ab2f7", B: "#f9d941", C: "#fcef78", D: "#fef2d2", E: "#000000", F: "#ff70b5", G: "#4c8dea", H: "#ffc7ed" });
+  const HERO_ART = pat([
+    "..ABBB..", ".BBBBAA.", ".CDEDE..", ".CDDDD.F",
+    "..BBBA.F", ".AGGHGAF", "D.ABBB.D", ".II..II."
+  ], { A: "#164f82", B: "#0769b5", C: "#6e3618", D: "#fef2d2", E: "#000000", F: "#bcc5d2", G: "#efb027", H: "#f67209", I: "#9c4f26" });
+
   // v2.15: collectibles get their own dedicated, multi-sprite kit in the Objects tab — cheese and
   // the gem were already the built-in "grab a sprite" looks, now joined by a heart and a coin —
   // rather than one shared default def a kid could only ever redraw in place. Fixed, readable ids
@@ -2149,8 +2171,10 @@
   // (and vice versa), each shelf only offering sprites that actually fit what's being edited.
   // renderPresetSwatches picks between them based on the def's temperament.
   const CHARACTER_PRESETS = [
-    { name: "hero", poses: HERO_POSES },
-    { name: "princess", poses: PRINCESS_POSES },
+    { name: "Gary", poses: HERO_POSES },
+    { name: "Princess", art: PRINCESS_ART },
+    { name: "Hero", art: HERO_ART },
+    { name: "Pink blob", poses: PRINCESS_POSES },
     { name: "ghost", poses: GHOST_POSES },
     { name: "monster", art: MONSTER_ART },
     { name: "skeleton", art: SKELETON_ART },
