@@ -2001,6 +2001,98 @@ content was loaded-then-replaced runs error-free across several real
 spawn cycles, alongside the full 5-sample regression sweep and another
 fresh switch+Gate export.
 
+### A spawner facing a wall was launching actors into a runaway off-board flight, forever (v2.35.2)
+
+Direct bug report, with an actual uploaded project to investigate: "the
+spawner is not working properly in the upper left corner of the screen.
+It's been loaded with a crate and nothing is happening. The other spawner
+is working properly." Investigated against the real project file rather
+than a guessed repro — loaded it into the live app, traced the exact
+actors it contained, and found the project had TWO north-facing spawners
+sitting directly on the room's own top row (row 0, one at the literal
+upper-left corner (0,0), one at (30,0)) alongside two others placed with
+open space around them ((47,1), (20,12)) — and the save file already
+contained pushable actors from these two row-0 spawners sitting at
+absurd y positions (`-1113238`, `-11030`) — a strong first clue that
+something had already gone wrong once before.
+
+**Confirmed with a frame-by-frame physics trace, not just read from the
+code**: a pushable spawned (or resting) with its position fully
+overlapping its own spawner's tile — which is physical/blocking, per
+v2.21 — gets ping-ponged a full tile further away EVERY SINGLE FRAME,
+forever. The trace showed exactly why: the moment gravity nudges `vy`
+to even a small positive value, `resolveAxis`'s "landed on a floor from
+above" branch (`actor.vy > 0`) fires against whatever row the actor is
+CURRENTLY sitting in — but if that row is the spawner's own cell (which
+the actor has never actually cleared) rather than a genuine floor
+approached from above, the resolution shoves it to `cy*TILE - actor.h`,
+i.e. a full tile further away. For a spawner with open space in its
+facing direction, the initial launch (`SPAWNER_LAUNCH_SPEED`) carries the
+actor several tiles clear of its own cell within the first ~17 frames,
+well before gravity ever revisits that position, so this never triggers.
+For a spawner on the room's own edge with nowhere to launch into (row 0
+facing north: the actor is ~5px from the room's implicit top boundary,
+which swallows the entire launch in a single frame), the actor can never
+separate from its own cell at all — it immediately starts ping-ponging
+between "landed on my own spawner tile" and "hit the boundary one cell
+further out," gaining a full tile of displacement each frame with `vy`
+pinned back to 0 every single time (confirmed directly: `vy` read exactly
+`0` at every sampled frame while `y` diverged by ~1900px/s, climbing to
+nearly -20000 within 10 seconds — it never even LOOKS like it's falling
+or rising, just silently teleporting away a tile at a time). This is a
+genuine runaway, not a cosmetic glitch: the "crate" the user loaded was
+never visibly missing, it was flying off-board in a single frame, every
+time, forever — reading as "nothing is happening" from the kid's seat.
+
+**Fix: a spawner checks whether its own facing direction is actually
+open before firing, and skips the cycle (with a one-time log message)
+if it isn't** — `isCellBlocking(x + dir.x, y + dir.y, { isPlayer: false
+})`, checked once per tick right after the clock updates, before the
+existing single-item-occupancy gate. `isCellBlocking` (not the plainer
+`isBlockingGeometry`) was chosen specifically so a spawner facing a
+CURRENTLY-OPEN Gate/channel-gated wall is correctly treated as clear —
+only a genuinely blocking cell (a solid wall, the room's own edge with no
+wrap, a closed Gate) stops it from firing. Deliberately fixed at the
+spawner's own call site, not inside `resolveAxis` itself: that collision
+function is shared by every actor's every tile interaction and already
+carries its own delicate tunneling-fix history (see its v2.20.1
+comments) — correctly generalizing "an actor fully embedded in a solid
+tile, not approaching from a clean direction" for every possible caller
+is a much bigger, riskier change than preventing the ONE specific setup
+(a spawner with nothing to launch into) that was actually reported.
+`state.warnedBlocked` (new, transient, reset the same way `activeId`
+already is) gates the log message to once per spawner per session,
+rather than spamming it every tick the spawner stays misconfigured —
+`log("A spawner can't launch anything — the way it's facing is blocked.
+Try rotating it.")` tells the kid exactly what to do about it (the
+existing click-to-rotate gesture already on every spawner).
+
+**Deliberately NOT a retroactive data fix.** The two pushables already
+sitting at `-1113238`/`-11030` in the uploaded project are leftover
+corruption from a prior, pre-fix session — `resetActorsToSpawn` still
+resets them to THEIR OWN saved `spawnX`/`spawnY` on every Play entry
+(confirmed: reloading the exact uploaded file and entering Play still
+shows them drift away from whatever stale position was last saved,
+exactly as before). This patch stops the SPAWNER from ever minting a
+new actor into this situation again; it does not hunt down and repair
+already-corrupted actors sitting in old save data. Flagged directly to
+the user: rotating the (0,0) and (30,0) spawners so they face a direction
+with open space (any of east/south/west, which all have room in this
+particular layout) is what actually lets them produce content; the two
+already-drifted pushables are harmless, permanently off-screen clutter
+that can be ignored or, if the kid wants them gone, selected and deleted
+like any other actor once the room is rebuilt facing the right way.
+
+Verified with Playwright: loaded the exact uploaded project and confirmed
+neither row-0 spawner mints any new actor over a 4-second run (ids
+unchanged before/after) while the two open-space spawners keep firing
+normally; a freshly-placed spawner on row 0 (default north-facing)
+produces zero actors ever and logs the warning exactly once; rotating
+that same spawner to face east (open space, same row) makes it fire
+normally, with the spawned actor settling at a sane on-board position
+rather than flying away; and the full 5-sample regression sweep plus a
+fresh export both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
