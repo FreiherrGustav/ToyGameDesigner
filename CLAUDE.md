@@ -605,11 +605,12 @@ plus the standard 4-sample regression sweep with zero errors.
 ### A second sprite-editor round: pressure plate reskin, Button, Cannon 2/Bomb 2, Crate, key/star collectibles, bomb/cannon animation (v2.27)
 
 The sprite-editor tool built for the previous round (a standalone
-`sprite-editor.html`, delivered separately, never committed to this repo —
-it exists purely so the user can touch up auto-extracted reference art with
-a proper pixel editor + eyedropper-capable color picker, outside this app)
-came back with a project JSON holding refined versions of a handful of its
-24 extracted icons. The request named eight specific pieces and asked for
+`sprite-editor.html`, originally delivered separately rather than committed
+— see "The sprite editor tool" section below for where it actually lives
+as of v2.36 — it exists purely so the user can touch up auto-extracted
+reference art with a proper pixel editor + eyedropper-capable color picker,
+outside this app) came back with a project JSON holding refined versions
+of a handful of its 24 extracted icons. The request named eight specific pieces and asked for
 each to land in its own "logical category" — deliberately **not** all 24;
 the other sixteen (wall, door, gate, platform, ladder, bridge, barrel,
 chest, fire, fan, spring, wind, teleporter, moving_platform) were left
@@ -1179,8 +1180,9 @@ the platform with zero errors; the standard 5-sample regression sweep (now
 
 ### Two new characters from the sprite editor tool, and a naming collision resolved by renaming the OLD presets (v2.30)
 
-The standalone sprite editor tool (not committed to this repo — see its
-own section below) gained the ability to create brand-new sprites from
+The standalone sprite editor tool (at the time, not committed to this repo
+— see its own section below, and v2.36 further down for where it actually
+lives now) gained the ability to create brand-new sprites from
 scratch, not just touch up extracted reference art; the user used it to
 paint two new characters, "Princess" and "Hero," and asked for them to be
 inserted into `index.html`.
@@ -1230,7 +1232,7 @@ complete 4-pose set; the full sample regression sweep (all 6 samples) and
 a fresh export (with Princess applied to the player, confirming her art's
 own hex colors land in the exported `GAME_DATA`) all run error-free.
 
-### The sprite editor tool (outside this repo): new-sprite creation, PNG import, JS export (v2.30)
+### The sprite editor tool (at the time, outside this repo — see v2.36): new-sprite creation, PNG import, JS export (v2.30)
 
 The standalone sprite editor (`sprite-editor.html`, built in an earlier
 session purely so the user can touch up auto-extracted reference art with
@@ -1284,9 +1286,10 @@ PNG import with pixel-exact downscale verification; the generated Export
 as JS code actually executing via `new Function()` with zero syntax
 errors and reproducing a real 64-entry art array; Save/Load JSON
 round-tripping custom sprite metadata correctly, including loading an
-older-format (pre-this-patch) save; and deleting a custom sprite. Stays
-outside this repo, same as always — handed to the user as a file, not
-committed.
+older-format (pre-this-patch) save; and deleting a custom sprite. At the
+time, this stayed outside the repo, handed to the user as a file rather
+than committed — see v2.36 below, where that decision was explicitly
+reversed.
 
 ### Switch becomes a real two-state toggle, and can now be hit by a thrown object (v2.31)
 
@@ -3249,6 +3252,47 @@ Tests are throwaway Playwright scripts written fresh each session:
   the player via a debug-hook position set (or spacing the two objects/
   cells much further apart) over chaining "throw, then walk toward the
   next thing" in one test.
+
+## The sprite editor tool now lives in this repo (v2.36)
+
+Every mention of `sprite-editor.html` above (v2.27, v2.30) documented a
+deliberate decision to keep it OUT of this repo — "stays outside this
+repo, same as always — handed to the user as a file, not committed." That
+decision is explicitly reversed as of this patch, by direct user request
+("push a copy of the sprite editor to the github"). Rather than silently
+comply (the request directly contradicts a documented, repeated
+convention) or silently ignore it, this was flagged back to the user
+first, who confirmed they want it committed into ToyGameDesigner itself.
+
+**Where it lives**: `prototypes/sprite-editor.html` — this repo already
+had a `prototypes/` folder (`gravity-piece-test.html`, an earlier
+pre-engine physics experiment) that's the natural home for a standalone
+dev tool like this one, rather than dropping it at the repo root
+alongside `index.html`/`CLAUDE.md`. The file itself is committed as-is,
+unmodified from the version the user has been using — no attempt was made
+to "clean it up" or integrate it with `index.html` in any way; it remains
+a fully separate, self-contained HTML file with no relationship to the
+game-maker's own code beyond generating `pat()`-formatted art for someone
+to paste in by hand, exactly as before.
+
+**Every "not committed to this repo" / "stays outside this repo" note
+earlier in this doc is now historically describing a past state, not the
+current one** — each was annotated in place to point here rather than
+rewritten, since they're accurate descriptions of the decision as it stood
+at the time (v2.27, v2.30) and this project's own convention is to
+document the history of a decision, not erase it when it changes (see the
+v2.27.1/v2.34.1 stale-factory-art fixes and the v2.27→v2.27.2
+cannon/bomb removal for other examples of a later patch explicitly
+superseding an earlier one rather than quietly editing the old entry
+away).
+
+**This does NOT fold the sprite editor into this project's own
+conventions** — it is still not a Playwright-tested, `pat()`-native part
+of `index.html`; it has no debug-hook pattern, no export pipeline, no
+backward-compat concerns, and changes to it don't need any of the
+`CLAUDE.md` sections above updated unless its *output format* (the
+generated `pat()` calls `index.html` pastes in) changes. It's committed
+for safekeeping/versioning, not because it's become part of the engine.
 
 ## Git / commit conventions
 
