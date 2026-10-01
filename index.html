@@ -1107,6 +1107,12 @@
   // drawGameplayTile's own mirrored-icon render — see PUSH_BUTTON_GEOMETRY.
   let pushButtonChannelsActive = {};
   let pushButtonFacing = {};
+  // v2.31.2: actor.id -> array of "cx,cy" switch-cell keys that actor was overlapping as of the
+  // last checkPlayerTileContacts/checkPhysicsObjectSwitchContacts call — see those functions' own
+  // comments for the real bug this fixes (a switch re-flipping itself every flipCooldown window
+  // for as long as something just stands on it). Transient, never persisted, same lifecycle as
+  // plateChannelsActive above.
+  let switchTouchedCells = {};
   // v2.23: color -> { on, since } — when each channel's own isChannelOn() reading last flipped,
   // recomputed once a tick by updateChannelTransitions(). Purely a render-timing aid for Barrier's
   // slide animation (see "Barrier: a moveable wall/door" below) — nothing physics-facing reads
@@ -1242,6 +1248,7 @@
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
     pushButtonChannelsActive = {}; pushButtonFacing = {};
+    switchTouchedCells = {};
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
@@ -5596,12 +5603,22 @@
   // isBlockingGeometry — so it always shows up here, never in resolveAxis's blocking loop).
   // Geometry and modifier are independent, so both can fire from the same cell.
   function checkPlayerTileContacts(player) {
+    // v2.31.2: which switch cells the player is overlapping THIS call — written back to
+    // switchTouchedCells at every exit point (including the early returns below) so a switch
+    // only ever fires on the frame contact NEWLY begins, never on every frame it continues —
+    // see triggerFlip's own call below for the bug this fixes.
+    const touchedSwitchKeys = [];
     for (const { cx, cy } of overlappedCells(player)) {
       const geometry = geometryAt(cx, cy);
       const modifier = modifierAt(cx, cy);
       if (modifier === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
-      else if (geometry === "switch") triggerFlip(player, cx, cy);
+      else if (geometry === "switch") {
+        const key = cx + "," + cy;
+        touchedSwitchKeys.push(key);
+        const prevTouched = switchTouchedCells[player.id];
+        if (!prevTouched || !prevTouched.includes(key)) triggerFlip(player, cx, cy);
+      }
       // bomb-arm and cannon-fire moved to resolveAxis (v2.21) — both are now blocking geometry
       // (see isBlockingGeometry), so the player never actually overlaps their cell the way this
       // function's overlap-based checks need; resolveAxis fires them at the moment of collision
@@ -5610,8 +5627,8 @@
       // repurposes a door's color entirely for room-linking instead (see wireColoredDoor), so a
       // door's own color no longer gates whether it functions — an unlinked/orphaned door is
       // already a handled, harmless case on its own (see triggerDoor's own no-op comment).
-      else if (geometry === "door") { triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
-      else if (geometry === "warp") { triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
+      else if (geometry === "door") { switchTouchedCells[player.id] = touchedSwitchKeys; triggerDoor(player, cx, cy); return; } // relocates the player entirely — nothing left in this cell list is still valid
+      else if (geometry === "warp") { switchTouchedCells[player.id] = touchedSwitchKeys; triggerWarp(player, cx, cy); return; } // same reason — moved elsewhere in the same room
       // v2.20.1: this function's whole premise (see its own comment above) is "the player never
       // overlaps blocking geometry" — resolveAxis already pushes it flush to the boundary, zero
       // overlap, so these modifier reactions were written assuming `geometry` here is always "none"
@@ -5633,6 +5650,7 @@
       else if (modifier === "hazard") triggerHazard(player);
       else if (modifier === "bouncy") triggerBouncyLaunch(player, modifier);
     }
+    switchTouchedCells[player.id] = touchedSwitchKeys;
   }
 
   // v2.31: "throws something into it" per the direct request — a thrown/dropped physics object
@@ -5646,9 +5664,18 @@
   // never player-gated), so nothing about it needed to change to support this — the gap was purely
   // that nothing ever called it for anyone but the player.
   function checkPhysicsObjectSwitchContacts(actor) {
+    // v2.31.2: same edge-trigger fix as checkPlayerTileContacts above — a crate left resting on
+    // a switch would otherwise re-flip it every flipCooldown window for as long as it stayed put.
+    const touchedSwitchKeys = [];
     for (const { cx, cy } of overlappedCells(actor)) {
-      if (geometryAt(cx, cy) === "switch") triggerFlip(actor, cx, cy);
+      if (geometryAt(cx, cy) === "switch") {
+        const key = cx + "," + cy;
+        touchedSwitchKeys.push(key);
+        const prevTouched = switchTouchedCells[actor.id];
+        if (!prevTouched || !prevTouched.includes(key)) triggerFlip(actor, cx, cy);
+      }
     }
+    switchTouchedCells[actor.id] = touchedSwitchKeys;
   }
 
   // v2.34: direct request — "Crates should be destroyed when they touch lethal (lava, fire,
@@ -8280,6 +8307,7 @@
   let plateChannelsActive = {};
   let pushButtonChannelsActive = {};
   let pushButtonFacing = {};
+  let switchTouchedCells = {}; // v2.31.2, edge-trigger bookkeeping — see checkPlayerTileContacts
   let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
@@ -8333,6 +8361,7 @@
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
     plateChannelsActive = {}; channelStateSince = {};
     pushButtonChannelsActive = {}; pushButtonFacing = {};
+    switchTouchedCells = {};
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
     actorContactCooldown = {}; dragContactCooldown = {};
