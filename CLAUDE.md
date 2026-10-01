@@ -1922,14 +1922,14 @@ never touched by either this or the v2.34 jitter; removing the jitters
 only changes where the actor starts and which way it's launched, not
 whether it animates in.
 
-**"Whatever is loaded into the spawner will replace the default" needed
-no code change** — confirmed by re-reading `tickSpawners`'s existing
-`defId` selection (`contents.length ? contents[...random...] :
-HAZARD_BALL_DEF_ID`, unchanged since v2.19/v2.33) before touching
-anything: loaded content already fully replaces the hazard-ball default,
-and this was never in question — the parenthetical was the user
-describing the existing, already-correct behavior for context, not asking
-for a change to it.
+**"Whatever is loaded into the spawner will replace the default" was
+WRONGLY declared "needs no code change" in this patch's first pass** —
+see the immediate v2.35.1 follow-up below for the actual fix. The
+re-reading at the time only checked that loaded content (any content)
+replaces the hazard-ball DEFAULT, which was true; it missed that loading
+a SECOND kind into an already-loaded spawner didn't replace the first,
+it joined a random-pick pool alongside it — a real, un-asked-for-fifth
+behavior the user had to report back separately before it got fixed.
 
 Verified with Playwright: a spawner run for ~14 real seconds across many
 spawn/TTL cycles never has more than 1 of its own spawns alive at once;
@@ -1943,6 +1943,63 @@ scenario that reproduced the original bug; and a fresh export with a
 placed spawner runs error-free for several full spawn cycles, plus the
 full 5-sample regression sweep and another fresh export (with a switch
 and Gate) both still run clean.
+
+### Spawner content is a single replaceable slot, not a random pool (v2.35.1)
+
+Direct, terse follow-up right after v2.35 shipped: "Spawner still trying
+to do multiple objects." The v2.35 concurrency fix (at most one spawn
+alive at a time) was re-verified and still holds — that part was never
+the issue. The actual remaining gap was in `spawnerContents` itself,
+untouched by v2.35: since v2.19, loading an actor/object onto an existing
+spawner tile APPENDED it to a list (`toggleSpawnerContent`'s `list.push`),
+and `tickSpawners` picked randomly among everything in that list on each
+fire (`contents[Math.floor(Math.random() * contents.length)]`). Loading a
+second kind into an already-loaded spawner never replaced the first —
+it joined it, and from then on the spawner alternated between different
+kinds at random. That's "still trying to do multiple objects" exactly:
+not a concurrency bug (already fixed), but the spawner's own *content*
+model still being a multi-item pool when the ask was for a single
+replaceable slot.
+
+**Fix: `spawnerContents[key]` is now a single `defId` string (or absent,
+meaning the hazard-ball default), not an array.** `toggleSpawnerContent`
+simplifies to a plain compare-and-swap: clicking a kind that's already
+the spawner's own loaded content clears it back to the default; clicking
+any OTHER kind replaces whatever was loaded, full stop — no more "several
+loaded, picked randomly," which was the literal behavior the user was
+describing wanting gone. `tickSpawners`'s own `defId` selection collapses
+to `spawnerContents[key] || HAZARD_BALL_DEF_ID`. The render-time `loaded`
+flag (whether a spawner tile shows as carrying something, read by
+`drawGameplayTile`) changes from `!!(contents && contents.length)` to the
+simpler `!!spawnerContents[spawnerKey]` — same meaning, now matching the
+simpler shape.
+
+**Backward compat**: a pre-v2.35.1 save can still have the old array
+shape (`["wandererA", "wandererB"]`) under a spawner's key.
+`restoreProjectSnapshot` now walks `spawnerContents` right after loading
+it and collapses any `Array.isArray` entry down to its first element (an
+empty array is treated as "nothing loaded" and deleted) — the same "keep
+the primary thing, drop the rest" call `migrateLegacyGroundEffects`
+already made for a diggable/trap tile's secondary modifier, applied here
+to a spawner's secondary loaded kinds instead. No export-pipeline change
+needed: `spawnerContents` is already shipped wholesale in `gameData`, and
+`tickSpawners`/`toggleSpawnerContent` are shared via `runtimeFunctions`
+from earlier patches, so the single-slot behavior applies automatically
+to an exported game the moment this code lands.
+
+Verified with Playwright: loading a second kind into an already-loaded
+spawner replaces the first (confirmed by id, not just by count) rather
+than joining a pool; the spawner then only ever produces that one
+replaced-in kind over a long run, never a mix with the one it replaced;
+clicking the currently-loaded kind again clears it back to the default;
+a simulated pre-v2.35.1 snapshot with an old two-element array under a
+spawner's key migrates to a single string (its first element), and a
+simulated old EMPTY array migrates to "nothing loaded" rather than an
+empty array; the previously-verified single-active-item concurrency
+behavior still holds unchanged; and a fresh export with a spawner whose
+content was loaded-then-replaced runs error-free across several real
+spawn cycles, alongside the full 5-sample regression sweep and another
+fresh switch+Gate export.
 
 ### Actor shape
 
