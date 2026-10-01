@@ -1376,6 +1376,73 @@ full 5-sample regression sweep (The Monster's Den specifically exercises
 its own pre-existing colored switch/barrier puzzle, now rendering with the
 new two-state art) and a fresh export both run error-free.
 
+### A fourth Lethal — Spiked mine — and a backward-compat gap in `lethalSlotIds` that had been latent since v2.22 (v2.32)
+
+Direct request: add a new Lethal preset from user-supplied `pat()` art
+(`SPIKED_MINE_ART`, defined right after `SPIKE_ART`). Before wiring it in,
+the existing three-entry `LETHAL_SEEDS` array (lava/fire/spike) was read in
+full to confirm the shape every entry follows: `{ id, name, frames,
+frameMs, geometry }`, modifier always hardcoded to `"lethal"` in the
+seeding loop, same `groundTileDefs`/`lethalSlotIds` machinery Ground
+textures already share.
+
+**Geometry default, decided by shape comparison against the existing
+precedent, not guessed**: `lthSpike`'s own art is a jagged floor that fills
+the BOTTOM half of its 8x8 grid — a floor you land on and die touching,
+hence its `"solid"` default. The new mine art is a small, roughly radial
+shape centered in the tile with open background on every side — it reads
+as a planted object sitting in open space, not a floor texture, so it
+follows lava/fire's `"none"` default (something fallen/walked into)
+instead. A kid can still repaint the geometry afterward, same as every
+other Lethal.
+
+**A real, previously-latent backward-compat gap, found while reading the
+architecture before adding to it, not caused by this patch**:
+`restoreProjectSnapshot`'s handling of `lethalSlotIds` —
+`lethalSlotIds = snap.lethalSlotIds ? snap.lethalSlotIds.slice() :
+LETHAL_SEEDS.map(s => s.id);` — never got the same "append any built-in
+seed id the save is missing" fix `groundSlotIds`/`GROUND_SEEDS` (v2.22) and
+`collectibleSlotIds`/`COLLECTIBLE_SEEDS` (v2.27) already received, even
+though the v2.22 Ground-tab revamp's own CLAUDE.md note explicitly named
+`LETHAL_SEEDS` as needing this same treatment for any future addition. It
+simply never came up before now, since no `LETHAL_SEEDS` entry had been
+added since the original three shipped in v2.19 — there was nothing to
+backfill until this patch's own `lthMine` gave the gap something to
+actually miss. Left unfixed, any already-autosaved or already-exported
+project's `lethalSlotIds` (lava/fire/spike only) would stay frozen forever
+on reload, exactly the "didn't publish for a returning project" bug class
+already hit twice before. Fixed with the identical append pattern:
+`LETHAL_SEEDS.forEach(seed => { if (!lethalSlotIds.includes(seed.id))
+lethalSlotIds.push(seed.id); });` right after the existing
+snap-or-default line, matching the established comment/style convention of
+its two siblings. The content-backfill one level down
+(`groundSlotIds.concat(lethalSlotIds).forEach(id => { if
+(!groundTileDefs[id]) groundTileDefs[id] = ... })`) already covered
+*content* for any id once it's in the list — only the id-LIST append was
+ever missing, the same "two different gaps, both need covering" distinction
+the v2.22 doc already called out.
+
+**No export-pipeline changes needed**: `groundTileDefs` is already shipped
+wholesale in `exportStandaloneGame`'s `gameData`, so any board cell
+referencing `lthMine` renders and kills correctly in an exported game for
+free, the same reason adding Rubble/Brick/Sand/Crystal or key/star needed
+no export-side changes either. `lethalSlotIds` itself is purely a
+Build-mode palette concern (which swatches show up), irrelevant to a
+play-only exported game.
+
+Verified with Playwright: a fresh project's `lethalSlotIds` includes
+`lthMine`, and its `groundTileDefs` entry has `modifier: "lethal"`,
+`geometry: "none"`, the right name, and a real 64-entry frame; the "spiked
+mine" swatch renders in the Lethals row; clicking it and painting a tile
+produces a `none:lethal` board cell with zero errors; restoring a
+simulated pre-patch snapshot (`lethalSlotIds` trimmed back to
+lava/fire/spike, `lthMine` stripped out of `groundTileDefs` entirely)
+correctly appends `lthMine` to the slot list and backfills its
+`groundTileDefs` content, with zero errors; a kid's own custom lethal id
+survives alongside the newly-appended `lthMine` rather than being
+disturbed by the fix; the full 5-sample regression sweep and a fresh
+export both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
