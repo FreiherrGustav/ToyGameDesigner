@@ -2093,6 +2093,114 @@ normally, with the spawned actor settling at a sane on-board position
 rather than flying away; and the full 5-sample regression sweep plus a
 fresh export both run error-free.
 
+### v2.35.2's own fix wasn't enough: a spawner still ran away even facing OPEN space (v2.35.3)
+
+Direct follow-up, with the user testing the v2.35.2 fix live: rotated the
+corner spawner from v2.35.2's own example to face south (confirmed open —
+`isCellBlocking` agreed), loaded it with a crate, and reported "nothing
+happens." Investigated with the same uploaded project rather than assumed
+fixed, since "I rotated it and it still doesn't work" directly contradicts
+what v2.35.2 was supposed to guarantee.
+
+**Two things were tangled together in that one report, and only one of
+them was a real bug.** First, a red herring that's still worth naming: the
+spawner's content was ALREADY `"pushable"` in the save from before (the
+user had loaded a crate into it in an earlier session) — so clicking the
+crate swatch and clicking the tile again, intending to "load a crate,"
+actually ran `toggleSpawnerContent`'s own click-to-clear path (v2.35.1's
+designed behavior: clicking the CURRENTLY-loaded kind again empties it)
+and silently reset the spawner back to its hazard-ball default. Confirmed
+directly — the app log read "Spawner emptied — back to the default hazard
+ball." This is the toggle working exactly as designed, not a bug, but it's
+a real point of confusion worth knowing about: loading a kind that's
+already loaded looks identical, from the kid's seat, to loading it for the
+first time.
+
+**Second, the actual bug, confirmed by a fresh frame-by-frame trace**: even
+with the spawner correctly identified as facing OPEN space (south) and
+correctly firing (the v2.35.2 `launchBlocked` check passed, a hazard ball
+was minted), the newly spawned actor STILL ran away off the top of the
+room — the exact same signature as v2.35.2's own bug (`vy` near a small
+constant, `y` diverging by thousands of pixels per second), just reached
+by a different path. The trace showed why: `spawnActorAt` places the new
+actor dead-center on the SPAWNER'S OWN cell (`x*TILE+TILE/2, y*TILE+TILE/2`
+— unchanged since v2.35). `ACTOR_SIZE` is only slightly smaller than
+`TILE`, so for the first physics frame or two after birth, the actor's
+AABB still overlaps its own spawner tile even while moving toward the
+(correctly) open cell beyond it — it simply hasn't traveled far enough yet
+to fully clear its own birth cell. Since the spawner tile is itself
+blocking (v2.21), and `resolveAxis`'s per-axis collision scan resolves
+against the FIRST blocking cell its AABB overlaps in ascending row/column
+order — not the one actually in the direction of travel — it found the
+actor's own still-overlapping spawner cell, read `vy > 0` (moving toward
+open space happened to mean "positive y" here), and misapplied the
+"landed on a floor from above" resolution to the spawner's own tile,
+snapping the actor the wrong direction. Once pushed one row negative, the
+exact same misresolution repeats against the room's own top boundary every
+following frame — forever, the identical runaway, just triggered by
+self-overlap-at-birth instead of a genuinely blocked facing. Confirmed
+directly: the `launchBlocked` check (`isCellBlocking` on the cell the
+spawner is facing INTO) correctly read `false` the entire time — v2.35.2's
+own fix was doing exactly its job and simply didn't cover this case.
+
+**This means v2.35.2's fix was necessary but not sufficient**: it
+correctly prevents the specific case it was built for (a spawner with
+NO open cell anywhere to launch into) but does nothing for this
+closely-related case (a spawner WITH open space, whose newly-spawned
+actor still briefly overlaps its own birth cell before clearing it) —
+the underlying fragility is the same one `resolveAxis`'s v2.20.1 comment
+already names (resolving against whichever blocking cell an AABB
+overlaps first, not the one actually relevant to the direction of
+travel), just reachable from a second angle this patch's own testing
+hadn't exercised.
+
+**Fix: spawn the actor directly INTO the cell the spawner is facing,
+not the spawner's own cell.** `tickSpawners`'s `spawnActorAt` call changed
+from `x*TILE+TILE/2, y*TILE+TILE/2` to `(x+dir.x)*TILE+TILE/2,
+(y+dir.y)*TILE+TILE/2` — the adjacent cell `launchBlocked` already
+confirmed is clear, one tile over in the spawner's own facing direction.
+Since `ACTOR_SIZE < TILE` with real margin, the actor's full AABB fits
+entirely inside that one cell without reaching back into the spawner's
+own tile at all, so the ambiguity (two overlapping blocking cells, pick
+the wrong one) never arises — rather than trying to teach the shared,
+delicate `resolveAxis` which of two blocking cells an AABB briefly
+straddles is the "real" one, this sidesteps the question by never letting
+the new actor overlap its own spawner tile in the first place. Same
+narrow-fix-at-the-call-site philosophy v2.35.2 already used, extended to
+cover the actual full scope of the bug it only partially caught. This also
+quietly makes more physical sense than the old "appears inside the
+spawner's own body" placement — the object now visibly emerges FROM the
+spawner into the cell it's launching toward, rather than materializing
+inside the spawner itself for a frame before leaving.
+
+**v2.35's own "starts exactly on the spawner's own cell" claim (see that
+section above) is now out of date** — a freshly spawned actor starts one
+tile over, in the cell it's launching into, not centered on the spawner.
+The velocity math is unchanged (still exactly `dir.x/y * SPAWNER_LAUNCH_SPEED`,
+zero perpendicular component) — only the starting position moved, which is
+what actually fixes the bug.
+
+Verified with Playwright: re-traced the exact scenario that failed (the
+uploaded project's corner spawner, rotated to face south) and confirmed
+the newly spawned actor now settles normally (lands and rests on the
+floor below at a sane y, no divergence) instead of running away; a fresh
+spawner tested in all four orientations (north/east/south/west, gravity
+on) each produces an actor that settles within a few seconds and drifts
+less than 200px afterward, confirming the fix generalizes rather than
+only covering the one reported direction; the original v2.35.2 regression
+suite (the exact uploaded project's two genuinely-blocked corner spawners,
+plus a fresh blocked spawner and its unblocking-via-rotation) still passes
+unchanged — 13/13; and the full 5-sample regression sweep plus a fresh
+switch+Gate export both run error-free. **Still not retroactively fixed,
+same as v2.35.2's own caveat**: the two pushables already corrupted in the
+user's save (sitting at absurd saved `spawnX`/`spawnY` values from
+before either fix existed) still drift away on every Play entry, since
+`resetActorsToSpawn` resets them to their own bad saved position
+regardless of what the spawner itself now does correctly. Deleting those
+two stray actors (or starting the corner fresh) is still the only way to
+clear them — no amount of fixing the spawner's own logic repairs
+already-corrupted actor data sitting in an old save.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
