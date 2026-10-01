@@ -2204,6 +2204,95 @@ two stray actors (or starting the corner fresh) is still the only way to
 clear them — no amount of fixing the spawner's own logic repairs
 already-corrupted actor data sitting in an old save.
 
+### A colored switch was re-flipping itself every ~500ms for as long as something stood on it (v2.31.2)
+
+Direct bug report, against the same uploaded project: "the switch should
+activate when hit to either on or off. I can't make it do that, nor does
+it activate the gates which are hard-coded to it." Investigated before
+assuming a code bug, since the first thing the project's own data showed
+was that it contained no `switch` geometry at all — every door-control
+tile in it was a **Button** (`pushbutton`) wired to a **Gate**
+(`barrier`), not a real colored Switch. Button's own momentary lifetime
+("on" only while actively pushed, same as a Plate — see the v2.27
+section) was confirmed working exactly as designed: traced live, the
+Button→Gate channel opens the instant the player pushes into it and
+reseals the instant they stop, with zero code issue. That ruled out the
+literal pieces in the user's project, but not the underlying claim — the
+user's own phrasing ("activate... to either on or off") describes a
+*Switch's* documented behavior (v2.31: a permanent toggle, "never
+auto-resets"), not a Button's, so the real colored Switch mechanic itself
+was tested directly next, independent of what happened to be placed in
+that one project.
+
+**A real, confirmed bug, found there**: painting a colored Switch next to
+a same-colored Gate and touching the Switch once correctly flips the gate
+open — but if the player (or a pushed/thrown crate) remains standing on
+the switch's own cell for more than `flipCooldown`'s 500ms, the SAME
+switch flips AGAIN, closing the gate back — and keeps re-flipping every
+500ms for as long as contact continues, forever. Confirmed with a direct
+trace: touch once (channel on), wait 1.5s while resting on the tile with
+no further input (channel reads OFF again, with nothing else having
+touched anything). `checkPlayerTileContacts` calls `triggerFlip`
+unconditionally for every frame the player's AABB overlaps a switch cell,
+with only `flipCooldown` (meant to prevent re-triggering within the same
+instant of contact, the same guard every other cooldown field in this
+file uses for a single bump) standing between "touched it" and "touched
+it again." A switch is specifically a *walkable, non-blocking* Fixture
+(by design — its whole mechanic depends on being walked onto, not bumped
+into), so nothing stops a kid from simply stopping to stand on one, and
+500ms is a completely ordinary amount of time to pause while watching a
+gate open — this isn't an edge case, it's close to the expected way a kid
+discovers what a switch does. `checkPhysicsObjectSwitchContacts` (the
+v2.31 "throws something into it" widening) has the exact same bug for a
+crate or Large Stone left resting on a switch after a push or throw.
+
+**Fix: the switch reaction became edge-triggered instead of overlap-
+triggered.** `switchTouchedCells` (actor id → array of `"cx,cy"` switch-
+cell keys that actor was overlapping as of the LAST call) is checked
+before calling `triggerFlip`: a cell already in that actor's previous set
+is skipped, a cell that's newly appeared in the overlap list fires.
+Stepping off a switch (even briefly) clears it from the set, so a
+deliberate second visit still correctly re-toggles the channel — only
+*sustained, continuous* contact is now a no-op after the first frame,
+which is what "activate when hit" always meant. Both call sites
+(`checkPlayerTileContacts`, `checkPhysicsObjectSwitchContacts`) got the
+same treatment; the former writes `switchTouchedCells[player.id]` at
+every exit point, including its two early `return`s (door/warp), so a
+mid-frame room change never leaves stale bookkeeping behind.
+`flipCooldown` itself is untouched — it still does its original, narrower
+job of preventing two triggers within the same instant of contact; this
+is a second, independent guard layered on top for the "still touching
+it" case `flipCooldown` was never meant to cover.
+
+**Deliberately scoped to Switch only, not Button/Plate.** Button and
+Plate are ALREADY correctly momentary by design (channel is live only
+during overlap/push-contact, recomputed fresh every tick via
+`updatePressurePlates`/`resolveAxis`) — there is no analogous bug there,
+since "goes back off when you stop touching it" is their entire intended
+behavior, not a glitch to fix.
+
+**Export pipeline**: `switchTouchedCells = {}` added alongside the live
+editor's declaration (and `clearTransientRuntimeState`'s reset list), plus
+the exported template's own matching `let switchTouchedCells = {};` and
+`restartStandaloneGame`'s reset line — the same "declared here by hand,
+never persisted" treatment every other transient per-tick map
+(`plateChannelsActive`, `pushButtonChannelsActive`, ...) already gets.
+`checkPlayerTileContacts`/`checkPhysicsObjectSwitchContacts` were already
+shared into the export via `runtimeFunctions` from earlier patches, so
+the fixed logic carries over automatically.
+
+Verified with Playwright: a player resting continuously on a colored
+switch for 1.5s keeps the channel ON the whole time (previously flipped
+back OFF partway through); walking fully across and past the switch, then
+deliberately walking back through it a second time, correctly toggles the
+channel OFF again (confirming edge-detection doesn't accidentally make
+the switch "stick" one-way); the uploaded project's own Button→Gate
+puzzle re-traced and confirmed unaffected (still correctly momentary); the
+full 5-sample regression sweep (The Monster's Den's own switch/Gate
+puzzle included) and a fresh export with a colored switch+Gate, played for
+1.5s past `flipCooldown` while resting on the switch, both run
+error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
