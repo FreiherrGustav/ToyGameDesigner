@@ -1430,6 +1430,14 @@
     "...MM...", "..MMMM..", ".MMMMMM.", "MMMMMMMM",
     ".MMMMMM.", "..MMMM..", "...MM...", "........"
   ], { M: "#26c6da" });
+  // v2.34.1: a second, refined colorway for Large Stone replaced the one v2.34 originally shipped
+  // with (a direct "just the colors" follow-up) — the exact same "an EXISTING built-in's art
+  // changed, not a new id" case this function exists for, so the first version gets the identical
+  // freeze-and-upgrade-on-exact-match treatment pushable/gem already got in v2.27.1.
+  const LEGACY_LARGE_STONE_ART = pat([
+    ".AABCDE.", "DDCCDADE", "BDADDFCD", "DCDDCDCA",
+    "ADDBBDFD", "EABDDECB", "DFBCADDD", ".EDADBD."
+  ], { A: "#bcc5d2", B: "#687287", C: "#8a9eba", D: "#3b4658", E: "#4d5c71", F: "#164f82" });
   function artEquals(a, b) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((c, i) => c === b[i]);
   }
@@ -1441,6 +1449,10 @@
     const gem = actorDefs["colGem"];
     if (gem && artEquals(gem.art, LEGACY_GEM_ART)) {
       actorDefs["colGem"] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs["colGem"]);
+    }
+    const stone = actorDefs[LARGE_STONE_DEF_ID];
+    if (stone && artEquals(stone.art, LEGACY_LARGE_STONE_ART)) {
+      actorDefs[LARGE_STONE_DEF_ID] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[LARGE_STONE_DEF_ID]);
     }
   }
   // Restores every field captureProjectSnapshot() saved, then re-derives everything downstream
@@ -2120,9 +2132,9 @@
   actorDefs[LARGE_STONE_DEF_ID] = {
     temperament: LARGE_STONE_KIND, poses: null, name: "large stone",
     art: pat([
-      ".AABCDE.", "DDCCDADE", "BDADDFCD", "DCDDCDCA",
-      "ADDBBDFD", "EABDDECB", "DFBCADDD", ".EDADBD."
-    ], { A: "#bcc5d2", B: "#687287", C: "#8a9eba", D: "#3b4658", E: "#4d5c71", F: "#164f82" })
+      ".ABBBBC.", "ABDBBBEC", "BBBBBECC", "BBBBBBEC",
+      "BBBBEBEC", "BBBEBCCC", "CEECCECC", ".CCCCCC."
+    ], { A: "#bcc5d2", B: "#4d5c71", C: "#3b4658", D: "#8a9eba", E: "#687287" })
   };
   // v2.19: the spawner's default content when nothing's been loaded into it — a plain physical
   // hazard, not a character with intent (no temperament picker offers this kind, same as pushable
