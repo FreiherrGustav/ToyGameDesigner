@@ -1443,6 +1443,147 @@ survives alongside the newly-appended `lthMine` rather than being
 disturbed by the fix; the full 5-sample regression sweep and a fresh
 export both run error-free.
 
+### Spawner and Barrier join the rotateable family; Barrier renamed "Gate"; Gate's stand-on-closed/fall-through-open behavior confirmed (v2.33)
+
+Direct feedback: "Not all objects appear to be rotateable. That's probably
+fine, but we do need that ability for the Spawner and barrier (which
+should be renamed 'Gate')." Two bundled asks — rotation for two single-
+orientation Objects that had never needed it before, plus a rename — each
+needed its own design decision before writing anything, since neither
+geometry had any existing notion of "facing" to generalize.
+
+**Two open questions, both put to the user rather than guessed**, since
+getting either wrong would have meant redoing real physics/art work:
+what should rotating a Spawner actually *do* (there's no existing
+direction field to reuse, unlike cannon/fan), and how many distinct
+orientations Gate should support given a portcullis looks identical from
+either side. Answers: Spawner rotation should give spawned actors a real
+**launch direction**, like a gentle cannon (not just a cosmetic facing
+marker); Gate should use the full **4-orientation** family (N/E/S/W) for
+consistency with cannon2/fan's existing machinery, even knowing two of
+the four will render identically to the other two.
+
+**Both generalized onto the exact same "one swatch, four storable
+orientations" machinery `CANNON2_ORDER`/`FAN_ORDER` already established** —
+`BARRIER_ORDER = ["barrier-n", "barrier-e", "barrier-s", "barrier-w"]` and
+`SPAWNER_ORDER = ["spawner-n", ..., "-w"]`, both spread into `GEOMETRIES` in
+place of the old bare `"barrier"`/`"spawner"` values. Every call site that
+used to check `geometry === "barrier"` or `=== "spawner"` — `isBlockingGeometry`,
+`isChannelGateGeometry`, `isColorTaggable`, `selectGeometry`,
+`renderObjectSwatches`' icon/selection lookups, `paintGeometryModifierAt`'s
+click-to-place/click-to-rotate branches (new ones added, mirroring the
+existing cannon2/fan branches exactly — Spawner never carries a channel
+color like cannon2, Gate does like fan), `tickSpawners`, the spawner-tile
+click-loads-contents guards, and `drawGameplayTile`'s windingUp/loaded/
+barrier-slide render checks — was found by grep and switched to
+`SPAWNER_ORDER.includes(geometry)`/`BARRIER_ORDER.includes(geometry)`.
+
+**Gate's rotation decides which way it slides open, generalizing its
+existing "slides straight up" animation rather than leaving it fixed.**
+`BARRIER_DIRECTIONS` (`n: {x:0,y:-1}`, `e: {x:1,y:0}`, etc., the same
+cardinal-vector shape `FAN_DIRECTIONS`/`WIND_DIRECTIONS` already use) feeds
+`drawGameplayTile`'s barrier branch: the slide-clip translation is now
+`dir.x/dir.y * slideFrac * TILE` instead of a hardcoded `-slideFrac` on the
+y axis alone. `"n"` (today's only pre-v2.33 look and slide-up behavior) is
+unchanged pixel-for-pixel; `BARRIER_ICON_N`'s own art is unchanged too —
+`BARRIER_ICON_E/S/W` are generated the same `rotateArt90CW` chain
+cannon2/fan's other orientations already use. Since a portcullis is
+left-right AND top-bottom symmetric, `n`/`s` (and `e`/`w`) render as the
+literal same pixels — acknowledged up front as the cost of reusing the
+4-member machinery instead of inventing a narrower 2-member one.
+
+**Spawner's rotation is a genuine behavior change, not just art**:
+`SPAWNER_DIRECTIONS` (same cardinal-vector shape) feeds `spawnActorAt`,
+which now takes a required `dir` parameter and sets `vx`/`vy` to
+`dir.x/y * SPAWNER_LAUNCH_SPEED` (420 — weaker than `CANNON_LAUNCH_SPEED`
+(700), reading as "a shove outward" rather than "fired") plus a small
+perpendicular jitter, replacing the old undirected small random "pop out"
+kick every spawned actor got regardless of orientation. `bouncyCooldown =
+350` is set on the new actor for the same reason every other real impulse
+in this file sets it — `stepActor`'s `NPC_MAX_SPEED` (160) clamp would
+otherwise flatten a 420px/s launch back down to a slow drift within a
+single frame; reusing this exemption field here is safe for the identical
+reason the throw/cannon-launch comment already gives (a freshly spawned
+actor never has steering input of its own during the exemption window).
+`SPAWNER_ICON_N` gained a small gold "mouth" notch on its facing edge
+specifically because the old art was fully radially symmetric and would
+have shown literally no visible difference between orientations otherwise
+— defeating the entire point of being able to aim it. `tickSpawners` now
+reads the spawner's own current orientation and passes
+`SPAWNER_DIRECTIONS[geometry]` through to `spawnActorAt` on every fire.
+
+**Barrier renamed "Gate" in the palette only** — `GEOMETRY_LABELS.barrier =
+"Gate"`, the exact established display-rename mechanism `cannon2`→"cannon"/
+`bomb2`→"bomb"/`pushbutton`→"button" already use. The internal id, board
+serialization format (`"barrier-n:none"`, etc.), and every internal
+variable/comment name stay `barrier`/`BARRIER_*` — the same "don't churn an
+id nobody but the code ever sees" call the crate rename (v2.27) and
+cannon2/bomb2 rename (v2.27.2) already made. User-facing hint text in the
+Objects tab (the "not the fan, the spawner, or the..." paragraph and the
+two Color-block paragraphs explaining what a barrier's channel color does)
+was updated to say "Gate" since kids actually read that copy; internal
+doc-comments throughout the file were deliberately left saying "barrier" —
+consistent with how `PUSHABLE_KIND`'s own comments still say "pushable"
+after the crate rename.
+
+**"Can stand on when closed but not open" was already true — confirmed by
+direct test, not assumed.** Gate's blocking has always been
+`isChannelGateGeometry` (the same channel-gate rule `solid` uses): blocking
+unconditionally unless tagged with a channel color that's currently on.
+Standing on top of a closed Gate is just ordinary solid-tile landing
+physics — nothing about rotation changes this. Verified directly rather
+than taken on faith: a player placed above a closed, red-tagged Gate falls
+and lands on it (`grounded: true`, not falling through), then flipping the
+red channel on makes the exact same player immediately fall through the
+cell that was solid a moment ago. No code change was needed for this part
+of the request — it's flagged here because the user's own phrasing
+("...if that's not already the case") correctly anticipated it might need
+fixing, and it was worth proving rather than asserting.
+
+**Backward compat**: a pre-v2.33 save can have a bare, unsuffixed
+`"spawner"`/`"barrier"` board-cell string — a geometry value
+`GAMEPLAY_TILE_DEFS`' cross-product no longer generates any entry for,
+since `GEOMETRIES` now only contains the suffixed orientation strings. Left
+alone this is the same "tile vanishes from the game, permanently, the
+moment an old project loads" failure shape `migrateLegacyGroundEffects`/
+`migrateLegacyCannonBomb` already guard against for diggable/trap and
+cannon/bomb. `migrateLegacyFacingObjects(board)`, called from
+`restoreProjectSnapshot` right alongside those two, rewrites any bare
+`spawner`/`barrier` geometry to `SPAWNER_ORDER[0]`/`BARRIER_ORDER[0]`
+("n") — a pure identity upgrade for Gate specifically, since "n" is
+pixel-for-pixel and behaviorally identical to the old single look. The
+built-in "The Monster's Den" and "The World's Worst Elevator" samples'
+own board-building source (three Gate placements, two spawner placements)
+was fixed directly to use `"barrier-n"`/`"spawner-n"`, the same "fix
+source code directly rather than rely on the runtime migration to catch
+it" precedent Tunnel Trouble's diggable maze character and Dungeon
+Diving's cannon tile already set.
+
+**Export pipeline**: `BARRIER_ORDER`, `BARRIER_DIRECTIONS`, `SPAWNER_ORDER`,
+`SPAWNER_DIRECTIONS`, and `SPAWNER_LAUNCH_SPEED` each got their own
+`constantsSource` line (every function that reads them —
+`isBlockingGeometry`, `tickSpawners`, `spawnActorAt`, `drawGameplayTile`,
+etc. — was already in `runtimeFunctions` from earlier patches, so only the
+new constants themselves needed wiring in). `GEOMETRY_ICONS`' new
+`barrier-n/e/s/w`/`spawner-n/e/s/w` keys needed no separate line, same as
+every other family's icons — that object is already exported wholesale.
+
+Verified with Playwright (26 checks): a placed Barrier geometry renders
+as a "Gate"-titled swatch in the Objects row with the spawner swatch
+unchanged alongside it; clicking the Gate swatch then clicking the same
+placed cell four more times cycles `barrier-n → -e → -s → -w → -n`, and
+the same for spawner's first two steps; a player falls onto and rests on
+a closed, channel-tagged Gate (`grounded: true`) and then falls straight
+through it the instant that channel flips on; a spawner's own
+`spawnActorAt` launch produces real, direction-correct velocity for all
+four orientations (~420px/s along the facing axis, minimal jitter on the
+perpendicular one) with `bouncyCooldown` set so the NPC speed cap doesn't
+immediately flatten it; a simulated pre-v2.33 snapshot with bare
+`"spawner"`/`"barrier"` board cells (one carrying a stacked modifier)
+correctly migrates both to their `-n` equivalents; and the full 5-sample
+regression sweep plus a fresh export (with a freshly rotated Gate and
+spawner painted in) both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
