@@ -944,6 +944,16 @@
   // slower than the player's own MAX_SPEED so a kid who's actually moving can stay ahead of it;
   // falling behind (see checkRunnerFailState) is what creates the tension the mode is for.
   const RUNNER_SPEED = 130;
+  // v2.39: Follow mode used to snap cameraX to its exact target every single tick — direct feedback
+  // that this read as "constantly jerking back and forth" rather than smooth tracking, since every
+  // frame-to-frame sub-pixel wobble in the player's own position (friction settling, a collision
+  // resolution nudging it flush to a tile edge, even plain frame-timing variance) was instantly and
+  // fully copied onto the camera with zero damping. CAMERA_FOLLOW_RATE is an exponential-ease
+  // constant (per second) — see updateCamera()'s `1 - Math.exp(-CAMERA_FOLLOW_RATE * dt)` — chosen
+  // so the camera closes roughly 95% of the gap to its target within about a third of a second:
+  // fast enough to keep a running player comfortably on screen, slow enough that a one-or-two-pixel
+  // target wobble gets smoothed into nothing a kid would notice.
+  const CAMERA_FOLLOW_RATE = 9;
   const BOUNCE_RESTITUTION = 0.82;
   // A plain bouncy WALL (solid+bouncy hit on the x-axis) used to just reflect whatever horizontal
   // speed the player already had — jumping straight up between two close bouncy walls carries
@@ -1117,6 +1127,13 @@
   // the hot room's cameraMode (see updateCamera()). Not persisted on the room; every room starts
   // its camera fresh at 0 the instant it becomes hot (see activateRoom()).
   let cameraX = 0;
+  // v2.39: Follow mode eases toward its target instead of snapping to it every frame (see
+  // updateCamera()) — but easing FROM the fresh room's cameraX=0 would read as the camera sliding
+  // in from the room's left edge on every room entry/Play restart, which nothing asked for and
+  // looks worse than the old instant snap it's replacing. This flag (reset true alongside
+  // cameraX=0 in activateRoom()) makes updateCamera's very first follow-mode tick in a newly-hot
+  // room snap directly to the target, same as before, with every tick after that eased.
+  let cameraFollowSnapNeeded = true;
   // v2.9: one independent boolean per channel color, toggled permanently by a same-colored
   // switch — the direct generalization of the old single gravity-flip boolean. Global across
   // rooms, same as gravity/wrap above, for the same reason.
@@ -1237,6 +1254,7 @@
     gravityEnabled = incoming.gravityEnabled; wrapHEnabled = incoming.wrapHEnabled; wrapVEnabled = incoming.wrapVEnabled;
     cameraMode = incoming.cameraMode; editorPanCol = incoming.editorPanCol;
     cameraX = 0;
+    cameraFollowSnapNeeded = true;
   }
 
   // Resets the whole multi-room game back to a single fresh room — used at startup and by the
@@ -6294,11 +6312,24 @@
   // of the player entirely — the Flappy Bird case. Camera behavior is a Play-only concept: Build
   // mode always shows the manual editorPanCol pan instead (see renderGame()), the same way every
   // other win/lose mechanic in this toy only actually resolves in Play.
+  // v2.39: Follow no longer snaps cameraX to its target every tick — see CAMERA_FOLLOW_RATE's own
+  // comment for why that read as constant jerking. It now eases toward the target instead, except
+  // on the very first follow-mode tick after a room becomes hot (cameraFollowSnapNeeded), where it
+  // still snaps immediately so entering a room doesn't visibly slide the camera in from wherever
+  // cameraX=0 happened to be.
   function updateCamera(dt) {
     const maxCameraX = Math.max(0, roomCols() * TILE - COLS * TILE);
     if (cameraMode === "follow") {
       const player = actors.find(a => a.isPlayer);
-      if (player) cameraX = Math.max(0, Math.min(maxCameraX, player.x + player.w / 2 - (COLS * TILE) / 2));
+      if (player) {
+        const target = Math.max(0, Math.min(maxCameraX, player.x + player.w / 2 - (COLS * TILE) / 2));
+        if (cameraFollowSnapNeeded) {
+          cameraX = target;
+          cameraFollowSnapNeeded = false;
+        } else {
+          cameraX += (target - cameraX) * (1 - Math.exp(-CAMERA_FOLLOW_RATE * dt));
+        }
+      }
     } else if (cameraMode === "runner") {
       cameraX = Math.min(maxCameraX, cameraX + RUNNER_SPEED * dt);
     } else {
@@ -8157,6 +8188,7 @@
     const constantsSource = [
       `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
       `const BOARD_MAX_COLS = ${BOARD_MAX_COLS}, RUNNER_SPEED = ${RUNNER_SPEED};`,
+      `const CAMERA_FOLLOW_RATE = ${CAMERA_FOLLOW_RATE};`,
       `const SOUND_PATCHES = ${JSON.stringify(SOUND_PATCHES)};`,
       `const CHIP_CPU = ${CHIP_CPU};`,
       `const CHIP_DUTY = ${JSON.stringify(CHIP_DUTY)};`,
@@ -8325,6 +8357,7 @@
   // the live editor's own globals work; the values here are placeholders until that first call.
   let gravityEnabled = false, wrapHEnabled = false, wrapVEnabled = false, cameraMode = "fixed", editorPanCol = 0;
   let cameraX = 0;
+  let cameraFollowSnapNeeded = true;
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
