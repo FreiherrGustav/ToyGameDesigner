@@ -355,7 +355,7 @@
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
       <div class="swatch-row" id="fixtureSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Built into the room — a door, a switch, a goal, a gravity well do their job from wherever
+        Built into the room — a door, a button, a goal, a gravity well do their job from wherever
         you put them, so you walk right onto them instead of bumping into them. They never move
         and can't be carried.
       </div>
@@ -369,15 +369,15 @@
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="objectColorSwatches"></div>
         <div class="hint" style="margin-top:2px;">
-          For a switch or plate — none: a switch flips gravity, a plate does nothing. Pick a color
-          instead and it turns that color on (a switch keeps it on; a plate only while something's
+          For a Button or plate — none: a Button flips gravity, a plate does nothing. Pick a color
+          instead and it turns that color on (a Button keeps it on; a plate only while something's
           standing on it) — any matching-colored wall over in Ground, or a Gate over here in
           Objects, listens for it.
         </div>
         <div class="hint" style="margin-top:6px;">
           For a Gate, color means the same thing it means for a wall over in Ground: none and
           it always blocks, forever, with no way to open it. Pick a color and it slides open while
-          that channel is on, and slides shut again the moment it turns off — a switch holds it
+          that channel is on, and slides shut again the moment it turns off — a Button holds it
           open for good, a plate only while something is actually standing on it.
         </div>
         <div class="hint" style="margin-top:6px;">
@@ -429,8 +429,8 @@
         <div class="swatch-row" id="groundColorSwatches"></div>
         <div class="hint" style="margin-top:2px;">
           None: this wall always blocks, same as ever. Pick a color and it only blocks while
-          nothing of that color is currently on — a matching switch or plate over in Objects is
-          what turns it off.
+          nothing of that color is currently on — a matching Button over in Fixtures, or a plate
+          over in Objects, is what turns it off.
         </div>
       </div>
     </div>
@@ -554,10 +554,15 @@
   // v2.27.2 removed the original the same way — see migrateLegacyCannonBomb() below.
   const BOMB2_GEOMETRY = "bomb2";
   function isBombGeometry(geometry) { return geometry === BOMB2_GEOMETRY; }
-  // v2.27: a new wall-mounted push switch — "works like a pressure plate, but by pushing into it"
-  // (direct request) — see resolveAxis's x-axis branches, isColorTaggable, and drawGameplayTile's
-  // own PUSH_BUTTON_GEOMETRY branch for the full mechanic. Named "Button" in the palette to avoid
-  // colliding with the existing permanent-toggle "Switch" — see isColorTaggable's own comment.
+  // v2.27 shipped this as a wall-mounted push switch — "works like a pressure plate, but by
+  // pushing into it" — living in the Objects row as a real, bumpable, blocking thing, alongside
+  // (not replacing) the separate permanent-toggle "Switch" fixture. v2.37 retired Switch outright
+  // and moved Button into the Fixtures row in its place: Button is now walk-onto (non-blocking,
+  // see FIXTURE_GEOMETRIES/isBlockingGeometry) and drives a permanent channel flip exactly like
+  // Switch used to (see checkPlayerTileContacts/checkPhysicsObjectSwitchContacts/triggerFlip) —
+  // the only thing that survived unchanged from the original push-button design is the art itself
+  // and its left/right mirrored rendering (see drawGameplayTile's own PUSH_BUTTON_GEOMETRY branch),
+  // which now shows on/off state instead of which side was last pushed.
   const PUSH_BUTTON_GEOMETRY = "pushbutton";
   // v2.19: fan is a discrete, switchable Object built entirely on top of the existing wind force
   // calculation (WIND_FORCE/windAt) — same "one swatch, four storable orientations" trick as cannon
@@ -587,8 +592,13 @@
   // v2.22: "diggable" and "trap" moved OUT of here and into MODIFIERS below — see that constant's
   // own comment for why. What's left is genuinely just the geometry axis: what blocks movement /
   // does the mechanical thing, independent of what a tile looks like or what happens on contact.
+  // v2.37: "switch" is gone — Button (PUSH_BUTTON_GEOMETRY) absorbed its entire job (permanent
+  // channel flip / gravity flip) and moved into the Fixtures row in its place; see that geometry's
+  // own top-of-file comment and FIXTURE_GEOMETRIES below. migrateLegacySwitchToButton rewrites any
+  // already-painted "switch" cell on load, the same "deleted geometry, same failure shape" pattern
+  // migrateLegacyCannonBomb/migrateLegacyFacingObjects already established.
   const GEOMETRIES = [
-    "none", "solid", "goal", "switch", "plate", "door", ...BARRIER_ORDER, PUSH_BUTTON_GEOMETRY,
+    "none", "solid", "goal", "plate", "door", ...BARRIER_ORDER, PUSH_BUTTON_GEOMETRY,
     ...CANNON2_ORDER, BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
     "magnet", "gravitywell", ...SPAWNER_ORDER, "trampoline"
   ];
@@ -611,9 +621,10 @@
   // at least behaves like a standalone thing rather than a fixed feature of the room itself.
   // v2.23: "barrier" joins this row — see "Barrier: a moveable wall/door" — a real physical thing
   // you bump into while its channel is off, exactly like cannon/bomb/fan/magnet/spawner already are.
+  // v2.37: Button (PUSH_BUTTON_GEOMETRY) left this row for Fixtures — it's walk-onto now, not
+  // bump-into — see that geometry's own top-of-file comment.
   const PALETTE_OBJECT_GEOMETRIES = [
-    "cannon2", BOMB2_GEOMETRY, "fan", "magnet", "spawner", "trampoline", "barrier",
-    PUSH_BUTTON_GEOMETRY
+    "cannon2", BOMB2_GEOMETRY, "fan", "magnet", "spawner", "trampoline", "barrier"
   ];
   // v2.9: wind/conveyor is one modifier value with four directional variants, same "one swatch,
   // several storable orientations" trick as cannon — "wind" stands in for whichever WIND_ORDER
@@ -652,8 +663,10 @@
   // v2.27 gave cannon2/bomb2 "cannon 2"/"bomb 2" labels while both stood side by side with the
   // originals; v2.27.2 removed the originals, so these now read as plain "cannon"/"bomb" — the
   // internal ids stay "cannon2-*"/"bomb2" (no reason to churn every save's board data just to
-  // rename an id nobody but the code ever sees). PUSH_BUTTON_GEOMETRY still reads as "button" (so
-  // it never looks like a second "Switch" swatch with different behavior) — see renderObjectSwatches.
+  // rename an id nobody but the code ever sees). PUSH_BUTTON_GEOMETRY still reads as "button" —
+  // originally so it never looked like a second "Switch" swatch with different behavior; v2.37
+  // retired "switch" outright and gave Button its exact job, so the label now just stays what kids
+  // already know it as — see renderObjectSwatches/renderFixtureSwatches.
   // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
   const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate" };
@@ -662,7 +675,7 @@
   // faint tint for a none+modifier tile) — see drawGameplayTile().
   const GEOMETRY_SWATCH_COLORS = {
     none: "#4caf50", solid: "#616161",
-    goal: "#ec407a", switch: "#3f51b5", plate: "#00897b", door: "#795548",
+    goal: "#ec407a", plate: "#00897b", door: "#795548",
     warp: "#8e24aa",
     fan: "#00acc1", "fan-n": "#00acc1", "fan-e": "#00acc1", "fan-s": "#00acc1", "fan-w": "#00acc1",
     magnet: "#c62828", gravitywell: "#4a148c", spawner: "#6d4c41", trampoline: "#f9a825",
@@ -870,7 +883,10 @@
   // currently read by any gameplay code (isBlockingGeometry/isCarryableTileGeometry already just
   // don't list these) — this constant exists so that stays a deliberate, documented omission
   // instead of an implicit one the next patch might "fix" by accident.
-  const FIXTURE_GEOMETRIES = ["goal", "switch", "plate", "door", "warp", "gravitywell"];
+  // v2.37: Button (PUSH_BUTTON_GEOMETRY) replaces "switch" here outright — see that geometry's own
+  // top-of-file comment for the full story of why, and migrateLegacySwitchToButton for what happens
+  // to an already-painted switch tile on load.
+  const FIXTURE_GEOMETRIES = ["goal", "plate", "door", "warp", "gravitywell", PUSH_BUTTON_GEOMETRY];
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -1100,13 +1116,6 @@
   // pressure plate currently has something on it — see isChannelOn(). Unlike switchChannels,
   // this is fully recomputed every tick (updatePressurePlates()), never persisted.
   let plateChannelsActive = {};
-  // v2.27: same shape/lifecycle as plateChannelsActive above, but populated from resolveAxis's own
-  // collision resolution instead of a raw overlap scan (a push-button is blocking, so an actor
-  // touching it is flush against its edge, never truly overlapping it — see resolveAxis's x-axis
-  // branches). pushButtonFacing tracks which side (left/right) last pushed each cell, purely for
-  // drawGameplayTile's own mirrored-icon render — see PUSH_BUTTON_GEOMETRY.
-  let pushButtonChannelsActive = {};
-  let pushButtonFacing = {};
   // v2.31.2: actor.id -> array of "cx,cy" switch-cell keys that actor was overlapping as of the
   // last checkPlayerTileContacts/checkPhysicsObjectSwitchContacts call — see those functions' own
   // comments for the real bug this fixes (a switch re-flipping itself every flipCooldown window
@@ -1247,7 +1256,6 @@
     animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
-    pushButtonChannelsActive = {}; pushButtonFacing = {};
     switchTouchedCells = {};
   }
   function enterPlayMode() {
@@ -1420,6 +1428,28 @@
       }
     }
   }
+  // v2.37: "switch" is gone outright — Button (PUSH_BUTTON_GEOMETRY) absorbed its exact job
+  // (permanent channel flip / gravity flip, see that geometry's own top-of-file comment) and moved
+  // into the Fixtures row in its place, same "fully replace, don't keep a hidden legacy branch"
+  // precedent the old cannon/bomb removal (migrateLegacyCannonBomb above) already set. A pre-v2.37
+  // save can still have a raw "switch" board-cell string — a geometry value GAMEPLAY_TILE_DEFS' own
+  // cross-product no longer generates any entry for, the same "tile vanishes forever" failure shape
+  // every migration in this section exists to prevent. Straight substitution, preserving whatever
+  // color tag the cell carries: switchChannels is keyed purely by color, never by which geometry
+  // drove it, so an old red switch and a newly-painted red Button read the exact same channel state
+  // with nothing else to migrate.
+  function migrateLegacySwitchToButton(board) {
+    for (let y = 0; y < board.length; y++) {
+      for (let x = 0; x < board[y].length; x++) {
+        const key = board[y][x];
+        if (!key) continue;
+        const sep = key.indexOf(":");
+        const geometry = key.slice(0, sep);
+        const modifier = key.slice(sep + 1);
+        if (geometry === "switch") board[y][x] = gameplayKey(PUSH_BUTTON_GEOMETRY, modifier);
+      }
+    }
+  }
   // v2.27.1: the crate rename and gem art refresh never actually reached a returning project.
   // Every OTHER backward-compat fix in restoreProjectSnapshot backfills a MISSING actorDefs key —
   // but pushable and colGem both already existed before this patch, so `!actorDefs[id]` is false
@@ -1472,6 +1502,7 @@
     rooms.forEach(r => migrateLegacyGroundEffects(r.board));
     rooms.forEach(r => migrateLegacyCannonBomb(r));
     rooms.forEach(r => migrateLegacyFacingObjects(r.board));
+    rooms.forEach(r => migrateLegacySwitchToButton(r.board));
     doorLinks = structuredClone(snap.doorLinks);
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
     // v2.35: a pre-v2.35 save can still have an old-shape ARRAY here (the v2.19-v2.34 "random
@@ -1858,21 +1889,13 @@
   const SPAWNER_ICON_S = rotateArt90CW(SPAWNER_ICON_E);
   const SPAWNER_ICON_W = rotateArt90CW(SPAWNER_ICON_S);
 
-  // v2.31: a real two-state toggle switch, replacing the old plain cross icon that never showed
-  // which way it was set — a gray bracket housing (the "neutral switch," identical in both arts,
-  // never changes) around a red knob on a short dark lever, mirrored left (off) vs right (on), plus
-  // a 1px black shadow directly under the knob that moves with it. The two arrays differ in exactly
-  // rows 3-4, cols 1-2 vs 5-6 (the knob/lever/shadow cluster) — everything else is pixel-identical,
-  // which is what makes this read as "the same switch, lever thrown" rather than two different
-  // objects. See drawGameplayTile's own switch branch for which one actually gets drawn.
-  const SWITCH_OFF_ART = pat([
-    "........", "AAAAAAAA", "A......A", "ARRBB..A",
-    "AKK....A", "A......A", "AAAAAAAA", "........"
-  ], { A: "#8a9eba", B: "#3b4658", R: "#e41606", K: "#000000" });
-  const SWITCH_ON_ART = pat([
-    "........", "AAAAAAAA", "A......A", "A..BBRRA",
-    "A....KKA", "A......A", "AAAAAAAA", "........"
-  ], { A: "#8a9eba", B: "#3b4658", R: "#e41606", K: "#000000" });
+  // v2.31 gave the old plain cross icon a real two-state toggle look (a gray bracket housing
+  // around a red knob/lever, mirrored left=off/right=on) under the name SWITCH_OFF_ART/
+  // SWITCH_ON_ART. v2.37 retired the whole "switch" geometry outright — Button absorbed its job
+  // and kept Button's OWN distinct art (below) with the same left/right mirror idea applied to
+  // on/off state instead of push-side, so these two constants (and the icon lookup that used them)
+  // were deleted rather than left as dead code — same "replace, don't keep a hidden legacy branch"
+  // precedent the old stick-figure preset and the original cannon/bomb removal already set.
 
   // ---- Built-in geometry icons (fixed, not kid-editable — see the v2.3 note-for-later:
   // a `solid` tile needs to always visually read as solid for "discover by touching" to
@@ -1889,11 +1912,6 @@
       "M.......", "MMMM....", "MMMMMM..", "MMMM....",
       "M.......", "M.......", "M.......", "MMMMMMM."
     ], { M: GEOMETRY_SWATCH_COLORS.goal }),
-    // The palette swatch and any other "just show me a switch" lookup gets the off art — the
-    // default state per the v2.31 patch note, and the state a freshly-painted switch always starts
-    // in (switchChannels[color] is undefined == falsy until first touched, same for gravityEnabled
-    // on a brand-new room). drawGameplayTile picks SWITCH_ON_ART instead once it's live and on.
-    switch: SWITCH_OFF_ART,
     // v2.27: user-refined art from the reference sheet, replacing the old plain gray frame — a
     // metal plate with a colored indicator strip down the middle (PLATE_INDICATOR_HEX, below),
     // which drawGameplayTile's plate branch recolors red/green for off/on — see that branch's own
@@ -1902,10 +1920,11 @@
       "........", "AAAAAAAA", "ABAAAABA", "ABCCCCBA",
       "AAAAAAAA", "DDDDDDDD", "........", "........"
     ], { A: "#8a9eba", B: "#687287", C: "#eb370c", D: "#3b4658" }),
-    // v2.27: new "Button" Object — a wall-mounted push switch, activated by shoving into it from
-    // the side (see the resolveAxis x-axis branches' own pushButtonChannelsActive comment) rather
-    // than walked onto like plate. Same reference-sheet SWITCH art as the base; drawGameplayTile
-    // mirrors it left/right depending which side last pushed it (PUSH_BUTTON_GEOMETRY).
+    // v2.27: "Button" Object, originally a wall-mounted push switch activated by shoving into it
+    // from the side. v2.37 retired the separate "switch" geometry and gave Button its exact job —
+    // this is now the one real two-state toggle fixture (walk onto it, see PUSH_BUTTON_GEOMETRY's
+    // own comment), but keeps its own distinct art and left/right mirror unchanged — drawGameplayTile
+    // mirrors it to show on/off state now instead of which side was last pushed.
     pushbutton: pat([
       "........", "..ABC...", "..BCD...", "..CDD...",
       "EEFEFEE.", "GFHFHFG.", "GGGGGGG.", "........"
@@ -2624,12 +2643,12 @@
     activateRoom(room.id);
     paintMazeString(MONSTERS_DEN_MAZE);
 
-    // The den's one doorway: sealed by a red Barrier until the red switch is flipped. A switch's
+    // The den's one doorway: sealed by a red Barrier until the red Button is flipped. A Button's
     // flip is permanent (unlike a plate), so this release — and the chase that follows — is for
-    // the rest of the game, not a momentary window.
+    // the rest of the game, not a momentary window. (v2.37: "switch" is gone — Button has its job.)
     board[6][14] = gameplayKey("barrier-n", "none");
     colorBoard[6][14] = "red";
-    board[14][3] = gameplayKey("switch", "none");
+    board[14][3] = gameplayKey("pushbutton", "none");
     colorBoard[14][3] = "red";
     board[6][20] = gameplayKey("goal", "none");
 
@@ -2703,10 +2722,10 @@
     // at ~col 12.6) — starting it any earlier would put it in the path of the STILL-RISING bounce,
     // which would just bonk its underside (an ascending actor can only hit a platform from below,
     // never land on top of one) instead of catching the player on the way back down.
-    fillWorstElevatorRect(board, 13, 14, 21, 14, "solid", "none"); // the platform — switch/barrier/cannon all live on row 13, on top of this
+    fillWorstElevatorRect(board, 13, 14, 21, 14, "solid", "none"); // the platform — button/barrier/cannon all live on row 13, on top of this
     board[8][5] = gameplayKey("spawner-n", "none"); // a stray hazard ball, loose in the wind itself — a moving hazard, not a wall
 
-    board[13][14] = gameplayKey("switch", "none");
+    board[13][14] = gameplayKey("pushbutton", "none"); // v2.37: "switch" is gone — Button has its job
     colorBoard[13][14] = "red";
     // A bomb, one row ABOVE the row-13 walkway rather than sitting in it — bombs are physical
     // (blocking) since v2.21, so one placed directly in the walkway would stop every player dead
@@ -3783,6 +3802,9 @@
   // v2.21: Fixtures get their own row, separate from Objects — same swatch look and the same
   // selectGeometry click path, just a different, kid-facing category (see FIXTURE_GEOMETRIES'
   // own comment for why these can never become physical or carryable like the Objects row can).
+  // v2.37: reads GEOMETRY_LABELS the same way renderObjectSwatches already does — needed the
+  // moment Button (internal id "pushbutton") joined this row, since showing the raw geometry
+  // string here would read as "pushbutton," not "button."
   function renderFixtureSwatches() {
     const container = document.getElementById("fixtureSwatches");
     container.innerHTML = "";
@@ -3791,14 +3813,15 @@
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = "#111";
-      sw.title = geometry;
+      const labelText = GEOMETRY_LABELS[geometry] || geometry;
+      sw.title = labelText;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
       drawArtToCtx(c.getContext("2d"), GEOMETRY_ICONS[geometry], ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = geometry;
+      label.textContent = labelText;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
@@ -4477,12 +4500,12 @@
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return groundSkinBoard[gy][gx];
   }
-  // A color reads as "on" from any source that can drive it — a permanently-flipped switch, a
-  // pressure plate currently occupied, or a push-button currently pushed — see the state comments
-  // on switchChannels/plateChannelsActive/pushButtonChannelsActive for why they're tracked so
-  // differently underneath.
+  // A color reads as "on" from either source that can drive it — a permanently-flipped Button
+  // (switchChannels, v2.37 — see PUSH_BUTTON_GEOMETRY's own comment) or a pressure plate currently
+  // occupied (plateChannelsActive, momentary) — see the state comments on each for why they're
+  // tracked so differently underneath.
   function isChannelOn(color) {
-    return !!switchChannels[color] || !!plateChannelsActive[color] || !!pushButtonChannelsActive[color];
+    return !!switchChannels[color] || !!plateChannelsActive[color];
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
@@ -4514,20 +4537,17 @@
     // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
     // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
     // through them made grabbing one feel glitchy, since there was nothing physically there to
-    // register the interaction against). FIXTURE_GEOMETRIES (door/switch/plate/warp/goal/
-    // gravitywell) deliberately stay OUT of this list — their whole function depends on being
-    // walked ONTO/THROUGH, not bumped into; see FIXTURE_GEOMETRIES' own comment.
+    // register the interaction against). FIXTURE_GEOMETRIES (door/plate/warp/goal/gravitywell/
+    // Button) deliberately stay OUT of this list — their whole function depends on being walked
+    // ONTO/THROUGH, not bumped into; see FIXTURE_GEOMETRIES' own comment. Button lived here as a
+    // blocking Object through v2.27-v2.36; v2.37 moved it to Fixtures and non-blocking, see
+    // PUSH_BUTTON_GEOMETRY's own top-of-file comment.
     if (isBombGeometry(geometry)) return true;
     if (geometry === "magnet") return true;
     // v2.33: spawner is now a 4-orientation family (SPAWNER_ORDER) too — see that constant's own comment.
     if (SPAWNER_ORDER.includes(geometry)) return true;
     if (isAnyCannonGeometry(geometry)) return true;
     if (FAN_ORDER.includes(geometry)) return true;
-    // v2.27: the new push-button Object — solid so a kid bumps into it rather than walking
-    // through, exactly the same "physical object" reasoning as bomb/cannon/magnet/spawner above;
-    // being blocking is also WHAT makes "push into it" a meaningful gesture at all (see
-    // resolveAxis's own pushButtonChannelsActive comment).
-    if (geometry === PUSH_BUTTON_GEOMETRY) return true;
     return false;
   }
   // v2.23: the two geometries whose blocking is gated by a channel color rather than fixed —
@@ -4895,29 +4915,12 @@
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
             if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
-            // v2.27: approaching from the left and pushing rightward INTO it — one of the push-
-            // button's own two "which side pushed me" states (see PUSH_BUTTON_GEOMETRY). Any actor
-            // counts, same "no weight/mass comparison" rule plate already uses — captured here,
-            // not in a separate overlap scan, because a blocking tile means the actor is flush
-            // against its edge, never truly overlapping it (same reasoning bomb-arm/cannon-fire
-            // already moved on for the same reason — see "Physical objects vs. fixtures").
-            if (geometry === PUSH_BUTTON_GEOMETRY) {
-              pushButtonFacing[roomCellKey(currentRoomId, cx, cy)] = "left";
-              const color = colorAt(cx, cy);
-              if (color) pushButtonChannelsActive[color] = true;
-            }
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
             if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
-            // The button's other state — approached from the right, pushed leftward into it.
-            if (geometry === PUSH_BUTTON_GEOMETRY) {
-              pushButtonFacing[roomCellKey(currentRoomId, cx, cy)] = "right";
-              const color = colorAt(cx, cy);
-              if (color) pushButtonChannelsActive[color] = true;
-            }
           }
         } else {
           if (actor.vy > 0) {
@@ -5401,9 +5404,10 @@
     roundComplete();
   }
 
-  // A `switch` tile is an ordinary painted tile — felt purely on contact, same bucket as
-  // goal/diggable/hazard. An uncolored switch keeps its original v2.2 behavior: flip the one
-  // shared gravity toggle for every actor in the game. A colored switch (v2.9) instead flips
+  // Called for a Button touch (v2.37 — originally a `switch` tile, before that geometry was
+  // retired and Button took over its exact job) — felt purely on contact, same bucket as
+  // goal/diggable/hazard. An uncolored Button keeps the original v2.2 behavior: flip the one
+  // shared gravity toggle for every actor in the game. A colored Button (v2.9) instead flips
   // that color's own independent channel, permanently, until touched again — the counterpart to
   // a same-colored pressure plate's momentary version of the same channel (see
   // updatePressurePlates). Placement is what makes either version meaningful: a kid puts one at
@@ -5596,24 +5600,26 @@
   }
 
   // Player-only contact reactions for whatever the player is actually overlapping — geometry
-  // that doesn't block (goal/switch/door/warp/bomb/cannon — solid and diggable's own hazard/bouncy
+  // that doesn't block (goal/Button/door/warp/bomb/cannon — solid and diggable's own hazard/bouncy
   // handling, plus diggable's erosion, live in resolveAxis instead, since the player never overlaps
   // blocking geometry) and any modifier found there, including trap (v2.22: the player always
   // passes straight through a trap-modified cell regardless of its base geometry — see
   // isBlockingGeometry — so it always shows up here, never in resolveAxis's blocking loop).
   // Geometry and modifier are independent, so both can fire from the same cell.
   function checkPlayerTileContacts(player) {
-    // v2.31.2: which switch cells the player is overlapping THIS call — written back to
-    // switchTouchedCells at every exit point (including the early returns below) so a switch
+    // v2.31.2: which Button cells the player is overlapping THIS call — written back to
+    // switchTouchedCells at every exit point (including the early returns below) so a Button
     // only ever fires on the frame contact NEWLY begins, never on every frame it continues —
-    // see triggerFlip's own call below for the bug this fixes.
+    // see triggerFlip's own call below for the bug this fixes. (v2.37: this used to gate the
+    // separate "switch" geometry; Button inherited the exact same mechanism when it absorbed
+    // switch's job — see PUSH_BUTTON_GEOMETRY's own comment.)
     const touchedSwitchKeys = [];
     for (const { cx, cy } of overlappedCells(player)) {
       const geometry = geometryAt(cx, cy);
       const modifier = modifierAt(cx, cy);
       if (modifier === "trap") triggerTrap(cx, cy);
       else if (geometry === "goal") triggerGoal(player);
-      else if (geometry === "switch") {
+      else if (geometry === PUSH_BUTTON_GEOMETRY) {
         const key = cx + "," + cy;
         touchedSwitchKeys.push(key);
         const prevTouched = switchTouchedCells[player.id];
@@ -5654,7 +5660,7 @@
   }
 
   // v2.31: "throws something into it" per the direct request — a thrown/dropped physics object
-  // (CARRYABLE_KINDS: pushable, or a grabbed bomb/magnet/cannon/trampoline) flips a switch the
+  // (CARRYABLE_KINDS: pushable, or a grabbed bomb/magnet/cannon/trampoline) flips a Button the
   // same way the player's own contact already does. Deliberately its own small function rather
   // than folding into checkPlayerTileContacts above (that one is explicitly player-only, by name
   // and by its own comment, and goal/door/warp/hazard/lethal/bouncy don't make sense for an
@@ -5662,13 +5668,15 @@
   // asked for. triggerFlip already takes a generic actor parameter and reads a plain per-actor
   // `flipCooldown` field every actor already carries (decremented unconditionally in stepActor,
   // never player-gated), so nothing about it needed to change to support this — the gap was purely
-  // that nothing ever called it for anyone but the player.
+  // that nothing ever called it for anyone but the player. (Function name predates v2.37's switch→
+  // Button merge and was kept as-is, same "an internal name doesn't need to chase a palette rename"
+  // call as PUSHABLE_KIND after the crate rename.)
   function checkPhysicsObjectSwitchContacts(actor) {
     // v2.31.2: same edge-trigger fix as checkPlayerTileContacts above — a crate left resting on
-    // a switch would otherwise re-flip it every flipCooldown window for as long as it stayed put.
+    // a Button would otherwise re-flip it every flipCooldown window for as long as it stayed put.
     const touchedSwitchKeys = [];
     for (const { cx, cy } of overlappedCells(actor)) {
-      if (geometryAt(cx, cy) === "switch") {
+      if (geometryAt(cx, cy) === PUSH_BUTTON_GEOMETRY) {
         const key = cx + "," + cy;
         touchedSwitchKeys.push(key);
         const prevTouched = switchTouchedCells[actor.id];
@@ -6244,15 +6252,11 @@
 
   // Momentary channels (v2.9): recomputed from scratch every tick from whoever's currently
   // standing on a plate, rather than toggled by an event — the defining difference from a
-  // switch's permanent flip. Any actor works, pushable blocks included (they're full actors —
-  // see PUSHABLE_KIND), no weight/mass comparison needed, per the patch note.
+  // Button's permanent flip (v2.37 — see PUSH_BUTTON_GEOMETRY). Any actor works, pushable blocks
+  // included (they're full actors — see PUSHABLE_KIND), no weight/mass comparison needed, per the
+  // patch note.
   function updatePressurePlates() {
     plateChannelsActive = {};
-    // v2.27: reset here too (once a tick, before physics runs) — resolveAxis's x-axis branches
-    // repopulate it fresh every frame something is actually pushed against a button, the same
-    // "recomputed from scratch, never toggled by an event" shape plateChannelsActive itself uses,
-    // just fed by collision contact instead of an overlap scan.
-    pushButtonChannelsActive = {};
     for (const actor of actors) {
       for (const { cx, cy } of overlappedCells(actor)) {
         if (geometryAt(cx, cy) === "plate") {
@@ -6468,7 +6472,7 @@
     return actors.find(a => px >= a.x && px < a.x + a.w && py >= a.y && py < a.y + a.h);
   }
 
-  // Geometries a channel color can actually tag (v2.9) — a switch or plate emits/holds the
+  // Geometries a channel color can actually tag (v2.9) — Button or plate emits/holds the
   // channel, a door or solid segment listens to it. Anything else painted over a cell clears
   // whatever color tag was there; it's meaningless anywhere else.
   function isColorTaggable(geometry) {
@@ -6477,10 +6481,11 @@
     // v2.23: barrier joins solid as the two geometries a color actually GATES (see
     // isChannelGateGeometry) rather than merely switches on/off (fan) or uses for room-linking
     // (door).
-    // v2.27: the new push-button Object joins switch/plate as a third way to drive a channel —
-    // "Button" in the palette specifically so it never reads as a second "Switch" swatch with
-    // different behavior (a real point of confusion this naming choice was picked to avoid).
-    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
+    // v2.27: the new push-button Object joined plate as a second way to drive a channel. v2.37
+    // retired the separate permanent-toggle "Switch" fixture outright and gave Button its exact
+    // job instead (see PUSH_BUTTON_GEOMETRY's own comment) — it's now the one that reads a
+    // channel permanently (switchChannels), plate the one that reads it momentarily.
+    return geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -7050,7 +7055,7 @@
           let fired = false;
           if (modifier === "trap") { triggerTrap(cx, cy); fired = true; }
           else if (geometry === "goal") { triggerGoal(actor); fired = true; }
-          else if (geometry === "switch") { triggerFlip(actor, cx, cy); fired = true; }
+          else if (geometry === PUSH_BUTTON_GEOMETRY) { triggerFlip(actor, cx, cy); fired = true; }
           else if (geometry === "door") {
             // relocates the actor into a different room's actor list entirely — bail out of
             // this drag-clamp call immediately rather than keep resolving stale cells against
@@ -7518,15 +7523,6 @@
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() * 0.02);
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
-    } else if (tile.geometry === "switch") {
-      // v2.31: a genuine two-state toggle (knob+lever+shadow slid left=off/right=on, same shared
-      // housing either way — see SWITCH_OFF_ART/SWITCH_ON_ART) replacing the old uniform alpha-dim.
-      // A colored switch reads its own channel; an UNCOLORED switch has no channel of its own to
-      // read (it flips the room's shared gravity toggle instead — see triggerFlip), so it shows
-      // whichever way THAT boolean currently reads — same "the switch shows the state it drives"
-      // idea the old alpha-dim comment already had, just a real position now instead of a dim.
-      const on = (extra && extra.color) ? extra.channelOn : gravityOn();
-      drawArtScaled(ctx, on ? SWITCH_ON_ART : SWITCH_OFF_ART, x, y, TILE, cell);
     } else if (tile.geometry === "plate" && extra && extra.color) {
       // v2.27: a real red/green indicator light, not just the uniform alpha-dim every other
       // switch/plate still uses — the plate's own reference art already reads as "a light strip
@@ -7539,21 +7535,24 @@
       const litIcon = extra.channelOn ? recoloredArt(icon, PLATE_INDICATOR_OFF_HEX, PLATE_INDICATOR_ON_HEX) : icon;
       drawArtScaled(ctx, litIcon, x, y, TILE, cell);
       ctx.restore();
-    } else if (tile.geometry === PUSH_BUTTON_GEOMETRY && extra && extra.color) {
-      // v2.27: shows which side last pushed it by mirroring the same base art horizontally —
-      // "two states, left and right" without needing a second hand-drawn sprite — plus the same
-      // channelOn alpha-dim every switch/plate already uses. See pushButtonFacing/
-      // pushButtonChannelsActive (resolveAxis's x-axis branches) for how facing/on are decided.
-      ctx.save();
-      ctx.globalAlpha = extra.channelOn ? 1 : 0.55;
-      if (extra.facing === "right") {
+    } else if (tile.geometry === PUSH_BUTTON_GEOMETRY) {
+      // v2.37: a genuine two-state toggle, taking over "switch"'s exact job (see this geometry's
+      // own top-of-file comment) but keeping Button's OWN v2.27 art and mirror-based rendering —
+      // "two states, left and right" without a second hand-drawn sprite, same mechanism, just now
+      // reading on/off channel state instead of which side was last pushed. A colored Button reads
+      // its own channel; an UNCOLORED one has no channel of its own to read (it flips the room's
+      // shared gravity toggle instead — see triggerFlip), so it shows whichever way THAT boolean
+      // currently reads — the exact "the tile shows the state it drives" idea "switch" used to.
+      const on = (extra && extra.color) ? extra.channelOn : gravityOn();
+      if (on) {
+        ctx.save();
         ctx.translate(x + TILE, y);
         ctx.scale(-1, 1);
         drawArtScaled(ctx, icon, 0, 0, TILE, cell);
+        ctx.restore();
       } else {
         drawArtScaled(ctx, icon, x, y, TILE, cell);
       }
-      ctx.restore();
     } else if (BARRIER_ORDER.includes(tile.geometry)) {
       // A moveable wall/door: slides straight out of the tile in its own facing direction as it
       // opens, straight back as it closes, instead of solid's own instant ghost-outline —
@@ -7742,12 +7741,6 @@
                 const target = state ? (state.on ? 1 : 0) : 0;
                 const start = 1 - target;
                 extra.slideFrac = start + (target - start) * Math.min(1, elapsed / BARRIER_SLIDE_MS);
-              }
-              // v2.27: which side last pushed this button — see resolveAxis's x-axis branches,
-              // where pushButtonFacing is actually set; defaults to "left" (the base, unmirrored
-              // art) for a button that's never been pushed yet.
-              if (tile.geometry === PUSH_BUTTON_GEOMETRY) {
-                extra.facing = pushButtonFacing[roomCellKey(currentRoomId, bx, y)] || "left";
               }
             }
           }
@@ -8220,8 +8213,6 @@
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
-      `const SWITCH_OFF_ART = ${JSON.stringify(SWITCH_OFF_ART)};`,
-      `const SWITCH_ON_ART = ${JSON.stringify(SWITCH_ON_ART)};`,
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
       `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
       `const RECIPES = ${JSON.stringify(RECIPES)};`,
@@ -8305,8 +8296,6 @@
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
-  let pushButtonChannelsActive = {};
-  let pushButtonFacing = {};
   let switchTouchedCells = {}; // v2.31.2, edge-trigger bookkeeping — see checkPlayerTileContacts
   let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
   let playerRoomId = GAME_DATA.playerRoomId;
@@ -8360,7 +8349,6 @@
     spawnerRuntime = {};
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
     plateChannelsActive = {}; channelStateSince = {};
-    pushButtonChannelsActive = {}; pushButtonFacing = {};
     switchTouchedCells = {};
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
