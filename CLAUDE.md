@@ -3649,6 +3649,103 @@ modes are confirmed unaffected; the same snap-on-entry and steady-while-idle beh
 identically in a freshly exported standalone game; and the full 5-sample regression sweep plus a
 fresh Button+Gate export both still run clean.
 
+## Follow camera, round two: a real render bug, plus a genre-standard dead zone (v2.40)
+
+Direct follow-up right after v2.39 shipped its easing fix: "this is still very jerky. 1) the
+motion needs to be smooth (not moving a tile at a time), and 2) the follow camera mode should
+probably be more a transition... Is there not a common convention for how this is done in video
+games?" Two separate things were actually wrong, and the second request named a real, well-known
+genre convention this engine had never implemented.
+
+**The actual root cause of "moving a tile at a time" was never cameraX — it was the renderer.**
+v2.39's exponential ease made `cameraX` itself move smoothly, but `renderRoomContents` (and
+`drawFanStream`, and the faint grid overlay) had always taken a pre-floored `viewStartCol =
+Math.floor(viewOffsetPx / TILE)` and drawn every tile at `sx * TILE` — a plain whole-tile screen
+column. No matter how smoothly the underlying camera position eased, the DRAWN tiles only ever
+jumped to a new position once `viewOffsetPx` crossed a full `TILE` (32px) boundary, snapping
+instantly the rest of the time. Confirmed by code read, not just suspected: `renderActors` already
+used the raw continuous `viewOffsetPx` to position actor sprites (`actor.x - viewOffsetPx`), so the
+player itself was always moving smoothly — the MISMATCH between a smoothly-sliding player sprite
+and a tile-snapping background underneath it is exactly what would read as jerky regardless of any
+camera-side easing. This had been latent since v2.17 (Runner mode's own continuously-advancing
+`cameraX` has always had the identical bug, just apparently never flagged) — Fixed and Build-mode
+panning never exposed it because both only ever move in whole-tile steps to begin with.
+
+**Fix: `renderRoomContents`/`drawFanStream` now draw every tile at its exact continuous screen
+position** (`screenX = bx * TILE - viewOffsetPx`) instead of a snapped column, sweeping one extra
+edge column (`firstCol` to `firstCol + COLS` inclusive) so nothing pops in or out as the fractional
+remainder crosses 0 — harmless when the extra column lands off-canvas. The three `renderGame` call
+sites now pass the real `viewOffsetPx` straight through instead of a pre-floored `viewStartCol`,
+which no longer exists as a concept. The thin grid overlay (`rgba(255,255,255,0.06)` lines, drawn
+unconditionally in both Build and Play) used to sit at fixed screen columns regardless of
+`viewStartCol` — harmless before, since every camera that ever moved did so in whole tiles, but it
+would have visibly drifted out of sync with the now-smoothly-scrolling tiles underneath it, so it
+scrolls with the same `screenX` formula now. This fix is a no-op for Build mode and Fixed rooms
+(`editorPanCol * TILE` is always an exact tile multiple) — only Follow and Runner, the two camera
+modes with a genuinely sub-tile position, are affected.
+
+**The second ask — "more a transition," with specific numbers (85%/40%) — named a real, standard
+pattern: a camera dead zone with a look-ahead anchor**, the same family of camera used in Mario,
+Metroid, and Celeste. v2.39's continuous "always centered on the player" easing was replaced
+outright (not layered on top) because dead-center tracking is structurally the wrong shape for this
+ask — a kid's own small side-to-side wiggling continuously nudges a centered camera, which never
+reads as "smooth," only as "still twitchy, just damped." The dead zone fixes that at the source: the
+camera doesn't move AT ALL while the player stays within a band of the screen, and only shifts once
+they approach an edge.
+
+**Mechanically**: `CAMERA_DEADZONE_TRIGGER_FRAC` (0.85) is the screen fraction a shift is triggered
+at; `CAMERA_DEADZONE_ANCHOR_FRAC` (0.40) is where the player ends up resting after the shift — 40%
+from the left when moving right, mirrored to 60% from the left (= 40% from the right) when moving
+left, the standard "look-ahead" bias of showing more room in the direction of travel than behind it.
+Letting the trigger and the rest point be two DIFFERENT numbers, rather than a single dead-zone edge
+the player is simply pinned against (the more textbook Mario-style shape), is what produces the
+"reveals a chunk of room, then holds" feel that was explicitly asked for, instead of a camera that
+creeps along just barely keeping pace with the player's own edge-hugging.
+
+**A real design mistake caught and fixed before shipping, worth remembering for any future
+dead-zone-style mechanic**: a first implementation computed the shift target fresh every tick purely
+from the CURRENT frac — "chase the 40% anchor only while frac > 85%, otherwise freeze" — on the
+theory that this would be self-terminating with no state needed. Verified by direct trace and found
+wrong: since the trigger (85%) and the anchor (40%) are different numbers, the eased `cameraX` only
+has to crawl a little before frac dips back under 85%, and the very next tick's "else freeze" branch
+catches it there — the shift stalled around ~78-80% and never got anywhere near 40%. Fixed with real
+remembered state, `cameraShiftSide` (`null`/`"right"`/`"left"`, reset alongside `cameraX`/
+`cameraFollowSnapNeeded` in `activateRoom`): once a trigger edge is crossed, the camera keeps
+chasing THAT side's anchor — recomputed every tick from the player's live position, so a sustained
+run keeps revealing room continuously — until frac actually reaches the anchor (within
+`CAMERA_DEADZONE_SETTLE_EPS`, 0.02) or the camera hits the room's own edge, only then dropping back
+to `null` and letting the dead zone re-engage. `CAMERA_DEADZONE_SHIFT_RATE` (16, faster than v2.39's
+own 9) is the same exponential-ease shape as before, just snappier — "smoothly and quickly," not a
+gentle idle correction, and genuinely irrelevant while frozen: inside the dead zone `cameraX` is
+simply never written to, not eased toward itself.
+
+**The very first Follow-mode tick after a room becomes hot still snaps instantly to a plain centered
+target** (`cameraFollowSnapNeeded`, unchanged from v2.39) rather than picking a 40%/60% anchor —
+there's no established direction of travel yet on room entry to pick one from, and easing in from
+the fresh room's `cameraX = 0` would visibly slide the camera in from the edge on every single
+entry, which was never asked for.
+
+**Export pipeline**: `CAMERA_DEADZONE_TRIGGER_FRAC`/`CAMERA_DEADZONE_ANCHOR_FRAC`/
+`CAMERA_DEADZONE_SETTLE_EPS`/`CAMERA_DEADZONE_SHIFT_RATE` each got `constantsSource` lines (replacing
+v2.39's single `CAMERA_FOLLOW_RATE` line, now gone); `cameraShiftSide` was added to the export
+template's own duplicate global declarations alongside its existing `cameraX`/
+`cameraFollowSnapNeeded` lines. `updateCamera`/`activateRoom`/`renderRoomContents`/`drawFanStream`
+were already shared into the export from earlier patches, so the fixed renderer and the new
+dead-zone behavior both apply automatically.
+
+Verified with Playwright: a small in-dead-zone player movement produces exactly zero camera
+movement (not just "very little"); crossing the 85% trigger moving right shifts the camera forward
+and the player settles within 5% of the 40% anchor, then the camera freezes again (two more samples
+300ms apart read identically); the mirrored leftward case (15% trigger, 60% rest point) produces the
+same result in the other direction; `cameraX` itself is confirmed to move in genuine non-32px-multiple
+(sub-tile) increments during an active shift, proving the value feeding the renderer is truly
+continuous; the camera clamps correctly and holds rock-stable (no oscillation) when the player is
+pinned near a room's physical edge; Runner mode (which already had a continuously-advancing
+`cameraX`, now benefiting from the same render fix) plays cleanly and its camera genuinely advances;
+the exact same dead-zone-freeze/trigger/settle sequence is confirmed working identically in a
+freshly exported standalone game; and the full 5-sample regression sweep plus a fresh Button+Gate
+export both still run clean.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
