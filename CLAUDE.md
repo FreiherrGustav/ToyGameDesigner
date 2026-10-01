@@ -1584,6 +1584,169 @@ correctly migrates both to their `-n` equivalents; and the full 5-sample
 regression sweep plus a fresh export (with a freshly rotated Gate and
 spawner painted in) both run error-free.
 
+### Spawner always fires (concurrency cap removed, launch scatter actually fixed); crates destroyed by lethal; Large Stone, a lethal-immune pushable for building bridges (v2.34)
+
+Direct feedback right after v2.33 shipped: "I'm getting a glitch with the
+spawner where it won't produce anything. This effect is more pronounced
+if I have more than 1 on the screen... Spawner should always produce the
+thing." Investigated rather than taken at face value, since the user's
+own guess (a population cap) and the actual felt symptom turned out to be
+two different, both-real things.
+
+**The cap was real, and is now gone — but a direct trace proved it was
+never silently stuck.** `SPAWNER_MAX_CONCURRENT` (4) made `tickSpawners`
+skip its own firing cycle outright once that many of its own content were
+still alive. A live trace (two spawners, real wall-clock ticks, 24
+seconds) showed population cycling normally the whole time — 2, 4, 6, 8,
+back down to 6, repeating — never stuck at a fixed count, let alone 0. So
+the cap was doing exactly its v2.19 job ("manage the population"), just a
+job the user no longer wants: the ask is for the timer to NEVER skip a
+cycle, full stop, not for a higher ceiling. `SPAWNER_MAX_CONCURRENT` is
+removed outright (not just raised) — `SPAWN_TTL_MS` (8s) alone now bounds
+how long any one spawned actor lives, which was already enough to prevent
+true runaway growth even with the cap gone.
+
+**The actual "isn't producing anything" feeling was a real, separate bug
+— one v2.33's own launch-direction feature introduced.** A direct position
+trace (one spawner, real gravity, 13 seconds) found three separate hazard
+balls from the same north-facing spawner settling within ~40px of each
+other — visually indistinguishable from a single ball sitting there. Root
+cause: v2.33 replaced the old undirected small random "pop out" kick with
+a strong, FIXED-direction launch (~420px/s dead straight up for a
+north-facing spawner) — gravity brings that straight back down to almost
+the exact same column every time, with only a small perpendicular jitter
+(±40px/s on `vx`) to separate repeat spawns.
+
+**First fix attempt (bigger velocity jitter) was traced and found not to
+work, for a reason specific to this engine's physics model** — worth
+keeping in mind for anything else that tries to "spread out" a
+non-steering actor's trajectory. `stepActor`'s `applyAxisFriction(actor,
+"x", dt, ax)` call runs UNCONDITIONALLY every frame, airborne or not; a
+spawned hazard ball has zero self-driven horizontal accel (`ax` stays 0),
+so `FRICTION_DECEL` (1800px/s²) eats ANY initial horizontal jitter almost
+instantly regardless of its starting magnitude. Confirmed with a direct
+frame-by-frame trace: a synthetic actor given `vx = 150` decayed
+150→60→30→0 in four ticks (~0.067s), covering barely 5px of real
+horizontal travel before friction fully killed it — `bouncyCooldown`'s
+"recentlyLaunched" exemption only skips the speed-CAP clamp elsewhere in
+`stepActor`, never this friction call. Bumping `SPAWNER_PERPENDICULAR_JITTER`
+from the old ±40 to ±150 therefore barely changed the observed spread at
+all (confirmed by re-running the same position trace) — the real
+constraint is friction, not the jitter's own size.
+
+**The actual fix: jitter the spawn POSITION itself, not just its launch
+velocity.** A positional offset is permanent — nothing decays it the way
+friction eats a velocity kick. `tickSpawners` now offsets `px`/`py` by
+`SPAWNER_POSITION_JITTER` (48px, ~1.5 tiles) along the axis perpendicular
+to the spawner's own facing (computed the same `perpX = -dir.y, perpY =
+dir.x` 90°-rotation `drawGameplayTile`'s Gate branch already uses) before
+ever calling `spawnActorAt` — so successive spawns start from genuinely
+different columns (for a vertical-facing spawner) or rows (horizontal-
+facing), landing in visibly different spots regardless of how fast
+friction consumes their velocity afterward. Re-verified with a fresh
+position trace after the fix: raw sampled offsets spanned the expected
+~±46px range, and a real multi-spawn run showed a healthy ~60px spread
+between landed actors (small-sample variance aside — any given run of 3-4
+samples from a uniform distribution won't always hit the full range, but
+the mechanism itself is confirmed working, unlike the velocity-only
+attempt which was mathematically incapable of producing real spread no
+matter how large the constant). `SPAWNER_PERPENDICULAR_JITTER` (the old
+velocity-based ±150) is kept at a small value purely for launch-feel
+variety frame-to-frame — it is explicitly NOT what separates spawns
+anymore, and its own comment says so to head off the exact same mistake
+being made twice.
+
+**Crates destroyed by lethal; most other objects deliberately untouched.**
+Direct request: "Crates should be destroyed when they touch lethal (lava,
+fire, etc). Not all objects should, though." `checkPhysicsObjectLethalContacts(actor)`,
+called from `stepActor` scoped to `PUSHABLE_KIND` specifically (not the
+whole `CARRYABLE_KINDS` list) — magnet, Trampoline, bomb2, cannon2, and
+the new Large Stone are all left completely unaffected by lethal, Large
+Stone deliberately so (see below). A wooden crate burning/sinking in
+lava is intuitive; a metal magnet or a stone doing the same isn't, so
+this is a narrow opt-in list rather than an opt-out one. Mirrors the
+same `playActorSound`/`playRecipe("popVanish")`/delayed-`removeActorById`
+shape every other "this actor vanishes" reaction in this file already
+uses (fleer-pop, collectible-gather, spawner TTL-despawn) — `splat` is
+the reused sound (its own family already covers "a life lost," the same
+severity tier as meeting a fatal end in lava). A new `actor.destroyed`
+flag (distinct from `ttlPopped`, which is specifically spawner-TTL's own
+state and could otherwise collide if a crate is ALSO loaded as spawner
+content) guards the ~220ms `popVanish` window against re-firing every
+frame. **Deliberately scoped to non-blocking lethal only** (`none:lethal`
+— the "lava/fire, a pool you fall into" case the request names): a
+blocking lethal tile (`solid:lethal`, a spike trap) already stops a crate
+at its edge via ordinary collision the same way any wall would, so there's
+no cell left to actually overlap and this reaction never fires there — a
+real, acknowledged scope boundary, not an oversight; flag it to the user
+before trying to extend "destroyed by lethal" to a spike wall a crate is
+thrown into.
+
+**Large Stone: a second placeable physics object, immune to lethal by
+design, for building bridges.** Direct request, with the user's own
+`pat()` art supplied directly: "a moveable object... I'd like players to
+be able to build a bridge across the lava with these by throwing them."
+Placed as a real actor exactly like pushable/crate (`OBJECT_ACTOR_KINDS`,
+`LARGE_STONE_KIND`/`LARGE_STONE_DEF_ID`), not a painted-tile-that-
+converts-on-grab like bomb2/cannon2/magnet/trampoline — it has no fixed
+standalone tile mechanic of its own, it's always just a solid, shovable,
+standable thing, the exact shape pushable already is. Needed its OWN
+distinct temperament (not just a re-skinned `PUSHABLE_KIND`) specifically
+so it could be EXCLUDED from the new lethal-destroy reaction while a
+crate isn't — the whole point of the piece is that it survives sitting in
+lava. `STANDABLE_OBJECT_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND]`
+generalizes every place that used to check `=== PUSHABLE_KIND` directly
+for "can other actors stand on/push this" physics: `shovePushables`,
+`actorBlockedByOtherPushables`, `resolveActorContact`'s crush-on-fall-
+from-above branch, and both cannon-trigger checks (`resolveAxis`/
+`clampDragPosition`'s `fireBlockingTileReaction`) that let a pushed object
+fire a cannon it's shoved into. `CARRYABLE_KINDS` also gained
+`LARGE_STONE_KIND`, so it's grabbable/throwable (confirmed end to end:
+grab via E, charge-throw toward a lava gap, the stone survives landing in
+it) and picks up the v2.28 bounce-off-bouncy/Trampoline and v2.31
+switch-flip-on-contact widenings for free, same as every other physics
+object. **Deliberately NOT added to `magnetable`** (pushable/collectible
+only) — a stone isn't magnetic, the same kid-logic reasoning that scopes
+every other modifier/reaction in this toy.
+
+**`findDefaultActorDef`'s name-match fragility (first found by the v2.27
+crate rename) needed handling from day one here, not discovered the hard
+way again.** Large Stone's `actorDefs` entry needs a friendly `name:
+"large stone"` (not the raw kind string `"largestone"`) for the palette
+label, which breaks `findDefaultActorDef`'s own `name === kind` match —
+exactly pushable/crate's old bug shape. Rather than repeating pushable's
+ad hoc ternary (`kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID : ...`) at each
+of its two call sites, a small shared lookup, `KIND_DEF_ID_OVERRIDES`/
+`defaultDefIdForKind(kind)`, replaces both — `renderObjectSwatches`' own
+def lookup and `selectActorKind`'s `selectedActorDefId` assignment both
+now call `defaultDefIdForKind(kind)` instead of duplicating the ternary,
+so a third future override (if one's ever needed) only has to be added
+once. `LARGE_STONE_DEF_ID` also joined the `restoreProjectSnapshot`
+actorDefs backfill list, the same one-line addition every new built-in
+actor def needs per that list's own established comment.
+
+**Export pipeline**: `LARGE_STONE_KIND`/`LARGE_STONE_DEF_ID`,
+`STANDABLE_OBJECT_KINDS`, `SPAWNER_POSITION_JITTER`, and the (now
+purely-cosmetic) `SPAWNER_PERPENDICULAR_JITTER` each got their own
+`constantsSource` line; `checkPhysicsObjectLethalContacts`/
+`destroyPhysicsObjectInLethal` were added to `runtimeFunctions`. Every
+function that reads these (`shovePushables`, `resolveActorContact`,
+`resolveAxis`, `tickSpawners`, `spawnActorAt`, ...) was already shared
+into the export from earlier patches, so only the new constants/functions
+themselves needed wiring in — no new export-side gaps found this round.
+
+Verified with Playwright (18 checks): a "large stone" swatch renders
+alongside the untouched "crate" swatch; a placed Large Stone can be stood
+on top of (`grounded: true`) exactly like a crate; a Large Stone
+relocated into a lava pool survives (still present 1.5s later) while a
+crate that falls into the same lava is destroyed (removed from `actors`)
+within its popVanish window; grabbing a placed Large Stone with E and
+charge-throwing it toward a lava gap leaves it intact after landing; a
+spawner kept firing with live content present after a sustained 15-second
+run (no stuck-at-zero state); and the full 5-sample regression sweep plus
+a fresh export (with a freshly painted Large Stone, crate, and spawner)
+all run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
