@@ -801,8 +801,17 @@
   const SPAWNER_WINDUP_MS = 350;
   // v2.34: SPAWNER_MAX_CONCURRENT (a hard per-spawner population cap) removed outright — direct
   // feedback that a spawner should always fire on schedule, never skip a cycle for having "too
-  // much" of its own content still alive. SPAWN_TTL_MS alone now bounds population.
-  const SPAWN_TTL_MS = 8000;
+  // much" of its own content still alive.
+  // v2.35 then capped a spawner to one live spawn at a time (SPAWN_TTL_MS auto-popping it after
+  // 8s) as the replacement population manager. v2.38: direct follow-up — "they should be able to
+  // make lots of the item, no reason they should automatically disappear" — both the single-slot
+  // cap AND the blanket timed despawn are gone. A spawner now fires on schedule every
+  // SPAWN_INTERVAL_MS, full stop, and what it produces persists exactly like anything else placed
+  // in the room (caught, popped by touch, destroyed by lethal — all still work, just nothing pops
+  // it on a clock). See tickSpawners' own comment for the one guard that's left: it still won't
+  // spawn ON TOP of an actor already sitting in its launch cell, since "overlapping with no place
+  // to go" is the one case where skipping a cycle (not an unbounded pile of exact-overlapping
+  // clones) is the right call.
   // The default spawner content when nothing's been loaded into it — a plain physical hazard that
   // bounces off every wall (not just bouncy-tagged ones — see resolveAxis's own bouncy check) under
   // gravity, with no steering of its own (same "full physics, zero self-driven accel" shape a
@@ -6315,13 +6324,12 @@
   // behavior. updateCamera/checkRunnerFailState right below stay Play-only on purpose: those really
   // are session concepts (a run's camera, a run's fail state) with no meaning while just tinkering.
   function tickSpawners(dt) {
-    const now = performance.now();
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < roomCols(); x++) {
         const geometry = geometryAt(x, y);
         if (!SPAWNER_ORDER.includes(geometry)) continue;
         const key = roomCellKey(currentRoomId, x, y);
-        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, activeId: null, warnedBlocked: false });
+        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, warnedBlocked: false });
         state.clock += dt * 1000;
         // v2.35.2: direct bug report — a spawner with nothing but a wall or the room's own edge
         // immediately in its facing direction (e.g. a north-facing spawner sitting on row 0) could
@@ -6349,23 +6357,23 @@
           }
           continue;
         }
-        // v2.35: direct follow-up to v2.34's own "always produce the thing" — a spawner now keeps
-        // at most ONE of its own spawns alive at a time, replacing both the old hard population cap
-        // (v2.33 and earlier, removed in v2.34) and v2.34's own uncapped-but-jittered attempt. The
-        // clock keeps counting even while occupied (so the instant the current one disappears —
-        // caught, popped by its own TTL, destroyed in lethal, whatever — a spawner whose timer has
-        // already run out fires again immediately rather than waiting out a fresh full interval);
-        // actually firing is gated on the slot being empty. A plain `actors.some(...)` scan is all
-        // "is it still alive" needs — it catches every removal path (TTL despawn, lethal
-        // destruction, a chaser's own pop-on-catch, anything else that ever calls removeActorById)
-        // for free, with no per-reaction bookkeeping to keep in sync.
-        const occupied = state.activeId != null && actors.some(a => a.id === state.activeId);
+        // v2.35 capped a spawner to one live spawn at a time ("occupied" — tracked via activeId).
+        // v2.38: direct follow-up — "they should be able to make lots of the item" — that cap is
+        // gone. A spawner fires on schedule every SPAWN_INTERVAL_MS regardless of how many of its
+        // own earlier spawns are still around; nothing about an existing spawn's lifetime changes
+        // just because another one is about to join it. The ONE thing still worth checking is
+        // whether the exact cell it's about to launch into already has an actor sitting in it —
+        // not a population cap, just not materializing a brand-new actor fully overlapping an
+        // existing one with literally no room to appear in ("overlapping with no place to go" is
+        // the one case where skipping this cycle, not piling up exact-overlapping clones, is right).
+        const destOccupied = cellOccupiedByActor(x + dir.x, y + dir.y);
         const timeToNext = SPAWN_INTERVAL_MS - state.clock;
         // the wind-up pulse — a brief physical "tell" right before firing, a structural stand-in
         // for a numeric countdown this toy never shows anywhere (see renderRoomContents). Suppressed
-        // while occupied — there's nothing about to fire yet, so a pulse would just read as a lie.
-        state.windUp = !occupied && timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
-        if (occupied || state.clock < SPAWN_INTERVAL_MS) continue;
+        // while the destination's occupied — there's nothing about to fire yet, so a pulse would
+        // just read as a lie.
+        state.windUp = !destOccupied && timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
+        if (destOccupied || state.clock < SPAWN_INTERVAL_MS) continue;
         state.clock = 0;
         const defId = spawnerContents[key] || HAZARD_BALL_DEF_ID;
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
@@ -6389,21 +6397,28 @@
         // the spawner's own tile at all, sidestepping the ambiguity rather than trying to teach
         // resolveAxis (shared, delicate, see its own v2.20.1 history) which of two overlapping
         // blocking cells is the "real" one.
-        state.activeId = spawnActorAt(defId, (x + dir.x) * TILE + TILE / 2, (y + dir.y) * TILE + TILE / 2, key, now, dir).id;
+        spawnActorAt(defId, (x + dir.x) * TILE + TILE / 2, (y + dir.y) * TILE + TILE / 2, key, dir);
       }
     }
   }
-  // v2.19: TTL despawn — every actor a spawner created pops on its own after SPAWN_TTL_MS, cap or
-  // no cap, the same "manage the population" mechanic the validated prototype tested. ttlPopped
-  // guards against re-triggering every frame while a popped actor is still mid-fade, waiting on
-  // its own removeActorById.
-  function tickSpawnedTTL() {
-    const now = performance.now();
-    actors.forEach(actor => {
-      if (!actor.spawnerKey || actor.ttlPopped) return;
-      if (now - actor.spawnBornAt > SPAWN_TTL_MS) despawnSpawnedActor(actor);
-    });
+  // v2.38: is any actor currently sitting in this cell? Used only to stop a spawner from
+  // materializing a brand-new actor fully on top of one that's already there — not a population
+  // cap, just a "don't spawn into a cell with literally no room" guard (see tickSpawners' own
+  // comment). A plain AABB-vs-cell-rect overlap scan, same shape as the tile-blocking checks
+  // already use, just against actors instead of geometry.
+  function cellOccupiedByActor(cx, cy) {
+    const left = cx * TILE, top = cy * TILE, right = left + TILE, bottom = top + TILE;
+    return actors.some(a => a.x < right && a.x + a.w > left && a.y < bottom && a.y + a.h > top);
   }
+  // v2.19-v2.35: a spawned actor used to pop on its own after SPAWN_TTL_MS, a timed population
+  // manager. v2.38: removed outright — direct feedback that spawned content "should be able to
+  // make lots of the item, no reason they should automatically disappear." despawnSpawnedActor
+  // itself is untouched and still very much in use — every spawned-content "pop on touch" reaction
+  // below (a hazard ball popping when it hurts the player, a stationary/wanderer counting as
+  // "popped" when bumped) calls it directly; only the standing TIMER that used to call it on a
+  // clock, with no contact needed, is gone. ttlPopped still guards those touch-triggered calls
+  // against re-firing every frame while a popped actor is mid-fade, waiting on its own
+  // removeActorById.
   function despawnSpawnedActor(actor) {
     actor.ttlPopped = true;
     sounds.pop();
@@ -6442,7 +6457,6 @@
     // v2.20: spawners run always-live, Build mode included — see tickSpawners' own comment on why.
     if (!roomTransition) {
       tickSpawners(dt);
-      tickSpawnedTTL();
     }
     if (appMode === "play" && !roomTransition) {
       updateCamera(dt);
@@ -6951,8 +6965,10 @@
   }
 
   // Creates a live actor instance the same shape placeNewActor does, minus anything player-
-  // specific (a spawner never produces the player), tagged with which spawner made it and when —
-  // spawnerKey lets tickSpawnedTTL find it again; spawnBornAt is what its TTL counts down from.
+  // specific (a spawner never produces the player), tagged with which spawner made it —
+  // spawnerKey is what the touch-triggered "pop on contact" reactions (resolveActorContact) check
+  // for. v2.38 dropped the timed spawnBornAt/TTL tracking this used to also carry — see
+  // despawnSpawnedActor's own comment on why.
   // v2.33: `dir` (always supplied by tickSpawners — SPAWNER_DIRECTIONS[geometry]) is a real launch
   // in whichever way the spawner is rotated to face, like a gentle cannon — direct request
   // ("rotating a spawner should set which way its contents get launched"), replacing the old
@@ -6963,7 +6979,7 @@
   // else, is what "very clearly comes out in the intended direction" means; under gravity that bias
   // was redundant anyway (gravity takes over the instant it launches), and in free-roam it was the
   // one remaining thing nudging a horizontal shot off its own facing axis.
-  function spawnActorAt(defId, px, py, spawnerKey, nowMs, dir) {
+  function spawnActorAt(defId, px, py, spawnerKey, dir) {
     const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
     const actor = {
       id: nextActorInstId++, defId, x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
@@ -6981,7 +6997,7 @@
       cannonCooldown: 0, warpCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       carried: false,
-      spawnerKey, spawnBornAt: nowMs
+      spawnerKey
     };
     actors.push(actor);
     // v2.20: an arrival deserves the same "something happened" treatment a despawn already gets
@@ -8118,7 +8134,7 @@
       updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
-      spawnActorAt, tickSpawners, tickSpawnedTTL, despawnSpawnedActor,
+      spawnActorAt, tickSpawners, cellOccupiedByActor, despawnSpawnedActor,
       stepActor, tick,
       drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
@@ -8177,7 +8193,6 @@
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
       `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS};`,
-      `const SPAWN_TTL_MS = ${SPAWN_TTL_MS};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
       `const CHANNEL_COLORS = ${JSON.stringify(CHANNEL_COLORS)};`,
       `const CHANNEL_COLOR_HEX = ${JSON.stringify(CHANNEL_COLOR_HEX)};`,
