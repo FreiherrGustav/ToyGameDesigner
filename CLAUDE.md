@@ -1747,6 +1747,38 @@ run (no stuck-at-zero state); and the full 5-sample regression sweep plus
 a fresh export (with a freshly painted Large Stone, crate, and spawner)
 all run error-free.
 
+### Large Stone's colors refined (v2.34.1)
+
+Direct, narrow follow-up right after v2.34 shipped: "simply an update of
+the colors for the large stone...not a replace" — a second, refined
+colorway for the same piece supplied as a new `pat()` call, explicitly
+scoped to the existing object rather than a second parallel "Large Stone
+2" (the cannon2/bomb2 side-by-side pattern was available and deliberately
+not used here — the user's own wording ruled it out). `actorDefs[LARGE_STONE_DEF_ID].art`
+was swapped in place for the new pixel data (new row layout, five-color
+legend instead of six — `F`/`"#164f82"` dropped) — same def id, same
+mechanics, same everything else, just different pixels.
+
+**Hit the exact `migrateStaleFactoryArt` gap v2.27.1 already named for any
+future revision of existing factory content** — Large Stone's art had
+only shipped one patch earlier, but `restoreProjectSnapshot`'s actorDefs
+backfill only fills *missing* keys, and `LARGE_STONE_DEF_ID` already
+existed, so an already-autosaved project from v2.34 would keep shadowing
+the new colors with the old ones forever without this. `LEGACY_LARGE_STONE_ART`
+(a frozen copy of v2.34's original six-color art) and a new
+`migrateStaleFactoryArt` branch — byte-for-byte `artEquals` check, upgrade
+to `FACTORY_DEFAULT_SNAPSHOT.actorDefs[LARGE_STONE_DEF_ID]` only on an
+exact match — follow the identical pattern already established for
+pushable/gem, so a kid's own repaint of Large Stone (if anyone's made one
+in the one-patch window this existed) is left alone.
+
+Verified with Playwright: a fresh project's Large Stone art matches the
+new colors exactly; a simulated snapshot carrying the old v2.34 art
+upgrades to the new colors on restore; a simulated hand-edited Large
+Stone art survives the migration untouched; the swatch still renders
+under the "large stone" title; and the full sample regression sweep plus
+a fresh export (with a placed Large Stone) both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
