@@ -6338,9 +6338,27 @@
         state.clock = 0;
         const defId = spawnerContents[key] || HAZARD_BALL_DEF_ID;
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
-        // SPAWNER_DIRECTIONS/spawnActorAt. v2.35: spawned dead-center on the spawner's own cell, no
-        // perpendicular position offset (see SPAWNER_LAUNCH_SPEED's own comment on why that's gone).
-        state.activeId = spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now, dir).id;
+        // SPAWNER_DIRECTIONS/spawnActorAt. v2.35 spawned it dead-center on the SPAWNER's own cell
+        // (no perpendicular offset) — but v2.35.3 found that still wasn't enough: an actor that size
+        // (ACTOR_SIZE, nearly a full tile) spawned at the spawner's own cell center still overlaps
+        // the spawner's own tile for its first physics frame or two, even when moving toward
+        // already-open space, because it hasn't traveled far enough yet to fully clear its own
+        // birth cell. Since the spawner tile is itself blocking (v2.21), resolveAxis's per-axis
+        // collision scan — which resolves against the FIRST blocking cell its AABB overlaps, in
+        // ascending row/column order, not the one actually in the direction of travel — can find the
+        // actor's own (still-overlapping) spawner cell before it ever reaches the clear cell beyond
+        // it, and misreads "still touching my own tile, vy>0" as "landed on a floor from above,"
+        // snapping it to the WRONG side. Confirmed by a frame-by-frame trace: a spawner facing a
+        // direction `isCellBlocking` correctly reports as open still produced a runaway — the newly
+        // spawned actor got teleported off the top of the room and never stopped, exactly the v2.35.2
+        // signature, just reached by a different path (self-overlap at birth, not a blocked facing).
+        // Fix: spawn directly INTO the cell the spawner is facing (already confirmed clear by the
+        // `launchBlocked` check above) instead of the spawner's own cell — the actor's full AABB
+        // (ACTOR_SIZE < TILE) fits entirely inside that one cell with margin, so it never overlaps
+        // the spawner's own tile at all, sidestepping the ambiguity rather than trying to teach
+        // resolveAxis (shared, delicate, see its own v2.20.1 history) which of two overlapping
+        // blocking cells is the "real" one.
+        state.activeId = spawnActorAt(defId, (x + dir.x) * TILE + TILE / 2, (y + dir.y) * TILE + TILE / 2, key, now, dir).id;
       }
     }
   }
