@@ -348,8 +348,9 @@
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="hint" style="margin-top:2px;">
         Real things in the room — you bump into them, and some of them (not the fan, the spawner,
-        or the barrier) can be picked up and carried around. Pushable block is yours to redraw,
-        like a character; the rest use a built-in icon, same as Ground.
+        or the Gate) can be picked up and carried around. Click a placed one again to rotate it.
+        Pushable block is yours to redraw, like a character; the rest use a built-in icon, same as
+        Ground.
       </div>
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
       <div class="swatch-row" id="fixtureSwatches"></div>
@@ -370,11 +371,11 @@
         <div class="hint" style="margin-top:2px;">
           For a switch or plate — none: a switch flips gravity, a plate does nothing. Pick a color
           instead and it turns that color on (a switch keeps it on; a plate only while something's
-          standing on it) — any matching-colored wall over in Ground, or barrier over here in
+          standing on it) — any matching-colored wall over in Ground, or a Gate over here in
           Objects, listens for it.
         </div>
         <div class="hint" style="margin-top:6px;">
-          For a barrier, color means the same thing it means for a wall over in Ground: none and
+          For a Gate, color means the same thing it means for a wall over in Ground: none and
           it always blocks, forever, with no way to open it. Pick a color and it slides open while
           that channel is on, and slides shut again the moment it turns off — a switch holds it
           open for good, a plate only while something is actually standing on it.
@@ -563,6 +564,23 @@
   // and wind itself, just on the geometry axis instead of the modifier axis, since a fan is a thing
   // placed in the world, not a surface finish. See fanAccelFor().
   const FAN_ORDER = ["fan-n", "fan-e", "fan-s", "fan-w"]; // clockwise each step, like WIND_ORDER
+  // v2.33: Gate (internal id stays "barrier" — see MODIFIER_LABELS/GEOMETRY_LABELS for the
+  // established "rename the display word, not the id" precedent) joins the same "one swatch, four
+  // storable orientations" family as cannon/fan — direct request ("not all objects appear to be
+  // rotateable... we need that for the Spawner and barrier"). A portcullis looks identical from
+  // either side, so n/s (and e/w) will render as the same art rotated 180° of itself — acknowledged
+  // and accepted rather than collapsing to a 2-member family, for consistency with every other
+  // rotateable Object using this exact 4-member machinery. The orientation also now decides which
+  // way it physically slides open (see BARRIER_DIRECTIONS/drawGameplayTile's own barrier branch) —
+  // n (today's only look) slides up, e slides right, s slides down, w slides left.
+  const BARRIER_ORDER = ["barrier-n", "barrier-e", "barrier-s", "barrier-w"];
+  // v2.33: Spawner joins the same rotateable family — direct request, paired with a real behavioral
+  // payoff rather than a purely cosmetic facing marker: rotating a spawner now sets which way its
+  // contents get an initial launch, like a gentle cannon (see SPAWNER_DIRECTIONS/SPAWNER_LAUNCH_SPEED,
+  // spawnActorAt). SPAWNER_ICON_N gained a small gold "mouth" notch on its facing edge specifically
+  // so a kid can see which way it's aimed — the old art was fully symmetric and would have shown no
+  // visible difference between orientations otherwise.
+  const SPAWNER_ORDER = ["spawner-n", "spawner-e", "spawner-s", "spawner-w"];
   // v2.9: pressure plate joins the geometry axis — non-blocking like goal/switch, but its
   // channel-color effect (see CHANNEL_COLORS) only holds while something is actually on it,
   // unlike a switch's permanent flip. Deliberately its own geometry value, not a switch variant.
@@ -570,9 +588,9 @@
   // own comment for why. What's left is genuinely just the geometry axis: what blocks movement /
   // does the mechanical thing, independent of what a tile looks like or what happens on contact.
   const GEOMETRIES = [
-    "none", "solid", "goal", "switch", "plate", "door", "barrier", PUSH_BUTTON_GEOMETRY,
+    "none", "solid", "goal", "switch", "plate", "door", ...BARRIER_ORDER, PUSH_BUTTON_GEOMETRY,
     ...CANNON2_ORDER, BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
-    "magnet", "gravitywell", "spawner", "trampoline"
+    "magnet", "gravitywell", ...SPAWNER_ORDER, "trampoline"
   ];
   // v2.14 taxonomy: the tile palette splits by what a piece IS to a kid, not by which internal
   // system built it. Ground is plain blocking/hazard geometry with no identity of its own beyond
@@ -636,7 +654,9 @@
   // internal ids stay "cannon2-*"/"bomb2" (no reason to churn every save's board data just to
   // rename an id nobody but the code ever sees). PUSH_BUTTON_GEOMETRY still reads as "button" (so
   // it never looks like a second "Switch" swatch with different behavior) — see renderObjectSwatches.
-  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button" };
+  // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
+  // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
+  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -681,6 +701,17 @@
     "fan-n": { x: 0, y: -1 }, "fan-e": { x: 1, y: 0 }, "fan-s": { x: 0, y: 1 }, "fan-w": { x: -1, y: 0 }
   };
   const FAN_RANGE_TILES = 5; // how far in front of itself a fan projects wind force
+  // v2.33: same cardinal vectors as wind/fan, keyed by the spawner's own orientation — which way a
+  // freshly spawned actor gets launched, see spawnActorAt().
+  const SPAWNER_DIRECTIONS = {
+    "spawner-n": { x: 0, y: -1 }, "spawner-e": { x: 1, y: 0 }, "spawner-s": { x: 0, y: 1 }, "spawner-w": { x: -1, y: 0 }
+  };
+  const SPAWNER_LAUNCH_SPEED = 420; // weaker than a real cannon shot (CANNON_LAUNCH_SPEED=700) — reads as "a shove outward," not "fired"
+  // v2.33: same cardinal vectors, keyed by Gate's own orientation — which way it slides open, see
+  // drawGameplayTile's own barrier branch.
+  const BARRIER_DIRECTIONS = {
+    "barrier-n": { x: 0, y: -1 }, "barrier-e": { x: 1, y: 0 }, "barrier-s": { x: 0, y: 1 }, "barrier-w": { x: -1, y: 0 }
+  };
   // v2.20: force now falls off with distance instead of being flat across the whole range — right
   // at the fan (i=0, the fan's own cell) it's FAN_NEAR_FORCE, strong enough to beat GRAVITY
   // outright (so standing right over/in front of a fan actually lifts you), tapering down to
@@ -1326,6 +1357,27 @@
       else if (actor.defId === "carrybomb") actor.defId = CARRY_BOMB2_DEF_ID;
     });
   }
+  // v2.33: spawner and barrier both gained a 4-orientation family (SPAWNER_ORDER/BARRIER_ORDER) —
+  // a pre-v2.33 save can still have a bare "spawner"/"barrier" board-cell string, a geometry value
+  // GAMEPLAY_TILE_DEFS' cross-product no longer generates ANY entry for (GEOMETRIES now only
+  // contains the suffixed orientation strings). Left alone, that's the same "tile vanishes forever"
+  // failure shape migrateLegacyGroundEffects/migrateLegacyCannonBomb above already guard against.
+  // Rewritten to the "n" orientation (SPAWNER_ORDER[0]/BARRIER_ORDER[0]) — the one pre-v2.33 look
+  // and (for Gate) slide direction both already matched, so this is a pure identity upgrade, not a
+  // visible or behavioral change for anything already on the board.
+  function migrateLegacyFacingObjects(board) {
+    for (let y = 0; y < board.length; y++) {
+      for (let x = 0; x < board[y].length; x++) {
+        const key = board[y][x];
+        if (!key) continue;
+        const sep = key.indexOf(":");
+        const geometry = key.slice(0, sep);
+        const modifier = key.slice(sep + 1);
+        if (geometry === "spawner") board[y][x] = gameplayKey(SPAWNER_ORDER[0], modifier);
+        else if (geometry === "barrier") board[y][x] = gameplayKey(BARRIER_ORDER[0], modifier);
+      }
+    }
+  }
   // v2.27.1: the crate rename and gem art refresh never actually reached a returning project.
   // Every OTHER backward-compat fix in restoreProjectSnapshot backfills a MISSING actorDefs key —
   // but pushable and colGem both already existed before this patch, so `!actorDefs[id]` is false
@@ -1365,6 +1417,7 @@
     rooms = structuredClone(snap.rooms);
     rooms.forEach(r => migrateLegacyGroundEffects(r.board));
     rooms.forEach(r => migrateLegacyCannonBomb(r));
+    rooms.forEach(r => migrateLegacyFacingObjects(r.board));
     doorLinks = structuredClone(snap.doorLinks);
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
     nextRoomId = snap.nextRoomId;
@@ -1712,6 +1765,34 @@
   const FAN_ICON_S = rotateArt90CW(FAN_ICON_E);
   const FAN_ICON_W = rotateArt90CW(FAN_ICON_S);
 
+  // v2.33: a portcullis — a frame top and bottom with four vertical bars between, the clearest
+  // "this is a moveable Gate" shape at 8x8. Deliberately plain/mechanical (no color-of-its-own
+  // beyond the frame) since its channel color is what actually tells a kid which switch/plate
+  // controls it — see the small corner badge every color-taggable tile already gets. "n" (this
+  // array, vertical bars) is today's only pre-v2.33 look; e/s/w are the same art rotated the same
+  // way cannon2/fan's other orientations are — n/s (and e/w) render identically to each other since
+  // a portcullis looks the same from either side, acknowledged in BARRIER_ORDER's own comment.
+  const BARRIER_ICON_N = pat([
+    "MMMMMMMM", "M.M.M.MM", "M.M.M.MM", "M.M.M.MM",
+    "M.M.M.MM", "M.M.M.MM", "M.M.M.MM", "MMMMMMMM"
+  ], { M: GEOMETRY_SWATCH_COLORS.barrier });
+  const BARRIER_ICON_E = rotateArt90CW(BARRIER_ICON_N);
+  const BARRIER_ICON_S = rotateArt90CW(BARRIER_ICON_E);
+  const BARRIER_ICON_W = rotateArt90CW(BARRIER_ICON_S);
+
+  // v2.33: same housing-with-a-core look the spawner always had, plus a small gold "mouth" notch cut
+  // into the facing edge's frame — the old art was fully symmetric and rotating it would have shown
+  // no visible difference between orientations, which defeats the point of "rotate to aim it" (see
+  // SPAWNER_ORDER/SPAWNER_DIRECTIONS). "n" (mouth on top) is the default/migration target for any
+  // already-placed spawner; e/s/w are this same art rotated, same trick as cannon2/fan.
+  const SPAWNER_ICON_N = pat([
+    "MM.WW.MM", "M.KKKK.M", "M.K..K.M", "M.KWWK.M",
+    "M.KWWK.M", "M.K..K.M", "M.KKKK.M", "MMMMMMMM"
+  ], { M: GEOMETRY_SWATCH_COLORS.spawner, K: "#8d6e63", W: "#ffca28" });
+  const SPAWNER_ICON_E = rotateArt90CW(SPAWNER_ICON_N);
+  const SPAWNER_ICON_S = rotateArt90CW(SPAWNER_ICON_E);
+  const SPAWNER_ICON_W = rotateArt90CW(SPAWNER_ICON_S);
+
   // v2.31: a real two-state toggle switch, replacing the old plain cross icon that never showed
   // which way it was set — a gray bracket housing (the "neutral switch," identical in both arts,
   // never changes) around a red knob on a short dark lever, mirrored left (off) vs right (on), plus
@@ -1789,12 +1870,7 @@
       "MMMMMMMM", "M......M", "M.KKKK.M", "M.K..K.M",
       "M.K..K.M", "M.KKKK.M", "M......M", "MMMMMMMM"
     ], { M: GEOMETRY_SWATCH_COLORS.gravitywell, K: "#000000" }),
-    // A housing with something waiting inside — the golden core hints "this dispenses something"
-    // without needing to show exactly what.
-    spawner: pat([
-      "MMMMMMMM", "M.KKKK.M", "M.K..K.M", "M.KWWK.M",
-      "M.KWWK.M", "M.K..K.M", "M.KKKK.M", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.spawner, K: "#8d6e63", W: "#ffca28" }),
+    "spawner-n": SPAWNER_ICON_N, "spawner-e": SPAWNER_ICON_E, "spawner-s": SPAWNER_ICON_S, "spawner-w": SPAWNER_ICON_W,
     warp: pat([
       "..MMMM..", ".M....M.", "M.MM...M", "M.M.M..M",
       "M..M.M.M", "M...MM.M", ".M....M.", "..MMMM.."
@@ -1806,14 +1882,7 @@
       "MMMMMMMM", "M......M", "MKKKKKKM", "M......M",
       ".M....M.", "..M..M..", "..M..M..", ".MM..MM."
     ], { M: GEOMETRY_SWATCH_COLORS.trampoline, K: "#fff59d" }),
-    // v2.23: a portcullis — a frame top and bottom with four vertical bars between, the clearest
-    // "this is a moveable barrier" shape at 8x8. Deliberately plain/mechanical (no color-of-its-own
-    // beyond the frame) since its channel color is what actually tells a kid which switch/plate
-    // controls it — see the small corner badge every color-taggable tile already gets.
-    barrier: pat([
-      "MMMMMMMM", "M.M.M.MM", "M.M.M.MM", "M.M.M.MM",
-      "M.M.M.MM", "M.M.M.MM", "M.M.M.MM", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.barrier })
+    "barrier-n": BARRIER_ICON_N, "barrier-e": BARRIER_ICON_E, "barrier-s": BARRIER_ICON_S, "barrier-w": BARRIER_ICON_W
   };
 
   // v2.22: this used to be GEOMETRY_ICONS.diggable's own dedicated icon art (a plain taupe square
@@ -2475,7 +2544,7 @@
     // The den's one doorway: sealed by a red Barrier until the red switch is flipped. A switch's
     // flip is permanent (unlike a plate), so this release — and the chase that follows — is for
     // the rest of the game, not a momentary window.
-    board[6][14] = gameplayKey("barrier", "none");
+    board[6][14] = gameplayKey("barrier-n", "none");
     colorBoard[6][14] = "red";
     board[14][3] = gameplayKey("switch", "none");
     colorBoard[14][3] = "red";
@@ -2486,7 +2555,7 @@
     // plate cell (see updatePressurePlates) — the monster's own overlap holds the barrier open just
     // as well as the player's does — so luring it through, then clearing the plate yourself,
     // reseals the doorway with the monster on the wrong side of it.
-    board[11][11] = gameplayKey("barrier", "none");
+    board[11][11] = gameplayKey("barrier-n", "none");
     colorBoard[11][11] = "orange";
     board[11][12] = gameplayKey("plate", "none");
     colorBoard[11][12] = "orange";
@@ -2552,7 +2621,7 @@
     // which would just bonk its underside (an ascending actor can only hit a platform from below,
     // never land on top of one) instead of catching the player on the way back down.
     fillWorstElevatorRect(board, 13, 14, 21, 14, "solid", "none"); // the platform — switch/barrier/cannon all live on row 13, on top of this
-    board[8][5] = gameplayKey("spawner", "none"); // a stray hazard ball, loose in the wind itself — a moving hazard, not a wall
+    board[8][5] = gameplayKey("spawner-n", "none"); // a stray hazard ball, loose in the wind itself — a moving hazard, not a wall
 
     board[13][14] = gameplayKey("switch", "none");
     colorBoard[13][14] = "red";
@@ -2567,7 +2636,7 @@
     // "ridiculous contraption" physics turned into a discoverable trap, not a bug; confirmed via a
     // real Playwright trace to be fully recoverable (the bounce/wind route back up is untouched).
     board[12][16] = gameplayKey(BOMB2_GEOMETRY, "none");
-    board[13][18] = gameplayKey("barrier", "none");
+    board[13][18] = gameplayKey("barrier-n", "none");
     colorBoard[13][18] = "red";
     board[13][20] = gameplayKey("cannon2-nw", "none"); // fires up-and-left; its rising arc sweeps straight through the door above
     // Placed from a real physics trace (a 45°, vx=vy=495 cannon launch, no held key): the arc
@@ -2618,7 +2687,7 @@
 
     board[16][3] = gameplayKey("door", "none");
     board[17][7] = gameplayKey("trampoline", "none"); // set into the floor itself, like a real trap door
-    board[17][9] = gameplayKey("spawner", "none");    // another loose hazard ball, right by the launch pad
+    board[17][9] = gameplayKey("spawner-n", "none");    // another loose hazard ball, right by the launch pad
     fillWorstElevatorRect(board, 7, 9, 20, 9, "goal", "none"); // a whole row — see why above
 
     doorLinks[roomCellKey(room1.id, 18, 11)] = { toRoomId: room2.id, toX: 3, toY: 16 };
@@ -3391,7 +3460,9 @@
   function selectGeometry(geometry) {
     const isCannon2 = geometry === "cannon2";
     const isFan = geometry === "fan";
-    selectedGeometry = isCannon2 ? CANNON2_ORDER[0] : isFan ? FAN_ORDER[0] : geometry;
+    const isSpawnerFamily = geometry === "spawner";
+    const isBarrierFamily = geometry === "barrier";
+    selectedGeometry = isCannon2 ? CANNON2_ORDER[0] : isFan ? FAN_ORDER[0] : isSpawnerFamily ? SPAWNER_ORDER[0] : isBarrierFamily ? BARRIER_ORDER[0] : geometry;
     selectedGroundSkinId = null; // a flat swatch pick means "just the built-in icon, no named skin"
     paintMode = "tile";
     activeTab = PALETTE_GROUND_GEOMETRIES.includes(geometry) ? "ground" : "object";
@@ -3597,20 +3668,25 @@
     PALETTE_OBJECT_GEOMETRIES.forEach(geometry => {
       const isCannon2 = geometry === "cannon2";
       const isFan = geometry === "fan";
+      const isSpawnerFamily = geometry === "spawner";
+      const isBarrierFamily = geometry === "barrier";
       const isSelected = paintMode === "tile" && activeTab === "object" &&
-        (isCannon2 ? CANNON2_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) : selectedGeometry === geometry);
+        (isCannon2 ? CANNON2_ORDER.includes(selectedGeometry) : isFan ? FAN_ORDER.includes(selectedGeometry) :
+          isSpawnerFamily ? SPAWNER_ORDER.includes(selectedGeometry) : isBarrierFamily ? BARRIER_ORDER.includes(selectedGeometry) :
+          selectedGeometry === geometry);
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = "#111";
       // v2.27: GEOMETRY_LABELS covers palette entries whose kid-facing name needs to read
       // differently from their internal geometry string (cannon2/bomb2 read as plain "cannon"/
       // "bomb" post-v2.27.2; pushbutton as "button" so it never looks like a second,
-      // differently-behaving "switch" swatch) — same established display-name-without-touching-
-      // the-id mechanism as MODIFIER_LABELS.
+      // differently-behaving "switch" swatch; barrier as "Gate", v2.33) — same established
+      // display-name-without-touching-the-id mechanism as MODIFIER_LABELS.
       sw.title = GEOMETRY_LABELS[geometry] || geometry;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), isCannon2 ? GEOMETRY_ICONS["cannon2-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] : GEOMETRY_ICONS[geometry], ART);
+      drawArtToCtx(c.getContext("2d"), isCannon2 ? GEOMETRY_ICONS["cannon2-ne"] : isFan ? GEOMETRY_ICONS["fan-n"] :
+        isSpawnerFamily ? GEOMETRY_ICONS["spawner-n"] : isBarrierFamily ? GEOMETRY_ICONS["barrier-n"] : GEOMETRY_ICONS[geometry], ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
@@ -4349,7 +4425,8 @@
     if (geometry === "solid") return true;
     // v2.23: barrier is a real, sprite-bearing Object version of the same "channel-gated wall"
     // idea solid already has — see isChannelGateGeometry(), "Barrier: a moveable wall/door" below.
-    if (geometry === "barrier") return true;
+    // v2.33: Gate is now a 4-orientation family (BARRIER_ORDER) — see that constant's own comment.
+    if (BARRIER_ORDER.includes(geometry)) return true;
     if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
     // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
     // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
@@ -4359,7 +4436,8 @@
     // walked ONTO/THROUGH, not bumped into; see FIXTURE_GEOMETRIES' own comment.
     if (isBombGeometry(geometry)) return true;
     if (geometry === "magnet") return true;
-    if (geometry === "spawner") return true;
+    // v2.33: spawner is now a 4-orientation family (SPAWNER_ORDER) too — see that constant's own comment.
+    if (SPAWNER_ORDER.includes(geometry)) return true;
     if (isAnyCannonGeometry(geometry)) return true;
     if (FAN_ORDER.includes(geometry)) return true;
     // v2.27: the new push-button Object — solid so a kid bumps into it rather than walking
@@ -4372,7 +4450,7 @@
   // v2.23: the two geometries whose blocking is gated by a channel color rather than fixed —
   // solid (the plain Ground wall) and barrier (the dedicated moveable-wall/door Object). Shared by
   // isCellBlocking and resolveAxis so the two never drift apart on which geometries this applies to.
-  function isChannelGateGeometry(geometry) { return geometry === "solid" || geometry === "barrier"; }
+  function isChannelGateGeometry(geometry) { return geometry === "solid" || BARRIER_ORDER.includes(geometry); }
   // The one place that actually decides "can I move into this cell" — isBlockingGeometry() plus
   // the color-gate exception a plain geometry check can't know about on its own. Every call site
   // that used to do isBlockingGeometry(geometryAt(cx,cy), actor) should go through this instead.
@@ -6100,7 +6178,8 @@
     const now = performance.now();
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < roomCols(); x++) {
-        if (geometryAt(x, y) !== "spawner") continue;
+        const geometry = geometryAt(x, y);
+        if (!SPAWNER_ORDER.includes(geometry)) continue;
         const key = roomCellKey(currentRoomId, x, y);
         const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false });
         state.clock += dt * 1000;
@@ -6114,7 +6193,9 @@
         if (alive >= SPAWNER_MAX_CONCURRENT) continue; // the spawner simply skips this cycle at cap
         const contents = spawnerContents[key];
         const defId = (contents && contents.length) ? contents[Math.floor(Math.random() * contents.length)] : HAZARD_BALL_DEF_ID;
-        spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now);
+        // v2.33: launched in whichever direction the spawner is currently rotated to face — see
+        // SPAWNER_DIRECTIONS/spawnActorAt.
+        spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now, SPAWNER_DIRECTIONS[geometry]);
       }
     }
   }
@@ -6209,7 +6290,7 @@
     // v2.27: the new push-button Object joins switch/plate as a third way to drive a channel —
     // "Button" in the palette specifically so it never reads as a second "Switch" swatch with
     // different behavior (a real point of confusion this naming choice was picked to avoid).
-    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || geometry === "barrier" || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
+    return geometry === "switch" || geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -6286,6 +6367,50 @@
       board[gy][gx] = gameplayKey(FAN_ORDER[0], selectedModifier);
       colorBoard[gy][gx] = selectedChannelColor;
       groundSkinBoard[gy][gx] = null; // a fan never carries a named ground skin
+      groundSkinRotationBoard[gy][gx] = 0;
+      return;
+    }
+    if (SPAWNER_ORDER.includes(selectedGeometry)) {
+      // v2.33: same place-then-rotate trick as cannon above — a fresh click on an already-placed
+      // spawner rotates which way it launches its contents instead of re-placing it (see
+      // SPAWNER_DIRECTIONS/spawnActorAt). No channel color, same as cannon (never color-taggable).
+      const strokeKey = gx + "," + gy;
+      if (cannonRotateStrokeCells.has(strokeKey)) return;
+      cannonRotateStrokeCells.add(strokeKey);
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && SPAWNER_ORDER.includes(existingTile.geometry)) {
+        const next = SPAWNER_ORDER[(SPAWNER_ORDER.indexOf(existingTile.geometry) + 1) % SPAWNER_ORDER.length];
+        board[gy][gx] = gameplayKey(next, selectedModifier);
+        return;
+      }
+      const roomKey = roomCellKey(currentRoomId, gx, gy);
+      delete digProgress[roomKey];
+      cancelBombArm(roomKey);
+      board[gy][gx] = gameplayKey(SPAWNER_ORDER[0], selectedModifier);
+      colorBoard[gy][gx] = null; // a spawner never carries a channel color
+      groundSkinBoard[gy][gx] = null;
+      groundSkinRotationBoard[gy][gx] = 0;
+      return;
+    }
+    if (BARRIER_ORDER.includes(selectedGeometry)) {
+      // v2.33: same place-then-rotate trick, but Gate also carries a channel color like fan/door/
+      // solid/plate — see isColorTaggable. Rotating also decides which way it slides open, see
+      // drawGameplayTile's own barrier branch.
+      const strokeKey = gx + "," + gy;
+      if (cannonRotateStrokeCells.has(strokeKey)) return;
+      cannonRotateStrokeCells.add(strokeKey);
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && BARRIER_ORDER.includes(existingTile.geometry)) {
+        const next = BARRIER_ORDER[(BARRIER_ORDER.indexOf(existingTile.geometry) + 1) % BARRIER_ORDER.length];
+        board[gy][gx] = gameplayKey(next, selectedModifier);
+        return;
+      }
+      const roomKey = roomCellKey(currentRoomId, gx, gy);
+      delete digProgress[roomKey];
+      cancelBombArm(roomKey);
+      board[gy][gx] = gameplayKey(BARRIER_ORDER[0], selectedModifier);
+      colorBoard[gy][gx] = selectedChannelColor;
+      groundSkinBoard[gy][gx] = null;
       groundSkinRotationBoard[gy][gx] = 0;
       return;
     }
@@ -6632,17 +6757,26 @@
   // Creates a live actor instance the same shape placeNewActor does, minus anything player-
   // specific (a spawner never produces the player), tagged with which spawner made it and when —
   // spawnerKey drives the concurrent-cap check (see tickSpawners) and lets tickSpawnedTTL find it
-  // again; spawnBornAt is what its TTL counts down from. Given a small "pop out" velocity kick
-  // regardless of content type, the same way the validated prototype's own ball entered the world.
-  function spawnActorAt(defId, px, py, spawnerKey, nowMs) {
+  // again; spawnBornAt is what its TTL counts down from. v2.33: `dir` (always supplied by
+  // tickSpawners — SPAWNER_DIRECTIONS[geometry]) is a real launch in whichever way the spawner is
+  // rotated to face, like a gentle cannon — direct request ("rotating a spawner should set which
+  // way its contents get launched"), replacing the old undirected small random "pop out" kick. A
+  // perpendicular jitter is kept on top so it doesn't read as a perfectly straight laser.
+  function spawnActorAt(defId, px, py, spawnerKey, nowMs, dir) {
     const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
     const actor = {
       id: nextActorInstId++, defId, x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
       spawnX: x, spawnY: y,
-      vx: (Math.random() * 2 - 1) * 90, vy: 60,
+      vx: dir.x * SPAWNER_LAUNCH_SPEED + (Math.random() * 2 - 1) * 40,
+      vy: dir.y * SPAWNER_LAUNCH_SPEED + (dir.y === 0 ? 60 : 0),
       grounded: false, isPlayer: false, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
-      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
+      hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0,
+      // v2.33: bouncyCooldown exempts the launch from stepActor's NPC_MAX_SPEED clamp for a beat,
+      // the same "recentlyLaunched" trick every other real impulse (throw, cannon, bouncy wall) in
+      // this file already reuses — without it the ordinary speed cap would flatten the launch back
+      // down to a slow drift within a single frame.
+      bouncyCooldown: 350, doorCooldown: 0,
       cannonCooldown: 0, warpCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       carried: false,
@@ -6769,7 +6903,7 @@
       if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return; }
       // v2.19: placing an actor/object onto an existing spawner tile loads it as that spawner's
       // contents instead — see toggleSpawnerContent.
-      if (geometryAt(gx, gy) === "spawner") { toggleSpawnerContent(gx, gy); return; }
+      if (SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy); return; }
       placeNewActor(px, py);
       return;
     }
@@ -6814,7 +6948,7 @@
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
       if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return; }
-      if (geometryAt(gx, gy) === "spawner") { toggleSpawnerContent(gx, gy); e.preventDefault(); return; }
+      if (SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy); e.preventDefault(); return; }
       placeNewActor(px, py);
       e.preventDefault();
       return;
@@ -7181,7 +7315,7 @@
       ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
-    } else if (tile.geometry === "spawner" && extra && extra.windingUp) {
+    } else if (SPAWNER_ORDER.includes(tile.geometry) && extra && extra.windingUp) {
       // a brief physical pulse right before it fires — a structural tell standing in for a
       // numeric countdown this toy never shows anywhere (see tickSpawners).
       ctx.save();
@@ -7224,24 +7358,28 @@
         drawArtScaled(ctx, icon, x, y, TILE, cell);
       }
       ctx.restore();
-    } else if (tile.geometry === "barrier") {
-      // A moveable wall/door: slides straight up out of the tile as it opens, straight back down
-      // as it closes, instead of solid's own instant ghost-outline — "moveable" is the whole point
-      // of this Object, so it needs to visibly travel, not just fade. Clipped to the tile bounds so
-      // it reads as sliding INTO a slot above rather than floating up over whatever's drawn there.
+    } else if (BARRIER_ORDER.includes(tile.geometry)) {
+      // A moveable wall/door: slides straight out of the tile in its own facing direction as it
+      // opens, straight back as it closes, instead of solid's own instant ghost-outline —
+      // "moveable" is the whole point of this Object, so it needs to visibly travel, not just fade.
+      // v2.33: the slide direction now follows whichever way Gate is rotated to face
+      // (BARRIER_DIRECTIONS) — "n" (today's pre-v2.33 only look) still slides up exactly as before.
+      // Clipped to the tile bounds so it reads as sliding INTO a slot rather than floating out over
+      // whatever's drawn there.
       const slideFrac = extra && extra.slideFrac || 0;
+      const dir = BARRIER_DIRECTIONS[tile.geometry];
       ctx.save();
       ctx.beginPath();
       ctx.rect(x, y, TILE, TILE);
       ctx.clip();
-      drawArtScaled(ctx, icon, x, y - slideFrac * TILE, TILE, cell);
+      drawArtScaled(ctx, icon, x + dir.x * slideFrac * TILE, y + dir.y * slideFrac * TILE, TILE, cell);
       ctx.restore();
     } else {
       drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
     }
     // A spawner with something loaded gets a small marker so a kid can tell at a glance it isn't
     // just going to spawn the default hazard ball — no dropdown/readout to check instead.
-    if (tile.geometry === "spawner" && extra && extra.loaded) {
+    if (SPAWNER_ORDER.includes(tile.geometry) && extra && extra.loaded) {
       ctx.save();
       ctx.fillStyle = "#ffd166";
       ctx.beginPath();
@@ -7391,7 +7529,7 @@
             extra = { digFrac: progress / DIG_DURATION_MS };
           } else if (isLive && isBombGeometry(tile.geometry)) {
             extra = { armed: !!bombArmed[roomCellKey(currentRoomId, bx, y)] };
-          } else if (isLive && tile.geometry === "spawner") {
+          } else if (isLive && SPAWNER_ORDER.includes(tile.geometry)) {
             const spawnerKey = roomCellKey(currentRoomId, bx, y);
             const state = spawnerRuntime[spawnerKey];
             const contents = spawnerContents[spawnerKey];
@@ -7403,7 +7541,7 @@
               extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
               // v2.23: how far along Barrier's slide is, from channelStateSince's last-flip
               // timestamp — purely a render input, see drawGameplayTile's own barrier branch.
-              if (tile.geometry === "barrier") {
+              if (BARRIER_ORDER.includes(tile.geometry)) {
                 const state = channelStateSince[color];
                 const elapsed = state ? performance.now() - state.since : BARRIER_SLIDE_MS;
                 const target = state ? (state.on ? 1 : 0) : 0;
@@ -7838,6 +7976,11 @@
       `const WIND_FORCE = ${WIND_FORCE};`,
       `const FAN_ORDER = ${JSON.stringify(FAN_ORDER)};`,
       `const FAN_DIRECTIONS = ${JSON.stringify(FAN_DIRECTIONS)};`,
+      `const BARRIER_ORDER = ${JSON.stringify(BARRIER_ORDER)};`,
+      `const BARRIER_DIRECTIONS = ${JSON.stringify(BARRIER_DIRECTIONS)};`,
+      `const SPAWNER_ORDER = ${JSON.stringify(SPAWNER_ORDER)};`,
+      `const SPAWNER_DIRECTIONS = ${JSON.stringify(SPAWNER_DIRECTIONS)};`,
+      `const SPAWNER_LAUNCH_SPEED = ${SPAWNER_LAUNCH_SPEED};`,
       `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
       `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
