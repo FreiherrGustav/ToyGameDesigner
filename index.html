@@ -707,26 +707,20 @@
     "spawner-n": { x: 0, y: -1 }, "spawner-e": { x: 1, y: 0 }, "spawner-s": { x: 0, y: 1 }, "spawner-w": { x: -1, y: 0 }
   };
   const SPAWNER_LAUNCH_SPEED = 420; // weaker than a real cannon shot (CANNON_LAUNCH_SPEED=700) — reads as "a shove outward," not "fired"
-  // v2.34: a small velocity-only jitter on top of the launch, purely for a bit of "kick" variety
-  // frame-to-frame — NOT what actually separates successive spawns (see SPAWNER_POSITION_JITTER
-  // below for that, and its own comment for the real reason a velocity-only jitter can't do it in
-  // this engine).
-  const SPAWNER_PERPENDICULAR_JITTER = 150;
-  // v2.34: direct feedback ("the spawner isn't producing anything," worse with multiple spawners)
-  // traced to genuine clumping, not a cap or a crash: a north/south-facing spawner's content goes
-  // straight up and gravity brings it straight back down, landing within ~40px of every other spawn
-  // from the same spawner — visually indistinguishable from a single ball bouncing in place. The
-  // first fix attempt was a bigger PERPENDICULAR VELOCITY jitter (150, up from the pre-existing
-  // flat ±40) — traced directly and found to barely help: `applyAxisFriction`'s x-axis call in
-  // stepActor runs UNCONDITIONALLY every frame, airborne or not, and a non-steering actor (a hazard
-  // ball has zero self-driven accel) has nothing opposing it, so FRICTION_DECEL (1800px/s²) eats a
-  // 150px/s jitter down to 0 within about 4 frames — confirmed with a direct frame-by-frame trace:
-  // vx 150 -> 60 -> 30 -> 0 in four ticks, covering barely 5px of real travel before friction fully
-  // kills it, regardless of how large the initial jitter is (bouncyCooldown's "recentlyLaunched"
-  // exemption only skips the speed-CAP clamp, never this friction call). The actual fix is jittering
-  // the spawn POSITION itself along the perpendicular axis — see tickSpawners — a permanent offset
-  // that isn't subject to friction at all, so it survives all the way to where the actor lands.
-  const SPAWNER_POSITION_JITTER = 48; // ~1.5 tiles either way — a 3-tile-wide spread, generous enough to read as new things landing in different spots
+  // v2.35: v2.34's SPAWNER_PERPENDICULAR_JITTER/SPAWNER_POSITION_JITTER (a sideways kick plus a
+  // permanent sideways position offset, both meant to keep several concurrently-alive spawns from
+  // visually clumping together) are gone — direct feedback that items were "disappearing into the
+  // wall or not appearing at all" near a room edge, confirmed as the position jitter's own doing: it
+  // offset the spawn position along whichever axis is PERPENDICULAR to the spawner's facing, which
+  // has nothing to do with which edge the spawner is aimed away from — a spawner facing east placed
+  // near the TOP edge still got jittered vertically, and a big enough roll could land it above row 0
+  // (off the board entirely, invisible) or inside a solid border tile (stuck). The clumping problem
+  // the jitter existed to solve is now moot anyway — tickSpawners itself only ever keeps one of its
+  // own spawns alive at a time now (see its own comment), so there's nothing left to clump. Removing both
+  // also directly serves a second, bundled request — "very clearly have the spawned item come out in
+  // the intended direction" — a spawn that starts exactly on the spawner's own cell and launches at
+  // a velocity purely along `dir`, no perpendicular component in either position or velocity, reads
+  // unambiguously as "this came out of that, going that way."
   // v2.33: same cardinal vectors, keyed by Gate's own orientation — which way it slides open, see
   // drawGameplayTile's own barrier branch.
   const BARRIER_DIRECTIONS = {
@@ -6279,33 +6273,33 @@
         const geometry = geometryAt(x, y);
         if (!SPAWNER_ORDER.includes(geometry)) continue;
         const key = roomCellKey(currentRoomId, x, y);
-        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false });
+        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, activeId: null });
         state.clock += dt * 1000;
+        // v2.35: direct follow-up to v2.34's own "always produce the thing" — a spawner now keeps
+        // at most ONE of its own spawns alive at a time, replacing both the old hard population cap
+        // (v2.33 and earlier, removed in v2.34) and v2.34's own uncapped-but-jittered attempt. The
+        // clock keeps counting even while occupied (so the instant the current one disappears —
+        // caught, popped by its own TTL, destroyed in lethal, whatever — a spawner whose timer has
+        // already run out fires again immediately rather than waiting out a fresh full interval);
+        // actually firing is gated on the slot being empty. A plain `actors.some(...)` scan is all
+        // "is it still alive" needs — it catches every removal path (TTL despawn, lethal
+        // destruction, a chaser's own pop-on-catch, anything else that ever calls removeActorById)
+        // for free, with no per-reaction bookkeeping to keep in sync.
+        const occupied = state.activeId != null && actors.some(a => a.id === state.activeId);
         const timeToNext = SPAWN_INTERVAL_MS - state.clock;
         // the wind-up pulse — a brief physical "tell" right before firing, a structural stand-in
-        // for a numeric countdown this toy never shows anywhere (see renderRoomContents).
-        state.windUp = timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
-        if (state.clock < SPAWN_INTERVAL_MS) continue;
+        // for a numeric countdown this toy never shows anywhere (see renderRoomContents). Suppressed
+        // while occupied — there's nothing about to fire yet, so a pulse would just read as a lie.
+        state.windUp = !occupied && timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
+        if (occupied || state.clock < SPAWN_INTERVAL_MS) continue;
         state.clock = 0;
-        // v2.34: direct feedback — "Spawner should always produce the thing." This used to skip
-        // the cycle outright once SPAWNER_MAX_CONCURRENT (4) of its own content were still alive —
-        // confirmed by direct trace that the cap genuinely was being hit and firing genuinely was
-        // being skipped (population self-regulates right at the cap, 3-4 alive, cycling normally,
-        // not stuck at 0 — so this wasn't a silent hang, but the user's own ask is for the timer to
-        // never be skipped regardless of population, so the cap is removed outright rather than
-        // just raised). SPAWN_TTL_MS (8s) still bounds how long any one spawned actor lives, so
-        // this doesn't risk truly unbounded growth — see SPAWN_TTL_MS/tickSpawnedTTL.
         const contents = spawnerContents[key];
         const defId = (contents && contents.length) ? contents[Math.floor(Math.random() * contents.length)] : HAZARD_BALL_DEF_ID;
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
-        // SPAWNER_DIRECTIONS/spawnActorAt.
+        // SPAWNER_DIRECTIONS/spawnActorAt. v2.35: spawned dead-center on the spawner's own cell, no
+        // perpendicular position offset (see SPAWNER_LAUNCH_SPEED's own comment on why that's gone).
         const dir = SPAWNER_DIRECTIONS[geometry];
-        // v2.34: the spawn POSITION itself is jittered along the axis perpendicular to `dir`, not
-        // just its launch velocity — see SPAWNER_POSITION_JITTER's own comment for why a velocity-
-        // only jitter turned out not to work in this engine's physics model.
-        const perpX = -dir.y, perpY = dir.x;
-        const posJitter = (Math.random() * 2 - 1) * SPAWNER_POSITION_JITTER;
-        spawnActorAt(defId, x * TILE + TILE / 2 + perpX * posJitter, y * TILE + TILE / 2 + perpY * posJitter, key, now, dir);
+        state.activeId = spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now, dir).id;
       }
     }
   }
@@ -6871,20 +6865,19 @@
   // in whichever way the spawner is rotated to face, like a gentle cannon — direct request
   // ("rotating a spawner should set which way its contents get launched"), replacing the old
   // undirected small random "pop out" kick.
-  // v2.34: `px`/`py` now arrive pre-offset by SPAWNER_POSITION_JITTER (see tickSpawners) — that
-  // positional jitter, not this function's own velocity jitter below, is what actually keeps
-  // successive spawns visually distinct; see SPAWNER_POSITION_JITTER's own comment for the direct
-  // trace that found a velocity-only jitter doesn't survive friction long enough to matter. The
-  // small SPAWNER_PERPENDICULAR_JITTER kick here is kept purely for a bit of launch-feel variety.
+  // v2.35: no perpendicular velocity component any more, not even the old small fixed +60 downward
+  // bias a horizontal launch used to carry (dropped alongside SPAWNER_POSITION_JITTER — see
+  // SPAWNER_LAUNCH_SPEED's own comment) — a thrown-dart-straight launch purely along `dir`, nothing
+  // else, is what "very clearly comes out in the intended direction" means; under gravity that bias
+  // was redundant anyway (gravity takes over the instant it launches), and in free-roam it was the
+  // one remaining thing nudging a horizontal shot off its own facing axis.
   function spawnActorAt(defId, px, py, spawnerKey, nowMs, dir) {
     const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
-    const perpX = -dir.y, perpY = dir.x;
-    const jitter = (Math.random() * 2 - 1) * SPAWNER_PERPENDICULAR_JITTER;
     const actor = {
       id: nextActorInstId++, defId, x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
       spawnX: x, spawnY: y,
-      vx: dir.x * SPAWNER_LAUNCH_SPEED + perpX * jitter,
-      vy: dir.y * SPAWNER_LAUNCH_SPEED + perpY * jitter + (dir.y === 0 ? 60 : 0),
+      vx: dir.x * SPAWNER_LAUNCH_SPEED,
+      vy: dir.y * SPAWNER_LAUNCH_SPEED,
       grounded: false, isPlayer: false, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0,
@@ -8097,8 +8090,6 @@
       `const SPAWNER_ORDER = ${JSON.stringify(SPAWNER_ORDER)};`,
       `const SPAWNER_DIRECTIONS = ${JSON.stringify(SPAWNER_DIRECTIONS)};`,
       `const SPAWNER_LAUNCH_SPEED = ${SPAWNER_LAUNCH_SPEED};`,
-      `const SPAWNER_PERPENDICULAR_JITTER = ${SPAWNER_PERPENDICULAR_JITTER};`,
-      `const SPAWNER_POSITION_JITTER = ${SPAWNER_POSITION_JITTER};`,
       `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
       `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
