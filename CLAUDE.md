@@ -1177,6 +1177,117 @@ the platform with zero errors; the standard 5-sample regression sweep (now
 6 including this one) and a fresh export both run error-free, including a
 3-second held-right playthrough of the exported standalone game.
 
+### Two new characters from the sprite editor tool, and a naming collision resolved by renaming the OLD presets (v2.30)
+
+The standalone sprite editor tool (not committed to this repo — see its
+own section below) gained the ability to create brand-new sprites from
+scratch, not just touch up extracted reference art; the user used it to
+paint two new characters, "Princess" and "Hero," and asked for them to be
+inserted into `index.html`.
+
+**Both names collided with existing presets.** `CHARACTER_PRESETS` already
+had a `"hero"` and a `"princess"` entry, both pose-based (`HERO_POSES`/
+`PRINCESS_POSES`, 4 frames each — stand/stride/air/crouch — from v2.16),
+with a completely different palette from the new flat single-pose art.
+Exactly the same shape of problem `TABBY_CAT_ART` hit against `CAT_ART` in
+v2.24 (a new sprite that would naturally want an existing name) — flagged
+back to the user rather than silently overwritten or silently given an
+awkward disambiguated name. **Resolution, by explicit user choice, was the
+other direction from the tabby-cat precedent**: rather than renaming the
+new arrivals, the two ORIGINAL v2.16 presets were renamed instead — "Gary"
+for the old hero look, "Pink blob" for the old princess look — freeing up
+"Princess"/"Hero" for the new ones. `HERO_POSES`/`PRINCESS_POSES`
+themselves, and every other place that reads them, are completely
+untouched; only the two label strings in `CHARACTER_PRESETS` changed.
+
+**Confirmed safe before doing it, not assumed**: a `CHARACTER_PRESETS`
+entry's `name` field is read in exactly one place, `renderPresetSwatches`'s
+`sw.title = preset.name` — a tooltip, nothing else matches against it. This
+is a different field from an `actorDefs` entry's own `.name`, which the
+v2.27 crate rename found WAS load-bearing elsewhere (`findDefaultActorDef`
+matches on it) — that fragility doesn't apply here, so renaming "hero" →
+"Gary" and "princess" → "Pink blob" is a pure two-string cosmetic edit with
+no follow-on risk, confirmed directly: Gary still carries its full 4-pose
+set and animates through Play mode exactly as "hero" always did.
+
+`PRINCESS_ART`/`HERO_ART` are plain `pat()` constants like
+`MONSTER_ART`/`SKELETON_ART`/etc. — single flat pose, no `_POSES` set,
+since (like the v2.24 reference-sheet presets) the editor tool that
+produced them has no notion of a walk-cycle, only one static 8×8 image per
+sprite. `CHARACTER_PRESETS`' final order, by explicit request: `Gary,
+Princess, Hero, Pink blob, ghost, monster, skeleton, slime, blocker,
+wanderer, chaser, fleer, cat, tabby cat` — Princess/Hero inserted as a pair
+right after Gary, immediately before Pink blob, with everything after
+unchanged.
+
+Verified with Playwright: `CHARACTER_PRESETS`' names and order exactly
+match the requested layout; the preset swatch row renders with matching
+tooltips in the same order; clicking Princess or Hero sets a full 64-entry
+flat `art` array on the player's def and clears any previous `poses`
+(reverting to simple mode, the same `renderPresetSwatches` click handler
+every flat-art preset already uses); clicking Gary still restores the
+complete 4-pose set; the full sample regression sweep (all 6 samples) and
+a fresh export (with Princess applied to the player, confirming her art's
+own hex colors land in the exported `GAME_DATA`) all run error-free.
+
+### The sprite editor tool (outside this repo): new-sprite creation, PNG import, JS export (v2.30)
+
+The standalone sprite editor (`sprite-editor.html`, built in an earlier
+session purely so the user can touch up auto-extracted reference art with
+a real pixel editor + eyedropper-capable color picker — see the v2.27
+section above for its origin) could, until now, only EDIT the fixed list
+of 24 icons it originally extracted from a reference sheet; there was no
+way to add a sprite that didn't already exist, and its only "export" was a
+raw JSON dump requiring someone to hand-derive a `pat()` row/legend
+representation from it before it could land in `index.html` (exactly the
+mechanical, error-prone-by-hand step the v2.26 monster/skeleton/tabby-cat
+fix had to do manually, verified bit-for-bit against the original art
+before trusting it).
+
+**Three additions, one explicitly "only if easy":**
+- **New sprite creation** — a "+ New sprite" row prompts for a name and
+  adds a blank 8×8 slot under its own "Custom" category, fully integrated
+  into the existing sidebar/dirty-tracking/palette machinery (no parallel
+  system). Since nothing was ever extracted for it, there's no reference
+  image to compare against — the Reference panel shows a plain "no
+  reference" placeholder instead of a broken image. A custom sprite's own
+  "×" deletes it; the original 24 extracted sprites have no such control
+  and can't be deleted, only reset back to their extraction.
+- **Export as JS** — generates, for every sprite that's new or edited
+  (not the unedited originals — matches the tool's existing dirty-tracking
+  semantics), a `pat(rows, legend)` call in this engine's own exact house
+  style (see `CANNON2_ICON_NE`/`FAN_ICON_N` in `index.html` for the
+  pre-existing convention this matches), opened in a modal with
+  copy-to-clipboard and download-.js actions. Legend characters are
+  assigned from a 62-character letter/digit pool — always a valid bare
+  object-literal key, so the generator never needs a fallback character
+  that could emit invalid JS; an image with MORE distinct colors than that
+  (realistically only a photo-like PNG import, never hand-painted pixel
+  art) gets a visible warning comment and colors past the pool size share
+  the last legend slot rather than silently corrupting the output. The
+  existing "Save JSON" round-trip format stays too, now also preserving
+  custom sprites' names/categories (a `{state, defs}` shape, backward-
+  compatible with the older bare-map saves from before this patch).
+- **Import PNG** — loads any image file into whichever sprite is
+  currently selected, scaled to the 8×8 grid via plain canvas
+  `drawImage`/`getImageData` with image smoothing off (nearest-neighbor,
+  not a pixel-art-aware downscale — stated directly in the tool's own hint
+  text rather than oversold). Alpha under 50% imports as erased
+  (transparent); everything else imports as a flat opaque color, since
+  this engine's sprite format has no partial transparency. Confirmed via a
+  real two-color test PNG that the downscale lands pixel-exact (an 8×8
+  source region becomes a 4×4 region at the engine's resolution, precisely
+  where expected, not approximately).
+
+Verified with Playwright (16 checks): new-sprite creation and painting;
+PNG import with pixel-exact downscale verification; the generated Export
+as JS code actually executing via `new Function()` with zero syntax
+errors and reproducing a real 64-entry art array; Save/Load JSON
+round-tripping custom sprite metadata correctly, including loading an
+older-format (pre-this-patch) save; and deleting a custom sprite. Stays
+outside this repo, same as always — handed to the user as a file, not
+committed.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
