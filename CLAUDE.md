@@ -3602,6 +3602,53 @@ standalone game; The World's Worst Elevator (the one built-in sample with live s
 3+ seconds with zero errors under the new behavior; and the full 5-sample regression sweep plus a
 fresh Button+Gate export both still run clean.
 
+## Follow camera eases toward its target instead of snapping every frame (v2.39)
+
+Direct feedback: "let's smooth out the 'follow' camera. it can't be so sensitive to pixels, as
+it's constantly jerking back and forth." `updateCamera`'s Follow branch (v2.17) had always just
+assigned `cameraX` to the exact centered-on-player target every single tick — no damping of any
+kind — so any frame-to-frame sub-pixel wobble in the player's own position (friction settling
+toward 0, a collision resolution snapping it flush to a tile edge, ordinary frame-timing variance)
+was copied onto the camera instantly and in full, reading as constant jitter rather than smooth
+tracking.
+
+**Fix: an exponential ease toward the target, not a position lerp with a fixed step.**
+`CAMERA_FOLLOW_RATE` (9, a per-second rate) feeds `cameraX += (target - cameraX) * (1 -
+Math.exp(-CAMERA_FOLLOW_RATE * dt))` — frame-rate independent (unlike a flat `* 0.1` per-frame
+lerp, which would track differently at 30fps vs 144fps), closing about 95% of the gap to the
+target within roughly a third of a second. Fast enough that a running player stays comfortably
+on screen, slow enough that a one-or-two-pixel target wobble gets smoothed into nothing a kid
+would notice. The target itself (centered-on-player, clamped to the room's edges) is computed
+exactly as before — only how `cameraX` moves toward it changed.
+
+**One case deliberately kept as an instant snap, not eased**: the very first Follow-mode tick
+after a room becomes hot (entering a room via a door, or Play/Restart). `cameraX` has always reset
+to 0 the instant `activateRoom` runs (see the Rooms section above) — easing FROM that arbitrary 0
+every time would read as the camera visibly sliding in from the room's left edge on every single
+room entry, which nothing asked for and is a worse experience than the old instant snap it's
+replacing. `cameraFollowSnapNeeded` (reset `true` alongside `cameraX = 0` in `activateRoom`) makes
+`updateCamera`'s first Follow tick in a freshly-hot room snap straight to the target, same as the
+old behavior always did, with only every tick after that eased.
+
+**Fixed and Runner modes are completely untouched** — Fixed always sets `cameraX = 0` and Runner
+advances at its own constant `RUNNER_SPEED`, neither of which ever had a jitter complaint; the
+easing is scoped to the one branch that actually had the reported problem.
+
+**Export pipeline**: `CAMERA_FOLLOW_RATE` got its own `constantsSource` line;
+`cameraFollowSnapNeeded` was added to the export template's own duplicate global declarations
+(right alongside its existing `cameraX` line) — `updateCamera`/`activateRoom` were already shared
+into the export from earlier patches, so the eased behavior applies automatically.
+
+Verified with Playwright: entering Play with Follow mode active snaps the camera to the clamped,
+centered-on-player target within the very first frame (not starting at 0 and visibly sliding in);
+holding the player perfectly still for a sustained run shows zero camera movement at all (previously
+the complaint — sub-pixel wobble reads as a dead-still camera now, not a jittering one); a sudden
+large jump in the player's position eases the camera toward the new target over multiple frames
+rather than snapping instantly, and fully catches up given enough time; Fixed and Runner camera
+modes are confirmed unaffected; the same snap-on-entry and steady-while-idle behavior holds
+identically in a freshly exported standalone game; and the full 5-sample regression sweep plus a
+fresh Button+Gate export both still run clean.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
