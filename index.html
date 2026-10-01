@@ -6290,8 +6290,34 @@
         const geometry = geometryAt(x, y);
         if (!SPAWNER_ORDER.includes(geometry)) continue;
         const key = roomCellKey(currentRoomId, x, y);
-        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, activeId: null });
+        const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, activeId: null, warnedBlocked: false });
         state.clock += dt * 1000;
+        // v2.35.2: direct bug report — a spawner with nothing but a wall or the room's own edge
+        // immediately in its facing direction (e.g. a north-facing spawner sitting on row 0) could
+        // never actually launch anything: the freshly-spawned actor starts fully overlapping the
+        // spawner's own tile, which is blocking (physical, per v2.21). With no open cell to launch
+        // into, it can never clear that overlap before gravity's very next frame nudges vy positive
+        // — and resolveAxis's "landed on a floor from above" branch then mistakes the spawner's own
+        // cell (or, immediately after, the board's synthetic boundary one further cell out) for
+        // that floor, placing the actor a full tile further away each time. That repeats forever,
+        // a genuine runaway (confirmed by a frame-by-frame trace: position diverging thousands of
+        // pixels off-board within seconds, `vy` pinned at 0 throughout — it never even reads as
+        // falling). A spawner with open space ahead never hits this: its strong initial launch
+        // clears its own cell for several frames before gravity ever revisits it. Checked once per
+        // fire attempt, here, rather than patched inside resolveAxis itself — that collision code is
+        // shared by everything in the game and has its own delicate tunneling-fix history (see its
+        // v2.20.1 comments); this is a narrower, safer place to prevent the one specific setup that
+        // triggers it.
+        const dir = SPAWNER_DIRECTIONS[geometry];
+        const launchBlocked = isCellBlocking(x + dir.x, y + dir.y, { isPlayer: false });
+        if (launchBlocked) {
+          state.windUp = false;
+          if (!state.warnedBlocked) {
+            state.warnedBlocked = true;
+            log("A spawner can't launch anything — the way it's facing is blocked. Try rotating it.");
+          }
+          continue;
+        }
         // v2.35: direct follow-up to v2.34's own "always produce the thing" — a spawner now keeps
         // at most ONE of its own spawns alive at a time, replacing both the old hard population cap
         // (v2.33 and earlier, removed in v2.34) and v2.34's own uncapped-but-jittered attempt. The
@@ -6314,7 +6340,6 @@
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
         // SPAWNER_DIRECTIONS/spawnActorAt. v2.35: spawned dead-center on the spawner's own cell, no
         // perpendicular position offset (see SPAWNER_LAUNCH_SPEED's own comment on why that's gone).
-        const dir = SPAWNER_DIRECTIONS[geometry];
         state.activeId = spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now, dir).id;
       }
     }
