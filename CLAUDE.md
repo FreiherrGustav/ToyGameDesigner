@@ -1779,6 +1779,77 @@ Stone art survives the migration untouched; the swatch still renders
 under the "large stone" title; and the full sample regression sweep plus
 a fresh export (with a placed Large Stone) both run error-free.
 
+### A real regression found and fixed: switch never lit/worked in an exported game (v2.31.1)
+
+Direct bug report, right after the v2.34.1 color patch: "the switch is not
+behaving as we fixed just a few messages ago" — the lever art never
+visibly changed, and a colored switch never opened its matching Gate.
+Investigated rather than assumed: the live editor's own switch/Gate
+mechanic (paint a colored switch, paint a colored Gate, walk/push/throw
+into the switch, confirm the Gate opens) was re-verified end to end with
+Playwright and found to work correctly — no regression there at all. The
+actual bug only showed up one layer down, in an **exported** standalone
+game: opening a freshly exported file and simply holding a movement key
+produced **zero movement** and a console error, `ReferenceError:
+SWITCH_OFF_ART is not defined`, thrown inside `drawGameplayTile` on the
+very first render frame. That error trips `handleFatalError`'s global
+error boundary, which halts the whole game — explaining BOTH reported
+symptoms as one and the same root cause: the lever "never updates"
+because the game is frozen the instant a switch tile needs to render at
+all (on or off, colored or not — `drawGameplayTile`'s switch branch reads
+`SWITCH_OFF_ART` unconditionally whenever `on` is false, which is every
+switch's resting state), and nothing downstream (including a Gate
+opening) ever runs because the main loop stopped.
+
+**Root cause, the exact "new constant, no export line" gap this file has
+hit before**: v2.31 added `SWITCH_OFF_ART`/`SWITCH_ON_ART` as the two
+rendered lever states, but `exportStandaloneGame`'s `constantsSource` only
+ever gained a line for `SWITCH_ON_ART` — `SWITCH_OFF_ART` was never added,
+even though it's the one actually read on every switch's default (off)
+state. The live editor never showed any symptom because `SWITCH_OFF_ART`
+is an ordinary top-level `const` there, always in scope — only a
+standalone export, which has no such global and relies entirely on
+`constantsSource`'s hand-written lines, was ever affected. Fixed with one
+line, `` `const SWITCH_OFF_ART = ${JSON.stringify(SWITCH_OFF_ART)};` ``,
+added right alongside the existing `SWITCH_ON_ART` line.
+
+**Confirmed by tracing the actual exported file, not just re-reading the
+export code**: a direct Playwright run against a freshly exported game
+(with a debug hook injected post-export purely for this investigation,
+discarded afterward) showed the `ReferenceError` firing every frame and
+player velocity staying pinned at 0 despite `keys.ArrowRight` correctly
+reading `true` — proving the game's input and physics were never broken,
+only its render loop was fatally erroring before `tick()`/`stepActor` ever
+got a chance to run. Re-ran the same exported-game trace after the fix:
+the gate correctly reads blocking before the switch is touched and
+non-blocking afterward, with real player movement in between.
+
+**Also directly confirmed, per the user's own follow-up question**: a
+switch's permanent on/off toggle (not a plate's momentary one) is exactly
+what it already does — `switchChannels[color]` only flips on `triggerFlip`,
+never auto-resets — and both a crate and a Large Stone activate it
+exactly like the player does, whether they arrive by being pushed,
+charge-thrown (grab with E, hold, release), or simply placed directly on
+the cell: `checkPhysicsObjectSwitchContacts` fires from `stepActor` for
+any actor whose temperament is in `CARRYABLE_KINDS` (which includes both
+`PUSHABLE_KIND` and `LARGE_STONE_KIND`), regardless of how it got there —
+the reaction is purely positional/overlap-based, with nothing throw- or
+push-specific about it. Verified all three delivery methods directly: a
+teleported-onto crate, a charge-thrown crate (grabbed with E, held past
+`THROW_CHARGE_MAX_MS`, released, landing on the switch), and a teleported
+Large Stone all flip the same red channel.
+
+Verified with Playwright: the live editor's switch/Gate mechanic (paint,
+color, push/throw/walk, confirm the Gate opens) confirmed already working
+correctly, no change needed there; the exact `SWITCH_OFF_ART` export gap
+reproduced against a real exported file and confirmed fixed (gate
+blocking before, non-blocking after, real player movement throughout);
+crate-push, crate-throw, and Large-Stone-teleport onto a switch all
+confirmed working; The Monster's Den (the one built-in sample with a live
+switch/Gate puzzle) replayed with zero errors; and the full sample
+regression sweep plus a fresh export (with a freshly painted switch and
+Gate) both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
