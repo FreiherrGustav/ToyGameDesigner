@@ -707,6 +707,26 @@
     "spawner-n": { x: 0, y: -1 }, "spawner-e": { x: 1, y: 0 }, "spawner-s": { x: 0, y: 1 }, "spawner-w": { x: -1, y: 0 }
   };
   const SPAWNER_LAUNCH_SPEED = 420; // weaker than a real cannon shot (CANNON_LAUNCH_SPEED=700) — reads as "a shove outward," not "fired"
+  // v2.34: a small velocity-only jitter on top of the launch, purely for a bit of "kick" variety
+  // frame-to-frame — NOT what actually separates successive spawns (see SPAWNER_POSITION_JITTER
+  // below for that, and its own comment for the real reason a velocity-only jitter can't do it in
+  // this engine).
+  const SPAWNER_PERPENDICULAR_JITTER = 150;
+  // v2.34: direct feedback ("the spawner isn't producing anything," worse with multiple spawners)
+  // traced to genuine clumping, not a cap or a crash: a north/south-facing spawner's content goes
+  // straight up and gravity brings it straight back down, landing within ~40px of every other spawn
+  // from the same spawner — visually indistinguishable from a single ball bouncing in place. The
+  // first fix attempt was a bigger PERPENDICULAR VELOCITY jitter (150, up from the pre-existing
+  // flat ±40) — traced directly and found to barely help: `applyAxisFriction`'s x-axis call in
+  // stepActor runs UNCONDITIONALLY every frame, airborne or not, and a non-steering actor (a hazard
+  // ball has zero self-driven accel) has nothing opposing it, so FRICTION_DECEL (1800px/s²) eats a
+  // 150px/s jitter down to 0 within about 4 frames — confirmed with a direct frame-by-frame trace:
+  // vx 150 -> 60 -> 30 -> 0 in four ticks, covering barely 5px of real travel before friction fully
+  // kills it, regardless of how large the initial jitter is (bouncyCooldown's "recentlyLaunched"
+  // exemption only skips the speed-CAP clamp, never this friction call). The actual fix is jittering
+  // the spawn POSITION itself along the perpendicular axis — see tickSpawners — a permanent offset
+  // that isn't subject to friction at all, so it survives all the way to where the actor lands.
+  const SPAWNER_POSITION_JITTER = 48; // ~1.5 tiles either way — a 3-tile-wide spread, generous enough to read as new things landing in different spots
   // v2.33: same cardinal vectors, keyed by Gate's own orientation — which way it slides open, see
   // drawGameplayTile's own barrier branch.
   const BARRIER_DIRECTIONS = {
@@ -772,7 +792,9 @@
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
   const SPAWN_INTERVAL_MS = 2500;
   const SPAWNER_WINDUP_MS = 350;
-  const SPAWNER_MAX_CONCURRENT = 4;
+  // v2.34: SPAWNER_MAX_CONCURRENT (a hard per-spawner population cap) removed outright — direct
+  // feedback that a spawner should always fire on schedule, never skip a cycle for having "too
+  // much" of its own content still alive. SPAWN_TTL_MS alone now bounds population.
   const SPAWN_TTL_MS = 8000;
   // The default spawner content when nothing's been loaded into it — a plain physical hazard that
   // bounces off every wall (not just bouncy-tagged ones — see resolveAxis's own bouncy check) under
@@ -799,11 +821,24 @@
   // it — so it fits the picker fine.
   const PUSHABLE_KIND = "pushable";
   const PUSHABLE_DEF_ID = "pushable";
+  // v2.34: a second placeable physics object, direct request — "a moveable object... I'd like
+  // players to be able to build a bridge across the lava with these by throwing them." Placed
+  // directly as an actor exactly like pushable (not a painted-tile-that-converts-on-grab like
+  // bomb2/cannon2/magnet/trampoline), since it has no fixed standalone tile mechanic of its own —
+  // it's always just a solid, shovable, standable thing, the same shape pushable already is. Its
+  // own distinct kind (not just a re-skinned PUSHABLE_KIND) is what lets it be immune to lethal
+  // while crates aren't — see checkPhysicsObjectLethalContacts' own PUSHABLE_KIND-only gate below.
+  const LARGE_STONE_KIND = "largestone";
+  const LARGE_STONE_DEF_ID = "largestone";
+  // v2.34: the "stand on top of it / push it / it blocks" physics pushable already has, generalized
+  // to also cover Large Stone — see shovePushables/actorBlockedByOtherPushables, both of which used
+  // to check `=== PUSHABLE_KIND` directly and now check this array instead.
+  const STANDABLE_OBJECT_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND];
   // Pushable is the one actor-kind left that lives in the Objects tab instead of Characters —
   // a real actor under the hood, same as everyone else, but it never moves on its own, so to a
   // kid it's an object, not a character. Collectibles (v2.15) used to be the other one; they're
   // their own dedicated section now (collectibleSlotIds), not part of this generic kind list.
-  const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND];
+  const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND];
   // v2.21: bomb/cannon/magnet/trampoline stay exactly what they've always been — tiles a kid
   // paints from the Objects palette, painted and rotated the same way as before — but grabbing one
   // (pressing the carry key near it) picks it bodily up off the board and turns THAT ONE INSTANCE
@@ -830,7 +865,7 @@
   function isCarryBombKind(temperament) { return temperament === CARRY_BOMB2_KIND; }
   // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
   // plus the grabbed-off-the-board kinds above.
-  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_MAGNET_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND];
+  const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_MAGNET_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND, LARGE_STONE_KIND];
   // v2.21: the other half of "should this be a physical object" — geometries whose entire job IS
   // being a fixed spot in the room (a door leads somewhere specific, a goal marks the win point, a
   // gravity well anchors a vortex). These never become physical/blocking and never become
@@ -1436,7 +1471,7 @@
     // (unrenamed) after v2.27.2 removed the original bomb/cannon def ids entirely — any future
     // built-in actor def needs the same one-line addition here (see this comment's own note
     // further up).
-    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID].forEach(id => {
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID, LARGE_STONE_DEF_ID].forEach(id => {
       if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
     });
     nextActorDefId = snap.nextActorDefId;
@@ -2078,6 +2113,17 @@
       "BCCAACCB", "BCACCACB", "BACCCCAB", "ABBBBBBA"
     ], { A: "#9c4f26", B: "#cb7a33", C: "#6e3618" })
   };
+  // v2.34: a second physics object, pushable's own look but a rough gray-blue boulder instead of a
+  // wooden crate — the look alone is most of why it reads as "sturdier, won't burn" (a crate is a
+  // box of wood, this reads like actual rock), on top of being mechanically immune to lethal (see
+  // checkPhysicsObjectLethalContacts) so a kid can actually use it to fill in a lava gap.
+  actorDefs[LARGE_STONE_DEF_ID] = {
+    temperament: LARGE_STONE_KIND, poses: null, name: "large stone",
+    art: pat([
+      ".AABCDE.", "DDCCDADE", "BDADDFCD", "DCDDCDCA",
+      "ADDBBDFD", "EABDDECB", "DFBCADDD", ".EDADBD."
+    ], { A: "#bcc5d2", B: "#687287", C: "#8a9eba", D: "#3b4658", E: "#4d5c71", F: "#164f82" })
+  };
   // v2.19: the spawner's default content when nothing's been loaded into it — a plain physical
   // hazard, not a character with intent (no temperament picker offers this kind, same as pushable
   // — see stepActor/resolveAxis's own always-bounces check and resolveActorContact's hazard-ball
@@ -2120,6 +2166,13 @@
   function findDefaultActorDef(temp) {
     return Object.keys(actorDefs).find(id => actorDefs[id].temperament === temp && actorDefs[id].name === temp);
   }
+  // v2.27 found pushable needs a special case here wherever its def is looked up by kind — its
+  // own def.name reads as the friendly "crate" rather than the raw kind string "pushable", which
+  // breaks findDefaultActorDef's own name === kind match. v2.34's Large Stone needs the identical
+  // treatment from day one ("large stone" vs. "largestone") — a shared lookup table, rather than
+  // repeating the same ternary at every call site, is what keeps the two in sync as this list grows.
+  const KIND_DEF_ID_OVERRIDES = { [PUSHABLE_KIND]: PUSHABLE_DEF_ID, [LARGE_STONE_KIND]: LARGE_STONE_DEF_ID };
+  function defaultDefIdForKind(kind) { return KIND_DEF_ID_OVERRIDES[kind] || findDefaultActorDef(kind); }
 
   selectedActorDefId = selectedActorKind === "player" ? playerDefId : findDefaultActorDef(selectedActorKind);
   currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
@@ -3642,7 +3695,7 @@
     const container = document.getElementById("objectSwatches");
     container.innerHTML = "";
     OBJECT_ACTOR_KINDS.forEach(kind => {
-      const def = actorDefs[kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID : findDefaultActorDef(kind)];
+      const def = actorDefs[defaultDefIdForKind(kind)];
       const isSelected = paintMode === "actor" && selectedActorKind === kind;
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
@@ -3829,7 +3882,7 @@
     // moment pushable's own def.name became "crate" instead of "pushable" (a real crash, caught
     // by testing the crate rename rather than assumed safe from renderObjectSwatches' OWN
     // pre-existing special case alone — this is a second, separate lookup with the same gap).
-    selectedActorDefId = kind === "player" ? playerDefId : kind === PUSHABLE_KIND ? PUSHABLE_DEF_ID : findDefaultActorDef(kind);
+    selectedActorDefId = kind === "player" ? playerDefId : defaultDefIdForKind(kind);
     selectedPoseKey = "stand";
     currentArt = activeArtFor(actorDefs[selectedActorDefId]).slice();
     updateModeButtons();
@@ -4870,7 +4923,7 @@
         // just a different moment to call them from. Cannon also still launches a pushed pushable
         // that bumps into one, matching what a shove into a cannon tile already did before this.
         if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
-        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && def.temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry, cx, cy);
+        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && STANDABLE_OBJECT_KINDS.includes(def.temperament)))) triggerCannon(actor, geometry, cx, cy);
         // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
         // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
         // doing the damage. An actor isn't always exactly tile-aligned, so its AABB routinely spans
@@ -4914,7 +4967,7 @@
     for (const other of actors) {
       if (other.id === selfId || other.id === moverId || other.carried) continue;
       const def = actorDefs[other.defId];
-      if (!def || def.temperament !== PUSHABLE_KIND) continue;
+      if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (candidate.x < other.x + other.w && candidate.x + candidate.w > other.x &&
           candidate.y < other.y + other.h && candidate.y + candidate.h > other.y) return true;
     }
@@ -4944,7 +4997,7 @@
     for (const other of actors) {
       if (other.id === actor.id || other.carried) continue;
       const def = actorDefs[other.defId];
-      if (!def || def.temperament !== PUSHABLE_KIND) continue;
+      if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
       const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
@@ -5174,7 +5227,7 @@
         removeActorById(npcActor.id);
         maybeRoundCompleteFromCollectibles();
       }, RECIPES.popVanish.duration);
-    } else if (temperament === PUSHABLE_KIND) {
+    } else if (STANDABLE_OBJECT_KINDS.includes(temperament)) {
       // "capable of ... hazard-affecting whatever's beneath it when dropped": a block falling
       // onto the player from above with real speed crushes them — reusing the exact same
       // knockback+life reaction any other hazard gets, not a second one invented for this.
@@ -5182,6 +5235,8 @@
       // the shove the patch note describes — displaced by contact, nothing more — and that
       // continuous displacement already happens every frame via shovePushables(), so there's no
       // bounce reaction to add here; reflecting velocities on top of it would just fight the shove.
+      // v2.34: generalized from PUSHABLE_KIND alone to STANDABLE_OBJECT_KINDS — a falling Large
+      // Stone crushes just as hard as a falling crate; both share the exact same physics shape.
       if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
@@ -5571,6 +5626,33 @@
     for (const { cx, cy } of overlappedCells(actor)) {
       if (geometryAt(cx, cy) === "switch") triggerFlip(actor, cx, cy);
     }
+  }
+
+  // v2.34: direct request — "Crates should be destroyed when they touch lethal (lava, fire,
+  // etc). Not all objects should, though." Scoped to PUSHABLE_KIND specifically (a wooden crate
+  // burning/sinking is intuitive) rather than every CARRYABLE_KIND — magnet/trampoline/bomb2/
+  // cannon2 and the new Large Stone are all left untouched by lethal, Large Stone deliberately so
+  // (it's meant to survive sitting in lava — see LARGE_STONE_KIND's own comment, "build a bridge
+  // across the lava by throwing them"). Only catches a NON-blocking lethal tile (none:lethal —
+  // lava/fire, the pool-you-fall-into case the request names): a blocking lethal (solid:lethal,
+  // a spike trap) already stops a crate at its edge via ordinary collision, the same reason
+  // checkPlayerTileContacts' own lethal/hazard/bouncy reactions are gated off blocking geometry
+  // too — there's no cell to actually overlap, so a thrown crate bonking into a spike WALL merely
+  // bumps it like any other wall, it doesn't currently get destroyed by that contact; flag this
+  // scope boundary to the user before trying to extend it to blocking lethal too.
+  // `destroyed` guards against re-firing every frame during the ~220ms popVanish window.
+  function checkPhysicsObjectLethalContacts(actor) {
+    if (actor.destroyed) return;
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (modifierAt(cx, cy) === "lethal") { destroyPhysicsObjectInLethal(actor); return; }
+    }
+  }
+  function destroyPhysicsObjectInLethal(actor) {
+    actor.destroyed = true;
+    playActorSound(actor, "splat");
+    playRecipe(actor, "popVanish");
+    log("The crate is destroyed!");
+    setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
   }
 
   // Every actor-actor/player-actor touch reacts once, then goes quiet for a beat — without
@@ -6096,6 +6178,10 @@
       // non-blocking tile reaction a thrown object can trigger: flipping a switch it flies into.
       const def = actorDefs[actor.defId];
       if (def && CARRYABLE_KINDS.includes(def.temperament)) checkPhysicsObjectSwitchContacts(actor);
+      // v2.34: "crates should be destroyed when they touch lethal" — PUSHABLE_KIND only, see
+      // checkPhysicsObjectLethalContacts' own comment on why the other carryables (and Large
+      // Stone specifically) are deliberately excluded.
+      if (def && def.temperament === PUSHABLE_KIND) checkPhysicsObjectLethalContacts(actor);
     }
     checkActorContacts(actor, actors);
 
@@ -6189,13 +6275,25 @@
         state.windUp = timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
         if (state.clock < SPAWN_INTERVAL_MS) continue;
         state.clock = 0;
-        const alive = actors.filter(a => a.spawnerKey === key).length;
-        if (alive >= SPAWNER_MAX_CONCURRENT) continue; // the spawner simply skips this cycle at cap
+        // v2.34: direct feedback — "Spawner should always produce the thing." This used to skip
+        // the cycle outright once SPAWNER_MAX_CONCURRENT (4) of its own content were still alive —
+        // confirmed by direct trace that the cap genuinely was being hit and firing genuinely was
+        // being skipped (population self-regulates right at the cap, 3-4 alive, cycling normally,
+        // not stuck at 0 — so this wasn't a silent hang, but the user's own ask is for the timer to
+        // never be skipped regardless of population, so the cap is removed outright rather than
+        // just raised). SPAWN_TTL_MS (8s) still bounds how long any one spawned actor lives, so
+        // this doesn't risk truly unbounded growth — see SPAWN_TTL_MS/tickSpawnedTTL.
         const contents = spawnerContents[key];
         const defId = (contents && contents.length) ? contents[Math.floor(Math.random() * contents.length)] : HAZARD_BALL_DEF_ID;
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
         // SPAWNER_DIRECTIONS/spawnActorAt.
-        spawnActorAt(defId, x * TILE + TILE / 2, y * TILE + TILE / 2, key, now, SPAWNER_DIRECTIONS[geometry]);
+        const dir = SPAWNER_DIRECTIONS[geometry];
+        // v2.34: the spawn POSITION itself is jittered along the axis perpendicular to `dir`, not
+        // just its launch velocity — see SPAWNER_POSITION_JITTER's own comment for why a velocity-
+        // only jitter turned out not to work in this engine's physics model.
+        const perpX = -dir.y, perpY = dir.x;
+        const posJitter = (Math.random() * 2 - 1) * SPAWNER_POSITION_JITTER;
+        spawnActorAt(defId, x * TILE + TILE / 2 + perpX * posJitter, y * TILE + TILE / 2 + perpY * posJitter, key, now, dir);
       }
     }
   }
@@ -6756,19 +6854,25 @@
 
   // Creates a live actor instance the same shape placeNewActor does, minus anything player-
   // specific (a spawner never produces the player), tagged with which spawner made it and when —
-  // spawnerKey drives the concurrent-cap check (see tickSpawners) and lets tickSpawnedTTL find it
-  // again; spawnBornAt is what its TTL counts down from. v2.33: `dir` (always supplied by
-  // tickSpawners — SPAWNER_DIRECTIONS[geometry]) is a real launch in whichever way the spawner is
-  // rotated to face, like a gentle cannon — direct request ("rotating a spawner should set which
-  // way its contents get launched"), replacing the old undirected small random "pop out" kick. A
-  // perpendicular jitter is kept on top so it doesn't read as a perfectly straight laser.
+  // spawnerKey lets tickSpawnedTTL find it again; spawnBornAt is what its TTL counts down from.
+  // v2.33: `dir` (always supplied by tickSpawners — SPAWNER_DIRECTIONS[geometry]) is a real launch
+  // in whichever way the spawner is rotated to face, like a gentle cannon — direct request
+  // ("rotating a spawner should set which way its contents get launched"), replacing the old
+  // undirected small random "pop out" kick.
+  // v2.34: `px`/`py` now arrive pre-offset by SPAWNER_POSITION_JITTER (see tickSpawners) — that
+  // positional jitter, not this function's own velocity jitter below, is what actually keeps
+  // successive spawns visually distinct; see SPAWNER_POSITION_JITTER's own comment for the direct
+  // trace that found a velocity-only jitter doesn't survive friction long enough to matter. The
+  // small SPAWNER_PERPENDICULAR_JITTER kick here is kept purely for a bit of launch-feel variety.
   function spawnActorAt(defId, px, py, spawnerKey, nowMs, dir) {
     const x = px - ACTOR_SIZE / 2, y = py - ACTOR_SIZE / 2;
+    const perpX = -dir.y, perpY = dir.x;
+    const jitter = (Math.random() * 2 - 1) * SPAWNER_PERPENDICULAR_JITTER;
     const actor = {
       id: nextActorInstId++, defId, x, y, w: ACTOR_SIZE, h: ACTOR_SIZE,
       spawnX: x, spawnY: y,
-      vx: dir.x * SPAWNER_LAUNCH_SPEED + (Math.random() * 2 - 1) * 40,
-      vy: dir.y * SPAWNER_LAUNCH_SPEED + (dir.y === 0 ? 60 : 0),
+      vx: dir.x * SPAWNER_LAUNCH_SPEED + perpX * jitter,
+      vy: dir.y * SPAWNER_LAUNCH_SPEED + perpY * jitter + (dir.y === 0 ? 60 : 0),
       grounded: false, isPlayer: false, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0,
@@ -6824,7 +6928,7 @@
     function fireBlockingTileReaction(cx, cy) {
       const geometry = geometryAt(cx, cy);
       if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
-      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && actorDefs[actor.defId].temperament === PUSHABLE_KIND))) triggerCannon(actor, geometry, cx, cy);
+      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && STANDABLE_OBJECT_KINDS.includes(actorDefs[actor.defId].temperament)))) triggerCannon(actor, geometry, cx, cy);
     }
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
@@ -7926,7 +8030,7 @@
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
-      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
@@ -7981,6 +8085,8 @@
       `const SPAWNER_ORDER = ${JSON.stringify(SPAWNER_ORDER)};`,
       `const SPAWNER_DIRECTIONS = ${JSON.stringify(SPAWNER_DIRECTIONS)};`,
       `const SPAWNER_LAUNCH_SPEED = ${SPAWNER_LAUNCH_SPEED};`,
+      `const SPAWNER_PERPENDICULAR_JITTER = ${SPAWNER_PERPENDICULAR_JITTER};`,
+      `const SPAWNER_POSITION_JITTER = ${SPAWNER_POSITION_JITTER};`,
       `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
       `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
@@ -7989,12 +8095,14 @@
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
       `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS};`,
-      `const SPAWNER_MAX_CONCURRENT = ${SPAWNER_MAX_CONCURRENT}, SPAWN_TTL_MS = ${SPAWN_TTL_MS};`,
+      `const SPAWN_TTL_MS = ${SPAWN_TTL_MS};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
       `const CHANNEL_COLORS = ${JSON.stringify(CHANNEL_COLORS)};`,
       `const CHANNEL_COLOR_HEX = ${JSON.stringify(CHANNEL_COLOR_HEX)};`,
       `const PUSHABLE_KIND = ${JSON.stringify(PUSHABLE_KIND)};`,
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
+      `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
+      `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
       `const TEMPERAMENT_COLORS = ${JSON.stringify(TEMPERAMENT_COLORS)};`,
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
