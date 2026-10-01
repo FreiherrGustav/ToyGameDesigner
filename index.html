@@ -944,16 +944,46 @@
   // slower than the player's own MAX_SPEED so a kid who's actually moving can stay ahead of it;
   // falling behind (see checkRunnerFailState) is what creates the tension the mode is for.
   const RUNNER_SPEED = 130;
-  // v2.39: Follow mode used to snap cameraX to its exact target every single tick — direct feedback
-  // that this read as "constantly jerking back and forth" rather than smooth tracking, since every
-  // frame-to-frame sub-pixel wobble in the player's own position (friction settling, a collision
-  // resolution nudging it flush to a tile edge, even plain frame-timing variance) was instantly and
-  // fully copied onto the camera with zero damping. CAMERA_FOLLOW_RATE is an exponential-ease
-  // constant (per second) — see updateCamera()'s `1 - Math.exp(-CAMERA_FOLLOW_RATE * dt)` — chosen
-  // so the camera closes roughly 95% of the gap to its target within about a third of a second:
-  // fast enough to keep a running player comfortably on screen, slow enough that a one-or-two-pixel
-  // target wobble gets smoothed into nothing a kid would notice.
-  const CAMERA_FOLLOW_RATE = 9;
+  // v2.39 first tried easing cameraX toward a continuously-recomputed "always centered on the
+  // player" target every tick, instead of snapping to it outright — a real improvement, but direct
+  // follow-up feedback was that it was "still very jerky" for two separate reasons v2.39 didn't
+  // reach: (1) the RENDER side (renderRoomContents) was drawing tiles snapped to whole-tile screen
+  // columns regardless of how smoothly cameraX itself moved — see that function's own v2.40 comment,
+  // the actual root cause of "moving a tile at a time" — and (2) continuous dead-center tracking
+  // just isn't how this genre's cameras read as "smooth" in the first place: a kid's own small
+  // side-to-side wiggling constantly nudges the camera too, which never stops feeling restless no
+  // matter how gently it's eased.
+  // v2.40 replaces continuous centering with the standard platformer "camera dead zone" pattern
+  // (Super Mario/Metroid/Celeste all use a version of this): the player can move freely within a
+  // band of the screen and the camera doesn't move AT ALL — not even smoothed — until the player
+  // nears the edge of that band, at which point the camera shifts to reveal more room ahead and
+  // then holds still again. Direct request, with specific numbers: trigger a shift once the player
+  // reaches CAMERA_DEADZONE_TRIGGER_FRAC (85%) of the way across the screen in their direction of
+  // travel, and shift the camera so they end up resting at CAMERA_DEADZONE_ANCHOR_FRAC (40%) from
+  // that same leading edge — i.e. 40% from the left when moving right (mirrored to 40% from the
+  // right, so 60% from the left, when moving left), which is also itself a standard convention
+  // (a "look-ahead" bias: more room visible in the direction you're heading than behind you).
+  // Letting the trigger (85%) and the rest point (40%) differ, rather than just pinning the player
+  // at a single dead-zone edge the way a pure Mario-style camera would, is what produces the "reveals
+  // a chunk of room at once, then holds" feel that was specifically asked for, instead of a camera
+  // that creeps along just barely keeping pace.
+  // This needs real state (updateCamera's cameraShiftSide), not just a per-frame frac check — a
+  // first attempt computed the target fresh every tick purely from the CURRENT frac (chase the 40%
+  // anchor only while frac > 85%, else freeze) on the theory that it would be self-terminating. It
+  // wasn't: since 85% and 40% are different numbers, the eased cameraX only has to crawl a little
+  // before frac dips back under 85%, and the very next tick's "else freeze" branch catches it there
+  // — the shift would stall around ~80% instead of ever reaching 40%. Fixed by remembering which
+  // edge triggered the shift (cameraShiftSide: null/"right"/"left") and chasing that same anchor,
+  // off the player's live position, every tick UNTIL frac actually reaches the anchor itself (within
+  // CAMERA_DEADZONE_SETTLE_EPS) — only then does it drop back to null and the dead zone re-engage.
+  const CAMERA_DEADZONE_TRIGGER_FRAC = 0.85;
+  const CAMERA_DEADZONE_ANCHOR_FRAC = 0.40;
+  const CAMERA_DEADZONE_SETTLE_EPS = 0.02;
+  // How fast the camera closes the gap while actively chasing an anchor (same exponential-ease
+  // shape v2.39 introduced, `1 - Math.exp(-rate*dt)`, just faster — "smoothly and quickly," not a
+  // gentle idle correction) — about 90% of the way there within a quarter of a second. Irrelevant
+  // inside the dead zone: cameraX is simply never touched there, not eased toward itself.
+  const CAMERA_DEADZONE_SHIFT_RATE = 16;
   const BOUNCE_RESTITUTION = 0.82;
   // A plain bouncy WALL (solid+bouncy hit on the x-axis) used to just reflect whatever horizontal
   // speed the player already had — jumping straight up between two close bouncy walls carries
@@ -1134,6 +1164,12 @@
   // cameraX=0 in activateRoom()) makes updateCamera's very first follow-mode tick in a newly-hot
   // room snap directly to the target, same as before, with every tick after that eased.
   let cameraFollowSnapNeeded = true;
+  // v2.40: null while the camera is frozen inside its dead zone; "right"/"left" while actively
+  // chasing that side's look-ahead anchor after a trigger-edge crossing — see
+  // CAMERA_DEADZONE_TRIGGER_FRAC's own comment for why this needs to be real remembered state, not
+  // just a per-frame threshold check. Reset alongside cameraX/cameraFollowSnapNeeded in
+  // activateRoom() — a fresh room always starts with no shift in progress.
+  let cameraShiftSide = null;
   // v2.9: one independent boolean per channel color, toggled permanently by a same-colored
   // switch — the direct generalization of the old single gravity-flip boolean. Global across
   // rooms, same as gravity/wrap above, for the same reason.
@@ -1255,6 +1291,7 @@
     cameraMode = incoming.cameraMode; editorPanCol = incoming.editorPanCol;
     cameraX = 0;
     cameraFollowSnapNeeded = true;
+    cameraShiftSide = null;
   }
 
   // Resets the whole multi-room game back to a single fresh room — used at startup and by the
@@ -6307,27 +6344,51 @@
     });
   }
 
-  // v2.17: Fixed camera never moves (cameraX stays 0). Follow tracks the player, centered,
-  // clamped to the room's real edges. Runner advances on its own at a constant speed, independent
-  // of the player entirely — the Flappy Bird case. Camera behavior is a Play-only concept: Build
-  // mode always shows the manual editorPanCol pan instead (see renderGame()), the same way every
-  // other win/lose mechanic in this toy only actually resolves in Play.
-  // v2.39: Follow no longer snaps cameraX to its target every tick — see CAMERA_FOLLOW_RATE's own
-  // comment for why that read as constant jerking. It now eases toward the target instead, except
-  // on the very first follow-mode tick after a room becomes hot (cameraFollowSnapNeeded), where it
-  // still snaps immediately so entering a room doesn't visibly slide the camera in from wherever
-  // cameraX=0 happened to be.
+  // v2.17: Fixed camera never moves (cameraX stays 0). Follow tracks the player via a dead zone
+  // (see CAMERA_DEADZONE_TRIGGER_FRAC's own comment for why, and for the v2.39 attempt this
+  // replaces). Runner advances on its own at a constant speed, independent of the player entirely —
+  // the Flappy Bird case. Camera behavior is a Play-only concept: Build mode always shows the
+  // manual editorPanCol pan instead (see renderGame()), the same way every other win/lose mechanic
+  // in this toy only actually resolves in Play.
+  // v2.40: while cameraShiftSide is null, cameraX is literally untouched — no target, no ease, the
+  // dead zone means genuinely frozen. The instant the player's screen fraction crosses a trigger
+  // edge, cameraShiftSide latches to which side crossed, and every tick after that (regardless of
+  // what frac does meanwhile) eases toward that side's look-ahead anchor computed fresh off the
+  // player's live position, until frac actually reaches the anchor (within CAMERA_DEADZONE_SETTLE_EPS)
+  // or the camera hits the room's own edge — only then does cameraShiftSide drop back to null and
+  // the dead zone re-engage. See CAMERA_DEADZONE_TRIGGER_FRAC's own comment for why this needs to be
+  // remembered state rather than a fresh per-frame frac check.
+  // The very first follow-mode tick after a room becomes hot (cameraFollowSnapNeeded) still snaps
+  // immediately to a plain centered target — there's no established "direction of travel" yet to
+  // pick a 40% vs 60% anchor from, and easing from the fresh room's cameraX=0 would visibly slide
+  // the camera in from the edge on every room entry, which nothing has ever asked for.
   function updateCamera(dt) {
     const maxCameraX = Math.max(0, roomCols() * TILE - COLS * TILE);
     if (cameraMode === "follow") {
       const player = actors.find(a => a.isPlayer);
       if (player) {
-        const target = Math.max(0, Math.min(maxCameraX, player.x + player.w / 2 - (COLS * TILE) / 2));
+        const viewportW = COLS * TILE;
+        const playerCx = player.x + player.w / 2;
         if (cameraFollowSnapNeeded) {
-          cameraX = target;
+          cameraX = Math.max(0, Math.min(maxCameraX, playerCx - viewportW / 2));
           cameraFollowSnapNeeded = false;
+          cameraShiftSide = null;
         } else {
-          cameraX += (target - cameraX) * (1 - Math.exp(-CAMERA_FOLLOW_RATE * dt));
+          const frac = (playerCx - cameraX) / viewportW;
+          if (cameraShiftSide == null) {
+            if (frac > CAMERA_DEADZONE_TRIGGER_FRAC) cameraShiftSide = "right";
+            else if (frac < 1 - CAMERA_DEADZONE_TRIGGER_FRAC) cameraShiftSide = "left";
+          }
+          if (cameraShiftSide === "right") {
+            const target = Math.max(0, Math.min(maxCameraX, playerCx - CAMERA_DEADZONE_ANCHOR_FRAC * viewportW));
+            cameraX += (target - cameraX) * (1 - Math.exp(-CAMERA_DEADZONE_SHIFT_RATE * dt));
+            if (frac <= CAMERA_DEADZONE_ANCHOR_FRAC + CAMERA_DEADZONE_SETTLE_EPS || cameraX >= maxCameraX - 0.5) cameraShiftSide = null;
+          } else if (cameraShiftSide === "left") {
+            const target = Math.max(0, Math.min(maxCameraX, playerCx - (1 - CAMERA_DEADZONE_ANCHOR_FRAC) * viewportW));
+            cameraX += (target - cameraX) * (1 - Math.exp(-CAMERA_DEADZONE_SHIFT_RATE * dt));
+            if (frac >= (1 - CAMERA_DEADZONE_ANCHOR_FRAC) - CAMERA_DEADZONE_SETTLE_EPS || cameraX <= 0.5) cameraShiftSide = null;
+          }
+          // else: inside the dead zone — cameraX is simply never written to this tick.
         }
       }
     } else if (cameraMode === "runner") {
@@ -7666,12 +7727,14 @@
   // Used both for the live room and — during a door transition — for the frozen snapshot of
   // whichever room was just left, so the two can be cross-faded independently of which one is
   // "hot" right now.
-  // v2.17: draws one viewport-sized (COLS-wide) window onto a room that may be wider than that —
-  // viewStartCol is which board column lines up with screen column 0. sx is always the on-screen
-  // column (0..COLS-1); bx = sx + viewStartCol is the real board column everything actually reads
-  // from. Every call site (renderGame, in Build or Play) picks viewStartCol appropriately; a plain
-  // call with no third argument (viewStartCol defaulting to 0) reproduces the pre-v2.17 behavior
-  // exactly, for a Fixed room where it's always 0 anyway.
+  // v2.17: draws one viewport-sized (COLS-wide) window onto a room that may be wider than that.
+  // v2.40: takes the real CONTINUOUS viewOffsetPx (board pixels) rather than a pre-floored
+  // viewStartCol column index — see renderRoomContents' own v2.40 comment for why drawing tiles
+  // snapped to whole-tile screen columns was the actual root cause of camera motion reading as
+  // "moving a tile at a time" regardless of how smoothly cameraX itself eased. Every call site
+  // (renderGame, in Build or Play) passes its own real offset; Build mode's editorPanCol*TILE is
+  // always an exact tile multiple, so this is a no-op change for Build/Fixed — only a genuinely
+  // sub-tile camera position (Follow/Runner) is affected.
   // v2.20: the "white wavy lines" a fan's airflow needed to actually read as wind rather than just
   // an icon with a chevron on it — small dashes flowing outward from the fan along its facing
   // direction, animated with a perpendicular wobble so they read as moving air, not a static
@@ -7684,11 +7747,13 @@
   // wind effect sitting right at the fan's mouth, per direct feedback. 2-3 short wavy white lines,
   // side by side (spaced along the perpendicular axis), each a small sine ripple confined well
   // inside that single tile's bounds and animated by phase so they shimmer in place.
-  function drawFanStream(ctx, boardArg, viewStartCol, isLive) {
+  function drawFanStream(ctx, boardArg, viewOffsetPx, isLive) {
     if (!isLive) return;
     const now = performance.now();
+    const firstCol = Math.floor(viewOffsetPx / TILE);
+    const lastCol = firstCol + COLS; // one extra edge column, matching renderRoomContents' own range
     for (let y = 0; y < ROWS; y++) {
-      for (let bx = viewStartCol; bx < viewStartCol + COLS; bx++) {
+      for (let bx = firstCol; bx <= lastCol; bx++) {
         const gKey = boardArg[y] && boardArg[y][bx];
         const geometry = gKey && GAMEPLAY_TILE_DEFS[gKey] ? GAMEPLAY_TILE_DEFS[gKey].geometry : null;
         if (!FAN_ORDER.includes(geometry)) continue;
@@ -7701,9 +7766,9 @@
         const stopKey = boardArg[fy] && boardArg[fy][fx];
         const stopGeometry = stopKey && GAMEPLAY_TILE_DEFS[stopKey] ? GAMEPLAY_TILE_DEFS[stopKey].geometry : null;
         if (stopGeometry === "solid") continue; // a wall right against the fan blocks the airflow entirely
-        const sx = fx - viewStartCol;
-        if (sx < 0 || sx >= COLS) continue;
-        const tileCx = sx * TILE + TILE / 2, tileCy = fy * TILE + TILE / 2;
+        const screenX = fx * TILE - viewOffsetPx;
+        if (screenX < -TILE || screenX > COLS * TILE) continue; // fully off-screen
+        const tileCx = screenX + TILE / 2, tileCy = fy * TILE + TILE / 2;
         for (let li = 0; li < 3; li++) {
           const perpOffset = (li - 1) * (TILE * 0.28);
           const phase = now / 220 + li * 1.7;
@@ -7728,17 +7793,28 @@
     }
   }
 
-  function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewStartCol) {
-    viewStartCol = viewStartCol || 0;
+  function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewOffsetPx) {
+    viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = performance.now();
     const isLive = boardArg === board; // crumble anim only applies to the currently-active room
+    // v2.40: bx now ranges over real board columns at their exact continuous screen position
+    // (screenX = bx*TILE - viewOffsetPx), not a pre-floored "viewStartCol + sx" whole-tile mapping
+    // — see this function's own top comment for why the old scheme was the actual cause of tiles
+    // visibly jumping a full tile at a time no matter how smoothly cameraX itself moved. One extra
+    // column is swept on the right (lastCol = firstCol + COLS, one more than the COLS that exactly
+    // fill the viewport at zero sub-tile offset) so nothing pops in/out as the fractional remainder
+    // crosses 0 — harmless when it lands off-canvas.
+    const firstCol = Math.max(0, Math.floor(viewOffsetPx / TILE));
+    const lastCol = firstCol + COLS;
+    const rowLen = boardArg[0] ? boardArg[0].length : 0;
 
     for (let y = 0; y < ROWS; y++) {
-      for (let sx = 0; sx < COLS; sx++) {
-        const bx = sx + viewStartCol;
+      for (let bx = firstCol; bx <= lastCol; bx++) {
+        if (bx >= rowLen) continue;
+        const screenX = bx * TILE - viewOffsetPx;
         const bgId = backgroundBoardArg[y][bx];
-        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, sx * TILE, y * TILE, TILE, cell);
+        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, screenX, y * TILE, TILE, cell);
 
         const key = bx + "," + y;
         const tanim = isLive ? tileAnimState[key] : null;
@@ -7747,7 +7823,7 @@
           if (sample) {
             ctx.save();
             ctx.globalAlpha = sample.alpha;
-            ctx.translate(sx * TILE + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
+            ctx.translate(screenX + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) ctx.rotate(sample.rot);
             ctx.scale(sample.sx, sample.sy);
             // v2.27: an optional art override (see EXPLOSION_ART/PARTICLE_ART, detonateBombAt,
@@ -7795,16 +7871,24 @@
             const skinId = groundSkinBoard[y][bx];
             if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId], skinRotation: groundSkinRotationBoard[y][bx] || 0 });
           }
-          drawGameplayTile(ctx, sx * TILE, y * TILE, tile, extra);
+          drawGameplayTile(ctx, screenX, y * TILE, tile, extra);
         }
       }
     }
 
-    drawFanStream(ctx, boardArg, viewStartCol, isLive);
+    drawFanStream(ctx, boardArg, viewOffsetPx, isLive);
 
+    // v2.40: the grid overlay now scrolls with the board (same screenX formula as the tiles above)
+    // instead of staying pinned to fixed screen columns — it always looked fine before since every
+    // camera that ever moved (Fixed always 0, Build's editorPanCol always a whole tile) kept the
+    // grid trivially aligned; a genuinely sub-tile camera position would otherwise show the grid
+    // visibly drifting out of sync with the tiles it's supposed to outline.
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth = 1;
-    for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * TILE, 0); ctx.lineTo(x * TILE, ROWS * TILE); ctx.stroke(); }
+    for (let bx = firstCol; bx <= lastCol; bx++) {
+      const sx = bx * TILE - viewOffsetPx;
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, ROWS * TILE); ctx.stroke();
+    }
     for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
   }
 
@@ -7916,7 +8000,6 @@
     // v2.17: Build mode always shows the manual editor pan (0 for a Fixed room — see
     // selectCameraMode); Play shows wherever the room's own camera mode has put cameraX.
     const viewOffsetPx = appMode === "build" ? editorPanCol * TILE : cameraX;
-    const viewStartCol = Math.floor(viewOffsetPx / TILE);
 
     if (roomTransition) {
       // A true cross-fade: the swap already happened instantly (see beginRoomTransition), so
@@ -7924,18 +8007,18 @@
       const frac = Math.min(1, (performance.now() - roomTransition.startedAt) / ROOM_TRANSITION_MS);
       gctx.save();
       gctx.globalAlpha = 1 - frac;
-      renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard, viewStartCol);
+      renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard, viewOffsetPx);
       renderActors(gctx, roomTransition.fromActors, viewOffsetPx);
       gctx.restore();
       gctx.save();
       gctx.globalAlpha = frac;
-      renderRoomContents(gctx, board, backgroundBoard, viewStartCol);
+      renderRoomContents(gctx, board, backgroundBoard, viewOffsetPx);
       renderActors(gctx, actors, viewOffsetPx);
       gctx.restore();
       return;
     }
 
-    renderRoomContents(gctx, board, backgroundBoard, viewStartCol);
+    renderRoomContents(gctx, board, backgroundBoard, viewOffsetPx);
 
     // The empty-socket cue and the start-position outline are Build-only editing affordances —
     // Play just shows the game itself.
@@ -8188,7 +8271,9 @@
     const constantsSource = [
       `const COLS = ${COLS}, ROWS = ${ROWS}, TILE = ${TILE}, ART = ${ART};`,
       `const BOARD_MAX_COLS = ${BOARD_MAX_COLS}, RUNNER_SPEED = ${RUNNER_SPEED};`,
-      `const CAMERA_FOLLOW_RATE = ${CAMERA_FOLLOW_RATE};`,
+      `const CAMERA_DEADZONE_TRIGGER_FRAC = ${CAMERA_DEADZONE_TRIGGER_FRAC}, CAMERA_DEADZONE_ANCHOR_FRAC = ${CAMERA_DEADZONE_ANCHOR_FRAC};`,
+      `const CAMERA_DEADZONE_SETTLE_EPS = ${CAMERA_DEADZONE_SETTLE_EPS};`,
+      `const CAMERA_DEADZONE_SHIFT_RATE = ${CAMERA_DEADZONE_SHIFT_RATE};`,
       `const SOUND_PATCHES = ${JSON.stringify(SOUND_PATCHES)};`,
       `const CHIP_CPU = ${CHIP_CPU};`,
       `const CHIP_DUTY = ${JSON.stringify(CHIP_DUTY)};`,
@@ -8358,6 +8443,7 @@
   let gravityEnabled = false, wrapHEnabled = false, wrapVEnabled = false, cameraMode = "fixed", editorPanCol = 0;
   let cameraX = 0;
   let cameraFollowSnapNeeded = true;
+  let cameraShiftSide = null;
   let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
