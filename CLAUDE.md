@@ -1288,6 +1288,94 @@ older-format (pre-this-patch) save; and deleting a custom sprite. Stays
 outside this repo, same as always — handed to the user as a file, not
 committed.
 
+### Switch becomes a real two-state toggle, and can now be hit by a thrown object (v2.31)
+
+Direct feedback: the `switch` tile's art never showed which way it was set
+(just a plain cross icon, dimmed when off — the same uniform alpha-dim
+every other switch/plate used before `plate` got its own real indicator in
+v2.27), and nothing but the player's own footsteps could ever flip one —
+"throws something into it" didn't work at all. Three asks bundled
+together: a real two-state sprite, a thrown/pushed object being able to
+flip it, and confirming it already works as "one channel, many switches
+and many controlled things" rather than a door's 1:1 pairing.
+
+**The third ask turned out to already be true — nothing to fix.** A
+colored switch has never stored any per-tile state of its own; it flips
+`switchChannels[color]`, a single boolean keyed only by COLOR, shared by
+every switch, plate, barrier, and gated solid wall painted with that same
+color (see `isChannelOn`). Touching any one red switch already turns every
+red barrier on and every other red switch's own reading along with it, for
+free, just by all of them reading the same shared value at render time —
+confirmed directly rather than assumed: a pushable placed on one red
+switch's cell flipped the channel, and a SECOND red switch painted
+afterward immediately read that already-on state with no extra wiring.
+This is also exactly why switch's channel model is NOT like a door's: a
+colored door's color means something else entirely (see `wireColoredDoor`
+— it pairs exactly two doors together for room-linking, v2.11), never a
+shared gate value, so "many things, one channel" was never a question of
+switch needing to catch up to anything — it already had the right model
+from day one, just no visual proof and no way for an object to trigger it.
+
+**A real two-state sprite**: `SWITCH_OFF_ART`/`SWITCH_ON_ART` replace the
+old plain cross icon — a gray bracket housing (the "neutral switch," pixel-
+identical in both arrays, never changes) around a red knob on a short dark
+lever with a 1px black shadow, mirrored left (off) vs right (on). The two
+arrays differ in exactly one 2x2 block of cells (rows 3-4, cols 1-2 vs
+5-6) — everything else matches byte-for-byte, which is what makes it read
+as "the same switch, lever thrown" rather than two unrelated icons.
+`drawGameplayTile`'s switch branch picks between them: `extra.color ?
+extra.channelOn : gravityOn()` — a COLORED switch reads its own channel,
+same as plate/barrier/button already do; an UNCOLORED switch has no
+channel of its own to read (it flips the room's shared gravity toggle
+instead, its original v2.2 behavior, untouched), so it shows whichever way
+THAT boolean currently reads instead — the same "the switch shows the
+state it drives" idea the old alpha-dim comment already had, just a real
+position now instead of a dim. Verified by sampling the actual rendered
+canvas pixel at the knob's position before and after a touch, for both the
+off→on direction and back — the knob measurably moves, not just a color or
+alpha change.
+
+**"Throws something into it"**: `checkPhysicsObjectSwitchContacts(actor)`,
+a small new function living right next to `checkPlayerTileContacts`
+(deliberately NOT folded into it — that function is explicitly player-only
+by name and by its own comment, and goal/door/warp/hazard/lethal/bouncy
+don't make sense for an inanimate object the way they do for a kid; this
+new function reacts to exactly the one thing that was actually asked for).
+Called from `stepActor` for any actor whose `actorDefs` temperament is in
+`CARRYABLE_KINDS` (pushable, or a grabbed-then-thrown bomb/magnet/cannon/
+trampoline) — the same "physics object" list the v2.28 bounce-widening
+patch already established, reused rather than inventing a second, parallel
+list. `triggerFlip` itself needed no changes at all to support this: it
+already takes a generic actor parameter and reads a plain `flipCooldown`
+field every actor already carries, decremented unconditionally in
+`stepActor`, never player-gated — the gap was purely that nothing had ever
+called it for anyone but the player. Verified two ways: a full end-to-end
+push (walk a crate into a switch) flips the shared channel, and — to rule
+out the player's own trailing contact as the real cause — a pushable
+teleported directly onto a switch's cell with the player standing still
+far away flips it on its own, proving the reaction belongs to the object,
+not incidental player overlap.
+
+**Export pipeline**: `checkPhysicsObjectSwitchContacts` added to
+`runtimeFunctions`, `SWITCH_ON_ART` added to `constantsSource` as its own
+line (`SWITCH_OFF_ART` needed no separate line — it lives inside
+`GEOMETRY_ICONS`, which is already exported wholesale). Verified directly:
+exported a game with a colored switch painted in, confirmed both new
+identifiers appear in the output, and the exported game boots and plays
+error-free.
+
+Verified with Playwright (18 checks across setup/behavior/visual/export):
+painting colored and uncolored switches; default state is off for both a
+fresh channel and a fresh room's gravity; walking into an uncolored switch
+flips `gravityEnabled`; walking into a colored switch flips its channel
+and a SECOND same-colored switch (plus a same-colored barrier) reflects
+it with no separate trigger; a pushable placed directly on a switch cell
+flips it with the player untouched; pixel-sampling the rendered canvas
+confirms the knob genuinely slides left/right, not just a recolor; the
+full 5-sample regression sweep (The Monster's Den specifically exercises
+its own pre-existing colored switch/barrier puzzle, now rendering with the
+new two-state art) and a fresh export both run error-free.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
