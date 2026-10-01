@@ -3533,6 +3533,75 @@ the real UI, then loading and playing the exported file past
 `flipCooldown`) both run error-free; and a final debug-hook-free sanity
 pass confirms `window.__toyDebug` leaves no trace.
 
+## Spawner: no more single-item cap, no more automatic timed disappearance (v2.38)
+
+Direct feedback: "Spawners still only make 1 item at a time. They should be able to make lots of
+the item. No reason they should automatically disappear. If they are overlapping with no place to
+go, then yes, maybe they start to disappear, but as the default behavior it's too restrictive."
+This reverses two separate population-management mechanisms v2.35 and earlier had built up —
+both existed for a reason at the time (keeping concurrent spawns from visually clumping, per
+v2.34's own jitter work), but the user's experience of them in practice was that a spawner just
+felt broken/limited, not managed.
+
+**Two restrictions removed, not replaced with a smarter version of either:**
+- The v2.35 "one live spawn at a time" cap (`state.activeId`, the `occupied` gate in
+  `tickSpawners`) is gone. A spawner now fires on schedule every `SPAWN_INTERVAL_MS`, full stop,
+  regardless of how many of its own earlier spawns are still alive.
+- The v2.19-era `SPAWN_TTL_MS` (8s) automatic despawn (`tickSpawnedTTL`, called unconditionally
+  from `tick()`) is gone outright, along with its call site, the constant itself, and the
+  `spawnBornAt` field it was the only reader of. Spawned content no longer pops on a clock just
+  for existing — it persists exactly like anything else placed in the room, until something
+  actually removes it (caught by the player, popped by touching it, destroyed in lethal, etc.).
+
+**What's kept, and why it's not the same thing as either removed restriction**: the user's own
+carve-out — "if they are overlapping with no place to go, maybe they start to disappear" — was
+read narrowly rather than built as a new despawn mechanism for already-existing actors (which
+would reintroduce exactly the "things vanish on their own for no visible reason" complaint this
+patch exists to fix). Instead, `cellOccupiedByActor(cx, cy)` (a plain AABB-vs-cell-rect scan
+against `actors`, the actor-world equivalent of the tile-blocking checks this file already has)
+gates the spawner's own firing: if the cell it's about to launch into already has an actor sitting
+in it, this cycle's fire is skipped — the clock keeps counting (same as the old `occupied` gate
+did), so the very next tick after the cell clears, it fires immediately rather than waiting out a
+fresh interval. Nothing that already exists is ever removed by this — it's purely "don't
+materialize a brand-new actor fully on top of one that's already there," which is also what
+actually prevents a literal stack of exact-overlapping clones from ever happening, not a cosmetic
+nicety. This is a deliberate, narrower reading of the user's own "maybe they start to disappear"
+phrasing than an active despawn-on-overcrowding reaction would have been — flagged here in case
+the user actually wants existing crowded spawns to start popping too, which would be a different,
+bigger change (deciding what "no place to go" means for something that already exists and can't
+move, not just a cell a new one hasn't been born into yet).
+
+**`despawnSpawnedActor` itself is completely untouched** and still does real work — every
+touch-triggered "this spawned thing goes away" reaction (`resolveActorContact`'s hazard-ball-pops-
+when-it-hurts-the-player branch, and the stationary/wanderer "bumping it counts as popping it
+early" branches) still calls it exactly as before; only the standing TIMER that used to call it on
+a clock, with no contact needed, is gone. `ttlPopped` still guards those touch-triggered calls
+against re-firing every frame while a popped actor is mid-fade.
+
+**A real, if obvious, consequence worth stating plainly**: with no cap and no timer, a spawner left
+running for a long Play session will accumulate actors indefinitely (bounded only by whatever
+naturally removes them — the player catching/touching them, lethal, etc.). This is the literal
+behavior asked for ("lots of the item"), not an oversight, but it's worth flagging since nothing in
+this patch adds a safety valve against a genuinely long, idle, uninterrupted run building up a
+large actor count — if that ever becomes a real problem, it needs its own explicit ask rather than
+silently reintroducing one of the two restrictions this patch just removed.
+
+**Export pipeline**: `tickSpawnedTTL` is removed from `runtimeFunctions` and replaced with
+`cellOccupiedByActor`; `SPAWN_TTL_MS`'s `constantsSource` line is removed (nothing reads it
+anymore). `spawnActorAt`'s signature dropped its now-unused `nowMs` parameter (and the `spawnBornAt`
+field it set) — its one call site in `tickSpawners` updated to match. Every other function this
+touches (`tickSpawners`, `despawnSpawnedActor`) was already shared into the export from earlier
+patches.
+
+Verified with Playwright: a spawner with open space ahead, run for 9 real seconds, produces at
+least 2-3 concurrently-alive spawns (not 1) and the count never drops on its own over that window
+(no automatic disappearance); a spawn frozen in place directly in the spawner's launch cell
+correctly blocks the next cycle's fire for as long as it stays there, then the spawner fires again
+within about a tick of the cell clearing; the exact same two checks hold in a freshly exported
+standalone game; The World's Worst Elevator (the one built-in sample with live spawners) plays for
+3+ seconds with zero errors under the new behavior; and the full 5-sample regression sweep plus a
+fresh Button+Gate export both still run clean.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
