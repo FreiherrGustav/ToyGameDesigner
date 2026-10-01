@@ -1850,6 +1850,100 @@ switch/Gate puzzle) replayed with zero errors; and the full sample
 regression sweep plus a fresh export (with a freshly painted switch and
 Gate) both run error-free.
 
+### Spawner: single-item-at-a-time, and the real root cause of "disappearing into the wall" near an edge (v2.35)
+
+Direct follow-up, right after v2.34: "still having issues with the
+spawner (especially when placed on the edge — even with the spawner
+aimed away from the edge, items are seemingly disappearing into the wall
+or not appearing at all)." Two bundled asks alongside the bug report:
+"only spawn one item (whatever is loaded into the spawner will replace
+the default)," and "very clearly have the spawned item come out in the
+intended direction (still with an animation)."
+
+**Root cause of the edge bug, found before writing any fix**:
+`SPAWNER_POSITION_JITTER` (v2.34's own fix for a DIFFERENT problem —
+several concurrent spawns visually clumping together) offset the spawn
+position along whichever axis is PERPENDICULAR to the spawner's facing —
+and "perpendicular to facing" has no relationship at all to which edge of
+the ROOM the spawner happens to sit near. A spawner facing east, placed
+near the TOP edge, still got jittered vertically (perpendicular to
+east/west is north/south) — exactly the "aimed away from the edge" case
+the user called out as still broken, because the jitter was never
+edge-aware to begin with, it just happened to usually land somewhere
+harmless. A big enough roll of that jitter (±48px, ~1.5 tiles) could push
+the spawn position above row 0 — off the board entirely, outside anything
+`geometryAt` or the camera ever accounts for, so the actor just floats or
+falls in open space forever, invisible ("not appearing at all") — or into
+a solid border tile if one was painted there ("disappearing into the
+wall"). This was a real, confirmed-by-design-reading bug, not a one-off
+fluke: the jitter direction was always orthogonal to the one axis a kid
+actually reasons about when placing a spawner near a wall.
+
+**The fix for both the bug and the two asks turned out to be the same
+change**: since the two jitter mechanisms (`SPAWNER_PERPENDICULAR_JITTER`
+on velocity, `SPAWNER_POSITION_JITTER` on position) existed for exactly
+one reason — keeping several concurrently-alive spawns from clumping
+together — and the new "only spawn one item" ask removes the concurrency
+that clumping even requires, both jitters are simply gone, not replaced
+with an edge-aware version. `tickSpawners` now tracks a per-spawner
+`activeId` (the id of its own currently-alive spawn, or `null`) in
+`spawnerRuntime[key]`, and gates actually firing on that slot being
+empty: `const occupied = state.activeId != null && actors.some(a => a.id
+=== state.activeId);`. A plain `actors.some(...)` scan is enough — it
+catches every way a spawned actor can stop existing (TTL despawn, lethal
+destruction, a chaser's own pop-on-catch, literally any future reaction
+that ever calls `removeActorById`) for free, with no per-reaction
+bookkeeping required to keep an explicit "this spawner's slot just
+emptied" event in sync. The interval clock keeps counting even while
+occupied (not reset or paused), so a spawner whose full `SPAWN_INTERVAL_MS`
+has already elapsed by the time its current spawn disappears fires again
+on the very next tick rather than making a kid wait out a second full
+interval on top. The wind-up "tell" pulse is suppressed while occupied —
+nothing is about to fire yet, so pulsing would read as a lie.
+
+**Directional clarity**: `spawnActorAt` is called with the spawner's own
+exact cell center (`x * TILE + TILE/2, y * TILE + TILE/2`) — no
+perpendicular position offset at all now — and its velocity is exactly
+`dir.x * SPAWNER_LAUNCH_SPEED, dir.y * SPAWNER_LAUNCH_SPEED`, with zero
+perpendicular component. This went one step further than just removing
+the two v2.34 jitters: the OLDER, pre-v2.34 `+60` fixed downward bias a
+horizontal launch always carried (there since v2.33, to keep a flat
+horizontal toss from looking unnaturally "sliding" in free-roam mode) is
+also gone — it's small and was never random, but it's still a
+perpendicular component, and "very clearly... in the intended direction"
+reads better served by a launch that's exactly on-axis, no caveats, than
+by one that's "almost always on-axis except for a deliberate tiny tilt."
+Under gravity the bias was redundant anyway (gravity takes over the
+instant the object launches); in free-roam it was the one thing left
+nudging a horizontal shot off true. **"Still with an animation"** needed
+no change — the existing pop-in (`sounds.spawn()` + the `caughtBounceIn`
+keyframe recipe, both already in `spawnActorAt`, from v2.19/v2.20) was
+never touched by either this or the v2.34 jitter; removing the jitters
+only changes where the actor starts and which way it's launched, not
+whether it animates in.
+
+**"Whatever is loaded into the spawner will replace the default" needed
+no code change** — confirmed by re-reading `tickSpawners`'s existing
+`defId` selection (`contents.length ? contents[...random...] :
+HAZARD_BALL_DEF_ID`, unchanged since v2.19/v2.33) before touching
+anything: loaded content already fully replaces the hazard-ball default,
+and this was never in question — the parenthetical was the user
+describing the existing, already-correct behavior for context, not asking
+for a change to it.
+
+Verified with Playwright: a spawner run for ~14 real seconds across many
+spawn/TTL cycles never has more than 1 of its own spawns alive at once;
+a freshly caught east-facing spawn starts exactly on the spawner's own
+cell (zero perpendicular position offset) with `vx` strongly positive and
+`vy` EXACTLY 0 (confirmed, not just "small"); a spawner placed directly on
+the room's TOP edge row, facing east (away from that edge, matching the
+user's own repro), fired multiple times over an extended run with zero
+spawns ever landing off-board or at a negative coordinate — the exact
+scenario that reproduced the original bug; and a fresh export with a
+placed spawner runs error-free for several full spawn cycles, plus the
+full 5-sample regression sweep and another fresh export (with a switch
+and Gate) both still run clean.
+
 ### Actor shape
 
 A live actor (in the `actors` array) looks like:
