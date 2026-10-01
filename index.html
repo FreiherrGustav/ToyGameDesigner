@@ -1016,11 +1016,17 @@
   function roomCellKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
   let digProgress = {};     // roomCellKey -> ms of sustained digging (holding Down) accumulated eroding a diggable wall
   let bombArmed = {};       // roomCellKey -> true while a bomb's fuse is lit
-  // v2.19: roomCellKey -> [defId, ...] — which actor/object defs are loaded into a given spawner
-  // tile, in load order. Placing an actor onto an existing spawner tile toggles it in/out of this
-  // list instead of placing a live instance (see the mousedown handler); an empty/missing entry
-  // means "nothing loaded", which spawns HAZARD_BALL_DEF_ID by default. Persisted the same way
-  // doorLinks is — a project-wide sparse map, not per-room — since it's keyed by roomId already.
+  // v2.19: roomCellKey -> defId — which single actor/object def is loaded into a given spawner
+  // tile. Placing an actor onto an existing spawner tile loads it instead of placing a live
+  // instance (see the mousedown handler); a missing entry means "nothing loaded," which spawns
+  // HAZARD_BALL_DEF_ID by default. Persisted the same way doorLinks is — a project-wide sparse
+  // map, not per-room — since it's keyed by roomId already.
+  // v2.35: a single value, not a list — direct feedback ("still trying to do multiple objects")
+  // after loading more than one kind into the same spawner once already produced several different
+  // things cycling through at random (v2.19's original "load several, pick randomly each fire"
+  // design). "Whatever is loaded into the spawner will replace the default" turned out to mean
+  // exactly that, literally — loading a SECOND kind now replaces the first, the same way the first
+  // replaced the hazard-ball default, rather than joining a pool — see toggleSpawnerContent.
   let spawnerContents = {};
   // v2.19: roomCellKey -> { clock, windUp } — transient per-spawner countdown state, reset the
   // same way digProgress/bombArmed are (see clearTransientRuntimeState). Not persisted in a saved
@@ -1461,6 +1467,17 @@
     rooms.forEach(r => migrateLegacyFacingObjects(r.board));
     doorLinks = structuredClone(snap.doorLinks);
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
+    // v2.35: a pre-v2.35 save can still have an old-shape ARRAY here (the v2.19-v2.34 "random
+    // pool" format, e.g. ["wanderer1","wanderer2"]) — spawnerContents is a single defId per key
+    // now, not a list (see its own comment above/toggleSpawnerContent). Collapse any array down to
+    // its first entry, the same "keep the primary thing, drop the rest" call
+    // migrateLegacyGroundEffects already made for a diggable/trap tile's secondary modifier.
+    Object.keys(spawnerContents).forEach(key => {
+      if (Array.isArray(spawnerContents[key])) {
+        if (spawnerContents[key].length) spawnerContents[key] = spawnerContents[key][0];
+        else delete spawnerContents[key];
+      }
+    });
     nextRoomId = snap.nextRoomId;
     playerRoomId = snap.playerRoomId;
     actorDefs = structuredClone(snap.actorDefs);
@@ -6293,8 +6310,7 @@
         state.windUp = !occupied && timeToNext <= SPAWNER_WINDUP_MS && timeToNext > 0;
         if (occupied || state.clock < SPAWN_INTERVAL_MS) continue;
         state.clock = 0;
-        const contents = spawnerContents[key];
-        const defId = (contents && contents.length) ? contents[Math.floor(Math.random() * contents.length)] : HAZARD_BALL_DEF_ID;
+        const defId = spawnerContents[key] || HAZARD_BALL_DEF_ID;
         // v2.33: launched in whichever direction the spawner is currently rotated to face — see
         // SPAWNER_DIRECTIONS/spawnActorAt. v2.35: spawned dead-center on the spawner's own cell, no
         // perpendicular position offset (see SPAWNER_LAUNCH_SPEED's own comment on why that's gone).
@@ -6838,24 +6854,25 @@
   }
 
   // v2.19: placing any actor/object onto an existing spawner tile loads it as that spawner's
-  // contents instead of placing a live instance — the same click-to-place gesture as everything
-  // else, no dropdown or settings menu. A second click on something already loaded unloads it;
-  // one thing loaded always spawns that thing, several loaded picks randomly among them each time
-  // it fires (see tickSpawners). The player can't be loaded — spawning players makes no sense.
+  // single content instead of placing a live instance — the same click-to-place gesture as
+  // everything else, no dropdown or settings menu. The player can't be loaded — spawning players
+  // makes no sense.
+  // v2.35: a spawner holds exactly ONE loaded thing, not a growing pool — direct feedback that
+  // loading a second kind should REPLACE the first ("whatever is loaded into the spawner will
+  // replace the default," generalized to "replaces whatever's there"), not join a random-pick
+  // pool alongside it (the old v2.19 shape, which read as "the spawner is still trying to do
+  // multiple objects" once more than one kind had ever been loaded). Clicking the SAME kind that's
+  // already loaded clears it back to the default hazard ball; clicking a DIFFERENT kind swaps it.
   function toggleSpawnerContent(gx, gy) {
     if (selectedActorDefId === playerDefId) { log("Can't load the player into a spawner."); return; }
     const key = roomCellKey(currentRoomId, gx, gy);
-    const list = spawnerContents[key] || [];
-    const idx = list.indexOf(selectedActorDefId);
-    if (idx >= 0) {
-      list.splice(idx, 1);
-      log(list.length === 0 ? "Spawner emptied — back to the default hazard ball." : "Removed from spawner — " + list.length + " thing(s) left in its random pool.");
+    if (spawnerContents[key] === selectedActorDefId) {
+      delete spawnerContents[key];
+      log("Spawner emptied — back to the default hazard ball.");
     } else {
-      list.push(selectedActorDefId);
-      log(list.length > 1 ? "Loaded into spawner — now picks randomly among " + list.length + " things." : "Loaded into spawner.");
+      spawnerContents[key] = selectedActorDefId;
+      log("Loaded into spawner — replaces whatever was loaded before.");
     }
-    if (list.length === 0) delete spawnerContents[key];
-    else spawnerContents[key] = list;
   }
 
   // Creates a live actor instance the same shape placeNewActor does, minus anything player-
@@ -7641,8 +7658,7 @@
           } else if (isLive && SPAWNER_ORDER.includes(tile.geometry)) {
             const spawnerKey = roomCellKey(currentRoomId, bx, y);
             const state = spawnerRuntime[spawnerKey];
-            const contents = spawnerContents[spawnerKey];
-            extra = { windingUp: !!(state && state.windUp), loaded: !!(contents && contents.length) };
+            extra = { windingUp: !!(state && state.windUp), loaded: !!spawnerContents[spawnerKey] };
           }
           if (isLive && isColorTaggable(tile.geometry)) {
             const color = colorBoard[y][bx];
