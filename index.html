@@ -1415,6 +1415,11 @@
     GROUND_SEEDS.forEach(seed => { if (!groundSlotIds.includes(seed.id)) groundSlotIds.push(seed.id); });
     nextGroundLetter = snap.nextGroundLetter || 0;
     lethalSlotIds = snap.lethalSlotIds ? snap.lethalSlotIds.slice() : LETHAL_SEEDS.map(s => s.id);
+    // v2.32: this append was always meant to exist (CLAUDE.md's own v2.22 note already named
+    // LETHAL_SEEDS as needing it) but never actually got written until a fourth Lethal (spiked mine)
+    // made the gap real — without it, an older save's lethalSlotIds (lava/fire/spike only) would stay
+    // frozen forever, same bug shape as groundSlotIds/collectibleSlotIds above, now fixed the same way.
+    LETHAL_SEEDS.forEach(seed => { if (!lethalSlotIds.includes(seed.id)) lethalSlotIds.push(seed.id); });
     nextLethalLetter = snap.nextLethalLetter || 0;
     customColors = snap.customColors ? snap.customColors.slice() : []; // older saves predate custom colors
     groundSlotIds.concat(lethalSlotIds).forEach(id => { if (!groundTileDefs[id]) groundTileDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.groundTileDefs[id]); });
@@ -1903,6 +1908,14 @@
     "........", "........", "...MM...", "..MHMM..",
     "..MHLM..", ".MHLMHH.", "MHHLLMHH", "MHLLLLMH"
   ], { M: "#3d3d3d", H: "#858585", L: "#c7cfdd" });
+  // v2.32: a fourth Lethal, user-supplied — unlike spike (a jagged floor filling the tile's bottom
+  // half), this is a small, centered, roughly radial shape with open background on every side, reading
+  // as a planted mine/charge rather than a floor texture — so it gets lava/fire's "none" geometry
+  // default (something fallen/walked into), not spike's "solid" (a floor you land and die on).
+  const SPIKED_MINE_ART = pat([
+    "....A...", "...BCB..", "..CDDDB.", ".CBDBDCA",
+    "..BDDDC.", "...BBB..", "....C...", "........"
+  ], { A: "#def3fd", B: "#8a9eba", C: "#bedcf7", D: "#343d4b" });
   const FIRE_FRAMES = [
     pat([
       "....M...", "..M.M.M.", "..MMM.M.", "M.MHMMM.",
@@ -2177,7 +2190,9 @@
   const LETHAL_SEEDS = [
     { id: "lthLava", name: "lava", frames: LAVA_FRAMES, frameMs: 350, geometry: "none" },
     { id: "lthFire", name: "fire", frames: FIRE_FRAMES, frameMs: 300, geometry: "none" },
-    { id: "lthSpike", name: "spike", frames: [SPIKE_ART], frameMs: 0, geometry: "solid" }
+    { id: "lthSpike", name: "spike", frames: [SPIKE_ART], frameMs: 0, geometry: "solid" },
+    // v2.32: fourth Lethal, see SPIKED_MINE_ART's own comment above for the geometry-default reasoning.
+    { id: "lthMine", name: "spiked mine", frames: [SPIKED_MINE_ART], frameMs: 0, geometry: "none" }
   ];
   LETHAL_SEEDS.forEach(seed => {
     groundTileDefs[seed.id] = { name: seed.name, frames: seed.frames.map(f => f.slice()), frameMs: seed.frameMs, geometry: seed.geometry, modifier: "lethal" };
