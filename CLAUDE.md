@@ -3872,6 +3872,115 @@ one built-in sample, The Monster's Den, with its own live Button/Gate puzzle) pl
 Button+Gate export — confirmed to have no `#captionBar` in its output, correctly excluding this
 whole patch's UI from the shipped game — both run error-free.
 
+## Cross-system QA pass: a real carry/door bug found and fixed, everything else confirmed sound (v2.42)
+
+Direct request: a revised cross-system QA checklist, explicitly scoped to combinations across
+features that no single patch's own per-feature testing would have exercised together — carry/
+carry/drop/throw crossed with doors/wrap/sticky/respawn, the rebuilt spawner crossed with lethal/
+magnets, the twice-rewritten Follow camera crossed with doors, the Button/Gate/Plate channel system
+crossed with the newer carry/throw/Large-Stone mechanics, the Large-Stone/lethal pairing as one
+scene rather than two separate features, the two-sound-engine split, the new character presets, and
+export completeness over a scene combining several of the above. The checklist itself distinguished
+"genuinely unverified" items from ones it expected to already be fine by design — this pass worked
+through the former with real Playwright traces rather than re-confirming what CLAUDE.md's own
+per-patch sections already establish.
+
+**One real, confirmed bug, found and fixed: a carried object was silently abandoned the instant the
+player stepped through ANY door while holding it.** `beginRoomTransition` (the actual room-swap
+`triggerDoor` hands off to) has always moved only the player's own id from the departure room's
+`actors` array into the arrival room's — it never looked at `player.carrying` at all. Since
+`tick()`'s own carry-follow step looks the carried actor up by id in whatever room is CURRENTLY hot
+(`actors.find(a => a.id === player.carrying)`), the object — still sitting in the room just left,
+marked `carried: true` and therefore exempt from its own physics (see `stepActor`'s early return) —
+could never be found again from the new room. Confirmed by a direct frame-by-frame trace: `carrying`
+stayed non-null for a few frames post-transition (stale) before `tick()`'s own "if it's vanished,
+let go cleanly" fallback fired and nulled it — the object itself was left behind, frozen, invisible,
+unreachable, forever, in the room the kid had just walked out of. This is a textbook example of
+exactly the combination the checklist was built to find: `checkPlayerTileContacts`'s own door
+handling, `beginRoomTransition`, and `tick()`'s carry-follow step are three different, individually-
+well-tested pieces of code that had simply never been run together before. **Fix**: `beginRoomTransition`
+now looks up the carried actor (if any) before removing the player, removes it from the departure
+room's `actors` alongside the player, and pushes the same object (not a clone — its live fields,
+including a bomb's `fuseTimerId`/`fuseRemainingMs`, are untouched) into the arrival room's `actors`
+right after the player. Position isn't set explicitly — the very next `tick()`'s own carry-follow
+step recomputes it from the player's new position, the same as it already does every other frame.
+No export-pipeline change needed: `beginRoomTransition` was already shared into
+`exportStandaloneGame`'s `runtimeFunctions`, and the fix only uses functions (`removeActorById`,
+`activateRoom`) already in that same list.
+
+**Everything else investigated turned up no bug — each confirmed directly, not assumed from reading
+the code alone, since a few of these initially looked suspicious under a naive test before a flawed
+test setup was found and corrected:**
+- **Carry through a wrap edge**: fine. A carried object's position is recomputed from scratch from
+  the player's own position every single tick (never accumulated), so it has no independent state
+  to desync — it simply reads whatever the player's `x`/`y` already is, wrapped or not, the following
+  frame. Confirmed with a player carrying a crate at real leftward velocity crossing a horizontal
+  wrap edge: the carried object stayed glued to the player throughout, no orphaning, no hitch. (A
+  first attempt at this test teleported the player to a dead stop exactly on the wrap boundary with
+  zero velocity, which exposed `applyWorldWrap`'s two edge conditions flip-flopping against each
+  other every tick for an actor parked precisely at the computed coordinate with nothing moving it
+  away — a real quirk, but one that can't occur in actual play, since crossing a wrap edge always
+  means having nonzero velocity in the direction that caused the crossing in the first place; not
+  flagged as a bug worth fixing, since it has no reachable real-play trigger.)
+- **Grab/throw while frozen by a sticky cling**: fine. The E key's grab/throw state machine is driven
+  by raw `keydown`/`keyup` listeners, never gated on `stepActor`'s own `stuck` flag (which only
+  blocks ordinary movement input) — confirmed directly by pinning the player against a sticky wall
+  with `stickyClingT` actively counting and zero velocity (a genuine, sustained freeze, not a
+  one-frame graze) and successfully grabbing a nearby crate mid-freeze.
+- **A carried bomb's fuse across a chaser-catch respawn**: fine by construction, not by accident —
+  the chaser-catch reaction (`resolveActorContact`) only ever teleports `playerActor.x/y` back to
+  `startPos`; it never touches `player.carrying`, `attachCarryable`, or either fuse-pause function.
+  Since the carried object's position is a pure function of the player's position every tick, it
+  simply teleports along for free, fuse state (paused, since nothing called `startOrResumeBombFuse`)
+  completely undisturbed.
+- **A thrown crate flips a colored Button; a magnet-dragged collectible does not**: confirmed as
+  intentional scope, not a gap. `checkPhysicsObjectSwitchContacts` is gated on `CARRYABLE_KINDS`,
+  which lists pushable/Large Stone/every carried-tile kind but not `"collectible"` — a magnet can
+  pull a collectible across a Button's cell all day without ever flipping it, while a charge-thrown
+  crate onto the same Button, same scene, flips it immediately. Both halves verified directly in one
+  project rather than assumed from the list membership alone.
+- **A spawner facing directly into its own lethal tile**: the theoretical race the checklist named
+  (an actor mid-`popVanish` fade still reading as "occupying" the launch cell, per `destroyPhysicsObjectInLethal`'s
+  `actor.destroyed = true` not removing it from `actors` until the `RECIPES.popVanish.duration`
+  setTimeout fires) is real but never actually reachable in practice: that fade window is ~220ms,
+  `SPAWN_INTERVAL_MS` is 2500ms — more than ten times longer — so by the time the spawner's next
+  cycle is even due, the destroyed actor has long since been spliced out. Confirmed by comparing the
+  two constants directly rather than tracing a scenario that can't occur with the shipped timing;
+  not worth a code change unless `SPAWN_INTERVAL_MS` is ever tuned dramatically shorter.
+- **Camera dead-zone shift state surviving a door transition mid-shift**: fine, and already
+  documented as deliberate in v2.40 — `cameraShiftSide` is reset to `null` in `activateRoom` itself,
+  which every door transition already calls via `beginRoomTransition`, so a shift in progress when a
+  door fires can never leak into the new room. Confirmed the reset fires and the new room's camera
+  settles to a finite, sane value; a fully deterministic "door fires at the exact tick a shift is
+  mid-flight" repro proved fiddly to force in an automated test (the shift and the door-fire timing
+  both depend on real elapsed `dt`), but the single unconditional reset line, called from the one
+  and only room-entry path every door/warp/Play-restart already goes through, leaves no code path
+  where it could be skipped — this is a structural guarantee, not a timing-dependent one.
+- **A Large Stone bridge and a crate coexisting in the same lava pool, same scene**: confirmed
+  directly — three Large Stones placed across/beside a lava pool all survived a 600ms Play session
+  (well past the crate's own ~220ms destruction fade) while a crate placed directly in the same lava
+  was destroyed, in the same room, at the same time, with no interference between the two reactions.
+- **A combined export scene** (Button+Gate, a Large Stone/lava pairing, a spawner, a grabbable
+  crate, Follow camera, and a built-in "cat" NPC exercising the chip-engine voice redesign alongside
+  the player's own default) exported and played for 3+ seconds with zero console errors, confirming
+  no new gap has crept into `runtimeFunctions`/`constantsSource` since the last full export-pipeline
+  audit.
+
+**Not retested**: anything the checklist itself flagged as "already well-covered" (The World's
+Worst Elevator's own bounce/wind/cannon-trajectory tracing), and a few narrower combinations the
+checklist raised that reduce to the same underlying mechanism already covered above (e.g. a
+spawner's own magnet-pull interaction follows the same `magnetable`/`CARRYABLE_KINDS` scoping
+already confirmed for the Button case, and the cannon2/bomb2-migration-through-rooms scenarios
+reduce to the same "an actor's live fields travel with it, unaffected by which room is hot" fact
+the door fix itself now guarantees for every carried actor, armed bombs included).
+
+Verified with Playwright across five separate test passes (31 checks total): the carry-through-door
+bug reproduced and then confirmed fixed, including a round trip through the same door link and a
+carried bomb's exact fuse state surviving byte-for-byte (same JS object, not recreated); the
+wrap/sticky/respawn/Button-scope/spawner-timing/camera-reset/lava-bridge items above each directly
+verified; and the full 5-sample regression sweep plus a fresh Button+Gate export, run again after
+the fix, both still pass clean.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
