@@ -3746,6 +3746,132 @@ the exact same dead-zone-freeze/trigger/settle sequence is confirmed working ide
 freshly exported standalone game; and the full 5-sample regression sweep plus a fresh Button+Gate
 export both still run clean.
 
+## Palette prose reduction: one caption line and two real affordances replace most of the hint text (v2.41)
+
+Direct request, stated as a design principle rather than a list of sentences to delete: "the UI
+should teach through affordances, the way a box of Lego does — try it, discover it — not through
+documentation." The request itself sorted the fix into three different categories by which
+problem each one actually solves, explicitly warning against a single blanket "remove hints"
+pass — "some things being cut need an affordance in their place, not silence." (This patch
+reuses the "v2.41" label purely as an internal code-comment convenience to avoid colliding with
+this doc's own existing, unrelated v2.22 section — see "Version labels are not reliable" above;
+it isn't claiming a real chronological position.)
+
+**Category 1 — cut outright, no replacement.** Wherever a click's effect is immediate and
+plainly visible, the paragraph explaining it added nothing a kid couldn't already see: the Game
+Rules paragraph (gravity/wrap), the Camera paragraph (Fixed/Follow/Runner), the category-level
+blurbs under Characters ("Custom characters"), Objects ("Pick an object"), Fixtures, and
+Collectibles that restated the v2.14 sprite-vs-colored-square taxonomy in words, and the bottom
+catch-all hint about Ground/Surface using built-in icons while Paint/Characters are hand-drawn.
+All of these `.hint` blocks are simply gone from the HTML — no new mechanism replaces them because
+none was needed.
+
+**Category 2 — one fixed caption line, not scattered tooltips.** The real problem this solves:
+choosing between similar-looking things with genuinely different consequences before testing any
+of them — Hazard vs. Lethal vs. Diggable vs. Trap is the request's own motivating example. Built
+as a single shared mechanism rather than per-item floating tooltips (which would have meant
+solving placement/collision for every swatch individually): `CAPTION_TEXT` is a plain lookup
+object (same shape as the existing `GEOMETRY_LABELS`/`MODIFIER_LABELS` pattern) mapping whatever
+plain identifier each row's own render function already iterates by — a geometry string, a
+modifier string, an actor kind, or a camera-mode key — to a short caption. `wireCaption(el, text)`
+attaches `mouseenter`/`mouseleave`/`touchstart` listeners that write to one fixed DOM element,
+`#captionBar` (new, sits right under the `<h1>`, never reflows since its height is fixed by CSS
+regardless of caption length) — the same element serves hover (desktop, cleared on
+`mouseleave`) and last-tap (touch, deliberately NOT cleared on any touch-end equivalent, so a
+tapped caption stays legible after the finger lifts) with zero separate touch-handling logic, per
+the request's own "same mechanism serves both input types" instruction. `CAPTION_IDLE_TEXT`
+("Hover (or tap) a piece to see what it does.") is both the HTML's own static initial content and
+what `setCaption` falls back to whenever `text` is empty/undefined — a plain Ground texture or a
+Collectible or a Character preset has no entry in `CAPTION_TEXT` at all, so hovering one is a
+silent no-op (idle text keeps showing), consistent with category 1's own test: a texture or
+preset swatch is "choosing a look," not "choosing a consequence," so there's nothing a caption
+would usefully add. `wireCaption` is called from every render function whose row this patch
+touches: `renderSurfaceSwatches` (Ground Effects — this is the direct replacement for the retired
+"Hazard costs one life... Trap looks solid" paragraph), `renderGroundSkinSwatch` (shared by the
+Ground row and the Lethals row — only the four built-in Lethal ids resolve to real text, a
+texture id silently no-ops through the same shared call site), both loops in `renderObjectSwatches`
+(actor kinds and tile geometries), `renderFixtureSwatches`, and `renderCameraSwatches`. The
+request supplied nine example captions verbatim (cannon, bomb, magnet, lava, hazard, lethal,
+diggable, trap, runner camera) and explicitly called the list "a starting point for the voice, not
+the full set, reasonable to do directly in code" — the remaining captions (fan, spawner,
+trampoline, Gate, crate, large stone, fire/spike/mine, the other Ground Effects, goal/plate/door/
+warp/gravitywell/button, Fixed/Follow) were written directly in this patch in the same short/
+funny/names-the-effect voice, a judgment call made without asking first since the request itself
+authorized it; flag any that land wrong.
+
+**Category 3 — two affordances replacing a sentence, not a shorter sentence.** Both describe
+something genuinely invisible on screen today, where cutting the sentence would hide a real
+discoverability gap rather than fix it:
+- **Rotate badge.** The old "Double-click any painted Ground texture or Lethal to spin it 90°"
+  sentence is gone, replaced by a small vector-drawn circular-arrow badge
+  (`drawRotateBadge`, plain canvas primitives — not pixel art, matching `drawEmptySocketCue`'s own
+  precedent that a Build-mode-only editing cue doesn't need to live in the game's ART-resolution
+  sprite system) in the top-right corner of whichever Ground/Lethal-skinned cell is currently
+  hovered (desktop) or last tapped (touch). "Selected tile" wasn't an existing concept anywhere in
+  this codebase, so a new `hoveredGroundCell` (`{gx, gy}` or `null`) reuses the exact same
+  hover/last-tap duality the caption bar already established rather than inventing a second one —
+  updated by the same `mousemove`/`touchstart`/`touchmove` listeners that already exist for
+  painting, plus one new `mouseleave` listener (touch has no "leave" gesture, so a tapped badge
+  deliberately persists until the next tap, same asymmetry as the caption bar). Drawn inside
+  `renderGame`'s existing `appMode === "build"` block, gated on `groundSkinBoard[gy][gx]` being
+  truthy at the hovered cell — a silent no-op over an empty cell, a plain `none`/`solid` swatch, or
+  any modifier with no named skin, since double-click-rotate was never meaningful there either.
+  The double-click-to-rotate mechanic itself (`rotateGroundSkinAt`) is completely untouched — only
+  the sentence describing it is gone, replaced by a badge that shows up exactly where that
+  mechanic actually applies.
+- **Door-color-cap greyout.** The old "Only two doors can ever share one color" sentence (plus
+  its surrounding Button/Gate/Door color explanation — all three Object Color paragraphs, in
+  fact) is gone. `renderColorSwatchesInto` now computes `isDoorColor = containerId ===
+  "objectColorSwatches" && selectedGeometry === "door"` and, only in that case, checks each color
+  option against the existing `findDoorsWithColor(color).length >= 2` — the same helper
+  `wireColoredDoor` already uses to enforce the cap reactively. A full color gets a `.full` CSS
+  class (dimmed, grayscale, `cursor: not-allowed`) and no click listener at all (not just a
+  disabled-looking one that still fires), plus a title-attribute explanation
+  ("— already used by two doors") for anyone who does hover it. The limit was already enforced
+  server-side exactly as before (`wireColoredDoor` still refuses and reverts a would-be third
+  placement, unchanged) — this only adds the proactive visual cue a kid sees before reaching for
+  a color that's already spoken for, instead of after. Scoped specifically to Door colors (via
+  the `isDoorColor` check) — every other color-taggable geometry (solid wall, barrier/Gate,
+  pushbutton/Button, plate) has no such cap and is unaffected.
+
+**Net effect, matching the request's own framing.** The three Object Color paragraphs and the
+Ground Effects Hazard/Lethal/Diggable/Trap paragraph — the densest prose in the old palette — are
+fully retired: the color-linking logic is now just the door-cap greyout (3) plus whatever the
+caption line (2) covers for Button/Gate in passing, and the modifier-behavior paragraph is
+replaced entirely by per-swatch captions (2). Nothing about what any piece actually does changed —
+only how a kid finds out. Left deliberately untouched, since none of these were named in the
+request: the plain Ground-row hint ("What it looks like, and whether it blocks you"), the Ground
+Effects "two independent choices" hint, the Lethals-row hint, the `groundColorBlock` hint
+(colored solid walls — a different block from the retired `objectColorBlock` paragraphs), and the
+Paint/`presetsBlock` hints.
+
+**No backward-compat or export-pipeline work needed.** This is pure Build-mode palette UI — no
+board/project data format changed, nothing here is serialized, and `renderGame`'s new
+rotate-badge branch lives inside the exact same `appMode === "build"` guard that already wraps
+`isCanvasEmpty`/`drawEmptySocketCue` (themselves never added to `exportStandaloneGame`'s
+`runtimeFunctions`) — an exported game hardcodes `const appMode = "play"`, so that whole branch,
+`hoveredGroundCell` included, is statically unreachable there and needs no export wiring, the same
+established precedent those two existing Build-only helpers already set.
+
+Verified with Playwright (47 checks across three passes): every wired swatch's caption text
+matches exactly on hover, including the full Hazard/Lethal/Diggable/Trap/lava set named in the
+request; the idle caption shows by default and is restored on `mouseleave`; a plain Ground texture
+swatch has no caption override (idle text stays); `touchstart` also sets the caption without
+needing `mouseleave` to clear it first; every one of the ten retired hint paragraphs is confirmed
+absent from the palette's own DOM text (checked against `.hint`/`.section-title`/`#captionBar`
+specifically, not `document.body.textContent`, which would have false-matched this very test's
+own source-code comments describing the retired sentences); the untouched hints (groundColorBlock,
+Paint, presets) are confirmed still present; painting a single colored door (which auto-pairs with
+a brand-new room's own return door of the same color, reaching the 2-cap immediately) marks that
+color swatch `.full` with an explanatory title and no click handler, and un-marks it once erased
+back down to one; a non-door color-taggable geometry (a plain colored wall) never shows `.full`
+regardless of how many share a color; an empty cell and a painted ground-skinned cell are
+confirmed to feed the rotate-badge's own guard condition correctly; double-click-to-rotate still
+fires with zero errors on a painted tile; and the full 5-sample regression sweep (including the
+one built-in sample, The Monster's Den, with its own live Button/Gate puzzle) plus a fresh
+Button+Gate export — confirmed to have no `#captionBar` in its output, correctly excluding this
+whole patch's UI from the shipped game — both run error-free.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
