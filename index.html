@@ -103,6 +103,17 @@
   .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
   .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
   .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; }
+  /* v2.41: a color already claimed by two doors reads as full right where a kid would reach for
+     it, instead of needing a sentence explaining the cap in advance — see renderColorSwatchesInto. */
+  .swatch.full { opacity: 0.35; filter: grayscale(0.6); cursor: not-allowed; }
+
+  /* v2.41: the one fixed caption line replacing every per-section hint paragraph this patch
+     retires — see CAPTION_TEXT/wireCaption/setCaption. Fixed height/position so it never reflows
+     the palette around it as text changes length. */
+  #captionBar {
+    min-height: 16px; font-size: 12px; color: #9aa0b4; font-style: italic;
+    padding: 2px 2px 8px 2px; border-bottom: 1px solid #2a2c3a; margin-bottom: 4px;
+  }
 
   /* Game rules are one of the two headline features (alongside placing a character), not just
      one more section — bigger swatches and a louder title so it reads as "this matters". */
@@ -294,23 +305,16 @@
   <!-- Palette / Authoring panel -->
   <div class="panel" id="paletteWrap">
     <h1>Toy Game-Maker</h1>
+    <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
+         used to live in this panel — see CAPTION_TEXT/wireCaption/setCaption. Updates on hover
+         (desktop) or last tap (touch) of whatever swatch has something worth saying. -->
+    <div id="captionBar">Hover (or tap) a piece to see what it does.</div>
 
     <div>
       <div class="section-title featured">Game rules</div>
       <div class="swatch-row" id="gameRuleSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        These aren't placed — they just switch on or off the moment you click them. Gravity makes
-        everything fall. Wrap makes an edge loop around to the opposite side instead of stopping
-        you — one switch per direction. These rules, and the camera below, belong to whichever
-        room is open, and switch automatically with the room tabs.
-      </div>
       <div class="section-title" style="margin-top:10px;">Camera</div>
       <div class="swatch-row" id="cameraSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Fixed shows the whole room at once. Follow lets the room be wider than the screen and
-        keeps the camera on the player. Runner does the same, but the camera moves on its own —
-        fall behind it and that's game over.
-      </div>
     </div>
 
     <div>
@@ -331,10 +335,6 @@
       <div class="swatch-row" id="playerSwatchRow"></div>
       <div class="section-title" style="margin-top:10px;">Custom characters</div>
       <div class="swatch-row" id="customActorSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Your own named characters, each with its own drawn art and its own way of acting — grab
-        one to place it, or hit + to make a new one.
-      </div>
       <div id="temperamentPickerBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">How it acts — <span id="customActorEditingName"></span></div>
         <div class="swatch-row" id="temperamentPickerSwatches"></div>
@@ -346,83 +346,25 @@
     <div id="objectPropertiesBlock" style="display:none;">
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Real things in the room — you bump into them, and some of them (not the fan, the spawner,
-        or the Gate) can be picked up and carried around. Click a placed one again to rotate it.
-        Pushable block is yours to redraw, like a character; the rest use a built-in icon, same as
-        Ground.
-      </div>
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
       <div class="swatch-row" id="fixtureSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Built into the room — a door, a button, a goal, a gravity well do their job from wherever
-        you put them, so you walk right onto them instead of bumping into them. They never move
-        and can't be carried.
-      </div>
       <div class="section-title" style="margin-top:10px;">Collectibles</div>
       <div class="swatch-row" id="collectibleSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Things a kid scores by touching, then they're gone — grab one to place it, or hit + to
-        draw your own.
-      </div>
       <div id="objectColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="objectColorSwatches"></div>
-        <div class="hint" style="margin-top:2px;">
-          For a Button or plate — none: a Button flips gravity, a plate does nothing. Pick a color
-          instead and it turns that color on (a Button keeps it on; a plate only while something's
-          standing on it) — any matching-colored wall over in Ground, or a Gate over here in
-          Objects, listens for it.
-        </div>
-        <div class="hint" style="margin-top:6px;">
-          For a Gate, color means the same thing it means for a wall over in Ground: none and
-          it always blocks, forever, with no way to open it. Pick a color and it slides open while
-          that channel is on, and slides shut again the moment it turns off — a Button holds it
-          open for good, a plate only while something is actually standing on it.
-        </div>
-        <div class="hint" style="margin-top:6px;">
-          For a door, color means something different: it's how the door decides where it leads.
-          None keeps a door's old default (links onward automatically). A color no other door is
-          using yet opens into a brand-new room. The same color on a second door links the two
-          directly — no new room — which is how a real loop back to an earlier room gets built.
-          Only two doors can ever share one color.
-        </div>
       </div>
     </div>
 
     <div id="groundPropertiesBlock" style="display:none;">
       <div class="section-title">Ground</div>
       <div class="swatch-row" id="groundSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        What it looks like, and whether it blocks you — plain none/solid, or a real look like
-        grass, brick, or crystal. Grab one to paint it, or hit + to draw your own.
-      </div>
 
       <div class="section-title" style="margin-top:10px;">Ground Effects</div>
       <div class="swatch-row" id="surfaceSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Two independent choices, painted together. Ground decides what it looks like and whether
-        it blocks you. Ground Effects decides what happens when you touch it, layered on top —
-        <em>none</em> + <em>none</em> just clears a tile back to empty.
-      </div>
-      <div class="hint" style="margin-top:6px;">
-        Hazard costs one life and knocks you back — you keep going. Lethal costs every life at
-        once, instantly, with no knockback. Diggable blocks you until you stand there holding Down
-        long enough to dig through. Trap looks solid to everyone else, but crumbles away the
-        instant you touch it.
-      </div>
 
       <div class="section-title" style="margin-top:10px;">Lethals</div>
       <div class="swatch-row" id="lethalSwatches"></div>
-      <div class="hint" style="margin-top:2px;">
-        Lava and fire (both animated) and spikes — tagged lethal automatically the moment you
-        place one: touch it and it's game over instantly, no knockback. Grab one to paint it, or
-        hit + to draw your own (yours will be lethal too).
-      </div>
-      <div class="hint" style="margin-top:2px;">
-        Double-click any painted Ground texture or Lethal to spin it 90° — just how it looks, not
-        how it blocks or hurts.
-      </div>
 
       <div id="groundColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
@@ -463,12 +405,6 @@
           <button class="tbtn" id="clearArt">Clear art</button>
         </div>
       </div>
-    </div>
-
-    <div class="hint">
-      Ground and Surface pieces use small built-in icons — no drawing needed, so they always
-      read the same way. Paint and Characters are yours to draw; most Objects use a built-in
-      icon too. The grid is always live — no separate play mode.
     </div>
   </div>
 
@@ -896,6 +832,75 @@
   // top-of-file comment for the full story of why, and migrateLegacySwitchToButton for what happens
   // to an already-painted switch tile on load.
   const FIXTURE_GEOMETRIES = ["goal", "plate", "door", "warp", "gravitywell", PUSH_BUTTON_GEOMETRY];
+  // v2.41: direct request to cut the palette's own prose down — "the UI should teach through
+  // affordances... not documentation." The old per-section paragraphs explaining what a row of
+  // similar-looking Objects/Fixtures/Ground-Effects/Lethal swatches each actually DO (as opposed to
+  // what's obvious just from looking) are gone; this is their replacement — one short, funny line
+  // per swatch, named the effect not the mechanism, shown in the single fixed caption bar
+  // (#captionBar, see wireCaption/setCaption) on hover (desktop) or last tap (touch). Keyed by
+  // whatever plain identifier each row's own render function already iterates by (a geometry
+  // string, a modifier string, an actor kind, a camera mode key, or a groundTileDefs id for the
+  // four built-in Lethals) — intentionally NOT exhaustive: Ground textures, Collectibles, and
+  // Characters are left uncaptioned since nothing there has a distinct EFFECT to call out (a
+  // kid picking grass vs. brick, or gem vs. coin, is choosing a look, not a consequence — exactly
+  // the "immediate and plainly visible, no decision to front-load" case the palette's own prose
+  // reduction already covers by just deleting those sections' hints outright, no caption needed).
+  const CAPTION_TEXT = {
+    // Camera (CAMERA_MODES)
+    fixed: "Shows the whole room.",
+    follow: "Keeps you in view.",
+    runner: "Keep up, or get left behind.",
+    // Objects row (PALETTE_OBJECT_GEOMETRIES + OBJECT_ACTOR_KINDS)
+    cannon2: "Shoots things.",
+    [BOMB2_GEOMETRY]: "Boom. Eventually.",
+    fan: "Blows you around.",
+    magnet: "Pulls stuff your way.",
+    spawner: "Makes more of something.",
+    trampoline: "Launches you skyward.",
+    barrier: "Opens for its color.",
+    [PUSHABLE_KIND]: "Push it. Stacks, too.",
+    [LARGE_STONE_KIND]: "Heavy. Lava-proof.",
+    // Fixtures row (FIXTURE_GEOMETRIES)
+    goal: "Touch it, you win.",
+    plate: "On while you're standing there.",
+    door: "Leads somewhere new.",
+    warp: "Zap. You're elsewhere.",
+    gravitywell: "Pulls you in.",
+    [PUSH_BUTTON_GEOMETRY]: "Flips a color on — for good.",
+    // Ground Effects row (PALETTE_MODIFIERS) — this is the direct replacement for the retired
+    // "Hazard costs one life... Lethal costs every life... Diggable blocks... Trap looks solid"
+    // paragraph (see groundPropertiesBlock's own hint, now gone).
+    none: "No extra effect.",
+    slippery: "Zero grip.",
+    bouncy: "Boing.",
+    hazard: "Stings a little.",
+    lethal: "That's it, game over.",
+    sticky: "Slows you to a crawl.",
+    diggable: "Dig in. Hold on.",
+    trap: "Looks safe. Isn't.",
+    wind: "Pushes you along.",
+    // Lethals row — only the four built-in groundTileDefs ids; a kid's own custom Lethal (drawn by
+    // them, named by them) has nothing a caption could usefully say that they don't already know.
+    lthLava: "Hot. Don't.",
+    lthFire: "Also hot. Also don't.",
+    lthSpike: "Ouch, permanently.",
+    lthMine: "Don't poke it."
+  };
+  // Wires one swatch element to show `text` in the fixed caption bar on hover (desktop) or tap
+  // (touch) — same handler serves both input types, so there's no separate touch-specific logic
+  // to keep in sync. Deliberately NOT a floating/positioned tooltip (no placement or collision
+  // math needed) and deliberately NOT cleared on touchend — "last tapped" is meant to persist
+  // until something else is tapped, same as the spec that asked for this asked for explicitly.
+  const CAPTION_IDLE_TEXT = "Hover (or tap) a piece to see what it does.";
+  function wireCaption(el, text) {
+    if (!text) return;
+    el.addEventListener("mouseenter", () => setCaption(text));
+    el.addEventListener("mouseleave", () => setCaption(""));
+    el.addEventListener("touchstart", () => setCaption(text), { passive: true });
+  }
+  function setCaption(text) {
+    document.getElementById("captionBar").textContent = text || CAPTION_IDLE_TEXT;
+  }
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -3725,6 +3730,7 @@
       label.textContent = displayName;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectSurfaceModifier(modifier));
+      wireCaption(sw, CAPTION_TEXT[modifier]);
       container.appendChild(sw);
     });
   }
@@ -3774,6 +3780,12 @@
     label.textContent = def.name;
     sw.appendChild(label);
     sw.addEventListener("click", () => selectGroundSkin(id));
+    // v2.41: only ever resolves to real text for the four built-in Lethal ids (lthLava/lthFire/
+    // lthSpike/lthMine) — a plain Ground texture id (gndGrass, customGndA, ...) has no entry in
+    // CAPTION_TEXT, so wireCaption's own `if (!text) return` makes this a silent no-op for every
+    // texture swatch this same function also renders. One shared function, captions apply where
+    // they're meaningful without the two call sites needing to know which case they're in.
+    wireCaption(sw, CAPTION_TEXT[id]);
     container.appendChild(sw);
   }
   function renderLethalSwatches() {
@@ -3829,6 +3841,7 @@
       label.textContent = def.name;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectObjectActorKind(kind));
+      wireCaption(sw, CAPTION_TEXT[kind]);
       container.appendChild(sw);
     });
     PALETTE_OBJECT_GEOMETRIES.forEach(geometry => {
@@ -3859,6 +3872,7 @@
       label.textContent = GEOMETRY_LABELS[geometry] || geometry;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
+      wireCaption(sw, CAPTION_TEXT[geometry]);
       container.appendChild(sw);
     });
   }
@@ -3888,6 +3902,7 @@
       label.textContent = labelText;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
+      wireCaption(sw, CAPTION_TEXT[geometry]);
       container.appendChild(sw);
     });
   }
@@ -3962,19 +3977,30 @@
     if (!show) return;
     container.innerHTML = "";
     const options = [null, ...CHANNEL_COLORS];
+    // v2.41: the two-doors-per-color cap used to only be explained in a paragraph here and
+    // enforced reactively (wireColoredDoor refuses + reverts + logs) once a kid actually tried a
+    // third door — per the patch's own rule 3, that's a discoverability gap to fix with an
+    // affordance, not a sentence: grey out a color swatch the moment it's already full, right in
+    // this same row, so the limit is something a kid sees when they reach for it instead of
+    // something they'd have had to read about first. Scoped to the Door swatch specifically —
+    // every other color-taggable geometry (solid/barrier/plate/pushbutton) has no such cap.
+    const isDoorColor = containerId === "objectColorSwatches" && selectedGeometry === "door";
     options.forEach(color => {
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedChannelColor === color ? " selected" : "");
+      const full = isDoorColor && color && findDoorsWithColor(color).length >= 2;
+      sw.className = "swatch" + (selectedChannelColor === color ? " selected" : "") + (full ? " full" : "");
       sw.style.background = color ? CHANNEL_COLOR_HEX[color] : "#2f3140";
-      sw.title = color || "none";
+      sw.title = (color || "none") + (full ? " — already used by two doors" : "");
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = color || "none";
       sw.appendChild(label);
-      sw.addEventListener("click", () => {
-        selectedChannelColor = color;
-        renderColorSwatches();
-      });
+      if (!full) {
+        sw.addEventListener("click", () => {
+          selectedChannelColor = color;
+          renderColorSwatches();
+        });
+      }
       container.appendChild(sw);
     });
   }
@@ -4271,6 +4297,7 @@
       label.textContent = mode.label;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
+      wireCaption(sw, CAPTION_TEXT[mode.key]);
       container.appendChild(sw);
     });
   }
@@ -7123,6 +7150,14 @@
   let dragActor = null;
   let dragContactCooldown = {}; // "cellKey" -> ms remaining, so a slow drag doesn't spam a reaction every frame
 
+  // v2.41: which board cell shows the rotate-badge affordance (see drawRotateBadge) — the
+  // Ground/Lethal-row rotate replacement for the old "double-click to spin it 90°" sentence
+  // (rule 3a of the palette prose-reduction patch). "Selected tile" doesn't exist as a concept
+  // anywhere else in this codebase, so this reuses the same hover(desktop)/last-tap(touch)
+  // duality the caption bar already established, rather than inventing a second one — {gx, gy}
+  // or null, updated by the same mousemove/touchstart/touchmove listeners below.
+  let hoveredGroundCell = null;
+
   function clampDragPosition(actor, targetX, targetY) {
     // resolve one axis at a time, exactly like simulation, but teleporting instead of integrating
     const before = { x: actor.x, y: actor.y };
@@ -7235,12 +7270,17 @@
   gameCanvas.addEventListener("mousemove", (e) => {
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
+    hoveredGroundCell = { gx, gy };
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); return; }
     if (!isPaintingBoard) return;
     if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
     else if (paintMode === "background") paintBackgroundAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
   });
+  // v2.41: the rotate badge only means anything while the mouse is actually over the canvas —
+  // clearing it on mouseleave is the desktop half of the hover/last-tap duality (touch has no
+  // equivalent "leave" gesture, so a tap's badge deliberately persists until the next tap).
+  gameCanvas.addEventListener("mouseleave", () => { hoveredGroundCell = null; });
   window.addEventListener("mouseup", () => {
     isPaintingBoard = false;
     // Dragging an actor to a new spot is a deliberate repositioning, same as placing it fresh —
@@ -7254,6 +7294,7 @@
     pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
+    hoveredGroundCell = { gx, gy }; // "last tapped" — touch's own half of the rotate-badge duality
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
       if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return; }
@@ -7271,6 +7312,7 @@
   gameCanvas.addEventListener("touchmove", (e) => {
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
+    hoveredGroundCell = { gx, gy };
     if (dragActor) { clampDragPosition(dragActor, px - dragActor.w / 2, py - dragActor.h / 2); e.preventDefault(); return; }
     if (isPaintingBoard) {
       if (paintMode === "tile") paintGeometryModifierAt(gx, gy);
@@ -8029,6 +8071,17 @@
         gctx.lineWidth = 1.5;
         gctx.strokeRect(startPos.x - viewOffsetPx + 1, startPos.y + 1, ACTOR_SIZE - 2, ACTOR_SIZE - 2);
       }
+      // v2.41: the rotate-badge affordance replacing the old "double-click... to spin it 90°"
+      // sentence (rule 3a) — shown over whichever Ground/Lethal-skinned cell is currently
+      // hovered (desktop) or last tapped (touch), the one case double-click-rotate actually
+      // applies to. Silent no-op for every other cell (empty, plain none/solid, a modifier with
+      // no named skin) since there's nothing there for double-click to rotate.
+      if (hoveredGroundCell) {
+        const { gx, gy } = hoveredGroundCell;
+        if (gx >= 0 && gx < roomCols() && gy >= 0 && gy < ROWS && groundSkinBoard[gy][gx]) {
+          drawRotateBadge(gx * TILE - viewOffsetPx, gy * TILE);
+        }
+      }
     }
 
     renderActors(gctx, actors, viewOffsetPx);
@@ -8102,6 +8155,44 @@
     gctx.beginPath();
     gctx.arc(cx, cy, r, 0, Math.PI * 2);
     gctx.stroke();
+    gctx.restore();
+  }
+
+  // v2.41: the rotate-badge affordance (rule 3a of the palette prose-reduction patch) — a small
+  // vector-drawn circular-arrow icon in a tile's top-right corner, shown only while that specific
+  // Ground/Lethal-skinned cell is hovered/last-tapped (see hoveredGroundCell). This is the
+  // replacement for the retired "Double-click any painted Ground texture or Lethal to spin it
+  // 90°" sentence — "the badge is the affordance, the sentence goes away entirely once it
+  // exists." Drawn with plain canvas primitives, not pixel art, matching drawEmptySocketCue's
+  // own precedent that a Build-mode-only editing cue doesn't need to live in the game's own
+  // ART-resolution sprite system. sx/sy are the tile's exact screen-space top-left corner.
+  function drawRotateBadge(sx, sy) {
+    const r = 7;
+    const cx = sx + TILE - r - 2, cy = sy + r + 2;
+    gctx.save();
+    gctx.globalAlpha = 0.92;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r, 0, Math.PI * 2);
+    gctx.fillStyle = "rgba(20,20,28,0.85)";
+    gctx.fill();
+    gctx.strokeStyle = "#ffd166";
+    gctx.lineWidth = 1;
+    gctx.stroke();
+    // A ~270° arc plus an arrowhead reads as "rotate" without needing any text.
+    gctx.strokeStyle = "#ffd166";
+    gctx.lineWidth = 1.6;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r - 2.5, -Math.PI * 0.2, Math.PI * 1.3);
+    gctx.stroke();
+    const headAngle = Math.PI * 1.3;
+    const hx = cx + Math.cos(headAngle) * (r - 2.5), hy = cy + Math.sin(headAngle) * (r - 2.5);
+    gctx.beginPath();
+    gctx.moveTo(hx, hy);
+    gctx.lineTo(hx - 3, hy - 2.5);
+    gctx.lineTo(hx - 0.5, hy + 3);
+    gctx.closePath();
+    gctx.fillStyle = "#ffd166";
+    gctx.fill();
     gctx.restore();
   }
 
