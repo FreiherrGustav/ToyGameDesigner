@@ -4314,6 +4314,128 @@ export, both clean; and a dedicated Spin Cycle export test (export, reload, play
 with zero errors. The debug hook was added fresh for this session's testing and fully stripped
 before this commit, confirmed via `grep -n "toyDebug" index.html` returning nothing.
 
+## Spawned content is purged (not just repositioned) on Play entry/Reset/Export; a "READY!" pause before the action starts
+
+Four related asks, all about what a kid actually experiences at the Build→Play boundary. Two
+turned out to be one real, confirmed bug wearing two faces; one turned out to already exist and
+work correctly; one was a genuinely new feature.
+
+**The real bug: a spawner's own accumulated population was never purged, only repositioned.**
+`resetActorsToSpawn` (v2.19.4) already snapped every HAND-PLACED actor back to its own recorded
+`spawnX`/`spawnY` at Play entry, standalone export, and the existing "Reset to start" button — but
+a spawner never stops firing in the always-live Build sandbox (v2.20), so by the time any of those
+three moments arrived, a spawner could easily have produced a whole population of its own content,
+each one possibly having wandered far from where it was born. `resetActorsToSpawn` only
+REPOSITIONED those spawned actors back to their own birth point — it never removed them, since it
+has no way to tell "a kid placed this" from "a spawner made this." Confirmed by direct trace: a
+spawner loaded with a chaser and left running for 8 seconds in Build mode produced 2-3 live
+actors; none of the three "start fresh" moments ever reduced that count to zero. **Fix**:
+`purgeSpawnedActors(actorsList)` splices out every actor whose `spawnerKey` is non-null (set only
+by `spawnActorAt`, never by `placeNewActor` — the one field that actually distinguishes "spawner-
+made" from "hand-placed"), called immediately before `resetActorsToSpawn` at all three existing
+call sites: `restartPlaySessionFromSnapshot` (every Play entry and every in-session restart),
+the "Reset to start" button's own handler (now also logging "Reset to start." for feedback,
+matching how every other control in this row already confirms it did something), and
+`exportStandaloneGame`'s `gameData` construction (so a spawner's Build-mode accumulation can never
+get baked permanently into a shipped export either — confirmed directly: letting a spawner
+idle-produce content in Build mode, then exporting, now bakes exactly zero spawner-made actors
+into `GAME_DATA`, where it previously baked in whatever happened to exist at export time). The
+exported game's own `restartStandaloneGame` needed no equivalent call — it already rebuilds
+`rooms` wholesale from a frozen `initialGameData` copy taken at the game's own first load, which
+is now always clean by construction once the export-time purge is in place.
+
+**The "a placed chaser starts wherever it wandered to" claim: traced directly, found already
+working.** Direct report: "if you place a chaser, and it wanders around, once you push play it
+doesn't start where you placed it, it starts where it's wandered to (which is inconveniently,
+wherever the player character is)." Investigated before assuming a second bug, since
+`resetActorsToSpawn` already existing specifically to prevent this (per its own v2.19.4 comment)
+made it worth checking directly rather than taking the report at face value. A real trace — place
+a chaser, let it wander 476px over 3 seconds of Build-mode free-roam, enter Play — showed it
+restarting within 12px of its original placement (rounding from `ACTOR_SIZE`/click-center math,
+not drift), not anywhere near where it had wandered to. **This mechanism was never broken.** The
+"inconveniently wherever the player is" detail is the actual tell for what was really happening:
+that phrasing is the signature of a spawner-produced chaser (which steers toward the player every
+tick, same as any chaser) accumulating during a long Build-mode idle and ending up clustered near
+wherever the player happened to be sitting — exactly the spawner-purge bug above, not a separate
+reset-to-spawn bug. Confirmed directly: the same compound scenario (a spawner loaded with a
+chaser, PLUS a separate hand-placed chaser elsewhere, both left running 8 seconds) now shows
+exactly the player plus the one hand-placed chaser at Play start, the hand-placed one within <1px
+of its original placement, with every spawner-made chaser gone. Flagging this plainly rather than
+silently "fixing" a second thing that was never broken: if a genuinely separate case surfaces
+later (a hand-placed, non-spawner actor still starting in the wrong place), it needs its own fresh
+repro, since this one specific shape is now confirmed sound.
+
+**The "there should be a reset button" ask: one already existed** (`#resetBtn`, "↺ Reset to
+start", in `#buildToolbar` — Build-mode-only, not a new addition this patch needed to make) **but
+it only did half the job** until the fix above — it repositioned hand-placed actors correctly but
+left spawned ones sitting there, unrepositioned-but-present, rather than actually returning the
+room to "nothing's happened yet." With `purgeSpawnedActors` now wired into its handler, the
+existing button is the complete fix the request asked for; no second button was added.
+
+**New feature: a "READY!" pause before the action starts**, matching the genre-standard beat
+(Pac-Man and most arcade games show exactly this at the start of every life/round, not just the
+first). Direct motivation: Play used to drop a kid straight into a running simulation with zero
+time to get their bearings — a real problem specifically for Runner mode (Spin Cycle among them),
+whose camera starts closing in the instant the session begins, per the request's own example.
+`READY_DURATION_MS` (1200) and a transient `playReadyUntil` timestamp (declared alongside
+`playSessionEnded`, reset to `null` in `clearTransientRuntimeState`) are the whole mechanism:
+`restartPlaySessionFromSnapshot` sets `playReadyUntil = performance.now() + READY_DURATION_MS`
+right where it already resets `lives`/`playSessionEnded`, and `frame()`'s own existing `if
+(roomTransition) {...} else if (playSessionEnded) {...} else {...}` chain gained one more branch
+in between: while `playReadyUntil` is set and still in the future, `tick(dt)`/`tickDragCooldowns(dt)`
+are skipped entirely — the exact same "frozen" shape the win/game-over screen already uses one
+branch up, reusing the established pattern rather than inventing a second one. Since
+`updateCamera`/`checkRunnerFailState` both live inside `tick()`, freezing it is what makes the
+Ready window a REAL freeze, not just a visual one: camera position, player velocity, and position
+are all provably unchanged for the whole window (confirmed by trace: holding the movement key the
+entire time produces `vx === 0`/`cameraX === 0` throughout, with real movement only resuming the
+instant the window elapses — not approximately, exactly). `drawReadyOverlay()` (called from
+`renderGame()`, mutually exclusive with the existing `drawPlaySessionEndOverlay` check) draws
+"READY!" centered on the canvas with a stroke outline for legibility over any background,
+deliberately with NO dark wash behind it (unlike the win/game-over screen) — the whole point is
+that the kid can see their actual starting position and surroundings clearly underneath the text,
+not have it obscured. It fades out over its own last third rather than popping off abruptly.
+Applies on every Play (re)start, not just the first — the same "a fresh round deserves the same
+beat" reasoning Pac-Man's own convention already follows, and the one that actually matters for a
+kid retrying after dying to (for example) Spin Cycle's own drain and needing the same beat to get
+re-oriented before the camera starts moving again.
+
+**A real gap in the export's own boot sequence, found and fixed while testing this**: the
+exported game's FIRST load never calls `restartStandaloneGame()` at all — it boots directly via
+`activateRoom(playerRoomId); renderPlayHUD();` right after the runtime functions are spliced in,
+a completely separate code path from the retry-after-game-over button/keypress handlers that DO
+call `restartStandaloneGame()`. Confirmed directly: without a matching `playReadyUntil =
+performance.now() + READY_DURATION_MS;` added at that exact boot line too, an exported game's
+*first* Play session skipped the Ready pause entirely (plain `restartStandaloneGame()`'s own
+fix alone only covered a retry, never the initial load) while every *retry* correctly got it —
+an asymmetry a kid would have felt immediately on their very first run. Both spots now set it.
+
+**Export pipeline**: `READY_DURATION_MS` got a `constantsSource` line; `drawReadyOverlay` was
+added to `runtimeFunctions` (`frame`/`renderGame`/`drawPlaySessionEndOverlay` were already there
+from earlier patches); `let playReadyUntil = null;` was added to the export template's own
+duplicate hand-declared globals, the same "declared here by hand, never part of `GAME_DATA`"
+treatment every other transient runtime-only field (`spawnerRuntime`, `plateChannelsActive`, ...)
+already gets. `purgeSpawnedActors` itself needed no export-side wiring at all — every call site
+that uses it (`restartPlaySessionFromSnapshot`, the Reset button, `exportStandaloneGame`) is
+live-editor-only code that never runs inside an exported game.
+
+Verified with Playwright across five focused passes plus the full regression sweep: a spawner
+loaded with a chaser, left running 8 seconds in Build mode, has its entire population purged to
+zero at Play start AND at a Reset-button click, confirmed via both scenarios independently; the
+compound repro (spawner + a separate hand-placed chaser, both run 8 seconds) leaves exactly
+player + the one hand-placed chaser at Play start, the hand-placed one within <1px of its
+original placement; a project with spawner-accumulated content, once exported, bakes zero
+spawner-made actors into `GAME_DATA` (confirmed by parsing the exported file's own embedded data
+directly, not inferred from runtime behavior); the Ready pause holds `vx`/`cameraX` at exactly 0
+for the full window in both the live editor and a freshly exported game (verified in the export by
+reading a closure-scope debug accessor injected directly into the downloaded file, the same
+established pattern prior export-pipeline audits in this project have used), then resumes real
+movement and camera advance the instant it elapses, confirmed in both; Spin Cycle's own full
+end-to-end run (dodge gauntlet → victory room → goal) still completes cleanly with the Ready pause
+now active, just delayed by the pause's own duration; and the full 6-sample regression sweep plus
+a fresh Button+Gate export both run error-free, before and after the debug hook (added fresh for
+this session, confirmed via `grep -n "toyDebug" index.html` returning nothing) was stripped.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

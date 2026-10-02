@@ -1121,6 +1121,12 @@
   const DEFAULT_LIVES = 3;
   let lives = DEFAULT_LIVES;
   let playSessionEnded = null; // null while playing; "win" or "lose" once a session resolves — freezes the frame loop
+  // How long a fresh Play session (or a retry after game-over) holds everything still before the
+  // action actually starts — the genre-standard "READY!" beat (Pac-Man, most arcade games) rather
+  // than dropping a kid straight into a moving hazard (e.g. Runner mode's own camera) with zero
+  // time to get their bearings. See frame()'s own gating and drawReadyOverlay().
+  const READY_DURATION_MS = 1200;
+  let playReadyUntil = null; // null = not in a Ready pause; otherwise a performance.now() timestamp
 
   let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
   let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
@@ -1326,6 +1332,7 @@
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
+    playReadyUntil = null;
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
@@ -1348,15 +1355,23 @@
     spawnerContents = structuredClone(buildSnapshot.spawnerContents);
     switchChannels = structuredClone(buildSnapshot.switchChannels);
     playerRoomId = buildSnapshot.playerRoomId;
-    // v2.19.4: the sandbox never stops simulating in Build, so every actor (chasers especially)
-    // may well have wandered from where it was actually placed by the time Play starts — snap
-    // every room's actors back to their authored spawn points before any of them go live.
-    rooms.forEach(r => resetActorsToSpawn(r.actors, r.startPos));
+    // Direct feedback: a spawner left running in the always-live Build sandbox can produce dozens
+    // of actors (and they can wander far from where they were born) before a kid ever presses
+    // Play — none of that is "designed" content, so it needs to be gone, not just repositioned,
+    // the instant a real Play session starts. purgeSpawnedActors removes every spawner-made actor
+    // (identified by its own spawnerKey, set only by spawnActorAt) first; resetActorsToSpawn then
+    // snaps every remaining, hand-placed actor (chasers especially — v2.19.4) back to its own
+    // authored spawn point, since the sandbox never stops simulating in Build either.
+    rooms.forEach(r => { purgeSpawnedActors(r.actors); resetActorsToSpawn(r.actors, r.startPos); });
     activateRoom(playerRoomId);
     lives = DEFAULT_LIVES;
     playSessionEnded = null;
     resetScoreAndIntensity();
     clearTransientRuntimeState();
+    // Direct feedback: the action used to start the instant Play was pressed, giving a kid zero
+    // time to get their bearings before e.g. Runner mode's camera starts closing in — the genre-
+    // standard "READY!" beat (frame()'s own gating skips tick() entirely until this elapses).
+    playReadyUntil = performance.now() + READY_DURATION_MS;
     renderAll();
     log("Play started!");
   }
@@ -7483,6 +7498,23 @@
     });
   }
 
+  // Direct feedback: a spawner never stops firing in the always-live Build sandbox (v2.20), so by
+  // the time a kid presses Play it may well have produced a whole population of its own content,
+  // scattered wherever each one wandered to since. None of that is "designed" — it's the live
+  // simulation's own byproduct — so it needs to be REMOVED, not merely repositioned the way
+  // resetActorsToSpawn already handles hand-placed actors. spawnerKey (set only by spawnActorAt,
+  // never by placeNewActor) is the one field that distinguishes "a kid placed this" from "a
+  // spawner made this," so it's the correct and only test here. Mutates actorsList in place
+  // (splicing, not filtering into a new array) so every existing caller's own array reference
+  // stays valid. Used everywhere a "start fresh" moment already calls resetActorsToSpawn — Play
+  // entry/restart, standalone export, and the "Reset to start" button — so none of them can leave
+  // stray spawned content behind.
+  function purgeSpawnedActors(actorsList) {
+    for (let i = actorsList.length - 1; i >= 0; i--) {
+      if (actorsList[i].spawnerKey != null) actorsList.splice(i, 1);
+    }
+  }
+
   // ============== Editor drag: continuous, collision-aware, same reactions as gameplay ==============
   // Dragging just moves the actor's real AABB with the cursor, clamped by the exact same
   // geometry collision the physics uses, and runs the exact same contact reactions — there is
@@ -7669,9 +7701,16 @@
 
   // ============== Reset / start controls ==============
   // v2.19.4: resets every actor in the current room, not just the player — a chaser dropped
-  // somewhere gets exactly as much of a "snap back" guarantee as the player already had.
+  // somewhere gets exactly as much of a "snap back" guarantee as the player already had. Direct
+  // feedback: that alone wasn't enough once a spawner was in the mix — it repositioned a
+  // spawner-made actor back to wherever it was BORN rather than removing it, so the room never
+  // actually got back to its true "nothing's happened yet" state. purgeSpawnedActors removes
+  // every spawner-made actor outright first; resetActorsToSpawn then handles everything a kid
+  // actually placed by hand.
   document.getElementById("resetBtn").addEventListener("click", () => {
+    purgeSpawnedActors(actors);
     resetActorsToSpawn(actors, startPos);
+    log("Reset to start.");
   });
   document.getElementById("setStartBtn").addEventListener("click", () => {
     const player = actors.find(a => a.isPlayer);
@@ -8434,6 +8473,31 @@
     const scPlayer = actors.find(a => a.isPlayer);
     const midSplat = scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate";
     if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
+    else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
+  }
+
+  // Direct feedback: Play used to drop a kid straight into a running simulation with zero time to
+  // get their bearings — a real problem for e.g. Runner mode, whose camera starts closing in the
+  // instant the session begins. This is the genre-standard "READY!" beat (Pac-Man, most arcade
+  // games) rather than a scripted tutorial: frame()'s own gating is what actually freezes the
+  // simulation (camera included) for READY_DURATION_MS; this just draws the beat over whatever's
+  // already on screen — the kid's real starting position, fully visible underneath — and fades
+  // out over its own last third rather than popping off abruptly.
+  function drawReadyOverlay() {
+    const remaining = playReadyUntil - performance.now();
+    const frac = 1 - Math.max(0, Math.min(1, remaining / READY_DURATION_MS)); // 0 at start, 1 at end
+    const fadeOutFrac = 1 / 3;
+    const alpha = frac > 1 - fadeOutFrac ? Math.max(0, (1 - frac) / fadeOutFrac) : 1;
+    gctx.save();
+    gctx.globalAlpha = alpha;
+    gctx.textAlign = "center";
+    gctx.fillStyle = "#ffd166";
+    gctx.font = "bold 40px sans-serif";
+    gctx.strokeStyle = "rgba(10,10,14,0.85)";
+    gctx.lineWidth = 5;
+    gctx.strokeText("READY!", gameCanvas.width / 2, gameCanvas.height / 2);
+    gctx.fillText("READY!", gameCanvas.width / 2, gameCanvas.height / 2);
+    gctx.restore();
   }
 
   // Win and game-over both get a real screen — distinct from a mid-game reset, per the point
@@ -8660,10 +8724,14 @@
       groundTileDefs: structuredClone(groundTileDefs)
     };
     // v2.19.4: an exported game is a frozen snapshot of whatever the always-live sandbox looked
-    // like at the moment Export was clicked — including any chaser mid-wander. Reset every actor
-    // in the cloned copy back to its authored spawn point first, so the shipped game always starts
-    // exactly where it was placed, not wherever it happened to be standing right then.
-    gameData.rooms.forEach(r => resetActorsToSpawn(r.actors, r.startPos));
+    // like at the moment Export was clicked — including any chaser mid-wander. Direct feedback:
+    // that snapshot could also have baked in a spawner's own accumulated population permanently
+    // into the shipped game, since nothing ever purged it (same gap as the live editor's own
+    // Play-entry and Reset button — see purgeSpawnedActors' own comment). Removing every
+    // spawner-made actor first, then snapping every remaining hand-placed actor back to its
+    // authored spawn point, is what actually makes the exported game start exactly as designed,
+    // not wherever the live sandbox happened to be at export time.
+    gameData.rooms.forEach(r => { purgeSpawnedActors(r.actors); resetActorsToSpawn(r.actors, r.startPos); });
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable,
@@ -8683,7 +8751,7 @@
       spawnActorAt, tickSpawners, cellOccupiedByActor, despawnSpawnedActor,
       stepActor, tick,
       drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
-      currentPoseFor, drawPlaySessionEndOverlay, renderGame, renderPlayHUD,
+      currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
       playPatch, playActorSound,
@@ -8776,6 +8844,7 @@
       `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
+      `const READY_DURATION_MS = ${READY_DURATION_MS};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
       `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
@@ -8882,6 +8951,7 @@
   let score = 0, intensity = 0;
   let lives = DEFAULT_LIVES;
   let playSessionEnded = null;
+  let playReadyUntil = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
   const wanderHeadings = {};
 
@@ -8902,6 +8972,7 @@
   const gctx = gameCanvas.getContext("2d");
 
   activateRoom(playerRoomId);
+  playReadyUntil = performance.now() + READY_DURATION_MS;
   renderPlayHUD();
 
   // No Build/Play toggle exists in this standalone export, so the win/game-over overlay's
@@ -8923,6 +8994,7 @@
     score = 0; intensity = 0;
     lives = DEFAULT_LIVES;
     playSessionEnded = null;
+    playReadyUntil = performance.now() + READY_DURATION_MS;
     currentRoomId = null;
     grabKeyDownAt = null;
     activateRoom(playerRoomId);
@@ -8997,7 +9069,15 @@
         if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
       } else if (appMode === "play" && playSessionEnded) {
         // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
+      } else if (appMode === "play" && playReadyUntil != null && t < playReadyUntil) {
+        // Direct feedback: the action used to start the instant Play was pressed, giving a kid
+        // zero time to see where they'd landed before e.g. Runner mode's camera started closing
+        // in. Frozen exactly like the win/game-over screen above — tick() never runs, so nothing
+        // (camera included, since updateCamera/checkRunnerFailState both live inside tick()) can
+        // move or hurt anyone during this window — only drawReadyOverlay (called from renderGame)
+        // shows the kid their starting position and a plain, genre-standard "READY!" beat.
       } else {
+        if (playReadyUntil != null) playReadyUntil = null; // the Ready window just elapsed this frame
         tick(dt);
         tickDragCooldowns(dt);
       }
