@@ -3981,6 +3981,67 @@ wrap/sticky/respawn/Button-scope/spawner-timing/camera-reset/lava-bridge items a
 verified; and the full 5-sample regression sweep plus a fresh Button+Gate export, run again after
 the fix, both still pass clean.
 
+### Follow-up: closing the gaps the v2.42 pass itself had hedged on (v2.42.1)
+
+Direct follow-up, prompted by being asked directly what from the v2.42 pass had been overlooked or
+put off rather than actually nailed down. Re-reading that section's own wording surfaced five real
+hedges: the camera/door interaction was inferred from a reset line, never from an actual forced
+repro (the one live attempt at it never got the door to fire at all); the carry-through-door fix
+itself was verified only in the live editor, never in an exported game, despite this file's own
+history of exactly that editor/export gap shape (`SWITCH_OFF_ART`, `nextActorInstId`, the
+`actorDefs` backfill — three prior instances); a carried bomb's fuse was confirmed to survive a
+door trip in a *paused* state but never actually let run out and detonate in the new room; only a
+2-room round trip was chained, never a 3rd distinct room; and the custom-character-preset-plus-
+voice checklist item was quietly substituted with a simpler built-in character rather than actually
+driven through the "+" creation wizard. All five were run for real this round — **zero new bugs
+found, every one confirmed sound**, closing out those hedges rather than leaving them as inferences:
+
+- **Camera dead-zone shift interrupted by a door, forced rather than inferred**: `cameraShiftSide`
+  was set directly to `"right"` via the debug hook immediately before teleporting the player onto a
+  door cell, guaranteeing the interrupt actually happens mid-shift rather than hoping real elapsed
+  `dt` lines the two up. Confirmed: the door still fires (room changes), and `cameraShiftSide`
+  genuinely resets to `null` from the forced non-null value, not just coincidentally settling there
+  on its own.
+- **The carry-through-door fix, verified in a real exported game**: built a crate+door scene, exported
+  it, and drove the exported file with real keyboard input (move to the crate, grab with E, keep
+  moving through the door) rather than only re-checking the live editor. The crate followed the
+  player into the new room in the export too — `beginRoomTransition`'s fix needed no separate export
+  wiring (confirmed, not just inferred from its presence in `runtimeFunctions`).
+- **A carried bomb's fuse, let run out for real, in the new room**: grabbed an armed-capable bomb,
+  crossed a door still holding it, dropped it (resuming its real `setTimeout`-based fuse per
+  `startOrResumeBombFuse`), and waited out the actual fuse duration. It detonated and was removed
+  from `actors` — genuinely, in the room the kid dropped it in, not stuck mid-transition or
+  silently orphaned.
+- **A 3-room door chain while carrying, not just a round trip**: chaining a second, distinct door
+  (needing its own color — two colorless doors pair with each other project-wide regardless of which
+  room they're painted in, a real detail this test had to work around, not a bug) confirmed the
+  carried crate survives a SECOND hop into a genuinely new third room, not just the original 2-room
+  back-and-forth.
+- **Warp + carry**: confirmed directly rather than left as "trivial by construction" — a carried
+  crate survives a same-room warp teleport with the player, as expected (warp never touches the
+  `actors` array the way a door does, so this was never really at risk, but it's now actually
+  checked rather than assumed).
+
+**Two real test-authoring mistakes were caught and are worth recording, since both are the exact
+shape of error that could otherwise manufacture a false "bug" or a false "fine" in future QA
+passes**: (1) capturing `#gameCanvas`'s bounding box *before* switching to Follow camera mode,
+rather than after — switching modes inserts a Build-mode pan-control row above the canvas, shifting
+its on-screen Y position by ~37px, which silently misdirected every subsequent canvas click in a
+way that looked exactly like "the door never fires under Follow mode" (it fires fine; the paint
+itself was landing on the wrong UI area). This is almost certainly why the original v2.42 pass's own
+camera/door test was inconclusive, not because the interaction is actually hard to test. (2) a
+`[class*=tab]` CSS selector used to find a room tab button, which never matches this app's actual
+`class="tbtn"` (no literal substring "tab" in "tbtn") — a reminder to check an app's real class
+names rather than guess a plausible-sounding one when a locator times out.
+
+**No code changes this round** — `index.html` is byte-identical to the v2.42 commit; this was pure
+verification closing out that patch's own hedges, the debug hook added and stripped exactly as it
+always is for a testing-only pass.
+
+Verified with Playwright (28 checks, one consolidated test file): all five items above confirmed
+directly; the two test-authoring bugs found, fixed, and re-run clean; and the full 5-sample
+regression sweep plus a fresh Button+Gate export both still pass.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
