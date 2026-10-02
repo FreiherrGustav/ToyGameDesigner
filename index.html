@@ -5674,13 +5674,27 @@
     const fromBackgroundSnapshot = backgroundBoard;
 
     const player = actors.find(a => a.isPlayer);
+    // v2.42 fix: a carried object used to be left behind, silently — only the player's own id was
+    // ever moved into the arrival room's actors, so tick()'s carry-follow update (which looks the
+    // carried actor up by id in whatever room is currently hot) failed to find it the very next
+    // frame and dropped `player.carrying` back to null, orphaning the object, frozen (`carried`
+    // actors are exempt from stepActor's own physics) and invisible in the room just left, forever
+    // reachable by nobody. A kid carrying a crate through a doorway on purpose (the obvious thing
+    // to try, and the literal use case Large Stone bridges already lean on one room over) had no
+    // way to know this had happened until the object they were holding simply vanished. Carried
+    // means "glued to the player," so it travels wherever the player travels — the same object,
+    // pulled out of the departure room's actor list here and pushed into the arrival room's below,
+    // right alongside the player itself.
+    const carried = player.carrying != null ? actors.find(a => a.id === player.carrying) : null;
     removeActorById(player.id);
+    if (carried) removeActorById(carried.id);
 
     activateRoom(link.toRoomId);
     player.x = link.toX * TILE + TILE / 2 - player.w / 2;
     player.y = link.toY * TILE + TILE / 2 - player.h / 2;
     player.vx = 0; player.vy = 0;
     actors.push(player);
+    if (carried) actors.push(carried); // position catches up on the very next tick() carry-follow step
     playerRoomId = link.toRoomId;
 
     roomTransition = {
