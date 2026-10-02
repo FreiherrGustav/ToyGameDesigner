@@ -4170,6 +4170,150 @@ Verified with Playwright (28 checks, one consolidated test file): all five items
 directly; the two test-authoring bugs found, fixed, and re-run clean; and the full 5-sample
 regression sweep plus a fresh Button+Gate export both still pass.
 
+## "Spin Cycle" — an auto-scroll dodge gauntlet, the first sample built under the new process
+
+The first sample built by actually following "Building a new sample game — process and physics
+reference" (the top-level reference section above) end to end — Phase 1 rough layout, then
+mandatory Phase 2 trace-and-fix, exactly as that section prescribes. It earned that discipline:
+multiple Phase 1 placements were wrong in ways a hand-derived guess wouldn't have caught, the same
+lesson Worst Elevator's own build already taught, now confirmed to generalize to a second sample.
+
+**The shape, confirmed before building anything.** The brief asked for "Astro War, not Flappy
+Bird" — free 2D dodge in an auto-advancing corridor, not jump-timing. This engine has never
+combined Runner camera mode with gravity OFF before (Runner was originally specced with gravity-on
+jump-timing in mind). Confirmed by direct trace before relying on it: `checkRunnerFailState` is a
+pure `player.x + player.w <= cameraX` comparison — gravity-agnostic by construction — and fires
+correctly in gravity-off free-roam exactly as it does under gravity. `RUNNER_SPEED` is `130`
+(looked up, not assumed).
+
+**A real, confirmed finding that shaped the whole level's hazard #2.** The brief itself flagged an
+open question: does sticky's full-freeze cling apply in gravity-off free-roam, or only the
+separate slowdown? Traced directly (`research_sticky_runner.js`): `stepActor`'s own
+`const touchingSticky = inGravity && isStuckToSticky(actor)` gates the cling on `inGravity` —
+in free-roam it's always `false`, so the full freeze **never** fires here. What a kid actually
+gets is `isOnStickyGround`'s separate slowdown, which turned out to be real danger anyway, not a
+nuisance: `STICKY_MOVE_MULT` (0.32) caps effective speed at `MAX_SPEED*0.32 = 70.4px/s` the
+instant it's entered — below `RUNNER_SPEED` (130), so a caught player nets **-59.6px/s** against
+the camera even while holding straight toward the exit the whole time. Confirmed this is not a
+freeze or a soft-lock by direct trace: holding both the travel direction and the escape direction
+simultaneously inside the patch settles at a combined ~70.4px/s split across both axes (not 0),
+and speed fully recovers to 220 the instant the patch is cleared.
+
+**Theme and hazard re-skins.** A rogue sock (`SOCK_ART`, single flat pose, mismatched cuff stripe
+and patch, googly eyes — matching the simple no-poses shape `MONSTER_ART`/`SLIME_ART` already
+established) survives the wash. All six hazards reuse existing mechanics, re-skinned via
+sample-scoped `groundTileDefs`/`backgroundTileDefs`/`actorDefs` entries added inside
+`buildSpinCycleGame()` itself — the same "custom kit lives inside the sample's own builder"
+pattern Cheese Heist's wall textures and Dungeon Diving's custom lethal already established, not a
+single new engine code path: soap-chunk solid obstacles (`spSoapChunk`, a chunky bubble-pile
+texture, deliberately visually distinct from the flatter "wet puddle" sticky-patch texture
+`spSudsPatch` so the two never get confused at a glance — directly continuing the v2.41 caption-
+bar work's own "look vs. consequence" clarity goal); a dryer-vent fan blast (the existing Fan
+object, confirmed by trace to apply a real, measurable force — `fanAccelFor` is purely positional
+and doesn't care about gravity mode); elastic-waistband bouncy walls (`spElastic`, a ribbed
+horizontal-banding texture over `solid:bouncy` — confirmed by trace that plain `BOUNCE_RESTITUTION`
+reflection fires correctly in free-roam, with no tunneling, under sustained held input toward the
+wall; the player-only wall-kick/lift bonus, `applyBouncyWallKick`, is gravity-mode-gated per its
+own v2.21 comment and does **not** apply here — only plain reflection); a spawner lobbing a stray
+sock (see the real bug found and fixed below); and the drain finale (`spDrain`, a dark
+near-black/navy concentric swirl, deliberately a different color family from every other Lethal so
+it reads as the single most dangerous thing on sight).
+
+**A real Phase 2 bug found and fixed: the first drain layout was unreachable, not "thrillingly
+tight."** The brief named this as the one hazard most likely to produce a Worst-Elevator-shaped
+surprise, and it did. First layout: two spawners at the gauntlet's extreme rows (2 and 15), zero
+buffer before the drain, a 2-row gap (rows 8-9). A direct trace sweeping the reaction column from
+the earliest possible moment (right as the spawner section ends) to the drain's own leading edge
+found **every single starting point died** — even reacting at the absolute earliest opportunity,
+the diagonal travel needed to cross from an extreme row to a 2-row gap, at the player's own real
+combined-speed cap, left zero margin against the horizontal distance available. A classic knife-
+edge, the same shape Worst Elevator's own first goal-tile placement hit. Fixed with two changes,
+both re-verified by trace rather than assumed: an explicit 8-tile clear buffer (cols 58-65, no
+hazards) between the spawner section and the drain, and the drain's gap widened to 6 rows
+(rows 6-11), with the spawner rows themselves pulled in from the literal extremes (2/15) to 4/13
+(still within the drain's own lethal blocks if never reacted to at all, preserving "zero reaction
+= death," but reachable from a real buffer-start reaction).
+
+**A second, subtler Phase 2 finding from the SAME trace: "hold the dodge direction throughout,"
+read completely literally, overshoots.** A player who starts the vertical dodge very early and
+never releases the key (continuing to hold it straight through the gap and into the OPPOSITE
+lethal block on the far side) can die from over-correction, not under-correction — confirmed by
+trace: reacting at the very first buffer column while holding the key the entire remaining
+distance drifts past row 11 into the lower block by the time the drain's own columns arrive. This
+is NOT the same bug as the knife-edge above (that one killed every reaction point; this one only
+over-commits on the very earliest ones) and isn't treated as a flaw needing a fix — unlike Worst
+Elevator's own discrete single bounce/launch events, this hazard has a specific row band to
+*settle into*, and a kid dodging toward a target naturally lets go once centered, the same way
+nobody keeps holding a direction after they've already avoided an obstacle. Re-traced with a
+"react, then let go once centered" pattern (modeling that natural behavior) instead of a literal
+never-release hold: reacting anywhere in roughly the first half of the 8-tile buffer survives
+cleanly from BOTH extreme starting rows, with reacting too late (the back half of the buffer)
+correctly still failing — a real, fair, non-knife-edge window, confirmed by trace rather than
+assumed from the fix alone.
+
+**A real Phase 2 bug found and fixed in hazard #5: two spawners could cost all three lives in one
+section, alone.** First layout placed two spawners (a button and a stray sock) close together
+right after section 4. An end-to-end trace of a player holding the travel direction the entire
+run (the brief's own "hold the dodge direction throughout" pattern, applied here as "never
+reacts to the autonomous content at all") found the accumulated spawned content — v2.38 removed
+both the spawner population cap AND the TTL despawn, so content persists and accumulates for as
+long as nothing removes it — could cost all `DEFAULT_LIVES` (3) in this one stretch alone,
+regardless of how well every other hazard was handled. Disproportionate: every other hazard here
+risks at most one life if mishandled. Fixed by cutting to a single spawner (also a closer literal
+reading of the brief's own "**A** spawner lobbing rogue buttons/stray socks" — singular), keeping
+the stray sock for thematic cohesion (`EXAMPLE_STRAYSOCK_DEF_ID`, `HAZARD_BALL_KIND` temperament,
+so it inherits the hazard ball's existing always-bounces/always-hurts reaction verbatim — no new
+mechanic). Confirmed by trace both ways: a clean, fast pass-through (holding the travel direction
+at full speed) now clears the whole stretch in under one `SPAWN_INTERVAL_MS` (2500ms), before the
+spawner even gets a first chance to fire — zero risk for an attentive, fast player — while a
+slower or inattentive one still faces a real, recoverable (one of three lives) threat, matching
+the brief's own "introduced later in the level once the player has the basics down" framing rather
+than overwhelming it. The unused button hazard-ball art/def from the first attempt was removed
+outright rather than left as dead, unreferenced code.
+
+**The finish and the background art.** A door at the gap's own row leads to a second, small,
+fixed-camera victory room ("You Survived the Wash!") with a goal tile — confirmed end to end:
+reaching it fires the win reaction. The Paint layer (pure decoration, zero gameplay effect, per
+v2.3/v2.25's reusable custom-tile system) is used for the first time across a whole sample rather
+than left nearly empty, per the brief's own actual ask — three new pastel blue/white background
+tiles (soap bubbles, water/motion streaks, a porthole-glass tint) scattered throughout the
+corridor and the victory room via `backgroundTileDefs.bg2`/`bg3`/`bg4`, added inside the sample's
+own builder (`backgroundTileDefs.bg1`, the factory default, is left untouched).
+
+**No engine code changed.** Every hazard re-skin is new art plus new sample-scoped
+`groundTileDefs`/`lethalSlotIds`/`groundSlotIds`/`backgroundTileDefs`/`actorDefs`/
+`spawnerContents` entries — all mechanisms that already existed and are already shared into
+`exportStandaloneGame` from earlier patches. No new `runtimeFunctions`/`constantsSource` lines
+were needed, confirmed by a clean, zero-error export test.
+
+**Three real test-authoring mistakes made and caught during this build, worth recording for the
+next sample** (the exact "manufacture a false bug or a false fine" risk the v2.42.1 section above
+already named, now confirmed to recur in fresh territory): (1) tracing the sticky patch with the
+test player placed at a row that collided with an EARLIER section's own soap chunk first, reading
+as "sticky froze the player" when it was actually solid-wall collision from a different hazard
+entirely, several columns earlier than intended — fixed by teleporting cleanly past the preceding
+section before isolating the one under test. (2) assuming a 500ms dodge window was enough to climb
+three tiles clear of a sticky patch, not accounting for the fact that movement WHILE escaping is
+ALSO slowed by the same `isOnStickyGround` effect (it doesn't care which direction is pressed) —
+the real escape takes several times longer than the unslowed `MOVE_ACCEL`/`MAX_SPEED` numbers
+alone would suggest; confirmed recoverable only once the wait was extended to match. (3) placing a
+synthetic test actor directly inside one of the level's OWN solid hazard cells (by not checking
+the just-written hazard coordinates against the test's own teleport target), producing a
+"frozen, unresponsive player" reading that was actually simple wall-wedging, not a sticky/physics
+bug — caught by noticing the reported position never moved even a single pixel, a dead giveaway
+distinct from every genuine slowdown/knockback case traced elsewhere in this same session.
+
+Verified with Playwright across the full process: the Phase 1 research pass (Runner+gravity-off
+fail-state, sticky-in-free-roam mechanism); dedicated Phase 2 trace-and-fix passes for the sticky
+patches and the drain (the two moments the brief itself flagged as needing real traces); targeted
+confirmation passes for the fan's force and the bouncy wall's reflection; a full, realistic
+end-to-end run (dodging section 4's chunk, re-centering before the drain the way an attentive kid
+naturally would) reaching the door, entering the victory room, and triggering the win; the full
+6-sample regression sweep (five existing samples plus Spin Cycle itself) and a fresh Button+Gate
+export, both clean; and a dedicated Spin Cycle export test (export, reload, play ~4+ seconds)
+with zero errors. The debug hook was added fresh for this session's testing and fully stripped
+before this commit, confirmed via `grep -n "toyDebug" index.html` returning nothing.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
