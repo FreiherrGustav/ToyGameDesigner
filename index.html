@@ -3209,6 +3209,235 @@
     ctx.restore();
   }
 
+  // "The Catapult Factory" — a multi-solution puzzle room built under the same two-phase process
+  // as Spin Cycle: a rough layout first, then a mandatory trace-and-fix pass. Spin Cycle's own
+  // failure mode was a level too EASY (hazards that never forced real engagement); this level's
+  // mirror-image risk, named explicitly in the brief, is the GOAL being reachable without the
+  // machinery mattering at all — guarded against directly as "rule one," see the final Gate below
+  // and its own Phase 2 verification.
+  //
+  // Open design question, resolved before building rather than silently either way: the premise
+  // is "get an object — or yourself — to the goal," but `goal` had only ever fired on the
+  // PLAYER's own touch (checkPlayerTileContacts) since it was added. Investigated rather than
+  // assumed: `triggerGoal(player)` only reads `player.goalCooldown` (a plain field every actor
+  // already carries) before calling `roundComplete()`, which re-finds the real player itself via
+  // `actors.find(a => a.isPlayer)` rather than trusting whatever was passed in — so calling
+  // `triggerGoal` with a non-player actor was already safe, no risk in extending it. Added
+  // `checkPhysicsObjectGoalContacts` (mirrors `checkPhysicsObjectSwitchContacts`, same
+  // CARRYABLE_KINDS scope, wired into stepActor/runtimeFunctions right alongside it) so a pushed/
+  // thrown object reaching a goal tile wins too, the same way a plate already treats an object and
+  // the player alike. This level is built CONSISTENTLY with that choice: a spare crate sits on the
+  // spine just before the final Gate, pushable through once it opens, as an explicit second way to
+  // finish — "yourself" by walking in, or "an object" by shoving the crate through ahead of you.
+  // Neither is required; both are confirmed to work.
+  //
+  // Shape, per the brief: ONE room (a puzzle box reads best surveyed as a whole, not split across
+  // room transitions), Follow camera (not Runner — no urgency/fail-state is wanted here, and
+  // Follow's own v2.40 dead-zone-plus-easing already reads well for free exploration), gravity on
+  // (cannon/pushable mechanics are built for the platformer case). `colsForCameraMode` confirms
+  // Follow reaches the full BOARD_MAX_COLS (72, 3x the 24-wide viewport) the same as Runner does —
+  // plenty of room for three spatially separate zones plus the final gate/goal.
+  //
+  // Topology, chosen to satisfy "a kid following Route A's path shouldn't stumble onto Route B's
+  // cannon by accident" directly rather than hoping maze walls alone achieve it: the SPINE (row 13,
+  // walking on a solid floor at row 14) runs the full 72-column width, straight and unobstructed,
+  // from the start to the final Gate — it is deliberately NOT where any route's own puzzle content
+  // lives. Each route is a sealed room ABOVE the spine (rows 1-11, floor at row 12 with exactly one
+  // 1-tile gap as its entrance), reached by jumping up through that one gap at a specific column.
+  // A kid who never leaves the spine never encounters any of the three routes at all — confirmed
+  // directly in Phase 2 (see the "rule one" verification) by walking the spine end to end with zero
+  // detours and finding the final Gate still closed.
+  const METAL_PANEL_ART = pat([
+    "MMMMMMMM",
+    "M......M",
+    "M.B..B.M",
+    "M......M",
+    "M......M",
+    "M.B..B.M",
+    "M......M",
+    "MMMMMMMM"
+  ], { M: "#78909c", B: "#c9a227" });
+  const GIRDER_ART = pat([
+    "MMMMMMMM",
+    "M.DDDD.M",
+    "M..DD..M",
+    "M..DD..M",
+    "M..DD..M",
+    "M..DD..M",
+    "M.DDDD.M",
+    "MMMMMMMM"
+  ], { M: "#607d8b", D: "#37474f" });
+  const HAZARD_STRIPE_ART = pat([
+    "YYKKYYKK",
+    "YKKYYKKY",
+    "KKYYKKYY",
+    "KYYKKYYK",
+    "YYKKYYKK",
+    "YKKYYKKY",
+    "KKYYKKYY",
+    "KYYKKYYK"
+  ], { Y: "#ffc107", K: "#1a1a1a" });
+  const BLUEPRINT_GRID_ART = pat([
+    "BBBBGBBB",
+    "BBBBGBBB",
+    "BBBBGBBB",
+    "BBBBGBBB",
+    "GGGGGGGG",
+    "BBBBGBBB",
+    "BBBBGBBB",
+    "BBBBGBBB"
+  ], { B: "#132a3a", G: "#2a5570" });
+  const BLUEPRINT_DOT_ART = pat([
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBGBBBGB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBGBBBGB",
+    "BBBBBBBB"
+  ], { B: "#132a3a", G: "#2a5570" });
+  const BLUEPRINT_CORNER_ART = pat([
+    "YBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBB",
+    "BBBBBBBY"
+  ], { B: "#132a3a", Y: "#c9a227" });
+  function fillFactoryRect(b, x0, y0, x1, y1, geometry, modifier) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) b[y][x] = gameplayKey(geometry, modifier);
+  }
+  function skinFactoryRect(skinBoard, x0, y0, x1, y1, skinId) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) skinBoard[y][x] = skinId;
+  }
+
+  function buildCatapultFactoryGame() {
+    groundTileDefs.cfPanel = { name: "factory panel", frames: [METAL_PANEL_ART], frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("cfPanel");
+    groundTileDefs.cfGirder = { name: "girder", frames: [GIRDER_ART], frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("cfGirder");
+    groundTileDefs.cfHazardStripe = { name: "hazard stripe", frames: [HAZARD_STRIPE_ART], frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("cfHazardStripe");
+
+    backgroundTileDefs.bg2 = { art: BLUEPRINT_GRID_ART.slice(), name: "blueprint grid" };
+    backgroundTileDefs.bg3 = { art: BLUEPRINT_DOT_ART.slice(), name: "blueprint dots" };
+    backgroundTileDefs.bg4 = { art: BLUEPRINT_CORNER_ART.slice(), name: "blueprint corner" };
+    nextBackgroundId = 5;
+
+    const SHARED_COLOR = "blue";   // Button A, Route B's final plate, Button C, and the final Gate
+    const LOCAL_B_COLOR = "orange"; // Route B's own intermediate plate+gate, revealing the cannon
+
+    const room = createEmptyRoom("The Catapult Factory");
+    room.gravityEnabled = true; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "follow";
+    rooms.push(room);
+    activateRoom(room.id);
+
+    // ---- Global shell ----
+    fillFactoryRect(board, 0, 0, 71, 0, "solid", "none");    // ceiling
+    skinFactoryRect(groundSkinBoard, 0, 0, 71, 0, "cfGirder");
+    fillFactoryRect(board, 0, 14, 71, 14, "solid", "none");  // the spine's own floor
+    skinFactoryRect(groundSkinBoard, 0, 14, 71, 14, "cfPanel");
+    fillFactoryRect(board, 0, 1, 0, 13, "solid", "none");    // left wall
+    skinFactoryRect(groundSkinBoard, 0, 1, 0, 13, "cfGirder");
+    fillFactoryRect(board, 71, 1, 71, 13, "solid", "none");  // right wall
+    skinFactoryRect(groundSkinBoard, 71, 1, 71, 13, "cfGirder");
+
+    // Blueprint-grid Paint-layer scatter across the whole factory floor, pure decoration.
+    const bgCycle = ["bg2", "bg3", "bg4"];
+    let bgI = 0;
+    for (let x = 2; x < 70; x += 3) {
+      backgroundBoard[3][x] = bgCycle[bgI % 3]; bgI++;
+      backgroundBoard[9][x] = bgCycle[bgI % 3]; bgI++;
+    }
+
+    // ---- Zone A: the direct route (cols 6-27) ----
+    fillFactoryRect(board, 6, 1, 6, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 6, 1, 6, 12, "cfPanel");
+    fillFactoryRect(board, 27, 1, 27, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 27, 1, 27, 12, "cfPanel");
+    fillFactoryRect(board, 7, 12, 26, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 7, 12, 26, 12, "cfPanel");
+    board[12][10] = null; // the one entrance gap — jump up from the spine here
+    board[11][16] = gameplayKey("solid", "none"); // a single pillar — an easy, unmissable jump-over
+    groundSkinBoard[11][16] = "cfGirder";
+    board[11][22] = gameplayKey(PUSH_BUTTON_GEOMETRY, "none");
+    colorBoard[11][22] = SHARED_COLOR;
+
+    // ---- Zone B: the indirect machine route (cols 30-55) ----
+    fillFactoryRect(board, 30, 1, 30, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 30, 1, 30, 12, "cfPanel");
+    fillFactoryRect(board, 55, 1, 55, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 55, 1, 55, 12, "cfPanel");
+    fillFactoryRect(board, 31, 12, 54, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 31, 12, 54, 12, "cfPanel");
+    board[12][33] = null; // entrance gap
+    // v2.44 Phase 2 finding, confirmed by trace: a PLATE immediately next to its own Gate doorway
+    // does NOT let a single actor cross from one into the other in one continuous motion the way
+    // it first looked like it should. Actor width (22px) is less than a tile (32px), so there's an
+    // unavoidable window, partway across the gate's own cell, where the actor has already fully
+    // left the plate's cell but hasn't yet cleared the gate's far edge — plateChannelsActive drops
+    // the instant overlap ends, and resolveAxis reverts the still-mid-gate actor flush back against
+    // the gate's near edge that same tick. Confirmed directly: a player held moving right from the
+    // plate oscillates forever right at the gate's boundary, never through. The Monster's Den
+    // sample's own plate+Gate trick (see CLAUDE.md) never actually relied on this exact transit —
+    // there, something else (a lured chaser) holds the plate down while the PLAYER walks through
+    // separately; nothing in this codebase validates one actor doing both at once. A Button
+    // (permanent — once flipped, the channel never depends on continued overlap again) sidesteps
+    // the whole timing question, so it's what actually opens this LOCAL reveal; the plate is saved
+    // for the route's own real centerpiece below, where a crate rests on it with nothing needing to
+    // walk away from it in the same motion — a genuinely different, already-safe scenario.
+    board[11][34] = gameplayKey(PUSH_BUTTON_GEOMETRY, "none");
+    colorBoard[11][34] = LOCAL_B_COLOR;
+    for (let y = 5; y <= 11; y++) { board[y][35] = gameplayKey("barrier-n", "none"); colorBoard[y][35] = LOCAL_B_COLOR; }
+    skinFactoryRect(groundSkinBoard, 44, 1, 48, 1, "cfHazardStripe"); // a hazard-striped ceiling accent flagging "something industrial happens here"
+    board[11][46] = gameplayKey("cannon2-ne", "none");
+    board[11][49] = gameplayKey("plate", "none");
+    colorBoard[11][49] = SHARED_COLOR;
+
+    // ---- Zone C: the bomb-reveal route (cols 58-66) ----
+    fillFactoryRect(board, 58, 1, 58, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 58, 1, 58, 12, "cfPanel");
+    fillFactoryRect(board, 66, 1, 66, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 66, 1, 66, 12, "cfPanel");
+    fillFactoryRect(board, 59, 12, 65, 12, "solid", "none"); skinFactoryRect(groundSkinBoard, 59, 12, 65, 12, "cfPanel");
+    board[12][60] = null; // entrance gap
+    for (let y = 7; y <= 11; y++) { board[y][64] = gameplayKey("solid", "none"); groundSkinBoard[y][64] = "cfPanel"; }
+    board[11][63] = gameplayKey(BOMB2_GEOMETRY, "none");
+    board[11][65] = gameplayKey(PUSH_BUTTON_GEOMETRY, "none");
+    colorBoard[11][65] = SHARED_COLOR;
+
+    // ---- The final Gate and the Goal chamber ----
+    // Rule one: this is the ONLY way through. A full floor-to-ceiling column of same-colored Gate
+    // tiles (not just one) — no jump clears a wall this tall, confirmed directly in Phase 2 by
+    // walking the spine end to end with none of the three routes triggered and finding it solid
+    // the whole way up.
+    for (let y = 1; y <= 13; y++) { board[y][68] = gameplayKey("barrier-n", "none"); colorBoard[y][68] = SHARED_COLOR; }
+    board[13][70] = gameplayKey("goal", "none");
+
+    placeExampleActor(PUSHABLE_DEF_ID, 47, 11); // Route B's own crate, adjacent east of the cannon (col 46)
+    placeExampleActor(PUSHABLE_DEF_ID, 67, 13); // a spare crate on the spine — push it through the open
+                                                 // Gate as an alternate, object-reaches-the-goal win
+    placeExampleActor(PLAYER_DEF_ID, 2, 13);
+
+    activateRoom(room.id);
+    return room;
+  }
+  function drawCatapultFactoryIcon(ctx) {
+    // A gear with a cannon muzzle peeking out — "a factory that fires things," the whole pitch in
+    // one glance, same "the icon IS the pitch" convention every other sample icon here follows.
+    ctx.fillStyle = "#78909c";
+    ctx.save();
+    ctx.translate(12, 12);
+    for (let i = 0; i < 8; i++) {
+      ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-1.5, -10, 3, 4);
+    }
+    ctx.restore();
+    ctx.fillStyle = "#546e7a";
+    ctx.beginPath(); ctx.arc(12, 12, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#263238";
+    ctx.beginPath(); ctx.arc(12, 12, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#c9a227";
+    ctx.beginPath(); ctx.arc(12, 12, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#37474f";
+    ctx.fillRect(14, 4, 5, 5);
+  }
+
   // v2.19.3: a third example, contributed as a finished two-room dungeon-crawler build --
   // hand-drawn custom characters, a custom (unused, blank) lethal tile slot, five custom
   // backgrounds, and six door pairs, five colored plus one colorless. Its one bug (the
@@ -6132,6 +6361,25 @@
     switchTouchedCells[actor.id] = touchedSwitchKeys;
   }
 
+  // The Catapult Factory (v2.44): the premise is "get an object — or yourself — to the goal," but
+  // goal has only ever fired on the PLAYER's own touch (checkPlayerTileContacts) since it was
+  // added — nothing established a pushed/thrown block itself reaching a goal tile as a win
+  // condition. Checked rather than assumed: triggerGoal(player) only reads player.goalCooldown (a
+  // plain per-actor field every actor already carries) before calling roundComplete(), which
+  // re-finds the REAL player itself via actors.find(a => a.isPlayer) rather than using whatever was
+  // passed in — so calling triggerGoal with a non-player actor is already safe, no changes needed
+  // there. Same small, narrow-function shape as checkPhysicsObjectSwitchContacts/
+  // checkPhysicsObjectLethalContacts above (not folded into checkPlayerTileContacts, which is
+  // explicitly player-only) and the same CARRYABLE_KINDS scope checkPhysicsObjectSwitchContacts
+  // already uses — "any actor" (what a pressure plate accepts) is wider than this toy's own "guide
+  // blocks through the machine" premise calls for; a wandering/chasing NPC reaching a goal tile by
+  // its own steering was never the ask.
+  function checkPhysicsObjectGoalContacts(actor) {
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (geometryAt(cx, cy) === "goal") { triggerGoal(actor); return; }
+    }
+  }
+
   // v2.34: direct request — "Crates should be destroyed when they touch lethal (lava, fire,
   // etc). Not all objects should, though." Scoped to PUSHABLE_KIND specifically (a wooden crate
   // burning/sinking is intuitive) rather than every CARRYABLE_KIND — magnet/trampoline/bomb2/
@@ -6681,7 +6929,7 @@
       // same place the player's own cannon-fire moved to in v2.21. v2.31 adds the one genuinely
       // non-blocking tile reaction a thrown object can trigger: flipping a switch it flies into.
       const def = actorDefs[actor.defId];
-      if (def && CARRYABLE_KINDS.includes(def.temperament)) checkPhysicsObjectSwitchContacts(actor);
+      if (def && CARRYABLE_KINDS.includes(def.temperament)) { checkPhysicsObjectSwitchContacts(actor); checkPhysicsObjectGoalContacts(actor); }
       // v2.34: "crates should be destroyed when they touch lethal" — PUSHABLE_KIND only, see
       // checkPhysicsObjectLethalContacts' own comment on why the other carryables (and Large
       // Stone specifically) are deliberately excluded.
@@ -7910,6 +8158,7 @@
     { name: "The Monster's Den", builder: buildMonstersDenGame, draw: drawMonstersDenIcon },
     { name: "The World's Worst Elevator", builder: buildWorstElevatorGame, draw: drawWorstElevatorIcon },
     { name: "Spin Cycle", builder: buildSpinCycleGame, draw: drawSpinCycleIcon },
+    { name: "The Catapult Factory", builder: buildCatapultFactoryGame, draw: drawCatapultFactoryIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
@@ -8744,7 +8993,7 @@
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
-      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,

@@ -4436,6 +4436,180 @@ now active, just delayed by the pause's own duration; and the full 6-sample regr
 a fresh Button+Gate export both run error-free, before and after the debug hook (added fresh for
 this session, confirmed via `grep -n "toyDebug" index.html` returning nothing) was stripped.
 
+## "The Catapult Factory" — a multi-solution puzzle room with three independent routes
+
+The first sample built around a genuinely different failure shape than Spin Cycle's own. That
+level was too easy because its hazards never forced engagement; this one's mirror-image risk,
+named explicitly in the brief, is the goal being reachable without the machinery mattering at
+all. Built under the same two-phase process (rough layout, then mandatory trace-and-fix), but
+with "rule one" — the goal must be genuinely gated — treated as its own first-class verification
+pass rather than folded into the general trace.
+
+**Open design question, resolved before building, not silently either way.** The premise is "get
+an object — or yourself — to the goal," but `goal` had only ever fired on the player's own touch
+(`checkPlayerTileContacts`) since it was first added — nothing established a pushed/thrown block
+reaching a goal tile as a win condition of its own. Investigated rather than assumed: `triggerGoal(player)`
+only reads `player.goalCooldown` (a plain field every actor already carries, per the Actor Shape)
+before calling `roundComplete()`, which re-finds the real player itself via `actors.find(a =>
+a.isPlayer)` rather than trusting whatever was passed in — so calling `triggerGoal` with a
+non-player actor was already safe, confirmed by reading the code, not by trying it and hoping.
+This made the extension a small, clean fit, so it was built: `checkPhysicsObjectGoalContacts(actor)`,
+living right next to `checkPhysicsObjectSwitchContacts`/`checkPhysicsObjectLethalContacts` (same
+file region, same shape — loop `overlappedCells(actor)`, check geometry, fire the reaction), scoped
+to the same `CARRYABLE_KINDS` list `checkPhysicsObjectSwitchContacts` already uses (pushable, Large
+Stone, every carried-tile kind) rather than Plate's own wider "any actor" scope — a wandering NPC
+stumbling onto a goal tile by its own steering was never the ask, this toy's "guide blocks through
+the machine" premise was. Wired into `stepActor`'s existing `if (def && CARRYABLE_KINDS.includes(...))`
+branch right alongside the switch-contact call, and added to `runtimeFunctions` for export. This
+level is built consistently with that choice, not just extended-and-forgotten: a spare crate sits
+on the spine just before the final Gate, pushable through once it opens, as a real, playable second
+way to finish — confirmed end to end (see below) that pushing it into the goal chamber wins the
+game exactly like the player's own touch would, in both the live editor and a fresh export.
+
+**Shape, per the brief.** One room (a puzzle box reads best surveyed as a whole, not split across
+room transitions — a kid should be able to look at the whole machine and choose an approach), Follow
+camera (not Runner — no urgency/fail-state is wanted here), gravity on (cannon/pushable mechanics
+are built for the platformer case). `colsForCameraMode` confirms Follow reaches the full
+`BOARD_MAX_COLS` (72, 3× the 24-wide viewport) the same as Runner does — plenty of room for three
+spatially separate zones plus the final gate/goal.
+
+**Topology, chosen to satisfy "a kid following Route A's path shouldn't stumble onto Route B's
+cannon by accident" structurally rather than hoping maze walls alone achieve it.** The SPINE (row
+13, walking on a solid floor at row 14) runs the full 72-column width, straight and unobstructed,
+from the start to the final Gate — and deliberately carries none of any route's own puzzle content.
+Each route is a sealed room ABOVE the spine (rows 1-11, floor at row 12 with exactly one 1-tile gap
+as its entrance), reached by jumping straight up through that one gap at a specific column. A kid
+who never leaves the spine never encounters any of the three routes at all — confirmed directly in
+Phase 2 by walking the spine's full length with zero detours and finding the final Gate still
+closed the whole way (see "rule one" below).
+
+**Route A — the direct route** (Zone A, cols 6-27): jump through the entrance gap (col 10), walk a
+short corridor, jump over one low pillar (col 16, a deliberately trivial single-tile obstacle — "the
+obvious solution for a kid who just starts walking and looking" per the brief, not a challenge),
+touch Button A (col 22, shared color). Confirmed by trace: the jump-through-the-entrance step only
+works if the player is horizontally aligned with the gap COLUMN before jumping — a first attempt at
+this test jumped from an adjacent column and gained zero height at all, bonking its head on the
+room's own solid floor one column over; the impulse is wasted entirely if it's not lined up with the
+one gap in that floor. Not a bug, just the same "a cell check needs the right cell" lesson every
+blocking-geometry gotcha in this file already teaches, re-learned here in test code rather than in
+the engine.
+
+**Route B — the indirect machine** (Zone B, cols 30-55): a real Phase 2 finding here, not a guess
+that happened to work. The original plan put a PRESSURE PLATE immediately next to its own Gate
+doorway, copying what looked like an established "Monster's Den" trick (a plate right beside a
+barrier's own cell). Traced directly and found broken: actor width (22px, `ACTOR_SIZE`) is less
+than a tile (32px), so there's an unavoidable window, partway across the Gate's own cell, where the
+actor has fully left the plate's cell but hasn't yet cleared the Gate's far edge — `plateChannelsActive`
+drops the instant overlap ends, and `resolveAxis` reverts the still-mid-gate actor flush back
+against the Gate's near edge that same tick. Confirmed by a real frame-by-frame trace: a player held
+moving right from the plate oscillates forever at the Gate's boundary, bouncing back to the same
+flush position every cycle, never through. Re-reading Monster's Den's own actual mechanism (see that
+section above) showed it never relied on this exact transit either — there, something else (a lured
+chaser) holds the plate down while the PLAYER walks through separately; nothing in this codebase had
+ever validated one actor doing both halves of that handoff itself. Fixed by using a BUTTON (permanent
+— once flipped, the channel no longer depends on continued overlap at all) for this LOCAL, zone-internal
+reveal instead of a plate, which sidesteps the whole timing question outright. The route's own real
+centerpiece — a crate landing on a plate and resting there — is a genuinely different, already-safe
+scenario (nothing needs to walk away from a RESTING object in the same motion the way a transiting
+actor does), so the plate stays there, unmodified.
+
+Past the now-open local Gate: a cannon (`cannon2-ne`, col 46) with a crate parked immediately
+adjacent on its east side (col 47) — grab it (E), face west, throw it in. The exact approach
+direction mattered and was traced, not assumed: a cannon fires in a FIXED direction regardless of
+which side it was hit from, so an object approaching from the SAME horizontal side the cannon fires
+toward gets launched back into the very cell it just left, re-collides with itself on the very next
+frame (since the launch velocity carries it further into, not out of, that cell), and has its
+velocity zeroed back to 0 by the ordinary "non-bouncy wall" collision resolution before `triggerCannon`'s
+own cooldown lets it fire again — confirmed directly: a first version of this test approached
+`cannon2-ne` from the west (matching its own fire direction) and the object never actually left the
+cannon's cell at all, cannonCooldown staying stuck at 0 forever. Approaching from the OPPOSITE side
+(east, moving west, into a `cannon2-ne`) works because the post-fire velocity then points AWAY from
+where the object just came from, clearing the cell cleanly on the next frame — confirmed by a
+dedicated trace (`trace_cannon_crate.js`) sampling position/velocity every 30ms through the whole
+arc. A second real finding from the same trace session: the crate's starting DISTANCE from the
+cannon matters more than throw strength might suggest, because friction (`FRICTION_DECEL = 1800`)
+decelerates the approach the entire time it's closing the gap — at a 2-tile starting distance, a
+bare minimum-charge throw (`THROW_MIN_SPEED = 260`) decays to a dead stop roughly half a tile short
+of the cannon and never triggers it at all, confirmed by a batch sweep (`trace_cannon_sweep.js`)
+across five throw speeds from two starting distances. Placing the crate directly ADJACENT to the
+cannon (the level's own actual layout) closes that gap small enough that every real throw speed from
+`THROW_MIN_SPEED` to `THROW_MAX_SPEED` reliably connects (confirmed: all six speeds tested landed
+at the exact identical column). Once fired, the post-launch arc is fully deterministic regardless of
+approach speed (the cannon overrides velocity outright, per `triggerCannon`) — traced apex at 3
+tiles above the cannon's row, landing exactly 3 tiles east of it, every single time (`landed dCol=3.000`
+across six separate speed trials) — which is where the second, shared-color plate sits (col 49),
+confirmed to trigger (`plateChannelsActive`) the instant the crate settles there, with nobody
+needing to hold anything down.
+
+**Route C — the bomb-reveal route** (Zone C, cols 58-66): a bomb (col 63) sits in the open corridor;
+arming it (bump into it) and retreating, then waiting out `BOMB_FUSE_MS`, clears both the bomb's own
+cell and its one cardinal-adjacent solid neighbor — the wall at col 64, revealing a small pocket
+with Button C (shared color). A real, accepted side effect, confirmed by trace rather than treated
+as a bug: the bomb's SOUTH cardinal neighbor is the floor itself (row 12 beneath it), which also
+clears, leaving a 1-tile gap in the floor directly under where the bomb used to sit — the exact same
+"ridiculous contraption" collateral damage the Worst Elevator's own bomb placement already
+established as a known, recoverable engine behavior, not something unique to this level. Confirmed
+reachable: the revealed space isn't a dead pocket — a simple hop across the collapsed floor gap (the
+same trivial single-tile-gap crossing every platformer sample already relies on) reaches the now-open
+former-wall cell and the pocket beyond, where Button C flips the shared channel.
+
+**Rule one, verified directly, not assumed from the wall layout alone.** The final Gate is a full
+floor-to-ceiling column (rows 1-13, all `barrier-n`, all the shared color) at col 68 — tall enough
+that no jump clears it, confirmed by the same walk-the-whole-spine trace mentioned above: holding
+right from the start for the time needed to cross all 66 remaining tiles, with zero detours into any
+of the three zones, leaves the shared channel off and the player stopped flush against the Gate's own
+left edge, not past it. Only once any one of the three routes is completed does the Gate open — confirmed
+independently for Route A (push a spare crate through the newly-open Gate, winning via the
+object-reaches-goal extension above) and for Routes B/C (their own channel flips, read directly).
+
+**A genuine test-authoring trap, worth recording for the next sample that tests any Play-mode
+sequence immediately after `enterPlayMode()`:** the v2.43-era "READY!" pause (`READY_DURATION_MS =
+1200`, see that section above) freezes `tick()` entirely for the first 1.2 seconds of every Play
+session — a test that sets velocity and samples position within that window will see the exact value
+it set, frozen, forever, and can easily misread that as "the physics engine isn't running" or "this
+mechanic is broken" rather than "the test needs to wait out the Ready pause first." Hit directly
+while testing Zone B's entrance jump (a `vy` set immediately after `enterPlayMode()` stayed pinned,
+unintegrated, for a full 500ms of sampling) before the cause was identified and every subsequent test
+in this round added an explicit ~1.3s wait after entering Play.
+
+**A second genuine test-authoring trap, worth recording for the same reason:** pushing the spare
+crate through the final Gate doesn't just open a path for the player to walk through afterward — the
+CRATE reaches the goal tile first (it's ahead of the player, being pushed), and since
+`checkPhysicsObjectGoalContacts` fires `triggerGoal` for it exactly like the player's own touch, this
+WINS the game outright and freezes the whole simulation (`playSessionEnded = "win"`) well before the
+player's own position would ever reach the goal chamber. A first version of this Phase 2 check looked
+for the PLAYER's own x-position past the Gate instead, read the resulting freeze (position and
+velocity both permanently unchanging) as a stuck blocking-collision bug, and spent real effort
+chasing a phantom collision problem before checking `playSessionEnded` directly and finding it was a
+confirmed win the whole time, not a stuck state — the exact kind of thing the "object reaches the
+goal" extension was built to do, working so well it initially looked like a failure.
+
+**Visual theme**: industrial, deliberately distinct from every pastel/organic sample so far — grey
+steel-blue panels with brass rivet accents (`METAL_PANEL_ART`), a darker girder/support-beam texture
+for variety (`GIRDER_ART`), and an amber/black diagonal hazard-stripe accent (`HAZARD_STRIPE_ART`)
+marking the cannon's own ceiling as "something industrial happens here." Three blueprint-themed Paint
+layer backgrounds (`BLUEPRINT_GRID_ART`, `BLUEPRINT_DOT_ART`, `BLUEPRINT_CORNER_ART` — a cross-hatch
+grid, a sparse dot grid, and brass corner tick marks on a dark blueprint-blue base) scattered across
+the spine, the same "actually use the Paint layer, don't leave it empty" ask Spin Cycle's own section
+already addressed, applied again here with a genuinely different palette family.
+
+**No engine code changed beyond the one deliberate extension** (`checkPhysicsObjectGoalContacts`,
+covered above, plus its one-line wiring into `stepActor` and `runtimeFunctions`). Every piece used —
+Button, Gate, cannon2, bomb2, plate, pushable crates — is an existing, already-validated mechanic;
+this level's own contribution is the level content itself plus the one goal-contact extension.
+
+Verified with Playwright across five separate test passes (33 checks total): rule one (the full
+spine walk with zero detours, Gate confirmed closed); Route A end to end (entrance jump, pillar
+jump, Button, confirmed opening the Gate for the spare-crate win); Route B end to end (entrance
+jump, local Button, local Gate, jump over the cannon without self-triggering it, grab, throw,
+cannon fire confirmed via `cannonCooldown`, landing column confirmed at the traced col 49); Route C
+end to end (bomb arm, retreat, wait out the fuse, wall-clear confirmed cell-by-cell, floor-collapse
+side effect confirmed and crossed, Button C confirmed); and a dedicated export test confirming the
+object-reaches-goal win fires correctly in a freshly exported standalone game too. The full 7-sample
+regression sweep (the six existing samples plus this one) and a fresh Button+Gate export both run
+error-free, before and after the debug hook (added fresh for this session, confirmed via `grep -n
+"toyDebug" index.html` returning nothing) was stripped.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
