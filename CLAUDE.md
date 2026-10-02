@@ -3342,6 +3342,134 @@ Tests are throwaway Playwright scripts written fresh each session:
   cells much further apart) over chaining "throw, then walk toward the
   next thing" in one test.
 
+## Building a new sample game — process and physics reference
+
+A standing process for any future built-in sample, distilled from how "The
+World's Worst Elevator" (v2.29) actually got built — it needed by far the
+most correction of any sample so far, specifically because it chains the
+most mechanics together, and that correction process is worth following
+deliberately next time rather than re-discovering it the hard way again.
+
+**Two phases, not one pass.**
+
+1. **Phase 1 — rough layout by intent.** Place pieces to tell the intended
+   story (fall → wind corridor → bounce → platform → switch → door →
+   trampoline → goal, or whatever this sample's own story is) using
+   plausible, provisional positions. Don't hand-calculate exact landing
+   columns from the constants below before ever running it — Worst
+   Elevator's own history shows this doesn't work out: multiple placements
+   that looked right on paper (a platform sized against the textbook
+   restitution formula, a goal column derived from a single hand-traced
+   guess) were wrong once actually traced, sometimes by a full tile or
+   more. Phase 1's job is to get the intended shape of the level down, not
+   to get the numbers right.
+2. **Phase 2 — mandatory trace-and-fix, not optional polish.** Every sample
+   that chains a launch/bounce mechanic into what comes next needs to be
+   run, with a real physics trace (position/velocity sampled every frame
+   or every ~400ms, not a single before/after screenshot), under all three
+   of these canonical input patterns before it's considered done:
+   1. **Hold the triggering direction the entire time** — never release.
+   2. **Release exactly at the trigger moment** — the bounce/launch fires,
+      then no further input.
+   3. **Release early** — stop holding before ever reaching the mechanic,
+      to confirm there's no soft-lock (friction alone should stop the
+      actor short, recoverably, never leave it stuck).
+   If a single goal/platform needs to catch all three, verify all three
+   actually land on it — don't assume a point that satisfies one also
+   satisfies the others. Worst Elevator's own trampoline-to-goal leg is the
+   worked example: "never let go" drifted to about column 20 by goal
+   height, "let go at the bounce" crossed that height back around column
+   13, and "let go early" never reached the trampoline at all (friction
+   stopped it a fraction of a tile short — not a softlock, just one more
+   tap of the key needed). A first attempt at four individually-guessed
+   goal tiles bracketing these three points still missed the middle case
+   outright, because the reachable range is genuinely gappy under the
+   launch-speed-cap exemption, not a smooth curve a few sample points can
+   safely interpolate between. The actual fix was a full ROW of goal tiles
+   spanning the traced range, not a better single guess — when bracketing
+   with discrete points keeps missing, widen the target instead of
+   refining the guess further.
+
+**Physics reference** (already-measured constants and behaviors, restated
+here for a quick lookup while laying out a new sample — see each
+constant's own section above in this file for the full derivation/history,
+and re-verify anything load-bearing with a real trace rather than trusting
+a remembered number):
+
+- `GRAVITY = 1450`, `MAX_FALL = 750`, `MOVE_ACCEL = 2200`.
+- `BOUNCE_RESTITUTION = 0.82` for plain `bouncy` — a rebound can never
+  exceed the height it fell from; restitution² × drop height is the rough
+  rebound-height ceiling.
+- Bouncy wall kick (gravity-mode, plain `bouncy` only): `BOUNCY_WALL_KICK`
+  (320, a minimum — only strengthens a weak reflection, never fights a
+  strong one) plus `BOUNCY_WALL_LIFT` (`vy -= 160`) for the diagonal-carom
+  feel, plus an additive `JUMP_VELOCITY` boost on top if jump is held at
+  the moment of the bounce (floor bounces get the same additive jump boost
+  too).
+- **Underside-only-blocks-ascent**: a platform can only ever be landed on
+  from above — an ascending actor hits its underside and is blocked, never
+  caught on top. Anything meant to catch a RISING arc (off a bounce or a
+  trampoline) must sit measurably below the real traced apex, never at or
+  above it, or the arc just sails underneath every time.
+- Trampoline OBJECT: `TRAMPOLINE_RESTITUTION = 0.97`, enforced minimum
+  `TRAMPOLINE_LAUNCH_SPEED = 900` — stronger than plain bouncy on purpose,
+  with a hard floor under the launch speed regardless of impact speed. With
+  genuinely zero held input, a trampoline bounce drifts sideways NOT AT
+  ALL (straight up, straight back down the same column) — any sideways
+  reach requires actively held directional input through the bounce; don't
+  assume free drift the way the wind-corridor case below gets it.
+- Plain wind/conveyor `WIND_FORCE = 1000` — deliberately less than
+  gravity, so it can slow a fall but never reverse it. A measured plain
+  wind-corridor drift (no bounce or other mechanic involved) came to
+  roughly 5-7 tiles of sideways travel over a ~13-row fall — a useful rough
+  baseline, not a guarantee for a differently-shaped corridor.
+- Fan force falloff: `FAN_NEAR_FORCE = 1900` right at the fan's own cell
+  (i = 0; deliberately stronger than gravity, so standing in the stream
+  genuinely lifts), linearly down to plain `WIND_FORCE` by the range's far
+  edge (`FAN_RANGE_TILES`). A fast fall needs the discrete
+  `FAN_BOUNCE_MIN_SPEED`/`FAN_BOUNCE_RESTITUTION` kick (2-3 successive
+  partial kicks) to visibly arrest — the continuous accel alone is too
+  brief a window to do it on its own.
+- `CANNON_LAUNCH_SPEED = 700`; `SPAWNER_LAUNCH_SPEED = 420` (deliberately
+  weaker — reads as a shove, not a shot).
+- Sticky: `STICKY_MOVE_MULT = 0.32`, `STICKY_FRICTION_MULT = 5`,
+  `STICKY_CLING_MS = 1000` (a full ordinary-movement-input freeze for this
+  long after first contact, regardless of whether contact is still being
+  made), `STICKY_RELEASE_MS = 500` (the gradual let-go ramp that follows).
+  **Correction to this reference's own first draft, confirmed directly by
+  this session's own v2.42 QA pass**: the freeze during `STICKY_CLING_MS`
+  only blocks ordinary movement input — grab/throw (the E key) is driven
+  by its own raw `keydown`/`keyup` listeners, never gated on the `stuck`
+  flag, so a kid can still grab and throw while frozen against a sticky
+  wall. Don't assume grab/throw is also frozen without re-checking; it
+  isn't.
+
+**Reusable building blocks.** Once a mechanic combination has been
+verified end-to-end in a shipped sample, treat it as a reusable chunk for
+future samples — described by its *relative* layout (which pieces sit
+where relative to each other), not by the absolute room coordinates it
+happened to ship at. Already-proven chunks, from this codebase's own
+samples: a Button-paired-to-a-same-colored-Gate doorway (shipped twice
+now, The Monster's Den and The World's Worst Elevator); a plate that traps
+a lured chaser by clearing it after the chaser crosses (The Monster's
+Den); a wind-corridor-into-a-bouncy-floor combo (Worst Elevator, Room 1).
+Add a new entry here once a new combination has actually been traced and
+shipped, rather than re-deriving it from scratch in a later sample.
+
+**Scope is a lever, not a fixed cost.** Verification cost scales with how
+many mechanics are chained together in one sequence, not with how many
+samples are wanted. Worst Elevator chained nine steps in a row and needed
+more trace-and-fix correction than any other sample to date; a
+single-mechanic showcase in the shape of Cheese Heist or The Monster's Den
+costs a small fraction of that trace time. Deliberately scoping a new
+sample down to fewer chained mechanics is a legitimate choice when speed
+matters more than ambition — not a compromise to apologize for.
+
+**How to brief a new sample.** Describe the intended experience/feeling
+and the discovery order (what a kid encounters first, second, third, and
+why), not literal tile coordinates — exact placement is Phase 2's job to
+get right by tracing, not something to pre-specify and then defend.
+
 ## The sprite editor tool now lives in this repo (v2.36)
 
 Every mention of `sprite-editor.html` above (v2.27, v2.30) documented a
