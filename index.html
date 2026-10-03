@@ -716,7 +716,22 @@
   // radialForceAccelFor().
   const RADIAL_FORCE_RADIUS_TILES = 4;
   const MAGNET_FORCE = 900; // px/s^2 at the source cell's center, falling off linearly to the radius edge
-  const GRAVITY_WELL_FORCE = 900;
+  // "A more powerful effect, like a black hole" — direct request to make the well dramatically
+  // stronger and wider-reaching than magnet, with its own radius rather than widening magnet's own
+  // shared RADIAL_FORCE_RADIUS_TILES (that would have changed magnet's own established feel as a
+  // side effect nobody asked for). GRAVITY_WELL_FORCE (~4.7x magnet's own peak, ~3x plain gravity)
+  // is what makes a FAST mover (a hard fall, a bounce, a throw, a cannon shot) visibly, drastically
+  // bend off its path without necessarily being captured — it only spends a brief moment anywhere
+  // near the well, so even a huge force only has time to redirect it, not stop it. A SLOW mover
+  // (ordinary walking/wandering/resting speed) spends far longer under the same pull and drifts the
+  // rest of the way into the well's own cell. GRAVITY_WELL_CAPTURE_SPEED is the explicit, named line
+  // between "redirected" and "sucked in and destroyed" (see checkGravityWellContacts) — the request
+  // itself drew that line in words, as two distinct outcomes, rather than describing one continuous
+  // effect for the force curve alone to produce — slightly above MAX_SPEED (220, the player's own
+  // ordinary run cap) so normal walking/running, even at full speed, still reads as capturable.
+  const GRAVITY_WELL_RADIUS_TILES = 7;
+  const GRAVITY_WELL_FORCE = 4200;
+  const GRAVITY_WELL_CAPTURE_SPEED = 240;
 
   // v2.19: gravity is suspended (not just extra friction) while touching a sticky+solid tile on
   // any side — see isStuckToSticky()/stepActor. Plain high-friction stickiness would be a much
@@ -785,7 +800,33 @@
   // v2.34: the "stand on top of it / push it / it blocks" physics pushable already has, generalized
   // to also cover Large Stone — see shovePushables/actorBlockedByOtherPushables, both of which used
   // to check `=== PUSHABLE_KIND` directly and now check this array instead.
-  const STANDABLE_OBJECT_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND];
+  // Moving Platform: one of the 16 sprite-editor icons that had sat unwired since v2.27 (see that
+  // section's own scope note) — `hazards.MOVING_PLATFORM` in the extracted reference sheet, a
+  // yellow/grey hazard-striped lift with small support legs, pasted in here verified bit-for-bit
+  // against the original extraction before trusting it, the same fidelity process v2.26's monster/
+  // skeleton/tabby-cat fix already established. Its own distinct kind (not a re-skinned pushable)
+  // is what lets it be immovable/self-driven while pushable stays shovable — see shovePushables'
+  // own new immovable branch below.
+  const MOVING_PLATFORM_KIND = "movingplatform";
+  const MOVING_PLATFORM_DEF_ID = "movingplatform";
+  const MOVING_PLATFORM_ART = pat([
+    "........",
+    "........",
+    ".YYYYYY.",
+    ".GYGGYG.",
+    "..D..D..",
+    "..EFFG..",
+    "........",
+    "........"
+  ], { Y: "#f9d941", G: "#8f9a91", D: "#3b4658", E: "#687287", F: "#4d5c71" });
+  // How far it travels each way from wherever it was placed (that spot — spawnX/spawnY, already
+  // recorded for every actor's own Reset/Play-restart snap-back — doubles as the center of its
+  // oscillation, not a separate field) and how fast it covers that path. A kid picks the axis by
+  // clicking the placed platform (see the mousedown/touchstart handlers' own toggle branch);
+  // which way is "default" is covered by the actor's own platformAxis field, seeded to "x".
+  const MOVING_PLATFORM_RANGE_TILES = 4;
+  const MOVING_PLATFORM_SPEED = 70; // px/s along its own track — a kid can jump on and actually ride it
+  const STANDABLE_OBJECT_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND, MOVING_PLATFORM_KIND];
   // Moving platforms: "a wide pushable or Large Stone sitting on a conveyor" only actually reads
   // as a platform once whatever's resting on TOP of it moves along too — this is how close that
   // geometric "resting on" relationship (rider's bottom edge flush with the platform's top edge,
@@ -797,7 +838,7 @@
   // a real actor under the hood, same as everyone else, but it never moves on its own, so to a
   // kid it's an object, not a character. Collectibles (v2.15) used to be the other one; they're
   // their own dedicated section now (collectibleSlotIds), not part of this generic kind list.
-  const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND];
+  const OBJECT_ACTOR_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND, MOVING_PLATFORM_KIND];
   // v2.21: bomb/cannon/magnet/trampoline stay exactly what they've always been — tiles a kid
   // paints from the Objects palette, painted and rotated the same way as before — but grabbing one
   // (pressing the carry key near it) picks it bodily up off the board and turns THAT ONE INSTANCE
@@ -929,12 +970,13 @@
     barrier: "Opens for its color.",
     [PUSHABLE_KIND]: "Push it. Stacks, too.",
     [LARGE_STONE_KIND]: "Heavy. Lava-proof.",
+    [MOVING_PLATFORM_KIND]: "Rides back and forth. Click to go up and down instead.",
     // Fixtures row (FIXTURE_GEOMETRIES)
     goal: "Touch it, you win.",
     plate: "On while you're standing there.",
     door: "Leads somewhere new.",
     warp: "Zap. You're elsewhere.",
-    gravitywell: "Pulls you in.",
+    gravitywell: "A black hole. Walk close and it sucks you in.",
     [PUSH_BUTTON_GEOMETRY]: "Flips a color on — for good.",
     // Ground Effects row (PALETTE_MODIFIERS) — this is the direct replacement for the retired
     // "Hazard costs one life... Lethal costs every life... Diggable blocks... Trap looks solid"
@@ -1695,7 +1737,7 @@
     // (unrenamed) after v2.27.2 removed the original bomb/cannon def ids entirely — any future
     // built-in actor def needs the same one-line addition here (see this comment's own note
     // further up).
-    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID, LARGE_STONE_DEF_ID].forEach(id => {
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID, LARGE_STONE_DEF_ID, MOVING_PLATFORM_DEF_ID].forEach(id => {
       if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
     });
     nextActorDefId = snap.nextActorDefId;
@@ -2336,6 +2378,11 @@
       "BBBBEBEC", "BBBEBCCC", "CEECCECC", ".CCCCCC."
     ], { A: "#bcc5d2", B: "#4d5c71", C: "#3b4658", D: "#8a9eba", E: "#687287" })
   };
+  // A third physics object, the first that moves on its own rather than needing a push/conveyor —
+  // see MOVING_PLATFORM_KIND's own comment for where its art came from and why it's immovable.
+  actorDefs[MOVING_PLATFORM_DEF_ID] = {
+    temperament: MOVING_PLATFORM_KIND, poses: null, name: "moving platform", art: MOVING_PLATFORM_ART
+  };
   // v2.19: the spawner's default content when nothing's been loaded into it — a plain physical
   // hazard, not a character with intent (no temperament picker offers this kind, same as pushable
   // — see stepActor/resolveAxis's own always-bounces check and resolveActorContact's hazard-ball
@@ -2383,7 +2430,7 @@
   // breaks findDefaultActorDef's own name === kind match. v2.34's Large Stone needs the identical
   // treatment from day one ("large stone" vs. "largestone") — a shared lookup table, rather than
   // repeating the same ternary at every call site, is what keeps the two in sync as this list grows.
-  const KIND_DEF_ID_OVERRIDES = { [PUSHABLE_KIND]: PUSHABLE_DEF_ID, [LARGE_STONE_KIND]: LARGE_STONE_DEF_ID };
+  const KIND_DEF_ID_OVERRIDES = { [PUSHABLE_KIND]: PUSHABLE_DEF_ID, [LARGE_STONE_KIND]: LARGE_STONE_DEF_ID, [MOVING_PLATFORM_KIND]: MOVING_PLATFORM_DEF_ID };
   function defaultDefIdForKind(kind) { return KIND_DEF_ID_OVERRIDES[kind] || findDefaultActorDef(kind); }
 
   selectedActorDefId = selectedActorKind === "player" ? playerDefId : findDefaultActorDef(selectedActorKind);
@@ -5740,14 +5787,19 @@
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
     const magnetable = isForceSusceptible(temperament) || temperament === "collectible" || isSteeringCharacter(temperament);
-    const radiusPx = RADIAL_FORCE_RADIUS_TILES * TILE;
-    for (let dy = -RADIAL_FORCE_RADIUS_TILES; dy <= RADIAL_FORCE_RADIUS_TILES; dy++) {
-      for (let dx = -RADIAL_FORCE_RADIUS_TILES; dx <= RADIAL_FORCE_RADIUS_TILES; dx++) {
+    const magnetRadiusPx = RADIAL_FORCE_RADIUS_TILES * TILE;
+    const wellRadiusPx = GRAVITY_WELL_RADIUS_TILES * TILE;
+    // Scan out to whichever radius is wider (the well's own, now that it's bigger than magnet's) —
+    // the per-source radiusPx just below still gates magnet to its own narrower, unchanged reach.
+    const scanTiles = Math.max(RADIAL_FORCE_RADIUS_TILES, GRAVITY_WELL_RADIUS_TILES);
+    for (let dy = -scanTiles; dy <= scanTiles; dy++) {
+      for (let dx = -scanTiles; dx <= scanTiles; dx++) {
         const cx = ac + dx, cy = ar + dy;
         const geometry = geometryAt(cx, cy);
         const isMagnet = geometry === "magnet", isWell = geometry === "gravitywell";
         if (!isMagnet && !isWell) continue;
         if (isMagnet && !magnetable) continue;
+        const radiusPx = isMagnet ? magnetRadiusPx : wellRadiusPx;
         const ddx = (cx * TILE + TILE / 2) - centerX, ddy = (cy * TILE + TILE / 2) - centerY;
         const dist = Math.hypot(ddx, ddy);
         if (dist >= radiusPx || dist < 1) continue;
@@ -6041,6 +6093,20 @@
       if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      // A Moving Platform is never shoved — it's self-driven on a fixed track, not something a kid
+      // or another object can push out of the way. It still needs to be stood-on-able (same as a
+      // resting pushable), so a mover is simply clamped flush against whichever edge it hit instead
+      // of trying to displace the platform first and revert on failure.
+      if (def.temperament === MOVING_PLATFORM_KIND) {
+        if (axis === "x") {
+          if (actor.vx > 0) { actor.x = other.x - actor.w; actor.vx = 0; }
+          else if (actor.vx < 0) { actor.x = other.x + other.w; actor.vx = 0; }
+        } else {
+          if (actor.vy > 0) { actor.y = other.y - actor.h; actor.vy = 0; actor.grounded = true; }
+          else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
+        }
+        continue;
+      }
       const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
       if (axis === "x") {
         if (actor.vx > 0) {
@@ -6373,6 +6439,34 @@
     log(causedGameOver ? "Splat! Instant game over." : "Splat!");
   }
 
+  // "Gravity Well: a black hole" — the player's own half of the capture reaction (see
+  // checkGravityWellContacts for the non-player half). Deliberately its own function rather than
+  // reusing triggerLethalHazard outright: that function has NO positional-reset logic in EITHER
+  // mode (confirmed by reading it in full) — only an instant Play-mode game-over — which can't
+  // satisfy the user's own explicit Build-mode requirement ("sent back to the start"). Play mode
+  // mirrors triggerLethalHazard's own instant-KO shape exactly (same splat sound/recipe, same
+  // delayed game-over stinger so it doesn't bury the animation); Build mode adds the one thing
+  // triggerLethalHazard never had — repositioning to startPos, the same field resetActorsToSpawn
+  // already uses for "the player's own reset-to-start point." hazardCooldown is reused as the
+  // re-trigger guard, same field triggerHazard/triggerLethalHazard already gate on.
+  function triggerPlayerGravityWellCapture(player) {
+    if (player.hazardCooldown > 0) return;
+    player.hazardCooldown = HAZARD_COOLDOWN_MS;
+    playActorSound(player, "splat");
+    playRecipe(player, "splatDisintegrate");
+    player.vx = 0; player.vy = 0;
+    const causedGameOver = appMode === "play" && !playSessionEnded;
+    if (causedGameOver) {
+      lives = 0;
+      triggerGameOver(true);
+      setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+      log("Pulled into the gravity well — instant game over!");
+    } else {
+      player.x = startPos.x; player.y = startPos.y;
+      log("Pulled into the gravity well — sent back to the start!");
+    }
+  }
+
   // none+bouncy launches on entry, matching the original top-down "step on it, get launched"
   // design. Under gravity it always launches up, regardless of how you fell in.
   function triggerBouncyLaunch(actor, modifier) {
@@ -6675,6 +6769,16 @@
         const prevTouched = switchTouchedCells[player.id];
         if (!prevTouched || !prevTouched.includes(key)) triggerFlip(player, cx, cy);
       }
+      // "Gravity Well: a black hole" — below GRAVITY_WELL_CAPTURE_SPEED while actually inside the
+      // well's own cell is "walking speed" (captured); at or above it (a hard fall, a bounce, a
+      // throw, a cannon shot) the player is just passing through, redirected by the ambient pull
+      // computed in radialForceAccelFor same as always, with no capture reaction here at all. Early-
+      // returns on capture (it may relocate/end the session, same reason door/warp return below).
+      else if (geometry === "gravitywell" && Math.hypot(player.vx, player.vy) < GRAVITY_WELL_CAPTURE_SPEED) {
+        switchTouchedCells[player.id] = touchedSwitchKeys;
+        triggerPlayerGravityWellCapture(player);
+        return;
+      }
       // bomb-arm and cannon-fire moved to resolveAxis (v2.21) — both are now blocking geometry
       // (see isBlockingGeometry), so the player never actually overlaps their cell the way this
       // function's overlap-based checks need; resolveAxis fires them at the moment of collision
@@ -6779,6 +6883,61 @@
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
     log("The crate is destroyed!");
+    setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
+  }
+
+  // "Gravity Well: a black hole" — this is the NON-player half of the capture reaction (see
+  // checkPlayerTileContacts' own gravitywell branch for the player's half). Scoped to exactly the
+  // population that already participates in the well's own pull (see radialForceAccelFor and
+  // stepActor's physics branch) — PHYSICS_OBJECT_KINDS and steering characters (wanderer/chaser/
+  // fleer) — deliberately NOT stationary/collectible, the same boundary every other optional force
+  // (wind/fan/magnet/bounce/cannon) already draws, since neither has a driven physics body to begin
+  // with (see isForceSusceptible's own comment). Flag widening this to the user before doing it —
+  // destroying the project's own last live collectible this way would also trigger a full-collection
+  // win via maybeRoundCompleteFromCollectibles, a real side effect nobody's asked for yet.
+  function checkGravityWellContacts(actor) {
+    if (actor.destroyed) return;
+    const def = actorDefs[actor.defId];
+    const temperament = def ? def.temperament : null;
+    // Deliberately PHYSICS_OBJECT_KINDS here, NOT isForceSusceptible — that gate exists specifically
+    // to carve Large Stone OUT of every other optional force (wind/fan/magnet/bounce/cannon), and
+    // the whole point of this one exception (see triggerGravityWellCapture's own comment) is that
+    // the well does NOT grant it the same immunity. PHYSICS_OBJECT_KINDS is the plain, un-narrowed
+    // "has a real physics body" list this one still wants.
+    if (!PHYSICS_OBJECT_KINDS.includes(temperament) && !isSteeringCharacter(temperament)) return;
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (geometryAt(cx, cy) !== "gravitywell") continue;
+      // see GRAVITY_WELL_CAPTURE_SPEED's own comment: below this speed while actually inside the
+      // well's own cell counts as "walking speed" (captured); at or above it (a hard fall, a bounce,
+      // a throw, a cannon shot) it's just passing through and only gets the ambient redirect.
+      if (Math.hypot(actor.vx, actor.vy) < GRAVITY_WELL_CAPTURE_SPEED) { triggerGravityWellCapture(actor, temperament); return; }
+    }
+  }
+  // NPCs (wanderer/chaser/fleer) go back to their own spawn point — the same spawnX/spawnY field
+  // resetActorsToSpawn already uses for "reset to here" — in BOTH Build and Play mode, per the
+  // user's own explicit wording. A plain physics object (pushable/Large Stone/hazard ball/a grabbed-
+  // then-dropped carryable) is actually destroyed, mirroring destroyPhysicsObjectInLethal's own
+  // established pattern exactly. "Destroys" is the GENERAL rule the request states, with the player
+  // and NPCs as its own two explicitly-named exceptions — you can't really delete the player or a
+  // persistent NPC instance the way you can an inanimate object. Large Stone is deliberately NOT
+  // exempted here despite being immune to every OTHER optional force (wind/fan/magnet/bounce/
+  // cannon) — the request's own wording was unqualified ("all moveable objects"), and a black hole
+  // crushing even the "heavy" piece reads as consistent with its own premise, not a contradiction of
+  // Large Stone's established identity elsewhere; flag this plainly since it's a judgment call, not
+  // something the user confirmed directly.
+  function triggerGravityWellCapture(actor, temperament) {
+    if (isSteeringCharacter(temperament)) {
+      actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
+      actor.displacedCooldown = 0;
+      playActorSound(actor, "splat");
+      playRecipe(actor, "popVanish");
+      log("Pulled into the gravity well — sent back to its spawn point!");
+      return;
+    }
+    actor.destroyed = true;
+    playActorSound(actor, "splat");
+    playRecipe(actor, "popVanish");
+    log("Pulled into the gravity well — destroyed!");
     setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
   }
 
@@ -7108,6 +7267,29 @@
     // v2.15: a custom character made "the player" (see playerDefId) keeps whatever temperament
     // it already had — nothing overwrites it — so a stray "stationary"/"collectible" here must
     // never freeze it; isPlayer always wins over its def's own resting temperament.
+    if (temperament === MOVING_PLATFORM_KIND) {
+      // Self-driven, not steered or gravity-affected at all — a fixed triangle-wave oscillation
+      // around its own placed spot (spawnX/spawnY, already the "reset to here" point every actor
+      // carries). platformAxis picks which axis ("x" default/horizontal, "y" after a click — see
+      // the mousedown/touchstart toggle below); platformT is just elapsed time along the wave.
+      // Riders are carried along by tick()'s own riding step (see RIDE_CONTACT_EPSILON), which
+      // reads the delta between this frame's start/end position — nothing extra is needed here for
+      // that half of it.
+      actor.platformT += dt;
+      const range = MOVING_PLATFORM_RANGE_TILES * TILE;
+      const period = (4 * range) / MOVING_PLATFORM_SPEED;
+      const phase = (actor.platformT % period) / period; // 0..1
+      // triangle wave: 0->1->0->-1->0 over one period, i.e. up-down-up across the full range
+      let tri;
+      if (phase < 0.25) tri = phase * 4;
+      else if (phase < 0.75) tri = 1 - (phase - 0.25) * 4;
+      else tri = -1 + (phase - 0.75) * 4;
+      const offset = tri * range;
+      if (actor.platformAxis === "y") { actor.x = actor.spawnX; actor.y = actor.spawnY + offset; }
+      else { actor.x = actor.spawnX + offset; actor.y = actor.spawnY; }
+      actor.vx = 0; actor.vy = 0;
+      return;
+    }
     if (!actor.isPlayer && (temperament === "stationary" || temperament === "collectible")) {
       // never move on their own; still decay any residual velocity from a bounce
       applyAxisFriction(actor, "x", dt, 0);
@@ -7338,6 +7520,12 @@
       // checkPhysicsObjectLethalContacts' own comment on why the other carryables (and Large
       // Stone specifically) are deliberately excluded.
       if (def && def.temperament === PUSHABLE_KIND) checkPhysicsObjectLethalContacts(actor);
+      // "Gravity Well: a black hole" — see checkGravityWellContacts' own comment for its scope
+      // (physics objects + steering characters, same population the well's own pull already
+      // reaches) and why it's called unconditionally here rather than gated like the three checks
+      // above (it does its own temperament gate internally, since it applies to a different,
+      // wider set than any single one of those).
+      checkGravityWellContacts(actor);
     }
     checkActorContacts(actor, actors);
 
@@ -8111,7 +8299,13 @@
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       // v2.21: `carried` is meaningful on anything carryable (see CARRYABLE_KINDS), `carrying` only
       // on the player — harmless, unused fields on everyone else, same as e.g. cannonCooldown is.
-      carried: false, carrying: isPlayer ? null : undefined
+      carried: false, carrying: isPlayer ? null : undefined,
+      // Moving Platform only (harmless, unused on everyone else, same pattern as above) — which
+      // axis it oscillates along ("x" default/horizontal, "y" after a click — see the mousedown/
+      // touchstart toggle), and how far along its own triangle-wave path it currently is. The
+      // CENTER of that path is spawnX/spawnY above, not a separate field — "wherever it was
+      // placed" already means exactly that for every actor.
+      platformAxis: "x", platformT: 0
     };
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -8200,7 +8394,16 @@
   function resetActorsToSpawn(actorsList, roomStartPos) {
     actorsList.forEach(actor => {
       if (actor.isPlayer) { actor.x = roomStartPos.x; actor.y = roomStartPos.y; }
-      else { actor.x = actor.spawnX != null ? actor.spawnX : actor.x; actor.y = actor.spawnY != null ? actor.spawnY : actor.y; }
+      else {
+        actor.x = actor.spawnX != null ? actor.spawnX : actor.x; actor.y = actor.spawnY != null ? actor.spawnY : actor.y;
+        // A Moving Platform's x/y are recomputed from platformT every single tick (see stepActor's
+        // own branch) — resetting position alone without also resetting its phase back to 0 would
+        // just have the very next frame immediately overwrite this reset with wherever its
+        // un-reset sweep says it should be instead. Resetting both together is what makes "reset to
+        // start" actually mean something for a self-driven actor like this one.
+        const def = actorDefs[actor.defId];
+        if (def && def.temperament === MOVING_PLATFORM_KIND) actor.platformT = 0;
+      }
       actor.vx = 0; actor.vy = 0;
     });
   }
@@ -8334,7 +8537,20 @@
     pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
-      if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return; }
+      if (hit) {
+        // A click on an already-placed Moving Platform toggles its track between horizontal
+        // (default) and vertical — same "click an existing one to change it" gesture cannon2/fan/
+        // Gate/Spawner already use for their own orientation, just a straight flip rather than a
+        // 4-step cycle since there are only two axes. Deliberately replaces the drag-to-reposition
+        // gesture for this one kind (same tradeoff cannon/spawner geometry tiles already accept —
+        // they're repainted from the palette instead of dragged too).
+        const hitDef = actorDefs[hit.defId];
+        if (hitDef && hitDef.temperament === MOVING_PLATFORM_KIND) {
+          hit.platformAxis = hit.platformAxis === "y" ? "x" : "y";
+          return;
+        }
+        dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return;
+      }
       // v2.19: placing an actor/object onto an existing spawner tile loads it as that spawner's
       // contents instead — see toggleSpawnerContent.
       if (SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy); return; }
@@ -8399,7 +8615,16 @@
     pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
-      if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return; }
+      if (hit) {
+        // Same Moving-Platform axis-toggle special case as the mousedown handler above.
+        const hitDef = actorDefs[hit.defId];
+        if (hitDef && hitDef.temperament === MOVING_PLATFORM_KIND) {
+          hit.platformAxis = hit.platformAxis === "y" ? "x" : "y";
+          e.preventDefault();
+          return;
+        }
+        dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return;
+      }
       if (SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy); e.preventDefault(); return; }
       placeNewActor(px, py);
       e.preventDefault();
@@ -9552,7 +9777,7 @@
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
-      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
@@ -9614,6 +9839,7 @@
       `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
+      `const GRAVITY_WELL_RADIUS_TILES = ${GRAVITY_WELL_RADIUS_TILES}, GRAVITY_WELL_CAPTURE_SPEED = ${GRAVITY_WELL_CAPTURE_SPEED};`,
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
@@ -9625,6 +9851,8 @@
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
       `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
       `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
+      `const MOVING_PLATFORM_KIND = ${JSON.stringify(MOVING_PLATFORM_KIND)}, MOVING_PLATFORM_DEF_ID = ${JSON.stringify(MOVING_PLATFORM_DEF_ID)};`,
+      `const MOVING_PLATFORM_RANGE_TILES = ${MOVING_PLATFORM_RANGE_TILES}, MOVING_PLATFORM_SPEED = ${MOVING_PLATFORM_SPEED};`,
       `const RIDE_CONTACT_EPSILON = ${RIDE_CONTACT_EPSILON};`,
       `const NPC_DISPLACED_RECOVERY_MS = ${NPC_DISPLACED_RECOVERY_MS};`,
       `const NPC_DISPLACEMENT_FORCE_THRESHOLD = ${NPC_DISPLACEMENT_FORCE_THRESHOLD};`,

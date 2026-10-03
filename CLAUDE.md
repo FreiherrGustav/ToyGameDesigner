@@ -5110,6 +5110,182 @@ enter Play, and run a held-right session with zero console errors) and a fresh e
 clean; and a final debug-hook-free sanity check (`grep -n "toyDebug" index.html` returning nothing)
 confirms no test-only code was left behind.
 
+## Moving Platform (from an undeployed sprite-editor icon), and Gravity Well becomes a real black hole
+
+Direct follow-up, two bundled asks right after the riding/NPC-physics patch above shipped: "time to
+implement the moving platform from our undeployed sprites... default to moving state (back and
+forth). Clicking causes it to go up and down. It's path should be 4 tiles in each direction from
+it's initial position," and separately, "Gravity well...this needs to be a more powerful effect
+like a black hole... works on all moveable objects including all characters."
+
+**Moving Platform's art is `hazards.MOVING_PLATFORM`** from the sprite-editor tool's own original
+24-icon extraction (see the v2.27/v2.36 sections above for that tool's history) — one of the 16
+icons that had sat unwired since v2.27's own explicit scope note named it. Extracted and verified
+byte-for-byte against the original `ART_DATA` before trusting it (the same "fidelity, not
+re-interpretation" process v2.26's monster/skeleton/tabby-cat fix established): a first hand-
+transcribed `pat()` row attempt had the support-leg columns off by one, caught by a Python script
+comparing the reconstructed array against the original index-by-index, fixed by re-deriving the
+rows programmatically rather than guessing again.
+
+**A genuinely new, third `STANDABLE_OBJECT_KINDS` member, not a re-skinned pushable.**
+`MOVING_PLATFORM_KIND`/`MOVING_PLATFORM_DEF_ID` follow the exact same
+`OBJECT_ACTOR_KINDS`/`KIND_DEF_ID_OVERRIDES`/`actorDefs`-seeding/`restoreProjectSnapshot`-backfill
+shape Large Stone already established — needed its own kind specifically so it could be made
+self-driven and immovable while pushable/Large Stone stay shovable.
+
+**Motion**: a fixed triangle-wave oscillation, computed directly in `stepActor` in a new branch
+checked BEFORE the stationary/collectible dispatch (so it applies regardless of `isPlayer`, though
+nothing but a non-player instance of this kind will ever exist) — no gravity, no steering, no
+friction, `vx`/`vy` always read 0. `actor.platformT` (elapsed time) and `actor.platformAxis`
+("x" default, "y" after a click) are the only new per-actor fields (harmless/unused on every other
+kind, same pattern `carried`/`carrying` already set on this file's own established precedent).
+The oscillation center is `spawnX`/`spawnY` — already "wherever this actor was placed," per every
+actor's existing field — not a new one. `MOVING_PLATFORM_RANGE_TILES = 4` (the requested "4 tiles
+in each direction," an 8-tile total swing) and `MOVING_PLATFORM_SPEED = 70` (px/s along its own
+track — not specified by the request, chosen to be slow enough to comfortably stand/ride on and
+fast enough to read as purposeful; flag this for tuning if it feels off once played with) feed a
+plain triangle-wave formula: `period = 4*range/speed`, phase swept 0→1→0→-1→0 across that period,
+multiplied by `range` for the offset added to whichever axis is active.
+
+**Immovable but stand-on-able — a new branch in `shovePushables`, not a reuse of the pushable
+displace-then-revert path.** Displacing a self-driven actor by however far the mover just moved
+(the existing mechanism) makes no sense for something whose own position is dictated by a formula,
+not physics — so a Moving Platform gets its own unconditional "mover clamps flush against my edge"
+branch instead, the same shape `bounceOffTrampolineObjects` already uses for a Trampoline object
+(which is also "something other actors collide with but never displace"). A rider lands on top
+with `grounded = true` exactly like resting on a pushable. **Riding itself needed no new code at
+all** — the general "an actor resting on a `STANDABLE_OBJECT_KINDS` member inherits its own
+frame's position delta" mechanism from the immediately-preceding patch (see "Moving platforms via
+riding" above) already covers a Moving Platform for free, since it's simply a third member of that
+same list; confirmed directly with Playwright rather than assumed from the membership alone.
+
+**Click-to-toggle axis, not drag.** A click on an already-placed Moving Platform (while
+`paintMode === "actor"`) flips `platformAxis` between "x" and "y" instead of starting the ordinary
+drag-to-reposition gesture every other actor gets — the same tradeoff cannon2/fan/Gate/Spawner
+geometry tiles already accept (repainted/rotated from the palette, not dragged) extended to an
+actor for the first time. Deliberately does NOT reset `platformT` on toggle — the phase carries
+over as-is, so toggling mid-swing produces a position discontinuity (the just-abandoned axis snaps
+back to its own `spawnX`/`spawnY` exactly, the newly-active axis picks up wherever that phase value
+already put it) rather than a smooth re-center; a reasonable, simple choice, not confirmed with the
+user, flagged here in case a smoother re-center on toggle is wanted instead. `resetActorsToSpawn`
+also resets `platformT = 0` for this kind specifically (a new, one-line addition, same "the four
+places new persistent state must be wired in" discipline the Rooms section's own table teaches) —
+without it, "reset to start"/Play entry would snap the platform's position back to spawn only for
+the very next frame's own triangle-wave formula to immediately overwrite that reset with wherever
+the un-reset phase says it should be, defeating the reset's whole purpose.
+
+**Gravity Well: "a more powerful effect, like a black hole," with the fast/slow distinction made
+explicit rather than left to the force curve alone.** `GRAVITY_WELL_FORCE` goes from 900 (same
+magnitude as magnet) to 4200 (~4.7x magnet's own peak, ~3x plain gravity), and gains its own
+`GRAVITY_WELL_RADIUS_TILES` (7, nearly double magnet's `RADIAL_FORCE_RADIUS_TILES` of 4) — a
+separate constant specifically so widening the well's own reach doesn't also change magnet's
+established feel as an unrequested side effect. `radialForceAccelFor`'s scan loop now bounds
+itself by `Math.max(RADIAL_FORCE_RADIUS_TILES, GRAVITY_WELL_RADIUS_TILES)` and picks a per-source
+`radiusPx` (magnet's own narrower one, or the well's wider one) inside that shared scan — a small
+restructure, not a rewrite, of the one loop both presets already shared.
+
+**The redirect/capture line is a real, explicit speed threshold — `GRAVITY_WELL_CAPTURE_SPEED =
+240`, just above `MAX_SPEED` (220)** — not an emergent side effect of the force curve alone, a
+deliberate departure from this file's usual "let simple physics rules produce the behavior"
+preference. The request itself named two distinct outcomes in words ("drastically redirects" vs.
+"sucks them in and destroys them"), not one continuous effect for a force curve to interpolate
+between — and a purely emergent design (relying on "a fast mover only spends a moment in the
+field") has a real failure mode here that an explicit threshold avoids: without it, any actor whose
+AABB happens to sweep through the well's own exact cell at ANY speed would satisfy a pure overlap-
+based capture check, destroying a hard-falling or cannon-launched object exactly like a slow one —
+the opposite of "redirects" for the fast case. `checkGravityWellContacts(actor)` (the non-player
+half, called unconditionally from `stepActor`'s non-player branch — it does its own temperament
+gate internally since its scope differs from the switch/goal/lethal checks beside it) and
+`checkPlayerTileContacts`'s own new `gravitywell` branch (the player half) both check
+`Math.hypot(vx, vy) < GRAVITY_WELL_CAPTURE_SPEED` at the moment of overlapping the well's own cell
+— below it, captured; at or above it (a hard fall, a bounce, a throw, a cannon shot), just the
+ambient redirect from the stronger pull, already computed every frame regardless.
+
+**Scope: `PHYSICS_OBJECT_KINDS`, deliberately NOT `isForceSusceptible` — the one place in this
+patch that reads as inconsistent with its own neighbor and isn't.** `isForceSusceptible` exists
+specifically to carve Large Stone OUT of every other optional force (wind/fan/magnet/bounce/
+cannon); `checkGravityWellContacts` reads `PHYSICS_OBJECT_KINDS.includes(temperament) ||
+isSteeringCharacter(temperament)` instead — the plain, un-narrowed list — because the request's own
+wording was unqualified ("all moveable objects including all characters," no exception named), and
+a black hole crushing even the "heavy" piece reads as consistent with its own premise, not a
+contradiction of Large Stone's established identity elsewhere. This was the one real bug caught
+during testing: an early draft used `isForceSusceptible` by reflex (it's the established gate for
+"does this participate in an optional force"), which silently made Large Stone immune to the well
+too, contradicting the design decision above — caught directly by a Playwright test that placed a
+Large Stone in the well's pull and found it never got destroyed, not assumed correct from the code
+alone. Deliberately excludes `stationary`/`collectible` — the same boundary every other optional
+force already draws, since neither has a driven physics body to begin with (see
+`isForceSusceptible`'s own comment) — and the new Moving Platform, which needs no explicit
+exclusion at all: its own `stepActor` branch returns before this check is ever reached, the same
+"too heavy/self-driven" identity Large Stone has toward every OTHER force, just arrived at for free
+by construction rather than an added check. Flag widening either boundary to the user before doing
+it — destroying the project's own last live collectible this way would also trigger a full-
+collection win via `maybeRoundCompleteFromCollectibles`, a real side effect nobody's asked for yet.
+
+**Consequences, exactly as specified, needing three separate reaction shapes, not one.** A plain
+physics object (pushable/Large Stone/hazard ball/a grabbed-then-dropped carryable) is destroyed —
+`triggerGravityWellCapture`, mirroring `destroyPhysicsObjectInLethal`'s own established shape
+exactly (`destroyed` flag, splat sound/`popVanish` recipe, delayed `removeActorById`). An NPC
+(wanderer/chaser/fleer) is sent back to its own `spawnX`/`spawnY` — in BOTH Build and Play mode,
+per the request's own explicit wording — same function, branching on `isSteeringCharacter`. The
+player needed its own dedicated function, `triggerPlayerGravityWellCapture`, rather than reusing
+`triggerLethalHazard` (investigated first, not assumed): that function has NO positional-reset
+logic in EITHER mode — only an instant Play-mode game-over — which can't satisfy the Build-mode
+"sent back to the start" requirement the user explicitly asked for. The new function mirrors
+`triggerLethalHazard`'s Play-mode shape exactly (same splat sound/recipe, same delayed game-over
+stinger so it doesn't bury the animation) and adds the one thing that function never had: Build
+mode repositions to `startPos`, the same field `resetActorsToSpawn` already uses for "the player's
+own reset-to-start point." "Destroys" is read as the GENERAL rule the request states, with the
+player and NPCs as its own two explicitly-named exceptions — you can't really delete the player or
+a persistent NPC instance the way you can an inanimate object.
+
+**A real test-authoring trap worth recording, the same shape this file has hit before**: a first
+pass at the Build-mode player-capture test polled every 150ms and checked for the player's position
+landing within 2px of `startPos`, and never saw it — not because the reset wasn't firing, but
+because `GRAVITY_WELL_FORCE`'s own huge magnitude re-accelerates the player away from a fresh reset
+within a handful of frames, so a slow, coarse poll essentially never lands during the brief window
+it's actually sitting at `startPos`. Confirmed by polling every 20ms instead and watching
+`hazardCooldown` (the capture's own re-trigger guard) spike back up to its full value — the
+unambiguous signature of the reaction firing again — then checking position at exactly that moment,
+which did land on `startPos` precisely. A separate test-authoring mistake hit the same "friction
+alone defeats a naively-placed test" gotcha this file's own v2.28 section already documents for a
+pushable's zero self-driven accel: a first "fast pass, should redirect not capture" test placed a
+pushable far from the well with a high starting velocity, and friction (`FRICTION_DECEL = 1800`)
+fully killed that velocity within about 100px of travel — well short of the well's own pull radius
+— before the well ever got a chance to redirect anything, reading as "nothing happened" rather than
+revealing the actual mechanism. Fixed the same way that section's own lesson prescribes: teleport
+the object to already be well within the pull radius immediately before giving it velocity, and
+sample fast, right away.
+
+**Export pipeline**: `MOVING_PLATFORM_KIND`/`MOVING_PLATFORM_DEF_ID`/`MOVING_PLATFORM_RANGE_TILES`/
+`MOVING_PLATFORM_SPEED` and `GRAVITY_WELL_RADIUS_TILES`/`GRAVITY_WELL_CAPTURE_SPEED` each got their
+own `constantsSource` lines (`MOVING_PLATFORM_ART` needed none — it's baked into
+`actorDefs[MOVING_PLATFORM_DEF_ID].art`, shipped wholesale, same as Large Stone's own art before
+it); `checkGravityWellContacts`/`triggerGravityWellCapture`/`triggerPlayerGravityWellCapture` were
+added to `runtimeFunctions`. `stepActor`/`shovePushables`/`checkPlayerTileContacts`/
+`radialForceAccelFor`/`resetActorsToSpawn` were all already shared into the export from earlier
+patches, so the platform's motion/immovability and the well's new pull/capture both apply
+automatically to an exported game — confirmed directly rather than assumed: a fresh export's HTML
+contains every new identifier, and a Moving Platform genuinely oscillates when the exported file is
+actually played.
+
+Verified with Playwright across several focused passes (31 targeted checks, plus the existing
+8-sample regression sweep and two export tests): the platform defaults to horizontal and its
+measured x-range matches `spawnX ± 4 tiles` exactly; clicking it toggles the axis both ways; it's
+never displaced by a crate shoved into it (the crate stops at its edge instead) while still being
+immovable-but-standable; a rider resting on top is genuinely carried along as the platform drifts
+(true riding, confirmed via the pre-existing riding mechanism, not a new one); a slow/stationary
+pushable drifting into the well is fully destroyed; a fast-moving pushable passing near the well is
+NOT destroyed and shows a large, measured swing in its velocity vector (confirmed genuinely
+redirected, not just "survived"); the player is instantly game-over'd when captured in Play mode;
+the player is repositioned to `startPos` when captured in Build mode (confirmed via the
+hazardCooldown-spike detection method above); a wanderer NPC is sent back to its own spawn point in
+BOTH Build and Play mode, never destroyed; Large Stone IS captured/destroyed by the well despite
+being immune to every other force; the full 8-sample regression sweep and two fresh exports (one
+general, one specifically scenes with a Moving Platform + Gravity Well) all run error-free; and a
+final debug-hook-free sanity pass (`grep -n "toyDebug" index.html` returning nothing) confirms no
+test-only code was left behind.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
