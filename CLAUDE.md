@@ -4904,6 +4904,212 @@ magnet, Large-Stone-still-falls-under-gravity, Large-Stone-sinks-into-lava-and-s
 both the live editor and a fresh export, and a final debug-hook-free sanity pass (`grep -n
 "toyDebug" index.html` returning nothing).
 
+## Moving platforms (riding, not a new piece) and NPCs joining physics with a recovery window
+
+Two extensions of the "Unify physics-object interactions" patch directly above, requested as a
+single follow-up right after that one shipped — treated with the same rigor (investigate before
+building, verify directly, full regression sweep, no retroactive content fixes beyond what's
+asked).
+
+### Riding: a wide pushable or Large Stone on a conveyor is now a real moving platform
+
+Direct correction of an earlier claim from the physics-object-unification pass: "a pushable block
+on a conveyor already moves" is true, but is a different claim from "standing on top of something
+carries you along with it." Investigated before writing anything: `shovePushables`'s own vy>0
+branch (landing on a pushable from above) already sets the rider's `grounded = true`, but never
+touched the rider's position relative to the platform on any SUBSEQUENT frame — once resting, a
+rider's own position only ever moved from its OWN velocity, while the platform underneath
+continued drifting via `windAccelFor`'s existing cellsUnderneath force. The two would simply drift
+apart; nothing ever carried a rider along.
+
+**Fixed generally, in `tick()`, not per-mechanic**: right before the per-actor `stepActor` loop
+runs each frame, every `STANDABLE_OBJECT_KINDS` actor (pushable, Large Stone) is checked for
+riders — any OTHER actor whose bottom edge sits within `RIDE_CONTACT_EPSILON` (3px) of its top
+edge, with horizontal overlap — using THIS frame's starting positions, before anyone has moved yet
+(checking post-step positions would already reflect the very drift this exists to correct). After
+the loop finishes, each platform's actual frame delta (`platform.x/y` now vs. its recorded
+pre-step position) is applied as a direct position offset to every one of its recorded riders — the
+same "set position directly" approach `tick()`'s own carried-object follow uses just above it, not
+a velocity trick `applyAxisFriction` would fight. **Single level only**: a rider stacked two deep
+(riding a platform that's itself riding another) won't get the fully compounded shift in the same
+frame — the same "low-risk generalization, not a full physics simulation" scope this file's own
+pushable-stacking work already accepted, and the only case actually asked for (a tile conveys the
+platform; the platform conveys whoever's standing on it) only ever needs one level.
+
+**Once true, a moving platform needs no new palette piece at all** — it's just a wide pushable or
+Large Stone sitting on a `solid:wind-*` conveyor tile, already fully buildable from existing
+pieces, exactly as the request anticipated ("everything else in this patch becomes free once the
+underlying rule is fixed once").
+
+**Direct check requested: does The World's Worst Elevator actually have a true rideable platform
+today, or has it been getting by on bounce/wind/cannon chains alone?** Read `buildWorstElevatorGame`
+directly rather than guessed: Room 1's "platform" (`fillWorstElevatorRect(board, 13, 14, 21, 14,
+"solid", "none")`) is a **plain static floor segment** — `solid:none`, no conveyor, never moves.
+Confirmed: the sample has been getting by on bounce/wind/cannon chains alone the whole time, never
+a genuinely rideable surface, despite its own name. Not retrofitted in this patch — the request
+asked for the general mechanism and a direct check, not a rebuild of an existing shipped sample;
+flagging this plainly rather than quietly leaving it unmentioned.
+
+**The wind-direction UI, part 2 — "a clickable edit, instead of rotation."** The conveyor's own
+direction used to be set by repeatedly clicking an already-placed wind tile, cycling N→E→S→W one
+step per click (the same `cannonRotateStrokeCells` "click again to rotate" trick cannon2/fan/
+Gate/Spawner all share). Replaced, for wind specifically, with a direct 4-arrow picker:
+`windDirPickerArrowPos`/`windDirPickerHitAt`/`drawWindDirPicker` place one small clickable arrow
+glyph at each cardinal edge of a hovered/last-tapped wind tile (reusing `WIND_DIRECTIONS`' own
+cardinal vectors, not four hand-placed positions), rendered via the same canvas-primitive
+affordance style `drawRotateBadge` (v2.41) already established for Build-mode-only editing cues.
+Clicking directly sets the direction (`setWindDirectionAt`) rather than cycling — a kid picks the
+exact direction they want in one click instead of guessing how many times to re-click. The old
+click-to-cycle branch inside `paintGeometryModifierAt` is now a plain no-op re-confirm on an
+already-wind-tagged cell (direction only ever changes via the picker now); painting a FRESH wind
+tile is unchanged (still defaults to `WIND_ORDER[0]`). The underlying stored data format
+(`"solid:wind-n"` etc.) is completely untouched — this is a pure input-method change, with zero
+backward-compat or runtime risk, matching `drawRotateBadge`/`rotateGroundSkinAt`'s own precedent of
+being Build-mode-only code never added to `exportStandaloneGame`'s `runtimeFunctions` (an exported
+game hardcodes `appMode = "play"`, so the whole picker is statically unreachable there).
+
+**A real bug caught before shipping, not by luck**: the first implementation placed each arrow
+exactly `TILE/2 - 8` from the tile's center and used an 8px hit radius — meaning the hit-test
+distance and the hit RADIUS were numerically equal, so clicking the tile's exact geometric CENTER
+registered as a `<=` match against whichever direction's circle happened to be checked first
+(`wind-n`, first in `WIND_ORDER`). A kid clicking the plain middle of an existing conveyor tile —
+not aiming at any edge at all — would have silently set it to North. Caught by a Playwright check
+that deliberately clicked dead-center and found it returned `"wind-n"` instead of `null`. Fixed by
+widening the gap between the two numbers (11px offset, 7px hit radius, leaving a real ~4px dead
+zone around the tile's center) rather than just shaving one value — confirmed directly afterward
+that a center click now correctly misses all four arrows.
+
+**A second thing confirmed, not assumed**: the mousedown/touchstart handlers only ever hit-test the
+wind-picker arrows when the clicked cell's OWN existing tile is already wind-tagged (checked via
+`GAMEPLAY_TILE_DEFS` lookup before calling `windDirPickerHitAt` at all) — an ordinary click near the
+edge of any OTHER cell elsewhere on the board can never be accidentally swallowed by this new check,
+since the geometric arrow positions are only even computed for a cell that's genuinely a wind tile.
+
+### NPCs (wanderer/chaser/fleer) join bounce/cannon/magnet physics — with a recovery window
+
+Not a binary "should NPCs bounce" question, per the request's own framing — it's about who's in
+control, and for how long, after a bounce/wind/cannon/magnet event displaces one. Full exemption
+(the pre-existing "NPCs only ever react to geometry, never to modifiers" rule — see `resolveAxis`'s
+own long-standing comment) would reintroduce exactly the per-mechanic inconsistency the physics-
+object unification patch just finished removing, and loses real comedy value the request named
+directly — the Gravity Switcheroo sample's own floating-chaser beat already assumes a chaser can be
+caught up in physics. Full ragdoll with no recovery was ruled out too: an NPC flung unpredictably
+forever becomes an unreadable threat a kid can't reasonably respond to.
+
+**Checked first whether a "don't fight the physics while displaced, resume once settled" mechanism
+already existed**, per the request's own explicit instruction, before building anything — re-read
+the Gravity Switcheroo's own chaser-pop mechanism (`triggerFlip`'s uncolored branch,
+`actors.forEach(a => { a.vy -= GRAVITY_OFF_POP_SPEED; })`, applied to every actor in the room on a
+gravity flip) directly rather than trusting its own doc section's "chasers go passive during a
+gravity-flip drift" framing at face value. Confirmed: no such mechanism exists there — the chaser's
+own steering (`steeringAccelFor`) keeps running completely unsuppressed through the pop; the
+"passive" reading in that doc section is describing an EMERGENT effect (the chaser is now also
+subject to the same zero-g physics as the player, diluting its menace), not a literal steering-
+suppression primitive. The one genuinely close existing precedent is `isStuckToSticky`'s own
+`stuck` flag, which already gates OUT the ordinary player-input/NPC-steering contribution entirely
+while actively clinging — the right shape to generalize, but narrower in cause (only sticky contact)
+than what this ask needs (any of four different triggers).
+
+**Resolution: NPCs become real physics bodies for bounce/cannon/magnet too** (wind/fan already
+applied unconditionally to every non-stationary/collectible actor, characters included — confirmed
+by reading `windAccelFor`/`fanAccelFor` directly, neither has ever had a kind-gate of any sort, so
+this needed no change at all), **but a new `displacedCooldown` field suppresses `steeringAccelFor`'s
+own contribution for a short beat (`NPC_DISPLACED_RECOVERY_MS`, 550ms) after whatever triggered
+it**, deliberately kept as its own field rather than folded into the existing `bouncyCooldown`/
+`cannonCooldown` (those exist specifically to exempt the SPEED-CAP clamp, a different job from
+suppressing steering, and reusing them would have coupled two independent concerns). `isForceSusceptible`
+and `isSteeringCharacter` stay two SEPARATE, explicit gates (never merged into one list) — a
+deliberate choice mirroring the request's own framing: a physics object has no will to hand back,
+a steering character does, and that's the entire reason this needs its own mechanism at all.
+
+**Wiring, every call site found by grep before trusting it was complete**: `resolveAxis`'s `bouncy`
+flag and `bounceOffTrampolineObjects`'s own copy both gained `isSteeringNPC` alongside
+`isPhysicsObject` in their OR chain (and every `bounceSound`-gating condition alongside them, four
+in `resolveAxis`, one in `bounceOffTrampolineObjects` — a bounced chaser should be heard, same
+reasoning as every other "make it heard, not just felt" widening in this file); both cannon-trigger
+sites (`resolveAxis`'s collision-time trigger and the build-mode drag handler's
+`fireBlockingTileReaction`) gained the same OR term; `radialForceAccelFor`'s `magnetable` gained it
+too, so a magnet genuinely pulls a chaser now, not just suppresses its steering while something
+else does the pulling. `displacedCooldown = NPC_DISPLACED_RECOVERY_MS` is set, unconditionally for
+any non-player actor (harmless no-op for a pushable/hazard-ball, which has no steering contribution
+to suppress in the first place, so no extra gate is needed at the SET sites), at: the bounce branch
+in `resolveAxis`, the bounce branch in `bounceOffTrampolineObjects`, and inside `triggerCannon`
+itself. Wind/fan/magnet get the SAME field through a different mechanism — a new check in
+`stepActor`, right after `windAccel`/`radialAccel`/`fanAccel` are computed, measures their combined
+magnitude and RESETS `displacedCooldown` to the full window every single frame it exceeds
+`NPC_DISPLACEMENT_FORCE_THRESHOLD` (400 px/s² — comfortably below both `MAGNET_FORCE`'s peak (900)
+and `WIND_FORCE` (1000), so ordinary use of either genuinely counts, but a magnet's own far-radius
+falloff tail doesn't) — this naturally keeps steering suppressed for the WHOLE time a strong
+continuous force is active, then lets the normal per-frame decrement carry the cooldown down over
+its own short tail once the force stops, rather than needing a second, parallel mechanism.
+
+**"Resume once settled," not just the fixed timeout** — `stepActor` zeroes `displacedCooldown`
+immediately once `gravityOn() && actor.grounded`, right after the per-axis collision calls each
+frame. Deliberately gravity-mode-only: `actor.grounded` is unconditionally `true` every frame in
+free-roam (this function's own pre-existing comment already says so), so checking it there would
+end the window the instant it started; free-roam relies on the fixed timeout alone, which is the
+documented, accepted scope boundary for this specific case.
+
+**A genuine test-authoring trap hit twice in a row while verifying this, worth recording**: a
+bounce/kick's reflected velocity is real and correct, but `FRICTION_DECEL` (1800) is strong enough
+to fully erase a modest reflected speed (the ~131px/s a 150-speed chaser gets off a bouncy wall, or
+a manually-set -150 in free-roam) within roughly 70-100ms — checking a bounced/displaced actor's
+velocity 150ms after the event reads an already-fully-decayed (but entirely expected) zero as "no
+bounce happened" or "steering wasn't actually suppressed," when the real signal was there and gone
+well before the check ran. Confirmed by direct frame-by-frame traces
+(`trace_chaser_bounce.js`/`trace_freeroam_displaced.js`) in both cases before concluding anything —
+checking within the first 20-40ms instead resolved both apparent failures as test-timing mistakes,
+not engine bugs. A second, related trap: manually setting a test velocity beyond `NPC_MAX_SPEED`
+(160) without ALSO setting the `bouncyCooldown`/`cannonCooldown` exemption a real bounce/cannon
+event would naturally carry gets it clamped back to the cap on the very first frame regardless of
+`displacedCooldown` — unrelated to steering suppression, but easy to misread as if it were.
+
+**The exaggerated-pose fairness requirement, not optional per the request** — a displaced NPC needs
+to be visually obvious while airborne, not a subtle nudge, so a kid can see it coming and react.
+`renderActors` adds a continuous spin (`t.rot += (now / 90) * spinFrac`, scaled by how much of
+`NPC_DISPLACED_RECOVERY_MS` is left so it winds down as steering returns rather than cutting off
+flat) for any non-player `isSteeringCharacter` actor with `displacedCooldown > 0` — a cheap,
+reused-from-nowhere-else cue deliberately separate from the existing `impactWobbleValue` squash
+(tuned for a quick landing compress, not a sustained "this creature got launched" read). Verified
+via debug-hook field inspection and a render-path error check rather than pixel sampling, consistent
+with this file's own established tolerance for that distinction on purely cosmetic cues.
+
+**Catch/collision consequences stay completely unchanged regardless of how an NPC arrived** — per
+the request's own explicit requirement. `resolveActorContact`'s reaction table was never touched by
+this patch at all; a chaser that reaches the player by walking, by being bounced, or by being blown
+by wind triggers the exact same catch reaction either way, since the table only ever reads the
+contact itself, never how either actor got there.
+
+**Export pipeline**: `RIDE_CONTACT_EPSILON`, `NPC_DISPLACED_RECOVERY_MS`,
+`NPC_DISPLACEMENT_FORCE_THRESHOLD` each got `constantsSource` lines; `isSteeringCharacter` was added
+to `runtimeFunctions`. `tick`/`stepActor`/`resolveAxis`/`bounceOffTrampolineObjects`/
+`radialForceAccelFor`/`triggerCannon`/`renderActors` were all already shared into the export from
+earlier patches, so the riding mechanism and the NPC-physics widening both apply automatically to
+an exported game with no new gaps — confirmed directly: a fresh export's `GAME_DATA`/runtime
+contains every new identifier, and a rider standing on an exported game's own moving platform is
+genuinely carried along in the downloaded file, not just the live editor.
+
+Verified with Playwright across several focused passes (29 targeted checks, plus the full 8-sample
+regression sweep and a dedicated export test): a crate drifting on a conveyor carries a rider on top
+of it along at the same speed, staying in the same relative spot (true riding, not drifting apart);
+a chaser bounces off a bouncy wall with a real, code-verified reflected velocity and a set
+`displacedCooldown`; a wanderer bumped into a cannon fires it; a magnet now pulls a chaser upward; a
+manually-set `displacedCooldown` genuinely suppresses steering (a chaser moving away from the player
+stays moving away, not reversed) and steering demonstrably resumes once it expires; landing on an
+ordinary floor zeroes a deliberately-huge simulated `displacedCooldown` almost immediately rather
+than waiting out the full window; the wind-direction picker's hit-test correctly identifies each of
+the four arrows and correctly misses the tile's own center; a plain non-wind tile is never
+mistakenly treated as hit-testable; Large Stone remains fully immune to the magnet even after the
+NPC widening (confirming the widening is additive, not a loosening of the existing exemption); The
+World's Worst Elevator's complete sequence still wins end to end after this patch, in both the live
+editor and a fresh export; a real-UI pass with no debug hook at all (genuine mouse clicks through
+the actual palette and canvas, screenshotted before and after) confirms the wind-direction picker
+visibly renders its four arrows and the highlighted "current direction" arrow genuinely moves from
+North to South after clicking the south arrow; the full 8-sample regression sweep (all samples load,
+enter Play, and run a held-right session with zero console errors) and a fresh export both pass
+clean; and a final debug-hook-free sanity check (`grep -n "toyDebug" index.html` returning nothing)
+confirms no test-only code was left behind.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

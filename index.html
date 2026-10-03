@@ -786,6 +786,13 @@
   // to also cover Large Stone — see shovePushables/actorBlockedByOtherPushables, both of which used
   // to check `=== PUSHABLE_KIND` directly and now check this array instead.
   const STANDABLE_OBJECT_KINDS = [PUSHABLE_KIND, LARGE_STONE_KIND];
+  // Moving platforms: "a wide pushable or Large Stone sitting on a conveyor" only actually reads
+  // as a platform once whatever's resting on TOP of it moves along too — this is how close that
+  // geometric "resting on" relationship (rider's bottom edge flush with the platform's top edge,
+  // see tick()'s own rideLinks pass) is allowed to drift before it stops counting. Generous enough
+  // to survive ordinary floating-point/frame-timing slop, tight enough that "standing next to it,
+  // not on it" never qualifies.
+  const RIDE_CONTACT_EPSILON = 3;
   // Pushable is the one actor-kind left that lives in the Objects tab instead of Characters —
   // a real actor under the hood, same as everyone else, but it never moves on its own, so to a
   // kid it's an object, not a character. Collectibles (v2.15) used to be the other one; they're
@@ -850,6 +857,36 @@
   function isForceSusceptible(temperament) {
     return PHYSICS_OBJECT_KINDS.includes(temperament) && temperament !== LARGE_STONE_KIND;
   }
+  // NPCs (wanderer/chaser/fleer) join the same bounce/cannon/magnet forces physics objects just
+  // got unified onto above — a deliberate, separate category from isForceSusceptible, not folded
+  // into it, since a steering character needs one thing no inert object does: control of its own
+  // movement to hand back once a displacement is over. "Not a binary 'should NPCs bounce' question
+  // — it's about who's in control, and for how long" was the actual ask. Full exemption would
+  // reintroduce the exact "this mechanic only works for some kinds" inconsistency the physics-
+  // object unification just fixed (and the Gravity Switcheroo sample's own floating-chaser beat
+  // already assumes an NPC can be caught up in physics); full ragdoll with no recovery turns a
+  // chaser into an unreadable threat a kid can't reasonably react to. The resolution: a steering
+  // character fully feels bounce/cannon/magnet/wind/fan like anything else, but steeringAccelFor's
+  // own contribution is suppressed for a short beat (NPC_DISPLACED_RECOVERY_MS) after whichever
+  // triggered it, then resumes on its own — see stepActor's own `displacedCooldown` handling and
+  // every place that sets it (resolveAxis's bounce branches, bounceOffTrampolineObjects,
+  // triggerCannon, and the continuous wind/fan/magnet check in stepActor). Stationary and
+  // collectible are deliberately excluded — the former is meant to be a fixed, inert prop, the
+  // latter already can't move (stepActor's own early-return skips it long before any of this).
+  function isSteeringCharacter(temperament) {
+    return temperament === "wanderer" || temperament === "chaser" || temperament === "fleer";
+  }
+  // How long steering stays suppressed after a bounce/cannon launch, and (via a fresh reset every
+  // frame the continuous force stays strong — see stepActor) how long it keeps NOT resuming while
+  // genuinely caught in a wind/fan/magnet field. A real, visible beat, not permanent ragdoll and
+  // not zero — "the bounce is real and visible for a beat; then the chaser resumes being a
+  // coherent threat."
+  const NPC_DISPLACED_RECOVERY_MS = 550;
+  // px/s^2 — how strong a continuous wind/fan/magnet pull has to be before it counts as genuinely
+  // displacing a steering character (rather than just an ambient nudge not worth suspending its AI
+  // over). Comfortably below MAGNET_FORCE's peak (900) and WIND_FORCE (1000), so ordinary use of
+  // either already clears it; a magnet's own far-radius falloff tail, well under this, does not.
+  const NPC_DISPLACEMENT_FORCE_THRESHOLD = 400;
   // v2.21: the other half of "should this be a physical object" — geometries whose entire job IS
   // being a fixed spot in the room (a door leads somewhere specific, a goal marks the win point, a
   // gravity well anchors a vortex). These never become physical/blocking and never become
@@ -5693,14 +5730,16 @@
   // ever changes, same as before this patch) — deliberately not the player, so it reads as
   // "attracts objects" rather than yanking a kid's own character around. Large Stone, like every
   // other optional force, is too heavy to be pulled. Gravity Well pulls every actor, player
-  // included — the unparked vortex/black-hole idea.
+  // included — the unparked vortex/black-hole idea. A steering character (wanderer/chaser/fleer)
+  // is magnetable too now — "NPCs... participate fully" in the same four forces physics objects
+  // already do (see isSteeringCharacter's own comment); the player stays excluded either way.
   function radialForceAccelFor(actor, player) {
     let ax = 0, ay = 0;
     const centerX = actor.x + actor.w / 2, centerY = actor.y + actor.h / 2;
     const ac = Math.floor(centerX / TILE), ar = Math.floor(centerY / TILE);
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
-    const magnetable = isForceSusceptible(temperament) || temperament === "collectible";
+    const magnetable = isForceSusceptible(temperament) || temperament === "collectible" || isSteeringCharacter(temperament);
     const radiusPx = RADIAL_FORCE_RADIUS_TILES * TILE;
     for (let dy = -RADIAL_FORCE_RADIUS_TILES; dy <= RADIAL_FORCE_RADIUS_TILES; dy++) {
       for (let dx = -RADIAL_FORCE_RADIUS_TILES; dx <= RADIAL_FORCE_RADIUS_TILES; dx++) {
@@ -5828,17 +5867,25 @@
         // stronger restitution — see TRAMPOLINE_RESTITUTION and the extra minimum-launch kick below.
         // v2.28: a thrown/dropped physics object (pushable/magnet/trampoline-object/bomb2/cannon2)
         // now bounces off bouncy/Trampoline tiles too, same restitution math as the player — direct
-        // request: "if I throw an object at a bouncy tile, it should bounce off it." A wandering/
-        // chasing/fleeing/stationary NPC still doesn't (this file's own comment on resolveAxis
-        // already drew that line deliberately — "NPCs only ever react to geometry, never to
-        // modifiers" — and nothing in this ask changes that; only genuinely thrown/dropped OBJECTS
-        // gained the reaction, not characters). isForceSusceptible is the shared default-in gate
-        // (see its own comment, "Unify physics-object interactions") — Large Stone is the one
-        // carved-out exception, too heavy to bounce.
+        // request: "if I throw an object at a bouncy tile, it should bounce off it." isForceSusceptible
+        // is the shared default-in gate (see its own comment, "Unify physics-object interactions") —
+        // Large Stone is the one carved-out exception, too heavy to bounce.
+        // NPCs join the same bounce every physics object just got: "NPCs only ever react to
+        // geometry, never to modifiers" was the rule right up until this ask explicitly reversed
+        // it for wanderer/chaser/fleer — see isSteeringCharacter's own comment for why this is a
+        // deliberate, separate category from isPhysicsObject rather than folded into it (a steering
+        // character needs its AI handed back after, which no inert object does).
         const isHazardBall = def && def.temperament === HAZARD_BALL_KIND;
         const isPhysicsObject = def && isForceSusceptible(def.temperament);
+        const isSteeringNPC = def && isSteeringCharacter(def.temperament);
         const isTrampolineGeom = geometry === "trampoline";
-        const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && (actor.isPlayer || isPhysicsObject)) || isHazardBall;
+        const bouncy = ((modifier === "bouncy" || isTrampolineGeom) && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) || isHazardBall;
+        // A bounced steering character gets a short, visible "not in control" beat — see
+        // steeringAccelFor's own displacedCooldown check and the render-time spin cue in
+        // renderActors. Harmless to set unconditionally for a non-steering actor (pushable/hazard
+        // ball never read it, since they have no steering contribution to suppress in the first
+        // place).
+        if (bouncy && !actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
         const restitution = isTrampolineGeom ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
         // v2.20.1: a bounce needs to SOUND like a bounce, not like an ordinary landing — the two
         // used to be indistinguishable (both just played the generic thud via triggerImpact).
@@ -5869,13 +5916,13 @@
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
           }
         } else {
           if (actor.vy > 0) {
@@ -5891,14 +5938,14 @@
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
-              if (actor.isPlayer || isPhysicsObject) bounceSound();
+              if (actor.isPlayer || isPhysicsObject || isSteeringNPC) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
             triggerImpact(actor, "y", actor.vy, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
@@ -5913,9 +5960,11 @@
         // cannon," a direct reported gap); now reads the same isForceSusceptible gate every other
         // optional force does, so a shoved/thrown hazard ball or a dropped magnet/trampoline/bomb2
         // gets fired too, same as a pushed crate always did. Large Stone, excepted by that same
-        // gate, is now too heavy for a cannon to launch at all.
+        // gate, is now too heavy for a cannon to launch at all. A steering character (wanderer/
+        // chaser/fleer) shoved or bumped into a cannon now fires it too, same isSteeringCharacter
+        // widening as the bounce branch above.
         if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
-        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && isForceSusceptible(def.temperament)))) triggerCannon(actor, geometry, cx, cy);
+        else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && isForceSusceptible(def.temperament)) || (def && isSteeringCharacter(def.temperament)))) triggerCannon(actor, geometry, cx, cy);
         // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
         // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
         // doing the damage. An actor isn't always exactly tile-aligned, so its AABB routinely spans
@@ -6043,15 +6092,19 @@
           const actorDef = actorDefs[actor.defId];
           // v2.28: same widening as resolveAxis's tile-Trampoline branch — a thrown/dropped
           // physics object landing on a Trampoline OBJECT bounces too, not just the player/hazard
-          // ball. Same isForceSusceptible gate as the tile branch (Large Stone excepted).
+          // ball. Same isForceSusceptible gate as the tile branch (Large Stone excepted). A
+          // steering character (wanderer/chaser/fleer) joins the same way the tile branch's own
+          // isSteeringCharacter widening does.
           const actorIsPhysicsObject = actorDef && isForceSusceptible(actorDef.temperament);
-          const bouncy = actor.isPlayer || actorIsPhysicsObject || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
+          const actorIsSteeringNPC = actorDef && isSteeringCharacter(actorDef.temperament);
+          const bouncy = actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
           triggerImpact(actor, "y", actor.vy, bouncy);
           if (bouncy) {
             actor.vy = -actor.vy * TRAMPOLINE_RESTITUTION;
             actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
-            if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
+            if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
+            if (actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC) sounds.trampolineBoing();
           } else { actor.vy = 0; actor.grounded = true; }
         } else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
       }
@@ -6422,6 +6475,10 @@
     const dir = CANNON_DIRECTIONS[geometry];
     actor.vx = dir.x * CANNON_LAUNCH_SPEED;
     actor.vy = dir.y * CANNON_LAUNCH_SPEED;
+    // A fired steering character gets the same short "not in control" beat a bounce gives one —
+    // see isSteeringCharacter's own comment. Harmless to set unconditionally on any non-player
+    // actor; a pushable/hazard ball has no steering contribution to suppress in the first place.
+    if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
     sounds.shot();
     actor.impactMag = 0.7;
     actor.impactWobbleT = 0;
@@ -6902,7 +6959,7 @@
       vx: 0, vy: 0, grounded: false, isPlayer: false, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
-      cannonCooldown: 0, warpCooldown: 0,
+      cannonCooldown: 0, warpCooldown: 0, displacedCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       carried: false, fuseArmed: false, fuseRemainingMs: BOMB_FUSE_MS, fuseTimerId: null, fuseStartedAt: 0,
       cannonDir: cannonDir || null
@@ -7095,6 +7152,16 @@
       const radialAccel = radialForceAccelFor(actor, player);
       const fanAccel = isLargeStone ? { ax: 0, ay: 0, near: false } : fanAccelFor(actor);
       actor.nearFan = fanAccel.near; // v2.20: purely a render cue (floating bob) — see renderActors
+      // A steering character caught in a wind/fan/magnet pull strong enough to count as genuinely
+      // displacing (not just an ambient nudge — see NPC_DISPLACEMENT_FORCE_THRESHOLD) keeps
+      // refreshing its own recovery timer every frame the pull stays strong, the same way a
+      // discrete bounce/cannon launch sets it once — so steering stays suppressed for the whole
+      // time it's being blown/pulled around, then counts down its own short tail afterward instead
+      // of snapping back to full AI control the instant the force stops.
+      if (isSteeringCharacter(temperament)) {
+        const naturalForceMag = Math.hypot(windAccel.ax + radialAccel.ax + fanAccel.ax, windAccel.ay + radialAccel.ay + fanAccel.ay);
+        if (naturalForceMag > NPC_DISPLACEMENT_FORCE_THRESHOLD) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
+      }
       // v2.20.2: a discrete "the wind just bounced me" kick, on top of the continuous accel below
       // — see FAN_BOUNCE_MIN_SPEED/FAN_BOUNCE_RESTITUTION's own comment for why continuous accel
       // alone can't visibly arrest a fast fall into an upward fan (not enough time/distance inside
@@ -7136,7 +7203,10 @@
             if (up && !down) ay += -MOVE_ACCEL * stickyMoveMult; else if (down && !up) ay += MOVE_ACCEL * stickyMoveMult;
           }
         }
-      } else if (!stuck) {
+      } else if (!stuck && actor.displacedCooldown <= 0) {
+        // Steering is withheld entirely while displacedCooldown is counting down — "who's in
+        // control, and for how long" after a bounce/wind/cannon/magnet event, not a partial blend
+        // with the AI still fighting the physics underneath it. See isSteeringCharacter's comment.
         const steer = steeringAccelFor(actor, player);
         ax += steer.ax * stickyMoveMult;
         if (!inGravity) ay += steer.ay * stickyMoveMult;
@@ -7225,6 +7295,7 @@
     if (actor.cannonCooldown > 0) actor.cannonCooldown -= dt * 1000;
     if (actor.warpCooldown > 0) actor.warpCooldown -= dt * 1000;
     if (actor.fanKickCooldown > 0) actor.fanKickCooldown -= dt * 1000;
+    if (actor.displacedCooldown > 0) actor.displacedCooldown -= dt * 1000;
 
     actor.x += actor.vx * dt;
     resolveAxis(actor, "x", dt);
@@ -7235,6 +7306,15 @@
     shovePushables(actor, "y");
     bounceOffTrampolineObjects(actor, "y");
     applyWorldWrap(actor);
+
+    // "Resume once settled" — a steering character gets its AI back the instant it visibly lands
+    // on an ordinary floor/platform, not just once NPC_DISPLACED_RECOVERY_MS's fixed timeout runs
+    // out. Gravity-mode only: actor.grounded is unconditionally true every frame in free-roam (see
+    // this function's own free-roam branch above), so checking it there would end the window the
+    // instant it started — free-roam relies on the fixed timeout alone for "a short recovery
+    // window." gravityOn() is re-read here rather than threading the earlier `inGravity` out of
+    // its own block scope.
+    if (gravityOn() && actor.grounded && actor.displacedCooldown > 0) actor.displacedCooldown = 0;
 
     // decay physics-driven deformation values — impact deformation now decays as a damped
     // oscillation (see impactWobbleValue()), so it's just time advancing here, not a magnitude
@@ -7491,6 +7571,35 @@
       }
     }
     const snapshot = actors.slice();
+    // Moving platforms: not a new placed piece — a wide pushable or a Large Stone already becomes
+    // one the moment it's sitting on a conveyor tile (windAccelFor already moves IT; confirmed
+    // pre-existing). What was missing is this: anything resting on TOP of that platform never
+    // inherited ITS velocity, so the platform would slide out from under a rider instead of
+    // carrying it along. Fixed generally, not per-mechanic: record who's resting on which
+    // STANDABLE_OBJECT_KINDS actor using THIS frame's starting positions (before anyone moves —
+    // using post-step positions here would already reflect the very drift this is meant to
+    // correct), then after every actor's own stepActor has run, shift each rider by however far
+    // its platform actually ended up moving — a position carry, the same direct-set approach
+    // tick()'s own carried-object follow uses just above, not a velocity trick friction would
+    // fight. Single level only: a rider stacked two deep (riding a platform that's itself riding
+    // another) won't get the fully compounded shift in the same frame — the same "low-risk
+    // generalization, not a full physics simulation" scope pushable-stacking already accepted,
+    // and the only case actually asked for (a tile conveys the platform; the platform conveys
+    // whoever's standing on it) only ever needs one level anyway.
+    const rideLinks = [];
+    for (const platform of snapshot) {
+      const pdef = actorDefs[platform.defId];
+      if (!pdef || !STANDABLE_OBJECT_KINDS.includes(pdef.temperament)) continue;
+      const riderIds = [];
+      for (const rider of snapshot) {
+        if (rider.id === platform.id || rider.carried) continue;
+        if (Math.abs((rider.y + rider.h) - platform.y) < RIDE_CONTACT_EPSILON &&
+            rider.x < platform.x + platform.w && rider.x + rider.w > platform.x) {
+          riderIds.push(rider.id);
+        }
+      }
+      if (riderIds.length) rideLinks.push({ platformId: platform.id, preX: platform.x, preY: platform.y, riderIds });
+    }
     for (const actor of snapshot) {
       // a door touched mid-loop already hot-swapped board/backgroundBoard/actors to a
       // different room — any actor left in this snapshot now belongs to a room that's no
@@ -7498,6 +7607,16 @@
       // room's geometry. Stop; it simply sits paused until its own room is active again.
       if (roomTransition) break;
       stepActor(actor, dt, player);
+    }
+    for (const link of rideLinks) {
+      const platform = actors.find(a => a.id === link.platformId);
+      if (!platform) continue;
+      const dx = platform.x - link.preX, dy = platform.y - link.preY;
+      if (dx === 0 && dy === 0) continue;
+      for (const riderId of link.riderIds) {
+        const rider = actors.find(a => a.id === riderId);
+        if (rider && !rider.carried) { rider.x += dx; rider.y += dy; }
+      }
     }
     tickActorContactCooldowns(dt);
     // v2.20: spawners run always-live, Build mode included — see tickSpawners' own comment on why.
@@ -7670,16 +7789,18 @@
       return;
     }
     if (WIND_ORDER.includes(selectedModifier)) {
-      // same click-to-place, click-again-to-rotate trick as cannon above, but for a MODIFIER
-      // value paired with whatever geometry is selected — a fresh click on an already-wind
-      // cell rotates its direction instead of just repainting the same thing.
+      // A click on an already-wind-tagged cell used to cycle its direction N->E->S->W via
+      // repeated re-clicks — replaced by a direct 4-arrow picker (windDirPickerHitAt/
+      // drawWindDirPicker, wired into the canvas mousedown/touchstart handlers BEFORE this
+      // function is ever reached) so a kid picks the exact direction — "both side to side and
+      // up and down" — in one click instead of guessing how many times to click. A plain click on
+      // the tile itself, missing all four arrows, is now a no-op re-confirm of whatever direction
+      // is already there, not a rotation — direction only ever changes via the arrow picker now.
       const strokeKey = "m" + gx + "," + gy;
       if (cannonRotateStrokeCells.has(strokeKey)) return;
       cannonRotateStrokeCells.add(strokeKey);
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       if (existingTile && existingTile.geometry === selectedGeometry && WIND_ORDER.includes(existingTile.modifier)) {
-        const next = WIND_ORDER[(WIND_ORDER.indexOf(existingTile.modifier) + 1) % WIND_ORDER.length];
-        board[gy][gx] = gameplayKey(selectedGeometry, next);
         return;
       }
       const key = roomCellKey(currentRoomId, gx, gy);
@@ -7726,6 +7847,20 @@
     if (!groundSkinBoard[gy][gx]) return;
     pushUndoSnapshot();
     groundSkinRotationBoard[gy][gx] = ((groundSkinRotationBoard[gy][gx] || 0) + 90) % 360;
+  }
+
+  // The direct-edit half of the wind-direction picker (see windDirPickerHitAt/drawWindDirPicker) —
+  // sets an already-wind-tagged cell's direction straight to whichever arrow was clicked, same
+  // "works no matter which tool happens to be selected" philosophy as rotateGroundSkinAt just
+  // above (this is editing a tile that's already there, not painting with the current selection).
+  // A no-op on anything that isn't already a wind tile — the picker is never shown there anyway.
+  function setWindDirectionAt(gx, gy, dirKey) {
+    if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return;
+    const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+    if (!existingTile || !WIND_ORDER.includes(existingTile.modifier)) return;
+    if (existingTile.modifier === dirKey) return; // already set to this direction — nothing to do
+    pushUndoSnapshot();
+    board[gy][gx] = gameplayKey(existingTile.geometry, dirKey);
   }
 
   // Writes to whichever room's board actually holds the live data — the hot room's own `board`
@@ -7968,7 +8103,7 @@
       vx: 0, vy: 0, grounded: false, isPlayer, facingDir: 1,
       impactMag: 0, impactWobbleT: 0, impactAxis: "y", jumpCrouch: 0, flashTimer: 0,
       hazardCooldown: 0, goalCooldown: 0, flipCooldown: 0, bouncyCooldown: 0, doorCooldown: 0,
-      cannonCooldown: 0, warpCooldown: 0,
+      cannonCooldown: 0, warpCooldown: 0, displacedCooldown: 0,
       // v2.20: "already fully released" — see stepActor's own comment on why this is the correct
       // default rather than 0, and isOnStickyGround/STICKY_RELEASE_MS. nearFan is a pure render
       // cue, recomputed fresh every frame by fanAccelFor — false here is just the pre-first-frame
@@ -8040,7 +8175,7 @@
       // this file already reuses — without it the ordinary speed cap would flatten the launch back
       // down to a slow drift within a single frame.
       bouncyCooldown: 350, doorCooldown: 0,
-      cannonCooldown: 0, warpCooldown: 0,
+      cannonCooldown: 0, warpCooldown: 0, displacedCooldown: 0,
       stickyReleaseT: STICKY_RELEASE_MS, nearFan: false, fanKickCooldown: 0, stickyClingT: 0,
       carried: false,
       spawnerKey
@@ -8112,8 +8247,8 @@
     function fireBlockingTileReaction(cx, cy) {
       const geometry = geometryAt(cx, cy);
       if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
-      // Same isForceSusceptible gate as resolveAxis's own cannon-trigger branch — see its comment.
-      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && isForceSusceptible(actorDefs[actor.defId].temperament)))) triggerCannon(actor, geometry, cx, cy);
+      // Same isForceSusceptible/isSteeringCharacter gate as resolveAxis's own cannon-trigger branch.
+      else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (actorDefs[actor.defId] && isForceSusceptible(actorDefs[actor.defId].temperament)) || (actorDefs[actor.defId] && isSteeringCharacter(actorDefs[actor.defId].temperament)))) triggerCannon(actor, geometry, cx, cy);
     }
     actor.x = targetX;
     for (const { cx, cy } of overlappedCells(actor)) {
@@ -8184,9 +8319,19 @@
 
   gameCanvas.addEventListener("mousedown", (e) => {
     if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
-    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
+    // Direct-edit wind-direction picker (see windDirPickerHitAt/setWindDirectionAt) — works no
+    // matter which tool happens to be selected, same "editing what's already there" precedent as
+    // dblclick's own rotateGroundSkinAt below. Only hit-tested when this exact cell already holds
+    // a wind tile (matching exactly when drawWindDirPicker ever draws the arrows), so an ordinary
+    // click near a cell's edge elsewhere on the board is never silently swallowed by this check.
+    const windExisting = board[gy] && board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+    if (windExisting && WIND_ORDER.includes(windExisting.modifier)) {
+      const windHit = windDirPickerHitAt(px, py, gx, gy);
+      if (windHit) { setWindDirectionAt(gx, gy, windHit); return; }
+    }
+    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
       if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return; }
@@ -8236,10 +8381,22 @@
 
   gameCanvas.addEventListener("touchstart", (e) => {
     if (appMode !== "build") return; // no editing/placing while playing — canvas input is movement-only there
-    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     const { px, py } = pxFromEvent(e);
     const { gx, gy } = cellFromEvent(e);
+    const wasHoveredWindCell = hoveredGroundCell && hoveredGroundCell.gx === gx && hoveredGroundCell.gy === gy;
     hoveredGroundCell = { gx, gy }; // "last tapped" — touch's own half of the rotate-badge duality
+    // Same direct-edit wind-direction picker as the mousedown handler — see its own comment there.
+    // Gated on `wasHoveredWindCell` so a tap that's just REVEALING the picker on a wind tile for
+    // the first time (nothing to see the arrows by yet) still paints/places normally, while a
+    // SECOND tap on that same already-showing cell can land on one of its now-visible arrows.
+    if (wasHoveredWindCell) {
+      const windExisting = board[gy] && board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (windExisting && WIND_ORDER.includes(windExisting.modifier)) {
+        const windHit = windDirPickerHitAt(px, py, gx, gy);
+        if (windHit) { setWindDirectionAt(gx, gy, windHit); e.preventDefault(); return; }
+      }
+    }
+    pushUndoSnapshot(); // one snapshot per stroke/placement, taken before the mutation — see pushUndoSnapshot()
     if (paintMode === "actor") {
       const hit = actorAABBAt(px, py);
       if (hit) { dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return; }
@@ -8946,6 +9103,16 @@
       // fanAccelFor's own near-force falloff/near flag) — a gentle sine bob, phase-offset per actor
       // so several floating things don't all bob in lockstep. Never touches actual physics.
       if (actor.nearFan) t.oy += Math.sin(now / 160 + actor.id) * 0.05;
+      // A displaced steering character gets an unmissable visual tell — "an exaggerated pose, not
+      // a subtle nudge," the same physical-readability standard every other reaction in this toy
+      // already relies on instead of hidden state, so a kid can see a bounced/fired/pulled chaser
+      // coming and react rather than being caught by an invisible state flag. A fast spin, scaled
+      // by how much of the recovery window is still left, so it winds down as steering comes back
+      // rather than cutting off flat.
+      if (actor.displacedCooldown > 0 && !actor.isPlayer && isSteeringCharacter(def.temperament)) {
+        const spinFrac = Math.min(1, actor.displacedCooldown / NPC_DISPLACED_RECOVERY_MS);
+        t.rot += (now / 90) * spinFrac;
+      }
       if (chargingPlayer && actor.id === chargingPlayer.carrying) {
         const heldMs = now - grabKeyDownAt;
         const chargeFrac = Math.max(0, Math.min(1, (heldMs - THROW_TAP_MS) / (THROW_CHARGE_MAX_MS - THROW_TAP_MS)));
@@ -9035,6 +9202,16 @@
         const { gx, gy } = hoveredGroundCell;
         if (gx >= 0 && gx < roomCols() && gy >= 0 && gy < ROWS && groundSkinBoard[gy][gx]) {
           drawRotateBadge(gx * TILE - viewOffsetPx, gy * TILE);
+        }
+        // Moving platforms, part 2: the wind-direction picker (see drawWindDirPicker) shown over
+        // whichever cell is hovered/last-tapped, the exact same hoveredGroundCell duality the
+        // rotate badge above already reuses — a silent no-op for every cell that isn't currently
+        // a wind tile, same "shown based on what's actually there" rule as the badge.
+        if (gx >= 0 && gx < roomCols() && gy >= 0 && gy < ROWS && board[gy][gx]) {
+          const tile = GAMEPLAY_TILE_DEFS[board[gy][gx]];
+          if (tile && WIND_ORDER.includes(tile.modifier)) {
+            drawWindDirPicker(gx * TILE - viewOffsetPx, gy * TILE, tile.modifier);
+          }
         }
       }
     }
@@ -9176,6 +9353,62 @@
     gctx.restore();
   }
 
+  // Moving platforms, part 2: a conveyor's direction used to be set by repeatedly clicking an
+  // already-placed wind tile, cycling N->E->S->W one step per click — "make that a clickable
+  // edit (instead of rotation)" replaces it with four small arrow targets, one per cardinal
+  // direction, positioned at the tile's own edges (reusing WIND_DIRECTIONS' cardinal vectors
+  // rather than hand-placing each one) — a kid clicks the exact direction they want in one shot.
+  // Same screen-space sx/sy convention as drawRotateBadge, and the same "a board-pixel formula
+  // works for both rendering (screen-space sx,sy) and hit-testing (board-space gx*TILE,gy*TILE)"
+  // trick, since it's a pure tile-relative offset either way.
+  function windDirPickerArrowPos(sx, sy, dirKey) {
+    const dir = WIND_DIRECTIONS[dirKey];
+    const r = TILE / 2 - 5; // keeps all four arrows close to the tile's own edges
+    return { x: sx + TILE / 2 + dir.x * r, y: sy + TILE / 2 + dir.y * r };
+  }
+  // Which WIND_ORDER direction (if any) a click/tap at board-space px,py lands on, for the wind
+  // tile at board cell gx,gy — null if it missed all four. A 7px hit radius against an 11px arrow
+  // offset leaves a real ~4px dead zone around the tile's own center, so a plain click near the
+  // middle of the tile (not aimed at any specific edge) can never accidentally register as "set
+  // to whichever direction happens to be checked first" — confirmed this exact collision existed
+  // with an earlier equal radius/offset pair before tightening it.
+  function windDirPickerHitAt(px, py, gx, gy) {
+    for (const dirKey of WIND_ORDER) {
+      const pos = windDirPickerArrowPos(gx * TILE, gy * TILE, dirKey);
+      if (Math.hypot(px - pos.x, py - pos.y) <= 7) return dirKey;
+    }
+    return null;
+  }
+  function drawWindDirPicker(sx, sy, currentDir) {
+    for (const dirKey of WIND_ORDER) {
+      const dir = WIND_DIRECTIONS[dirKey];
+      const pos = windDirPickerArrowPos(sx, sy, dirKey);
+      const isCurrent = dirKey === currentDir;
+      gctx.save();
+      gctx.globalAlpha = isCurrent ? 0.95 : 0.6;
+      gctx.beginPath();
+      gctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+      gctx.fillStyle = isCurrent ? "rgba(255,209,102,0.92)" : "rgba(20,20,28,0.85)";
+      gctx.fill();
+      gctx.strokeStyle = isCurrent ? "#111" : "#ffd166";
+      gctx.lineWidth = 1;
+      gctx.stroke();
+      // A small filled triangle pointing the way this arrow would set the conveyor — the
+      // CURRENTLY active direction reads dark-on-gold, the other three gold-on-dark, so which
+      // one is already selected is obvious at a glance, not just which four exist.
+      const ang = Math.atan2(dir.y, dir.x);
+      const ah = 3.2;
+      gctx.beginPath();
+      gctx.moveTo(pos.x + Math.cos(ang) * ah, pos.y + Math.sin(ang) * ah);
+      gctx.lineTo(pos.x + Math.cos(ang + 2.5) * ah, pos.y + Math.sin(ang + 2.5) * ah);
+      gctx.lineTo(pos.x + Math.cos(ang - 2.5) * ah, pos.y + Math.sin(ang - 2.5) * ah);
+      gctx.closePath();
+      gctx.fillStyle = isCurrent ? "#111" : "#ffd166";
+      gctx.fill();
+      gctx.restore();
+    }
+  }
+
   // Room list/tab strip: grows automatically as doors create new rooms. Clicking a tab just
   // changes which room is hot — it never moves the player, since the player is only ever
   // simulated as part of whichever room's actor list is currently active (see activateRoom()).
@@ -9310,7 +9543,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
@@ -9392,6 +9625,9 @@
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
       `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
       `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
+      `const RIDE_CONTACT_EPSILON = ${RIDE_CONTACT_EPSILON};`,
+      `const NPC_DISPLACED_RECOVERY_MS = ${NPC_DISPLACED_RECOVERY_MS};`,
+      `const NPC_DISPLACEMENT_FORCE_THRESHOLD = ${NPC_DISPLACEMENT_FORCE_THRESHOLD};`,
       `const TEMPERAMENT_COLORS = ${JSON.stringify(TEMPERAMENT_COLORS)};`,
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
