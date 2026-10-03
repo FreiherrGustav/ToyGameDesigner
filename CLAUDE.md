@@ -5504,6 +5504,43 @@ export of The Catapult Factory played error-free; and a functional export test (
 lethal is destroyed, adjacent bombs chain-detonate, in the exported file itself). The debug hook was
 stripped (`grep -n "toyDebug" index.html` returns nothing).
 
+## Gravity Well becomes the animated "Black Hole" (art + palette name only)
+
+Direct request: "Replace art and renames current gravity well," with a user-supplied 6-frame `pat()`
+sprite ("Black Hole"). Every earlier section of this doc that says "Gravity Well" / `gravitywell` is
+describing this same object; nothing about it was split or duplicated.
+
+**Scope: art and kid-facing name only, mechanics untouched.** The internal geometry id stays
+`"gravitywell"` (board serialization, `FIXTURE_GEOMETRIES`, `checkGravityWellContacts`,
+`triggerGravityWellCapture`, `GRAVITY_WELL_*` constants all unchanged — same "don't churn an id nobody
+but the code sees" call as the crate/Gate/cannon2 renames). The palette-facing name changes through the
+established mechanism, `GEOMETRY_LABELS.gravitywell = "black hole"`, which the Fixtures row already
+reads for both the swatch title and its on-screen label. The in-game log lines for being captured now say
+"black hole" too (kids read those); internal comments and identifiers keep saying "gravity well".
+`CAPTION_TEXT.gravitywell` already described it as "A black hole..." and needed no change.
+
+**Animation: wall-clock frame cycling, no per-tile state.** `BLACK_HOLE_FRAME1_ART`..`FRAME6_ART` plus
+`BLACK_HOLE_FRAMES` are the user's art verbatim; `BLACK_HOLE_FRAME_MS` (130, a tuning choice — flag if
+it reads too fast/slow) picks the frame as `floor(performance.now() / BLACK_HOLE_FRAME_MS) % 6`, the
+same stateless approach `currentSkinFrame` already uses for animated ground skins, in a new
+`gravitywell` branch in `drawGameplayTile`. `GEOMETRY_ICONS.gravitywell` (the old static ring art is
+deleted) is frame 1, so the palette swatch is a still image — the swatch row doesn't animate, only
+placed tiles do, same as every other animated tile here.
+
+**Export pipeline**: one new `constantsSource` line ships `BLACK_HOLE_FRAMES`/`BLACK_HOLE_FRAME_MS`
+(`GEOMETRY_ICONS` is exported wholesale, but the frames array isn't part of it).
+`drawGameplayTile` was already in `runtimeFunctions`.
+
+**No backward-compat work needed**: ids and board strings are unchanged, so every old save/sample
+renders the new art automatically.
+
+Verified with Playwright through the real UI (no debug hook): the Fixtures swatch is titled/labelled
+"black hole" (no leftover "gravitywell" title), uses the new purple/black palette, and the hover
+caption reads correctly; a painted tile renders 6 distinct frames over ~1.4s; an exported game
+containing a painted black hole contains both new constants and animates it (6 distinct frames in
+~1.1s) with zero errors; the full 8-sample sweep and the standard export test pass. The
+capture/pull mechanics were not re-traced since nothing they read changed beyond log-string text.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

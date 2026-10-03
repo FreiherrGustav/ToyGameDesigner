@@ -605,7 +605,7 @@
   // already know it as — see renderObjectSwatches/renderFixtureSwatches.
   // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
-  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate" };
+  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate", gravitywell: "black hole" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -2116,6 +2116,36 @@
   // ---- Built-in geometry icons (fixed, not kid-editable — see the v2.3 note-for-later:
   // a `solid` tile needs to always visually read as solid for "discover by touching" to
   // hold, so gameplay tiles use a small consistent icon set rather than custom art). ----
+  // Black Hole (replaces the old static "gravity well" ring icon) — six frames of a swirling
+  // purple vortex around a black core, drawn from the sprite-editor tool's own animation export
+  // (see "Sprite editor tool: up to 8 animation frames"). First frame doubles as the static
+  // swatch/GEOMETRY_ICONS entry; drawGameplayTile cycles all six on a timer for placed tiles.
+  const BLACK_HOLE_FRAME1_ART = pat([
+    "..AAA...", ".ABBBA..", "AACCDAA.", "ADCCCDDA",
+    "ADDCCCDA", ".AADCCAA", "..ABBBA.", "...AAA.."
+  ], { A: "#2c0e6c", B: "#a641f9", C: "#000000", D: "#33039b" });
+  const BLACK_HOLE_FRAME2_ART = pat([
+    "....AAA.", "..ABBBA.", "AAACCCA.", "ADECCDDA",
+    "ADDCCEDA", ".ACCCAAA", ".ABBBA..", ".AAA...."
+  ], { A: "#2c0e6c", B: "#a641f9", C: "#000000", D: "#33039b", E: "#300391" });
+  const BLACK_HOLE_FRAME3_ART = pat([
+    "......AA", "..AAABBA", ".AACDDB.", ".CEDDDC.",
+    ".CDDDEC.", ".BDDCAA.", "ABBAAA..", "AA......"
+  ], { A: "#2c0e6c", B: "#a641f9", C: "#33039b", D: "#000000", E: "#300391" });
+  const BLACK_HOLE_FRAME4_ART = pat([
+    "...AAA..", "..ABBAA.", ".AABCCDA", "ADBCCCDA",
+    "ADCCCEDA", "ADCCBAA.", ".AABBA..", "...AA..."
+  ], { A: "#2c0e6c", B: "#33039b", C: "#000000", D: "#a641f9", E: "#300391" });
+  const BLACK_HOLE_FRAME5_ART = pat([
+    "...AAA..", "AAABBA..", "ACDBBAA.", "ACDDDDC.",
+    ".CDDDDCA", ".AABBDCA", "..ABBAAA", "..AAA..."
+  ], { A: "#2c0e6c", B: "#33039b", C: "#a641f9", D: "#000000" });
+  const BLACK_HOLE_FRAME6_ART = pat([
+    "AA......", "ABBCCA..", ".BDDCAA.", ".ADDDCA.",
+    ".ACDDDA.", ".AACDDB.", "..ACCBBA", "......AA"
+  ], { A: "#2c0e6c", B: "#a641f9", C: "#33039b", D: "#000000" });
+  const BLACK_HOLE_FRAMES = [BLACK_HOLE_FRAME1_ART, BLACK_HOLE_FRAME2_ART, BLACK_HOLE_FRAME3_ART, BLACK_HOLE_FRAME4_ART, BLACK_HOLE_FRAME5_ART, BLACK_HOLE_FRAME6_ART];
+  const BLACK_HOLE_FRAME_MS = 130;
   const GEOMETRY_ICONS = {
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
     // v2.22: trap/diggable no longer live here — they're modifiers now (MODIFIERS), so a
@@ -2165,11 +2195,10 @@
       "WW....WW", "MM....MM", "MM....MM", "MM....MM",
       "MM....MM", "MMMMMMMM", ".MMMMMM.", "..MMMM.."
     ], { M: GEOMETRY_SWATCH_COLORS.magnet, W: "#cfd8dc" }),
-    // A dark ring around a black hole — the "vortex/black hole" idea, visually.
-    gravitywell: pat([
-      "MMMMMMMM", "M......M", "M.KKKK.M", "M.K..K.M",
-      "M.K..K.M", "M.KKKK.M", "M......M", "MMMMMMMM"
-    ], { M: GEOMETRY_SWATCH_COLORS.gravitywell, K: "#000000" }),
+    // The Black Hole's static frame (swatches, drag ghost) — placed tiles animate, see
+    // drawGameplayTile. Internal id stays "gravitywell" (no save migration), same convention as
+    // crate/Gate/button: only GEOMETRY_LABELS changes what a kid reads.
+    gravitywell: BLACK_HOLE_FRAME1_ART,
     "spawner-n": SPAWNER_ICON_N, "spawner-e": SPAWNER_ICON_E, "spawner-s": SPAWNER_ICON_S, "spawner-w": SPAWNER_ICON_W,
     warp: pat([
       "..MMMM..", ".M....M.", "M.MM...M", "M.M.M..M",
@@ -6487,10 +6516,10 @@
       lives = 0;
       triggerGameOver(true);
       setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
-      log("Pulled into the gravity well — instant game over!");
+      log("Pulled into the black hole — instant game over!");
     } else {
       player.x = startPos.x; player.y = startPos.y;
-      log("Pulled into the gravity well — sent back to the start!");
+      log("Pulled into the black hole — sent back to the start!");
     }
   }
 
@@ -7019,13 +7048,13 @@
       actor.displacedCooldown = 0;
       playActorSound(actor, "splat");
       playRecipe(actor, "popVanish");
-      log("Pulled into the gravity well — sent back to its spawn point!");
+      log("Pulled into the black hole — sent back to its spawn point!");
       return;
     }
     actor.destroyed = true;
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
-    log("Pulled into the gravity well — destroyed!");
+    log("Pulled into the black hole — destroyed!");
     setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
   }
 
@@ -9173,6 +9202,10 @@
       ctx.clip();
       drawArtScaled(ctx, icon, x + dir.x * slideFrac * TILE, y + dir.y * slideFrac * TILE, TILE, cell);
       ctx.restore();
+    } else if (tile.geometry === "gravitywell") {
+      // Black Hole: cycles its six swirl frames on a wall-clock timer, same approach (and same
+      // "no per-tile animation state to store") as animated Ground skins' currentSkinFrame.
+      drawArtScaled(ctx, BLACK_HOLE_FRAMES[Math.floor(performance.now() / BLACK_HOLE_FRAME_MS) % BLACK_HOLE_FRAMES.length], x, y, TILE, cell);
     } else {
       drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
     }
@@ -9957,6 +9990,7 @@
       `const RADIAL_FORCE_RADIUS_TILES = ${RADIAL_FORCE_RADIUS_TILES};`,
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
       `const GRAVITY_WELL_RADIUS_TILES = ${GRAVITY_WELL_RADIUS_TILES}, GRAVITY_WELL_CAPTURE_SPEED = ${GRAVITY_WELL_CAPTURE_SPEED};`,
+      `const BLACK_HOLE_FRAMES = ${JSON.stringify(BLACK_HOLE_FRAMES)}, BLACK_HOLE_FRAME_MS = ${BLACK_HOLE_FRAME_MS};`,
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
