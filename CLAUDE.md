@@ -5286,6 +5286,86 @@ general, one specifically scenes with a Moving Platform + Gravity Well) all run 
 final debug-hook-free sanity pass (`grep -n "toyDebug" index.html` returning nothing) confirms no
 test-only code was left behind.
 
+## Sprite editor tool: up to 8 animation frames per sprite
+
+Direct request on the standalone sprite editor (`prototypes/sprite-editor.html`, committed since
+v2.36 — see that section above for why it lives in this repo at all): "let's create the ability to
+add frames (up to 8) to create custom animations... three buttons, new frame, duplicate frame,
+delete frame, and... a reference area where you can select between the frames. Also a preview for
+the animation." Framed explicitly by the user as groundwork for a possible future game feature, not
+a request to wire anything into `index.html` itself — scoped to the standalone tool only, same as
+every other sprite-editor-only change this doc already covers (v2.27's Export-as-JS, v2.30's
+new-sprite-creation/PNG-import). No debug hook, no `pat()`-native index.html integration, no
+backward-compat migration inside `index.html` — none of that applies here, per the tool's own
+established "not folded into this project's conventions" status.
+
+**Data model**: `state[id]` (every sprite's live art) changes from a single flat 64-entry array to
+an ARRAY of up to `MAX_FRAMES` (8) flat arrays — a static sprite is simply a 1-frame "animation,"
+not a special case. `currentFrameIndex[id]` tracks which frame is currently loaded into the pixel
+editor for that sprite; it's deliberately NOT persisted across a Save/Load round trip (every loaded
+sprite starts back on frame 1) — a simplicity choice, not an oversight. `markDirty`'s comparison
+generalizes for free: comparing `state[id]` against `[ORIGINAL_ART[id]]` (the original wrapped as a
+1-frame animation) catches an edited pixel AND an added/removed frame with the same check, no
+separate frame-count comparison needed.
+
+**New Frame / Duplicate Frame / Delete Frame** insert or remove a frame right after whichever one
+is currently selected (so the new/duplicated frame becomes the one you're editing next), disabled
+at the 8-frame ceiling or the 1-frame floor respectively — a sprite can never have zero frames.
+**The frame strip** (`#frameStrip`, left of the palette block) is the "reference area to select
+between frames" the request asked for: one small thumbnail per frame, click to load it into "Your
+edit"; painting and Import PNG both only ever touch whichever frame is currently selected there, so
+building an 8-frame walk cycle means switching frames and drawing each one in turn. **Preview** is
+a third canvas column (alongside the existing Reference/Your-edit pair) that loops through every
+frame of the selected sprite on a fixed 300ms timer, reading live from `state[selectedId]` every
+tick — a mid-edit pixel change shows up in the preview the next time its frame comes around, with
+no restart needed; switching to a DIFFERENT sprite does reset the preview back to frame 1, so a
+sprite's loop always starts from the beginning rather than wherever the previous sprite's cycle
+happened to be.
+
+**Export as JS gains a second shape, modeled on an existing index.html convention, not invented
+from nothing.** A single-frame sprite still exports exactly as before (`const NAME_ART =
+pat(...);`). A multi-frame sprite exports one `pat()` call per frame (`NAME_FRAME1_ART`,
+`NAME_FRAME2_ART`, ...) plus `const NAME_FRAMES = [NAME_FRAME1_ART, ...];` tying them together —
+mirroring how `index.html` already names its own animated-tile frame sets (`FIRE_FRAMES`,
+`LAVA_FRAMES`), so pasting the result in reads consistently with what's already there rather than
+introducing a competing naming scheme. This is the one part of this patch that changes the tool's
+own *output format*, which per the v2.36 section above is the one case that does need a CLAUDE.md
+note even for a sprite-editor-only change.
+
+**Save JSON / Load JSON**: saving needed no code change at all — it already serializes `state`
+wholesale, and a nested array of frames serializes exactly as cleanly as the old flat one did.
+Loading gained real backward-compat logic: a loaded entry whose first element is itself an array is
+the new multi-frame shape (used as-is, clamped to 8 frames); a loaded entry that's a bare 64-long
+flat array is a save from before frames existed, wrapped as a single-frame animation — the exact
+"older data predates a feature, re-derive a sane default" shape this whole project's own
+`restoreProjectSnapshot` backward-compat sections already use repeatedly, applied here to this
+tool's own, much smaller save format.
+
+**A real test-fixture bug caught while verifying Import PNG, worth recording so it isn't rediscovered
+the hard way again**: a commonly-copied "known good" 1×1 base64 PNG test fixture decodes with
+alpha=127 once drawn through a canvas, not 255 — which this tool's own Import PNG logic correctly
+treats as transparent per its already-documented "alpha under 50% imports as erased" rule. The
+first attempt at testing Import PNG against a currently-selected frame read this as the feature
+being broken (nothing ever got written); tracing the actual pixel data (not just the end result)
+showed the import logic was working exactly as designed on a genuinely semi-transparent test image.
+Fixed by generating a real, fully-opaque test PNG via canvas rather than trusting a copied base64
+literal — the lesson generalizes to any future PNG-import test on this tool.
+
+Verified with Playwright (46 checks): a fresh/original sprite starts at exactly 1 frame with Delete
+disabled; New Frame inserts a blank frame right after the current one and selects it, leaving every
+other frame untouched; Duplicate Frame does the same but copies the source frame's content;
+clicking a frame thumbnail loads that frame for editing; New/Duplicate Frame correctly disable at
+the 8-frame cap and clicking a disabled button is a genuine no-op; Delete Frame correctly disables
+again once back down to 1 frame; the Preview canvas visibly cycles through more than one distinct
+frame color over real elapsed time and immediately shows a newly-selected sprite's own frame 1;
+Save/Load round-trips a multi-frame sprite exactly; loading a simulated pre-frames (bare flat-array)
+save correctly wraps it as a single frame; Import PNG writes only into the currently-selected frame,
+leaving every other frame of that sprite untouched; Export as JS produces a plain `NAME_ART` for a
+single-frame edit and a full `NAME_FRAME1_ART..NAME_FRAME3_ART` + `NAME_FRAMES` set for a 3-frame
+custom sprite, confirmed by actually executing the generated source via `new Function()` (with a
+faithful local reimplementation of index.html's own `pat()`, since the tool itself never defines
+it) and checking the reproduced frame colors match exactly, in order.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

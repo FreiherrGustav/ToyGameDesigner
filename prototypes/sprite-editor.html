@@ -51,6 +51,7 @@
   .icon-row canvas { image-rendering: pixelated; border-radius: 3px; background:
     repeating-conic-gradient(#2a2e3a 0% 25%, #22242e 0% 50%) 50% / 8px 8px; }
   .icon-row .lbl { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .icon-row .frame-count { font-size: 10px; color: var(--muted); flex-shrink: 0; }
   .icon-row .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: auto; visibility: hidden; flex-shrink: 0; }
   .icon-row.dirty .dirty-dot { visibility: visible; }
   .icon-row .del-x {
@@ -132,15 +133,14 @@
     line-height: 1.5;
     padding: 0 20px;
   }
-  #pixelCanvas {
+  #pixelCanvas, #previewCanvas {
     width: 256px; height: 256px;
     image-rendering: pixelated;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: repeating-conic-gradient(#2a2e3a 0% 25%, #22242e 0% 50%) 50% / 16px 16px;
-    cursor: crosshair;
-    touch-action: none;
   }
+  #pixelCanvas { cursor: crosshair; touch-action: none; }
   #editorName { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
   #editorMeta { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
 
@@ -162,6 +162,33 @@
     border: 2px dashed var(--muted);
     font-size: 16px; font-weight: bold; color: var(--muted);
   }
+
+  #framesBlock { padding: 0 28px 24px; }
+  #framesBlock h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 500; }
+  #frameToolRow { display: flex; gap: 10px; margin-bottom: 14px; }
+  #frameToolRow button:disabled { opacity: .4; cursor: not-allowed; }
+  #frameToolRow button:disabled:hover { border-color: var(--border); }
+  #frameStrip { display: flex; flex-wrap: wrap; gap: 10px; }
+  .frame-thumb {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+  }
+  .frame-thumb:hover { border-color: var(--border); }
+  .frame-thumb.selected { border-color: var(--accent); }
+  .frame-thumb canvas {
+    width: 48px; height: 48px;
+    image-rendering: pixelated;
+    border-radius: 4px;
+    background: repeating-conic-gradient(#2a2e3a 0% 25%, #22242e 0% 50%) 50% / 8px 8px;
+  }
+  .frame-thumb .frame-num { font-size: 11px; color: var(--muted); }
+  .frame-thumb.selected .frame-num { color: var(--text); font-weight: 600; }
 
   #toolRow { display: flex; gap: 10px; padding: 0 28px 8px; }
   .hint { color: var(--muted); font-size: 12px; padding: 0 28px 10px; max-width: 640px; line-height: 1.5; }
@@ -250,11 +277,26 @@
         <button id="resetOneBtn">Reset this sprite</button>
       </div>
     </div>
+    <div class="compareCol">
+      <h3>Preview</h3>
+      <canvas id="previewCanvas" width="8" height="8"></canvas>
+      <p style="color:var(--muted); font-size:12px; margin:10px 0 0;">Loops through every frame</p>
+    </div>
     <div style="flex-basis:100%; height:0;"></div>
     <div>
       <p id="editorName">—</p>
       <p id="editorMeta">—</p>
     </div>
+  </div>
+
+  <div id="framesBlock">
+    <h3>Frames (up to 8 — builds the animation shown in Preview)</h3>
+    <div id="frameToolRow">
+      <button id="newFrameBtn">+ New frame</button>
+      <button id="dupFrameBtn">⧉ Duplicate frame</button>
+      <button id="delFrameBtn" class="danger">🗑 Delete frame</button>
+    </div>
+    <div id="frameStrip"></div>
   </div>
 
   <div id="toolRow"></div>
@@ -281,13 +323,25 @@
     (alpha under 50%) import as erased; everything else imports as a flat opaque color, since this
     engine's own sprite format has no partial transparency.
   </p>
+  <p class="hint">
+    <strong>Frames</strong> turn a sprite into a looping animation of up to 8 pixel-edit steps.
+    <strong>New frame</strong> adds a blank frame right after the one you're on;
+    <strong>Duplicate frame</strong> does the same but starts from a copy of the current frame
+    (handy for a small tweak between steps); <strong>Delete frame</strong> removes the current one
+    (disabled once only one is left — every sprite always has at least one frame). Click any
+    thumbnail in the strip to load that frame into "Your edit"; Import PNG and painting both affect
+    only the frame you're currently on. Preview always loops the whole set, live, so you can watch
+    the animation as you build it.
+  </p>
   <p id="saveNote">
-    <strong>Save JSON</strong> downloads everything you've edited or added as a single file — a
-    full round-trip format, useful for saving progress or handing the whole batch back for
-    integration the way earlier rounds did. <strong>Export as JS</strong> instead generates
-    ready-to-paste <code>pat(...)</code> calls, in this engine's own house style, for just the
-    sprites that are new or edited — meant to be copied straight into <code>index.html</code>
-    without anyone needing to hand-derive the pattern/legend form first.
+    <strong>Save JSON</strong> downloads everything you've edited or added — frames included — as
+    a single file, a full round-trip format useful for saving progress or handing the whole batch
+    back for integration the way earlier rounds did. <strong>Export as JS</strong> instead
+    generates ready-to-paste <code>pat(...)</code> calls, in this engine's own house style, for
+    just the sprites that are new or edited; a sprite with more than one frame exports one
+    <code>pat()</code> per frame plus a <code>NAME_FRAMES</code> array tying them together, meant
+    to be copied straight into <code>index.html</code> without anyone needing to hand-derive the
+    pattern/legend form — or the frame array — first.
   </p>
 </div>
 
@@ -319,13 +373,26 @@
   const PALETTE = PAYLOAD.PALETTE;
   const REF_THUMBS = PAYLOAD.REF_THUMBS;
 
+  // Frames: each sprite's `state[id]` is now an ARRAY of frame arrays (1 to MAX_FRAMES), not a
+  // single flat array -- a static sprite is simply a 1-frame "animation". currentFrameIndex[id]
+  // tracks which of those frames is currently loaded into the pixel editor; it isn't persisted
+  // across a Save/Load round trip (every loaded sprite starts back on frame 1), a deliberate
+  // simplicity choice, not an oversight.
+  const MAX_FRAMES = 8;
   let state = {};
-  ICON_DEFS.forEach(def => { state[def.id] = ORIGINAL_ART[def.id].slice(); });
+  ICON_DEFS.forEach(def => { state[def.id] = [ORIGINAL_ART[def.id].slice()]; });
+  let currentFrameIndex = {};
   let dirty = {};
   let customColors = [];
   let selectedId = ICON_DEFS[0].id;
   let currentColor = PALETTE[0];
   let isDrawing = false;
+
+  function frameIdx(id) {
+    const i = currentFrameIndex[id] || 0;
+    return Math.min(i, state[id].length - 1);
+  }
+  function currentFrameArt(id) { return state[id][frameIdx(id)]; }
 
   const canvas = document.getElementById('pixelCanvas');
   const ctx = canvas.getContext('2d');
@@ -352,7 +419,9 @@
     } else {
       refWrap.innerHTML = '<div class="noRef">No reference image<br>(this is a new sprite)</div>';
     }
-    drawArt(state[selectedId]);
+    drawArt(currentFrameArt(selectedId));
+    renderFrameStrip();
+    refreshPreview();
   }
 
   // A def is "needs inclusion" (gets the dirty dot, and is what Export as JS emits) either
@@ -361,7 +430,10 @@
   function markDirty(id) {
     const def = ICON_DEFS.find(d => d.id === id);
     if (def && def.custom) { dirty[id] = true; return; }
-    if (JSON.stringify(state[id]) !== JSON.stringify(ORIGINAL_ART[id])) dirty[id] = true;
+    // state[id] is now an array of frames -- comparing against [ORIGINAL_ART[id]] (the original
+    // wrapped as a 1-frame "animation") catches both an edited pixel AND an added/removed frame,
+    // with no separate frame-count check needed.
+    if (JSON.stringify(state[id]) !== JSON.stringify([ORIGINAL_ART[id]])) dirty[id] = true;
     else delete dirty[id];
   }
 
@@ -384,7 +456,7 @@
       c.width = ART; c.height = ART;
       c.style.width = '28px'; c.style.height = '28px';
       const cctx = c.getContext('2d');
-      state[def.id].forEach((color, i) => {
+      state[def.id][0].forEach((color, i) => {
         if (color) { cctx.fillStyle = color; cctx.fillRect(i % ART, Math.floor(i / ART), 1, 1); }
       });
       row.appendChild(c);
@@ -392,6 +464,13 @@
       lbl.className = 'lbl';
       lbl.textContent = def.label;
       row.appendChild(lbl);
+      if (state[def.id].length > 1) {
+        const fc = document.createElement('div');
+        fc.className = 'frame-count';
+        fc.textContent = state[def.id].length + 'f';
+        fc.title = state[def.id].length + '-frame animation';
+        row.appendChild(fc);
+      }
       const dot = document.createElement('div');
       dot.className = 'dirty-dot';
       row.appendChild(dot);
@@ -424,7 +503,8 @@
     while (ICON_DEFS.some(d => d.id === id)) { id = base + '-' + n; n++; }
     const def = { id, label: trimmed, category: 'Custom', custom: true };
     ICON_DEFS.push(def);
-    state[id] = new Array(ART * ART).fill(null);
+    state[id] = [new Array(ART * ART).fill(null)];
+    currentFrameIndex[id] = 0;
     dirty[id] = true;
     selectedId = id;
     renderSidebar();
@@ -439,6 +519,7 @@
     ICON_DEFS.splice(idx, 1);
     delete state[id];
     delete dirty[id];
+    delete currentFrameIndex[id];
     if (selectedId === id) selectedId = ICON_DEFS.length ? ICON_DEFS[0].id : null;
     renderSidebar();
     renderEditor();
@@ -488,7 +569,7 @@
   function paintAt(e) {
     const { x, y } = pixelFromEvent(e);
     if (x < 0 || x >= ART || y < 0 || y >= ART) return;
-    state[selectedId][y * ART + x] = currentColor;
+    currentFrameArt(selectedId)[y * ART + x] = currentColor;
     markDirty(selectedId);
     renderEditor();
     renderSidebar();
@@ -516,25 +597,124 @@
   document.getElementById('resetOneBtn').addEventListener('click', () => {
     const def = ICON_DEFS.find(d => d.id === selectedId);
     if (def && def.custom) {
-      state[selectedId] = new Array(ART * ART).fill(null);
+      state[selectedId] = [new Array(ART * ART).fill(null)];
     } else {
-      state[selectedId] = ORIGINAL_ART[selectedId].slice();
+      state[selectedId] = [ORIGINAL_ART[selectedId].slice()];
       delete dirty[selectedId];
     }
+    currentFrameIndex[selectedId] = 0;
     renderEditor();
     renderSidebar();
   });
 
   document.getElementById('resetAllBtn').addEventListener('click', () => {
-    if (!confirm('Reset every ORIGINAL sprite back to the extraction, and clear every custom sprite blank? This discards all edits. (Custom sprites you added are not deleted — only emptied.)')) return;
+    if (!confirm('Reset every ORIGINAL sprite back to the extraction, and clear every custom sprite blank? This discards all edits AND all extra animation frames. (Custom sprites you added are not deleted — only emptied.)')) return;
     ICON_DEFS.forEach(def => {
-      state[def.id] = def.custom ? new Array(ART * ART).fill(null) : ORIGINAL_ART[def.id].slice();
+      state[def.id] = [def.custom ? new Array(ART * ART).fill(null) : ORIGINAL_ART[def.id].slice()];
+      currentFrameIndex[def.id] = 0;
     });
     dirty = {};
     ICON_DEFS.forEach(def => { if (def.custom) dirty[def.id] = true; });
     renderEditor();
     renderSidebar();
   });
+
+  // ---- Frames: up to MAX_FRAMES per sprite, selected via the thumbnail strip, looped in Preview ----
+  function renderFrameStrip() {
+    const root = document.getElementById('frameStrip');
+    root.innerHTML = '';
+    const frames = state[selectedId];
+    const curIdx = frameIdx(selectedId);
+    frames.forEach((frameArt, i) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'frame-thumb' + (i === curIdx ? ' selected' : '');
+      const c = document.createElement('canvas');
+      c.width = ART; c.height = ART;
+      const cctx = c.getContext('2d');
+      frameArt.forEach((color, j) => {
+        if (color) { cctx.fillStyle = color; cctx.fillRect(j % ART, Math.floor(j / ART), 1, 1); }
+      });
+      thumb.appendChild(c);
+      const lbl = document.createElement('div');
+      lbl.className = 'frame-num';
+      lbl.textContent = i + 1;
+      thumb.appendChild(lbl);
+      thumb.addEventListener('click', () => { currentFrameIndex[selectedId] = i; renderEditor(); });
+      root.appendChild(thumb);
+    });
+    document.getElementById('newFrameBtn').disabled = frames.length >= MAX_FRAMES;
+    document.getElementById('dupFrameBtn').disabled = frames.length >= MAX_FRAMES;
+    document.getElementById('delFrameBtn').disabled = frames.length <= 1;
+  }
+
+  document.getElementById('newFrameBtn').addEventListener('click', () => {
+    const frames = state[selectedId];
+    if (frames.length >= MAX_FRAMES) return;
+    const idx = frameIdx(selectedId);
+    frames.splice(idx + 1, 0, new Array(ART * ART).fill(null));
+    currentFrameIndex[selectedId] = idx + 1;
+    markDirty(selectedId);
+    renderEditor();
+    renderSidebar();
+  });
+
+  document.getElementById('dupFrameBtn').addEventListener('click', () => {
+    const frames = state[selectedId];
+    if (frames.length >= MAX_FRAMES) return;
+    const idx = frameIdx(selectedId);
+    frames.splice(idx + 1, 0, frames[idx].slice());
+    currentFrameIndex[selectedId] = idx + 1;
+    markDirty(selectedId);
+    renderEditor();
+    renderSidebar();
+  });
+
+  document.getElementById('delFrameBtn').addEventListener('click', () => {
+    const frames = state[selectedId];
+    if (frames.length <= 1) return;
+    const idx = frameIdx(selectedId);
+    frames.splice(idx, 1);
+    currentFrameIndex[selectedId] = Math.max(0, idx - 1);
+    markDirty(selectedId);
+    renderEditor();
+    renderSidebar();
+  });
+
+  // ---- Preview: loops through every frame of the selected sprite on a fixed timer ----
+  const PREVIEW_FRAME_MS = 300;
+  const previewCanvas = document.getElementById('previewCanvas');
+  const previewCtx = previewCanvas.getContext('2d');
+  previewCtx.imageSmoothingEnabled = false;
+  let previewFrameIdx = 0;
+  let previewSpriteId = null;
+
+  function drawPreviewFrame() {
+    previewCtx.clearRect(0, 0, ART, ART);
+    const frames = state[selectedId];
+    if (!frames || !frames.length) return;
+    const art = frames[previewFrameIdx % frames.length];
+    for (let y = 0; y < ART; y++) {
+      for (let x = 0; x < ART; x++) {
+        const c = art[y * ART + x];
+        if (c) { previewCtx.fillStyle = c; previewCtx.fillRect(x, y, 1, 1); }
+      }
+    }
+  }
+
+  // Called from renderEditor() on every repaint (including mid-edit) so a live edit to whichever
+  // frame the preview is currently showing appears immediately -- but only resets back to frame 1
+  // when the SELECTED SPRITE actually changes, so switching sprites always starts its loop from
+  // the beginning instead of wherever the previous sprite's own cycle happened to be.
+  function refreshPreview() {
+    if (selectedId !== previewSpriteId) { previewSpriteId = selectedId; previewFrameIdx = 0; }
+    drawPreviewFrame();
+  }
+
+  setInterval(() => {
+    const frames = state[selectedId];
+    if (frames && frames.length > 1) previewFrameIdx = (previewFrameIdx + 1) % frames.length;
+    drawPreviewFrame();
+  }, PREVIEW_FRAME_MS);
 
   document.getElementById('saveBtn').addEventListener('click', () => {
     const payload = { state, defs: ICON_DEFS.filter(d => d.custom).map(d => ({ id: d.id, label: d.label, category: d.category, custom: true })) };
@@ -566,9 +746,20 @@
           }
         });
         ICON_DEFS.forEach(def => {
-          const art = loadedState[def.id];
-          if (Array.isArray(art) && art.length === ART * ART) {
-            state[def.id] = art.slice();
+          const raw = loadedState[def.id];
+          if (!Array.isArray(raw) || !raw.length) return;
+          let frames;
+          if (Array.isArray(raw[0])) {
+            // Current save shape -- state[id] is an array of frame arrays.
+            frames = raw.filter(f => Array.isArray(f) && f.length === ART * ART).slice(0, MAX_FRAMES);
+          } else if (raw.length === ART * ART) {
+            // Backward-compatible with every save from before frames existed -- a bare flat
+            // array is a single-frame "animation."
+            frames = [raw.slice()];
+          }
+          if (frames && frames.length) {
+            state[def.id] = frames;
+            currentFrameIndex[def.id] = 0;
             markDirty(def.id);
           }
         });
@@ -611,7 +802,7 @@
           art[i] = hex;
           if (!PALETTE.includes(hex) && !customColors.includes(hex)) customColors.push(hex);
         }
-        state[selectedId] = art;
+        state[selectedId][frameIdx(selectedId)] = art;
         markDirty(selectedId);
         renderEditor();
         renderSidebar();
@@ -628,12 +819,12 @@
   // own existing art-constant style (see CANNON2_ICON_NE, FAN_ICON_N, etc.) ----
   const LEGEND_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.split('');
 
-  function constNameFor(def, usedNames) {
+  function baseNameFor(def, usedNames) {
     let base = def.label.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     if (!base) base = 'SPRITE';
     if (/^[0-9]/.test(base)) base = '_' + base;
-    let name = base + '_ART', n = 2;
-    while (usedNames.has(name)) { name = base + '_' + n + '_ART'; n++; }
+    let name = base, n = 2;
+    while (usedNames.has(name)) { name = base + '_' + n; n++; }
     usedNames.add(name);
     return name;
   }
@@ -675,6 +866,18 @@
     return { source: 'pat([\n' + rowsSource + '  ], { ' + legendSource + ' })', overflow };
   }
 
+  function overflowWarning() {
+    return '// WARNING: more than ' + LEGEND_CHARS.length + ' distinct colors -- some got merged onto\n' +
+      '// the same legend letter below. Likely means this came from a photo-like PNG import\n' +
+      '// rather than flat pixel art; touch it up by hand before using it.\n';
+  }
+
+  // A single-frame sprite exports exactly as before: one `const NAME_ART = pat(...);`. A
+  // multi-frame sprite exports one pat() call per frame (NAME_FRAME1_ART, NAME_FRAME2_ART, ...)
+  // plus a `const NAME_FRAMES = [NAME_FRAME1_ART, ...];` array tying them together -- mirroring how
+  // index.html already names its own existing animated-tile frame sets (FIRE_FRAMES, LAVA_FRAMES),
+  // not a new convention invented from nothing, so pasting the result in reads consistently with
+  // everything already there.
   function buildExportSource() {
     const toExport = ICON_DEFS.filter(def => def.custom || dirty[def.id]);
     if (!toExport.length) {
@@ -683,15 +886,23 @@
     const usedNames = new Set();
     let out = '';
     toExport.forEach(def => {
-      const name = constNameFor(def, usedNames);
-      const { source, overflow } = toPatSource(state[def.id]);
-      out += '// ' + def.label + ' (' + def.category + (def.custom ? ', new' : ', edited') + ')\n';
-      if (overflow) {
-        out += '// WARNING: more than ' + LEGEND_CHARS.length + ' distinct colors -- some got merged onto\n';
-        out += '// the same legend letter below. Likely means this came from a photo-like PNG import\n';
-        out += '// rather than flat pixel art; touch it up by hand before using it.\n';
+      const base = baseNameFor(def, usedNames);
+      const frames = state[def.id];
+      out += '// ' + def.label + ' (' + def.category + (def.custom ? ', new' : ', edited') +
+        (frames.length > 1 ? ', ' + frames.length + ' frames' : '') + ')\n';
+      if (frames.length === 1) {
+        const { source, overflow } = toPatSource(frames[0]);
+        out += (overflow ? overflowWarning() : '') + 'const ' + base + '_ART = ' + source + ';\n\n';
+      } else {
+        const frameNames = [];
+        frames.forEach((frameArt, i) => {
+          const { source, overflow } = toPatSource(frameArt);
+          const frameName = base + '_FRAME' + (i + 1) + '_ART';
+          frameNames.push(frameName);
+          out += (overflow ? overflowWarning() : '') + 'const ' + frameName + ' = ' + source + ';\n';
+        });
+        out += 'const ' + base + '_FRAMES = [' + frameNames.join(', ') + '];\n\n';
       }
-      out += 'const ' + name + ' = ' + source + ';\n\n';
     });
     return out;
   }
