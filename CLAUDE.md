@@ -4610,6 +4610,172 @@ regression sweep (the six existing samples plus this one) and a fresh Button+Gat
 error-free, before and after the debug hook (added fresh for this session, confirmed via `grep -n
 "toyDebug" index.html` returning nothing) was stripped.
 
+## "The Gravity Switcheroo" — an eighth sample, and a real new mechanic: the weightlessness pop
+
+A small, single-room physics gag built specifically to showcase one mechanic chain rather than a
+sprawling level — the brief itself asked for a lighter verification burden than Catapult Factory,
+and the two-phase process (rough layout, then mandatory trace-and-fix) still applied, since this
+room chains a dodge, a flip, a diagonal drift, and a ceiling bounce — exactly the "multi-link
+trajectory" shape that's repeatedly been the hardest thing to get right by guessing in every prior
+sample. `buildGravitySwitcherooGame()`/`drawGravitySwitcherooIcon`, two rooms ("Through the Door," a
+short entry hallway, and "The Gravity Switcheroo" itself).
+
+**Naming confirmed before building anything, not assumed**: the gravity-flip tile is an uncolored
+`pushbutton` (Button) — `"switch"` was fully retired project-wide in v2.37 (folded into Button and
+removed). `triggerFlip`'s existing uncolored branch already flips the room's own `gravityEnabled`
+hot global; nothing new was needed there beyond the pop below.
+
+**The weightlessness pop — genuinely new behavior, called out as such rather than discovered.**
+Standing still means zero vertical velocity; simply switching a downward force off doesn't create
+upward motion from nothing — left alone, the flip would read as "suddenly frozen in place," not
+"weightless." `GRAVITY_OFF_POP_SPEED` (420) is a one-time additive `vy -=` applied to **every actor
+in the room** the instant gravity goes OFF (never on the way back on — gravity resuming already
+supplies its own downward motion from the first tick). Additive on top of whatever `vy` an actor
+already has, the same "preserve existing momentum, don't override it" rule the room's own diagonal
+drift already depends on.
+
+**A real bug, caught by tracing before it ever reached a user: reusing `bouncyCooldown` to exempt
+the pop from the free-roam speed cap caused unbounded velocity runaway.** The obvious move — every
+other real impulse in this file (cannon, bomb-blast, a throw) exempts itself from the ordinary
+speed-cap clamp via `bouncyCooldown`/`recentlyLaunched` — was tried first and is exactly wrong here.
+That exemption skips the cap *clamp*, but not the *acceleration* `applyAxisFriction` still adds each
+frame — safe for a thrown object (never has steering input of its own during the window), but this
+room's whole premise is the player holding a run key right through the flip. Confirmed directly: a
+trace with the exemption in place and right held through the flip showed `vx` climbing past 800px/s,
+the identical "`recentlyLaunched` + held key" runaway this file's own `resolveAxis` comments already
+warn about for a different mechanic. Fixed by dropping the exemption entirely — the ordinary
+combined-speed clamp still scales both axes by the same factor, which preserves the diagonal ANGLE
+(a real "kicked sideways and up" moment) while actually capping the magnitude.
+
+**Two physics facts confirmed by trace, not assumed from the brief's own description, that shaped
+the room's whole layout:**
+- **This engine has no "coast at reduced speed" state at all**, gravity or free-roam — releasing a
+  held key decays velocity to a dead stop within roughly 150-250ms (`FRICTION_DECEL = 1800` is
+  strong by design). "Different entry speed into the toggle" can't come from a kid choosing to walk
+  in slower; it has to come from a forced direction change — the Chaser's placement is load-bearing
+  for this, not just thematic.
+- **Free-roam's speed cap is on the combined 2D vector, not per axis** — holding two perpendicular
+  directions (up+right) equally settles at `cap/√2 ≈ 155.6` on each of `vx`/`vy`, a true 45° cruise,
+  not a faster diagonal than either axis alone could reach. Zero-gravity motion really is the
+  simpler case the brief describes once a direction is actually being held — `stepActor`'s free-roam
+  branch has no curving force at all, just friction on both axes.
+
+**A real design conflict, found by trace rather than assumed: a single collectible wins the room on
+its own, bypassing the whole chain.** `maybeRoundCompleteFromCollectibles` (project-wide,
+unconditional — "goal and full collection both funnel through here, one completion reaction, two
+ways to reach it") fires the instant the last live collectible is gathered. With only the one gem
+the brief describes near the spike ring, grabbing it — which happens naturally while just walking
+right, well before the toggle — already drops the count to zero and ends the room on the spot.
+Confirmed directly: every "hold right" trace won at column ~12 with gravity never once flipping, the
+entire toggle/drift/bounce/goal sequence skipped. The brief's "single collectible" was clearly meant
+as a mid-run bait item, not the room's real win condition (the goal tile, reached via the ricochet,
+plainly is) — fixed with a second gem placed inside the goal area itself, so the center-room pickup
+can no longer complete the set alone; gathering it and touching goal both still independently win,
+by design, they just can't be satisfied by the bait alone anymore.
+
+**A second real bug, found by the same trace: a chaser catch sent the player to (0,0), not the
+room's entrance.** `createEmptyRoom` defaults `startPos` to `{x:0,y:0}`, and the only thing that
+normally overwrites it is placing a player directly into a room via the palette
+(`placeNewActor`'s own `if (isPlayer) startPos.x = ...`) — which never happens here, since the
+player is placed once in Room 1 and only ever *arrives* in Room 2 via the door. Left at (0,0), a
+chaser catch (`resolveActorContact`'s own "teleport to `startPos`" respawn) sent the player to open
+space above the room's own ceiling line — confirmed directly by trace, a real, nonsensical respawn
+spot, not a death (lives remained). Fixed by setting `room2.startPos` explicitly to the door's own
+drop-off cell, matching what a hand-placed player would have set. Worth noting for any future
+multi-room sample where the player only ever *arrives* via a door rather than being placed by
+hand: `startPos` needs the same explicit treatment every time, not just here.
+
+**A third real finding: the Chaser's first placement (7 tiles past the toggle) made the dodge an
+almost-guaranteed catch, not a genuine race.** `NPC_MAX_SPEED` (160) closes a 7-tile gap in about
+1.4s, while a real measured run from the door to the toggle takes roughly 4.5-5s — so a chaser that
+close reaches the toggle's own airspace long before the player ever does. Confirmed by trace: every
+attempt at the post-flip diagonal climb got caught within ~150ms of crossing the toggle, every time,
+turning "a reactive dodge" into a foregone conclusion. Pulled back to col 37 (near the room's own
+right wall, roughly 20 tiles from the toggle) instead — closer to matching the player's own real
+run-up time, so the two arrive in the toggle's neighborhood at comparable moments and the dodge
+reads as a genuine close-run thing. Re-verified: a plain "hold right, never press up" pass now
+floats cleanly along the floor well past the toggle without an immediate catch — a legitimate
+"clean float-and-retry" outcome, not a near-certainty of failure.
+
+**The ceiling bounce itself was confirmed working correctly — a prior read of it as "not
+bouncing" was a test-and-input artifact, not an engine bug.** `resolveAxis`'s bouncy-reflection
+branch for a ceiling hit from below (`actor.vy < 0`) is not gated on `gravityOn()` — only the
+player-only "wall kick" bonus is — so the base restitution reflection fires in free-roam exactly
+like it does under gravity. A live-key trace that held "up" continuously through and past the
+bounce showed the player appearing to just slide along the ceiling's underside instead of
+rebounding — confirmed, via an isolated teleport-with-known-velocity test (after first discovering
+and fixing a mistake in that same test: it was checking a position before the room-transition
+animation, `ROOM_TRANSITION_MS = 420`, had actually cleared, so `tick()` was still frozen and
+nothing moved at all), that the raw reflection genuinely fires (`vy` flips from strongly negative to
+strongly positive on contact) — it's just that continuing to hold "up" through the bounce means the
+player's own `MOVE_ACCEL` thrust immediately out-accelerates the brief rebound back toward negative
+again, which is the correct, intuitive physics outcome of pushing into a surface rather than letting
+it carry you away from it. A kid has to actually let go of (or reverse) the climbing key at the
+bounce for the rebound to read as a rebound, which is exactly the "reactive, not autopilot" feel the
+whole chain is built around — not every input pattern should produce the same outcome.
+
+**A fourth real finding, downstream of the one above: a single goal tile at a hand-guessed landing
+spot was unreachable, the same knife-edge shape Worst Elevator's own goal placement already hit
+once.** Traced directly: holding right+up into the bounce, then releasing up and holding down to
+actually descend (rather than just hug the ceiling), produces a clean 45° dive from around the
+bounce point (col ~22.6) that crosses row 9 at column ~24.9 — nowhere near a single hand-placed
+target. Rather than refining the guess, the goal was widened into a whole row (`fillGravRect(board,
+23, 9, 29, 9, "goal", "none")`, columns 23-29) — the exact fix that worked for Worst Elevator's own
+goal placement, bracketing the traced crossing with real margin for a shallower or steeper dive.
+Deliberately placed at row 9, well above the floor's own resting height (row ~13, where a player who
+never bounces at all ends up floating once the pop washes out) — a goal planted at floor height
+would let the "never press up" float-along-the-floor outcome reach it too, trivializing the one
+route that's actually supposed to require the bounce; confirmed directly that it doesn't. The
+second bait-fix gem (above) was moved to sit inside this same row rather than at a separate column,
+so it's gathered naturally the moment a successful dive lands, not a second target to aim for.
+
+**Phase 2 checklist, each confirmed directly rather than assumed:**
+- **Spikes still hurt an airborne, non-grounded actor, not just a grounded one** — confirmed by a
+  sustained zero-g drift straight into a row-11 spike cell: `hazardCooldown` jumps from 0 to a real
+  positive value exactly on contact, the same reaction a grounded walk-in gets.
+- **The Chaser gets the same gravity-off event and pop as the player, not special-cased out** —
+  confirmed directly: the Chaser's own `vy` reads negative (upward) immediately after the flip, from
+  the same plain `actors.forEach` loop in `triggerFlip` that pops every actor in the room.
+- **The toggle is genuinely scoped to this room only** — confirmed directly: flipping gravity in
+  Room 2 leaves Room 1's own stored `gravityEnabled` untouched (`true` before and after), the
+  natural consequence of the "hot globals" per-room architecture, not something this patch had to
+  build — but worth confirming rather than trusting the architecture at face value, per this
+  project's own history of specced behavior not always being fully wired.
+
+**Deliberately embraced, not eliminated, per the brief's own framing**: a drift that floats along
+the floor and meets the Chaser, or one that climbs into the spike ring instead of the bounce, are
+both treated as fair, intended alternate outcomes — "sometimes a perfect ricochet, sometimes a
+spike, sometimes a clean float-and-retry" is the actual target, not a single guaranteed beat. No
+code or layout decision in this patch tries to make the ricochet the only reachable outcome.
+
+**Visuals**: a floor/ceiling texture pair (`GRAV_FLOOR_ART`, a warm earthy orange; `GRAV_CEIL_ART`,
+a cool blue) gives a kid a visceral "which way is down" cue before and after the flip, per the
+brief's own light ask — not the focus of this sample the way art was for the last two, just a small
+functional touch. The one bouncy ceiling segment (`GRAV_PANEL_ART`) is a visually loud yellow/orange
+outlier against the plain blue ceiling flanking it, continuing the established "look vs. consequence
+must be visually distinct" rule from Spin Cycle's own soap-chunk/suds-patch pairing and the v2.41
+caption-bar work.
+
+**No engine code changed beyond the one new constant** (`GRAVITY_OFF_POP_SPEED`, plus its one line
+in `triggerFlip` and its `constantsSource` export line) — every other piece (Button, spikes, the
+bouncy modifier, goal, collectible) is an existing, already-validated mechanic; this sample's whole
+contribution is the pop, the level content, and the string of real layout bugs the trace-and-fix
+pass above caught.
+
+Verified with Playwright across many focused passes rather than one broad one, matching the room's
+own "light verification burden" framing: the bouncyCooldown runaway found and fixed; the duplicate
+player placement (room 1 left with zero actors) found and fixed; the row-13 spike layout blocking
+the only walking path found and fixed (moved to row 11, confirmed by trace that a standing actor's
+own height never reaches it while grounded); the premature full-collection win found and fixed; the
+(0,0) chaser-catch respawn found and fixed; the too-close Chaser found and fixed with a re-traced
+"clean float, no immediate catch" control case; the isolated ceiling-bounce reflection confirmed
+working (after finding and fixing a room-transition-timing mistake in the test itself); the
+widened-goal-row dive confirmed landing a win; spikes-hurt-while-airborne, chaser-pop, and
+per-room-scoping each confirmed directly; the full 8-sample regression sweep (all prior samples plus
+this one) and a dedicated export test (door transition, toggle flip, both confirmed working in a
+freshly exported standalone game) all run error-free; and a final debug-hook-free sanity pass
+(`grep -n "toyDebug" index.html` returning nothing) confirmed clean.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

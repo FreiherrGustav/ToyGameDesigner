@@ -1001,6 +1001,16 @@
   const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
+  // "The Gravity Switcheroo": new behavior, not a discovered existing one — physically, an actor
+  // standing still has zero vertical velocity, and simply removing a downward force from zero
+  // produces zero motion, not an upward drift. Left alone, gravity flipping off would read as
+  // "suddenly frozen in place," not "weightless." This is the deliberate fix: a one-time upward
+  // impulse applied to every actor in the room at the instant gravity turns OFF (never on the way
+  // back on — gravity resuming already supplies its own downward motion from the first tick).
+  // Additive on top of whatever vy an actor already has (a falling actor's pop just softens the
+  // fall; a standing actor's pop is the whole story), the same "preserve existing momentum, don't
+  // override it" rule horizontal drift already follows elsewhere in this file.
+  const GRAVITY_OFF_POP_SPEED = 420;
   const DIG_DURATION_MS = 900;     // sustained contact needed to erode a diggable wall through
   const CANNON_LAUNCH_SPEED = 700; // stronger than a bouncy launch — a fixed-direction override reads as "shot", not "bounced harder"
   // Long enough to cover a full 45°-launch arc (rise ~340ms, fall ~340ms at this speed/gravity)
@@ -3436,6 +3446,251 @@
     ctx.beginPath(); ctx.arc(12, 12, 1.6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#37474f";
     ctx.fillRect(14, 4, 5, 5);
+  }
+
+  // "The Gravity Switcheroo" — a small, single-mechanic-chain showcase, deliberately the opposite
+  // scale from The Catapult Factory: one gag, traced carefully, not a sprawling multi-room puzzle.
+  // Still built under the same two-phase process, because this still chains a multi-link
+  // trajectory (run → flip → diagonal drift → maybe a ceiling bounce → maybe the goal) — exactly
+  // the category of thing this project's own history (Worst Elevator, Spin Cycle, Catapult
+  // Factory) has repeatedly found impossible to get right by hand-deriving instead of tracing.
+  //
+  // Naming check, done before building rather than assumed: "switch" was retired project-wide in
+  // v2.37 in favor of Button (see that section above) — the gravity-toggle piece placed here is an
+  // UNCOLORED `pushbutton` (PUSH_BUTTON_GEOMETRY), which still does exactly its original v2.2 job
+  // for an uncolored touch (flip the room's own `gravityEnabled`), per `triggerFlip`'s own existing
+  // branch. Nothing new needed there — just confirming the live terminology before placing it.
+  //
+  // The one genuinely new behavior this level needed, flagged as new rather than discovered: a
+  // "weightlessness pop." As specced, the player (and anything else in the room) would go
+  // perfectly weightless FROM WHATEVER VELOCITY THEY ALREADY HAD the instant gravity turns off —
+  // standing still means vy is already 0, and removing a downward force from zero creates no
+  // upward motion from nothing. Confirmed this is really what the engine would do before writing
+  // any fix: gravity integrates vy directly (not through acceleration), so there is no "release of
+  // stored tension" to speak of, just whatever vy already existed a moment ago. Without a
+  // deliberate addition, flipping gravity off under a standing player reads as "suddenly frozen in
+  // place," not "weightless" — see GRAVITY_OFF_POP_SPEED's own top-of-file comment and
+  // `triggerFlip`'s own OFF-transition branch for the actual fix.
+  //
+  // A real Phase 2 finding, caught by tracing rather than assumed safe: the first version of that
+  // fix reused `bouncyCooldown` to exempt the pop from the free-roam speed cap, the same exemption
+  // every other impulse in this file (cannon, bomb-blast, a thrown object) already uses. Traced
+  // directly and found dangerous here specifically: every other use of that exemption fires on an
+  // actor with no steering input of its own (a thrown pushable never holds its own movement key),
+  // but THIS room's whole premise is the player holding a run key right through the flip — and
+  // holding a direction key during that exemption window is the exact v2.20.1 "recentlyLaunched +
+  // held key" runaway this file's own resolveAxis comments already warn about elsewhere (confirmed
+  // directly: vx exceeded 800px/s in one trace run). Fixed by dropping the exemption entirely — the
+  // ordinary combined-speed clamp still preserves the diagonal ANGLE (it scales both axes by the
+  // same factor), which is all a believable "kicked sideways and up" moment actually needs; see
+  // GRAVITY_OFF_POP_SPEED's own comment for the rest of this story.
+  //
+  // A second real finding, also from tracing rather than assuming the brief's own physics model:
+  // this engine has no "coast at reduced speed" state at all, in gravity OR free-roam — releasing
+  // a held key decays velocity to a dead stop within a couple hundred milliseconds
+  // (FRICTION_DECEL = 1800 is strong by design, the same constant that kills a spawner's own
+  // launch jitter almost instantly per that section above). So "different entry speed into the
+  // toggle" never comes from a kid choosing to walk in slowly and coast — releasing early just
+  // means arriving at a dead stop, or not arriving at all. The real source of variance, confirmed
+  // by trace, is DIRECTION CHANGES forced by the Chaser (a reactive dodge-and-recover right before
+  // the toggle) and whether a kid keeps holding up after the flip or lets go — not speed as such.
+  // The Chaser's placement below is load-bearing for this, not just thematic.
+  //
+  // Zero-gravity motion itself, once established, really is the simple case the brief describes —
+  // confirmed directly: `stepActor`'s free-roam branch integrates both axes through the same
+  // friction-only path, no curving force at all, so a held diagonal (up+right) settles into a
+  // dead-straight-line cruise. One real, measured number worth recording: holding both up and
+  // right simultaneously doesn't add their speeds — the free-roam cap is on the COMBINED 2D
+  // vector, so two equally-held perpendicular directions settle at exactly cap/√2 per axis
+  // (traced: 220/√2 ≈ 155.6 on each of vx/vy, not 220 on both) — a true 45° cruise, not a faster
+  // diagonal than either axis alone could reach.
+  const GRAV_FLOOR_ART = pat([
+    "MMMMMMMM",
+    "M......M",
+    "M.D..D.M",
+    "M......M",
+    "MMMMMMMM",
+    "M......M",
+    "M.D..D.M",
+    "MMMMMMMM"
+  ], { M: "#8d5524", D: "#c9792f" });
+  const GRAV_CEIL_ART = pat([
+    "MMMMMMMM",
+    "M.S..S.M",
+    "M......M",
+    "MMMMMMMM",
+    "M......M",
+    "M.S..S.M",
+    "M......M",
+    "MMMMMMMM"
+  ], { M: "#274472", S: "#7fc8f8" });
+  // The one ceiling segment that's actually bouncy — deliberately a visually loud outlier against
+  // the plain ceiling panels flanking it, so a kid can SEE which part of the ceiling is "the
+  // special one" before ever touching it, the same "look vs. consequence" clarity this project's
+  // caption-bar work (v2.41) and Spin Cycle's own soap-chunk/suds-patch pairing already established.
+  const GRAV_PANEL_ART = pat([
+    "YYYYYYYY",
+    "YKKYYKKY",
+    "YKYYYYKY",
+    "YYYYYYYY",
+    "YYYYYYYY",
+    "YKYYYYKY",
+    "YKKYYKKY",
+    "YYYYYYYY"
+  ], { Y: "#ffd166", K: "#e07a1f" });
+  const GRAV_SPIKE_ART = pat([
+    "........",
+    "........",
+    "........",
+    "........",
+    "K.K.K.K.",
+    "KKKKKKKK",
+    "MMMMMMMM",
+    "MMMMMMMM"
+  ], { K: "#9e9e9e", M: "#616161" });
+
+  function fillGravRect(b, x0, y0, x1, y1, geometry, modifier) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) b[y][x] = gameplayKey(geometry, modifier);
+  }
+  function skinGravRect(skinBoard, x0, y0, x1, y1, skinId) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) skinBoard[y][x] = skinId;
+  }
+
+  function buildGravitySwitcherooGame() {
+    groundTileDefs.gsFloor = { name: "grounded floor", frames: [GRAV_FLOOR_ART], frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("gsFloor");
+    groundTileDefs.gsCeiling = { name: "up-ceiling", frames: [GRAV_CEIL_ART], frameMs: 0, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("gsCeiling");
+    groundTileDefs.gsPanel = { name: "bouncy panel", frames: [GRAV_PANEL_ART], frameMs: 0, geometry: "solid", modifier: "bouncy" };
+    groundSlotIds.push("gsPanel");
+    groundTileDefs.gsSpike = { name: "spike", frames: [GRAV_SPIKE_ART], frameMs: 0, geometry: "solid", modifier: "hazard" };
+    groundSlotIds.push("gsSpike");
+
+    // ---- Room 1: a tiny entry room, nothing but a walk to the door ----
+    const room1 = createEmptyRoom("Through the Door");
+    room1.gravityEnabled = true; room1.wrapHEnabled = false; room1.wrapVEnabled = false; room1.cameraMode = "fixed";
+    rooms.push(room1);
+    activateRoom(room1.id);
+    fillGravRect(board, 0, 0, 23, 0, "solid", "none");
+    fillGravRect(board, 0, 14, 23, 14, "solid", "none");
+    fillGravRect(board, 0, 1, 0, 13, "solid", "none");
+    fillGravRect(board, 23, 1, 23, 13, "solid", "none");
+    board[13][18] = gameplayKey("door", "none");
+    placeExampleActor(PLAYER_DEF_ID, 2, 13);
+
+    // ---- Room 2: "The Gravity Switcheroo" itself — Follow camera, not for scale (the room's own
+    // IDEA is small and single-purpose) but because the diagonal drift this chain depends on
+    // genuinely needs real travel distance to read — confirmed by trace (see the comment above):
+    // a sustained up+right hold covers real horizontal ground while climbing, more than a single
+    // 24-wide Fixed screen comfortably holds once the ceiling panel and a landing spot both need
+    // to fit past it.
+    const room2 = createEmptyRoom("The Gravity Switcheroo");
+    room2.gravityEnabled = true; room2.wrapHEnabled = false; room2.wrapVEnabled = false; room2.cameraMode = "follow";
+    // A real Phase 2 finding: `createEmptyRoom` defaults `startPos` to (0,0), and the only thing
+    // that normally overwrites it is placing a player directly into the room via the UI
+    // (`placeNewActor`'s own `if (isPlayer) startPos.x = ...`) — which never happens here, since
+    // the player is placed once in Room 1 and only ever ARRIVES in Room 2 via the door. Left at
+    // (0,0), a chaser catch (resolveActorContact's own "teleport to startPos" respawn) sends the
+    // player to open space above the room's own ceiling line instead of back to the entrance —
+    // confirmed directly by trace: drifting into the Chaser mid-flight teleported the player to
+    // exactly (0,0), not a death (lives remained), just a nonsensical respawn spot. Set explicitly
+    // to the door's own drop-off cell, matching what a hand-placed player would have set.
+    room2.startPos = { x: 2 * TILE, y: 13 * TILE };
+    rooms.push(room2);
+    activateRoom(room2.id);
+
+    fillGravRect(board, 0, 14, 39, 14, "solid", "none"); // floor — "down"
+    skinGravRect(groundSkinBoard, 0, 14, 39, 14, "gsFloor");
+    fillGravRect(board, 0, 6, 16, 6, "solid", "none");   // ceiling — "up" — EXCEPT the panel below
+    skinGravRect(groundSkinBoard, 0, 6, 16, 6, "gsCeiling");
+    fillGravRect(board, 23, 6, 39, 6, "solid", "none");
+    skinGravRect(groundSkinBoard, 23, 6, 39, 6, "gsCeiling");
+    fillGravRect(board, 17, 6, 22, 6, "solid", "bouncy"); // the one bouncy ceiling panel
+    skinGravRect(groundSkinBoard, 17, 6, 22, 6, "gsPanel");
+    fillGravRect(board, 0, 7, 0, 13, "solid", "none");   // left wall
+    skinGravRect(groundSkinBoard, 0, 7, 0, 13, "gsCeiling");
+    fillGravRect(board, 39, 7, 39, 13, "solid", "none"); // right wall
+    skinGravRect(groundSkinBoard, 39, 7, 39, 13, "gsCeiling");
+
+    // Four spike tiles, hovering two rows above the walking floor (row 11, not row 13) — a real
+    // Phase 2 finding, not the first layout tried: placed directly IN the walking row, they just
+    // blocked the only path outright (confirmed by trace: holding right alone ran face-first into
+    // the first one and never reached the toggle at all, burning through every life before ever
+    // seeing it). A standing actor's own height (ACTOR_SIZE=22, well under one tile) never reaches
+    // row 11 while grounded on row 13, so the ground walk is now genuinely unobstructed — these
+    // only matter once the player goes airborne, which is exactly the point: a loose ring hanging
+    // over the collectible's own airspace, harmless to collect on foot, genuinely dangerous the
+    // moment the drift carries someone up into that band (see this level's own Phase 2 pass).
+    [7, 9, 13, 15].forEach(x => { board[11][x] = gameplayKey("solid", "hazard"); groundSkinBoard[11][x] = "gsSpike"; });
+    placeExampleActor("colGem", 11, 13);
+    // A real Phase 2 finding, not part of the original brief: `maybeRoundCompleteFromCollectibles`
+    // (project-wide, unconditional — see "goal and full collection both funnel through here") fires
+    // the instant the LAST live collectible is gathered, win or not. With only the one gem above,
+    // just grabbing it near the start — which happens naturally while walking right, before ever
+    // reaching the toggle — already drops the count to zero and ends the room on the spot. Confirmed
+    // directly by trace: every "hold right" run won at col ~12, gravity never once flipping, the
+    // whole switcheroo chain skipped entirely. The brief's own "single collectible" was clearly meant
+    // as a mid-run bait item, not the room's actual win condition (that's the goal tile below, per
+    // the brief's whole "ricochet into the goal" framing) — so a second gem, placed right at the
+    // real goal, keeps the count above zero until the chain's actual payoff is reached. Gathering it
+    // and touching the goal tile both still independently win (by design, per roundComplete's own
+    // comment), they just can no longer be satisfied by the center-room bait alone. Placed within
+    // the goal row itself (see that section below) rather than at a separate single column, so it's
+    // naturally gathered the moment the dive actually lands, not a second target to separately aim
+    // for.
+    placeExampleActor("colGem", 26, 9);
+
+    // The gravity toggle — an UNCOLORED Button (see this section's own top comment on confirming
+    // the current name before building). Close enough past the spike ring that grabbing the
+    // collectible and reaching the toggle is one continuous run, not two separate stops.
+    board[13][17] = gameplayKey(PUSH_BUTTON_GEOMETRY, "none");
+
+    // The Chaser — positioned to close in from the far side as the player runs right. A real Phase
+    // 2 finding moved this from its first-tried spot (col 24, only 7 tiles past the toggle): traced
+    // directly, NPC_MAX_SPEED (160) closes a 7-tile gap in about 1.4s, while a real measured run
+    // from the door to the toggle takes roughly 4.5-5s (door walk + the full run-up) — so a chaser
+    // that close reaches the toggle's own airspace long before the player ever does, turning "a
+    // reactive dodge" into "an almost-guaranteed catch right as you arrive," confirmed by trace (the
+    // very first attempt at the post-flip diagonal climb got caught within ~150ms of crossing,
+    // every time). Pulled back to col 37 (near the room's own right wall) instead — roughly 20
+    // tiles from the toggle, closer to matching the player's own real run-up time — so the two
+    // arrive in the toggle's neighborhood at comparable moments, making the dodge a genuine
+    // close-run thing rather than a foregone conclusion either way.
+    placeExampleActor(EXAMPLE_CAT_DEF_ID, 37, 13);
+
+    // A real Phase 2 finding, same shape as The World's Worst Elevator's own goal-row fix: a single
+    // goal tile at a hand-guessed landing spot was unreachable in practice. Traced directly (hold
+    // right+up into the bounce, then release up and hold down to actually descend rather than just
+    // hug the ceiling): the bounce point sits around col 22.6, and a down-held 45-degree dive from
+    // there crosses row 9 at col ~24.9, not anywhere near a single guessed column — overshooting any
+    // one-tile target the way Worst Elevator's own first attempt did. Widened to a whole row (cols
+    // 23-29) instead of refining the guess further, the same fix that worked there: this brackets
+    // the traced crossing with real margin on both sides for a shallower or steeper dive angle.
+    // Deliberately placed at row 9, well above the floor's own resting height (row ~13, where a
+    // player who never bounces at all ends up floating after the pop washes out) — a goal planted
+    // at floor height would let the "never press up" float-along-the-floor outcome reach it too,
+    // trivializing the one route that's actually supposed to require the bounce.
+    fillGravRect(board, 23, 9, 29, 9, "goal", "none");
+
+    doorLinks[roomCellKey(room1.id, 18, 13)] = { toRoomId: room2.id, toX: 2, toY: 13 };
+
+    activateRoom(room1.id);
+    return room1;
+  }
+  function drawGravitySwitcherooIcon(ctx) {
+    // A split circle, warm floor-orange on the bottom half and cool ceiling-blue on top, with a
+    // small white up/down swap-arrow through the middle — "flip which way is down," the whole
+    // pitch in one glance, same convention every other sample icon here follows.
+    ctx.save();
+    ctx.beginPath(); ctx.arc(12, 12, 10, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = "#274472"; ctx.fillRect(1, 1, 22, 11);
+    ctx.fillStyle = "#8d5524"; ctx.fillRect(1, 12, 22, 11);
+    ctx.restore();
+    ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(12, 12, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.moveTo(9, 10); ctx.lineTo(12, 5); ctx.lineTo(15, 10); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(9, 14); ctx.lineTo(12, 19); ctx.lineTo(15, 14); ctx.closePath(); ctx.fill();
   }
 
   // v2.19.3: a third example, contributed as a finished two-room dungeon-crawler build --
@@ -6086,6 +6341,25 @@
       gravityEnabled = !gravityEnabled;
       log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
       renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
+      // The weightlessness pop (see GRAVITY_OFF_POP_SPEED's own comment) — only on the OFF
+      // transition, and only ever the actors in THIS room's own `actors` array (the hot-globals
+      // pattern already scopes this correctly: a different room's own actors aren't even in this
+      // array right now, so there's nothing to accidentally reach across rooms here).
+      // Deliberately NOT exempted from the free-roam speed cap the way a thrown object's own
+      // impulse would be (reusing bouncyCooldown here was tried first and rejected — see the
+      // level's own CLAUDE.md writeup): a thrown pushable never has steering input of its own
+      // during that exemption window, but a PLAYER very much can, and very much will, since
+      // holding the run key right through the flip is the whole intended "carry momentum into
+      // the drift" moment. Confirmed directly: with the exemption in place, holding a direction
+      // key through the flip let MOVE_ACCEL keep adding to velocity completely unbounded for the
+      // rest of the exemption window (the exact v2.20.1 "held key during a recentlyLaunched
+      // window" runaway this file's own comments already warn about elsewhere) — observed vx
+      // past 800px/s in a direct trace. Letting the ordinary combined-speed clamp apply from the
+      // very next frame instead caps the magnitude while preserving the diagonal ANGLE (it scales
+      // vx/vy by the same factor), which is all "a real diagonal kick" actually needs.
+      if (!gravityEnabled) {
+        actors.forEach(a => { a.vy -= GRAVITY_OFF_POP_SPEED; });
+      }
     }
   }
 
@@ -8159,6 +8433,7 @@
     { name: "The World's Worst Elevator", builder: buildWorstElevatorGame, draw: drawWorstElevatorIcon },
     { name: "Spin Cycle", builder: buildSpinCycleGame, draw: drawSpinCycleIcon },
     { name: "The Catapult Factory", builder: buildCatapultFactoryGame, draw: drawCatapultFactoryIcon },
+    { name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
@@ -9078,6 +9353,7 @@
       `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION};`,
       `const BOUNCY_WALL_KICK = ${BOUNCY_WALL_KICK}, BOUNCY_WALL_LIFT = ${BOUNCY_WALL_LIFT};`,
       `const BOUNCY_LAUNCH_SPEED = ${BOUNCY_LAUNCH_SPEED}, HAZARD_KNOCKBACK_SPEED = ${HAZARD_KNOCKBACK_SPEED};`,
+      `const GRAVITY_OFF_POP_SPEED = ${GRAVITY_OFF_POP_SPEED};`,
       `const HAZARD_COOLDOWN_MS = ${HAZARD_COOLDOWN_MS}, DIG_DURATION_MS = ${DIG_DURATION_MS};`,
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
