@@ -5366,6 +5366,144 @@ custom sprite, confirmed by actually executing the generated source via `new Fun
 faithful local reimplementation of index.html's own `pat()`, since the tool itself never defines
 it) and checking the reproduced frame colors match exactly, in order.
 
+## Object-to-object interaction matrix: bomb chains, impact detonation, and a lot of corrected assumptions
+
+The physics-unification patch fixed object-to-*force* coverage (does X respond to wind/bounce/
+cannon/gravity). This is the other half: object-to-*object* — does one mechanism's effect become
+another mechanism's trigger. The request was a matrix (rows = active mechanisms, columns = what they
+could act on) with each cell marked ✓ (should already work), ? (genuinely unverified), or NEW
+(doesn't exist, worth adding), plus three named priorities: check magnet's target list first,
+add bomb chain reactions, add collision-triggered bomb detonation, and confirm in-flight objects keep
+obeying every force. **The single most useful finding is that the matrix itself was wrong in several
+places** — every ✓/? cell was checked directly (Playwright, not code-reading alone), and the
+corrections below matter as much as the two new features.
+
+**The "concrete gap, check first": magnet's pull list was ALREADY fixed — no code change.** The
+request's prime suspect was `radialForceAccelFor`'s `magnetable` still being a separately maintained
+list. It isn't: it already reads `isForceSusceptible(temperament) || temperament === "collectible" ||
+isSteeringCharacter(temperament)` (the NPC-physics patch did this). Confirmed by test: a magnet
+pulls a hazard ball, a dropped bomb actor, and a wandering NPC. **Correction to the matrix's "Magnet
+→ NPC: probably not — would fight steering AI":** it does pull NPCs, and the `displacedCooldown`
+recovery window is exactly the mechanism that resolves the "fights steering" worry — but only when the
+pull is strong: `NPC_DISPLACEMENT_FORCE_THRESHOLD` (400px/s²) means a wanderer more than ~2.5 tiles
+from a magnet (force ~200 at that range) is NOT displaced and its own steering simply wins. A first
+test at ~3 tiles read "magnet doesn't pull NPCs" for exactly this reason; the real behavior is "pulls
+when close enough to beat steering," verified at point-blank range with the wander heading pinned the
+opposite way (peak vx toward the magnet 160, steering suppressed true).
+
+**Magnet → Player: deliberately NOT implemented, flagged for the user's own decision.** The matrix
+marked it "? (dangerous, delightful if yes)," but "a magnet attracts objects, not the player" is a
+long-standing, repeatedly stated boundary (see v2.21's Magnet bullet: "never the player"). Reversing
+it is a design-principle call, not a gap fix — raise it with the user before changing `magnetable`.
+
+**NEW: bomb chain reactions.** `detonateBombAt`'s cell loop now treats a *neighboring bomb tile*
+(`isBombGeometry`) as a chain trigger — `cancelBombArm` + a recursive `detonateBombAt` — instead of
+leaving it untouched like any other non-solid neighbor. Naturally bounded: the bomb's own cell is
+first in the `cells` array and is nulled before any neighbor's recursive call could see it again.
+The actor loop gets the actor-world twin: a dropped/thrown bomb2 actor (`isCarryBombKind`) inside the
+blast radius calls `detonateCarriedBombAt` instead of taking ordinary knockback. Two supporting
+changes: the actor loop iterates `targetActors.slice()` (a chained detonation can mutate the array
+mid-iteration) and skips any actor with `detonating` set; and `detonateCarriedBombAt` has a
+`bombActor.detonating` re-entrancy guard — set *before* its own `detonateBombAt` call — which
+centralizes double-detonation protection for every path that can reach it (fuse timeout, chain
+reaction, lethal contact) rather than each call site needing its own check. Blast radius is unchanged
+(cardinal-adjacent, radius 1): a bomb two cells away is NOT touched (tested).
+
+**NEW: collision-triggered bomb detonation.** In `resolveAxis`'s existing bomb/cannon trigger block, a
+physics object or steering NPC (`isPhysicsObject || isSteeringNPC`) that hits a bomb *tile* at
+`speedAtImpact >= BOMB_IMPACT_DETONATE_SPEED` (240, just above the player's 220 run cap — the same
+margin `GRAVITY_WELL_CAPTURE_SPEED` uses) detonates it immediately. `speedAtImpact` is captured
+*before* the axis branch zeroes/reflects velocity (a snapshot taken afterward would always read
+~0 or the reflected value). The player's own touch is unchanged — it still arms a fuse regardless of
+speed — and an ordinary slow shove into a bomb still just stops at its edge (tested both ways).
+Hazard balls bounce off every wall unconditionally, but the detonation check is independent of the
+bounce, so a fast hazard ball both reflects *and* detonates.
+
+**Large Stone's missing sticky exemption — fixed.** The matrix expected Sticky → Large Stone to be
+"exempt (heavy)"; it wasn't, because `isStuckToSticky`/`isOnStickyGround` are fully kind-agnostic and
+sticky had never been gated per-kind. `isLargeStone` is now computed earlier in `stepActor` and gates
+both `touchingSticky` and `stickyMoveMult`. Tested with a control: a Large Stone pressed into a
+sticky wall keeps falling (270px), while an ordinary crate in the identical setup is frozen (0px).
+
+**Lethal row — three matrix ✓s were false, because no such reactions existed.** An exhaustive grep
+found `triggerLethalHazard` is player-only (three call sites) and `checkPhysicsObjectLethalContacts`
+was `PUSHABLE_KIND`-only. So NPC, hazard ball, and bomb-vs-lethal had *no* reaction at all.
+Resolved as: hazard ball → destroyed (same as a crate); bomb actor → **detonates** via
+`detonateCarriedBombAt` rather than silently vanishing (the matrix's own open question — detonating
+is the more game-like answer); NPC → new `checkNpcLethalContacts`/`triggerNpcLethalReset`, sent back to
+its own `spawnX`/`spawnY` (never destroyed), mirroring `triggerGravityWellCapture`'s NPC branch
+exactly. `destroyPhysicsObjectInLethal`'s log text is now generic ("Destroyed by lethal!") since it
+no longer only ever means a crate. Still deliberately excluded: Large Stone (immune by design),
+magnet/trampoline/cannon2 (unasked either way — left as an acknowledged gap, not silently widened),
+and **collectible** — destroying the last live collectible would trigger a full-collection win via
+`maybeRoundCompleteFromCollectibles`, the same side-effect risk already flagged for the gravity well.
+
+**Plate vs Button: the matrix's single "Plate/Button" row was really two different functions.**
+`updatePressurePlates` has *zero* temperament filtering — every overlapping actor triggers it, so
+Plate already works for Large Stone, bomb actors, hazard balls, collectibles, everything (the matrix's
+"not currently"/"n/a" labels for Plate were wrong). Button (`checkPhysicsObjectSwitchContacts`) was
+`CARRYABLE_KINDS`-only, so a hazard ball or NPC resting on one did nothing. Its call-site gate in
+`stepActor` is now `PHYSICS_OBJECT_KINDS.includes(t) || isSteeringCharacter(t)` — deliberately **not**
+`isForceSusceptible`, which would have *removed* Large Stone (already working) from Button's scope.
+The shared call site was split in two so **Goal's gate stays `CARRYABLE_KINDS`-only** — a wandering NPC
+winning by stumbling onto a goal tile was never the ask (the Catapult Factory's premise depends on it).
+
+**Collectibles are fully inert — the matrix's Gravity → Collectible "✓" and the whole Collectible
+column's "?"s collapse to "n/a".** `stepActor`'s `stationary`/`collectible` branch applies no
+gravity, wind, sticky, bounce, or magnet — it only decays residual velocity. A collectible placed
+mid-air under gravity does not fall (tested: 0.0px over 800ms). `magnetable`'s `|| temperament ===
+"collectible"` is therefore dead code (already noted in the unification section). Making collectibles
+physical is a real design change with win-condition consequences, not a bug fix; not attempted.
+
+**Deliberately preserved, flagged: a bomb blast still knocks back Large Stone.** The matrix expected
+"exempt (heavy)," but `detonateBombAt`'s knockback loop has never type-filtered anything, with an
+explicit existing comment ("a bomb doesn't discriminate between the player and an NPC"). A point-blank
+explosion moving even a heavy object reads as plausible (unlike a gentle magnet or steady wind), so
+this was left as-is rather than silently resolved either way.
+
+**In-flight objects keep obeying every force — confirmed, no bug.** A cannon-launched crate flying
+through a south-wind corridor in free-roam (where wind is the *only* possible source of southward
+motion) drifted ~300px south past its own launch apex. Forces are integrated every frame regardless
+of how an object got its velocity.
+
+**Other matrix cells confirmed directly:** Sticky clings a pushable, hazard ball, bomb actor, and NPC
+alike (all frozen, 0.0px) — only Large Stone is exempt; Button/Large Stone already worked.
+
+**Test-authoring traps hit (all the same shape this file has recorded before):** (1) `enterPlayMode`
+runs `resetActorsToSpawn`, which zeroes any velocity set *before* Play — set test velocity *after*
+entering Play and waiting out the READY pause. (2) A non-player actor's velocity is clamped to
+`NPC_MAX_SPEED` (160) the next frame unless `bouncyCooldown` is also set — a raw `vx = 500` test
+silently became 160 and read as "below the detonation threshold." (3) `placeActorDef`-style
+center-based placement left the actor ~5px short of the wall; use explicit `x`/`y` so the AABB already
+overlaps the target and the first frame's `resolveAxis` snaps it flush (friction otherwise eats a
+non-steering actor's velocity within ~3px). (4) A test actor def with `art: null` crashes
+`drawArtScaled` on the first render, which halts the whole `frame()` loop — every actor in the scene
+then looks frozen, producing false "doesn't move/doesn't react" failures for *unrelated* actors; give
+test defs a real 64-entry art array. (5) A wanderer's heading is random every 0.8-1.7s, so net
+displacement over a long window is noise — pin the heading and sample peak velocity instead.
+(6) A cannon fires a fixed direction; approaching from the side it fires toward self-collides and
+zeroes (see Catapult Factory) — approach from the opposite side. (7) A free-roam launch decays under
+friction within ~250ms, so a wind corridor must cover the *whole area the launch arcs through*, not
+just the launch row. (8) Exporting within ~220ms of an actor being destroyed in Build mode bakes
+`destroyed: true` into the export (no timer ever removes it, and every lethal check early-returns on
+the flag) — a real but very narrow edge (it pre-dates this patch for crates); wait out the fade
+before exporting in a test.
+
+**Export pipeline**: `BOMB_IMPACT_DETONATE_SPEED` got a `constantsSource` line;
+`checkNpcLethalContacts`/`triggerNpcLethalReset` were added to `runtimeFunctions`.
+`detonateCarriedBombAt`/`detonateBombAt`/`checkPhysicsObjectLethalContacts` were already shared.
+
+Verified with Playwright (14 + 26 + 8 targeted checks): tile chain (adjacent bomb detonates, a bomb
+two cells away doesn't), actor-in-blast chain (marked `detonating` immediately, removed after the blast
+animation), double-trigger re-entrancy (removed exactly once), fast hazard ball detonates a bomb tile
+while a slow shoved crate doesn't, the sticky/Large Stone pair with its control, Button vs hazard
+ball/NPC/Large Stone, Lethal vs hazard ball/bomb actor/NPC, magnet vs hazard ball/NPC/bomb actor,
+in-flight wind redirection, sticky vs hazard ball/bomb/NPC, collectible-doesn't-fall; the full
+8-sample sweep (each loaded through the real samples modal, played ~3s held-right, zero errors); an
+export of The Catapult Factory played error-free; and a functional export test (a hazard ball in
+lethal is destroyed, adjacent bombs chain-detonate, in the exported file itself). The debug hook was
+stripped (`grep -n "toyDebug" index.html` returns nothing).
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

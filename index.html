@@ -1130,6 +1130,17 @@
   const CANNON_COOLDOWN_MS = 800;
   const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
   const BOMB_BLAST_KNOCKBACK_SPEED = 480;
+  // Object-to-object interaction matrix: "a launched or thrown object colliding with a bomb at
+  // real velocity should detonate it on impact" — direct request, the companion to the chain-
+  // reaction below (detonate, don't just knock aside). A PLAYER'S own touch keeps its existing
+  // arm-a-fuse landmine feel completely unchanged regardless of speed (see resolveAxis's own
+  // isBombGeometry branch) — this threshold only gates the NEW non-player case. Set just above
+  // MAX_SPEED (220, the player's own ordinary run cap, same margin GRAVITY_WELL_CAPTURE_SPEED
+  // already uses for an identical reason) so a crate merely being SHOVED into a bomb (which can
+  // never exceed walking speed, since a pushable has zero self-driven accel of its own) still just
+  // stops at its edge like before; only a real throw (THROW_MIN_SPEED=260 and up) or a cannon shot
+  // (CANNON_LAUNCH_SPEED=700) clears it.
+  const BOMB_IMPACT_DETONATE_SPEED = 240;
   const WARP_COOLDOWN_MS = 400;
   // v2.23: how long Barrier's slide animation takes to fully open/close — see
   // updateChannelTransitions()/drawGameplayTile's own barrier branch. Purely visual; the tile's
@@ -5952,6 +5963,11 @@
         // underside, stops you like any other solid wall and nothing more. Captured before the
         // y-branch below resets vy, since that's the only place the original direction survives.
         const steppedOnTop = axis === "y" && actor.vy > 0;
+        // Captured BEFORE either axis branch below mutates vx/vy (zeroing or reflecting them) —
+        // the one snapshot of "how fast was this actor actually moving at the moment of this
+        // collision," reused below to gate the new impact-detonates-a-bomb reaction on real speed
+        // rather than an ordinary push/walk bump.
+        const speedAtImpact = Math.hypot(actor.vx, actor.vy);
         // Direct feedback: a plain bouncy tile had "no vector quality" — a wall bounce only ever
         // reflected whatever horizontal speed you already had (near nothing, jumping straight up
         // between two close bouncy walls), and there was no way to actively pump more height/reach
@@ -6016,6 +6032,17 @@
         // chaser/fleer) shoved or bumped into a cannon now fires it too, same isSteeringCharacter
         // widening as the bounce branch above.
         if (isBombGeometry(geometry) && actor.isPlayer) triggerBombArm(cx, cy);
+        // Object-to-object interaction matrix: "a launched or thrown object colliding with a bomb
+        // at real velocity should detonate it on impact" — a cannon-fired crate or a hard player
+        // throw hitting a bomb TILE blows it immediately, rather than the player-only touch-arm
+        // above. Gated on BOMB_IMPACT_DETONATE_SPEED (see its own comment) so an ordinary shoved
+        // crate — which can never exceed walking speed — still just stops at the bomb's edge like
+        // before; only a real throw or cannon shot clears it. Same isForceSusceptible/
+        // isSteeringCharacter population every other widened reaction in this block already uses.
+        else if (isBombGeometry(geometry) && (isPhysicsObject || isSteeringNPC) && speedAtImpact >= BOMB_IMPACT_DETONATE_SPEED) {
+          cancelBombArm(roomCellKey(currentRoomId, cx, cy));
+          detonateBombAt(currentRoomId, cx, cy);
+        }
         else if (CANNON_DIRECTIONS[geometry] && (actor.isPlayer || (def && isForceSusceptible(def.temperament)) || (def && isSteeringCharacter(def.temperament)))) triggerCannon(actor, geometry, cx, cy);
         // v2.20.1: THE actual root cause of the reported "warps through a bouncy floor" bug — worse
         // than the checkPlayerTileContacts overlap issue fixed above, and the one that was really
@@ -6630,6 +6657,18 @@
       const tile = cellKey ? GAMEPLAY_TILE_DEFS[cellKey] : null;
       if (!tile) return;
       const isBombItself = x === gx && y === gy;
+      // Object-to-object interaction matrix: "a bomb's blast should detonate any other bomb
+      // caught in its radius" — the single most universally-expected "bomb" behavior in any game
+      // that has them. A neighboring bomb TILE chain-detonates via a plain recursive call rather
+      // than being treated as just another solid-neighbor clear; this is naturally bounded, never
+      // infinite, since the bomb's OWN cell (processed first in `cells`, per this array's own
+      // literal order) is already nulled out by the time any neighbor's recursive call could ever
+      // see it again as ITS OWN neighbor.
+      if (!isBombItself && isBombGeometry(tile.geometry)) {
+        cancelBombArm(roomCellKey(roomId, x, y));
+        detonateBombAt(roomId, x, y);
+        return;
+      }
       if (!isBombItself && tile.geometry !== "solid") return;
       // v2.27: the bomb's OWN cell shows EXPLOSION_ART instead of scaling up its own icon (see the
       // tile-anim render loop's art-override); a cleared solid NEIGHBOR keeps its old look (the
@@ -6640,10 +6679,27 @@
 
     // Explicit exception to "actors only ever react to geometry, never modifiers": a bomb
     // doesn't discriminate between the player and an NPC caught in its blast.
-    targetActors.forEach(actor => {
+    // Copy the array before iterating: a caught bomb actor's own chain-detonation (below) can
+    // call detonateBombAt again, which can splice actors out of this very array (an already-
+    // detonated bomb's delayed removeActorById, or another caught bomb one cell further away) —
+    // iterating a live reference mid-mutation would skip or double-visit entries.
+    targetActors.slice().forEach(actor => {
+      // An actor already mid-detonation (caught by a second, overlapping blast this same pass —
+      // the chain reaction's own recursive detonateBombAt call can revisit a cell that includes
+      // the very bomb actor it was just called FOR) has nothing left to react to; skip it
+      // entirely rather than also applying a pointless knockback to something already exploding.
+      if (actor.detonating) return;
       const acx = Math.floor((actor.x + actor.w / 2) / TILE);
       const acy = Math.floor((actor.y + actor.h / 2) / TILE);
       if (Math.abs(acx - gx) + Math.abs(acy - gy) > 1) return;
+      // Object-to-object interaction matrix: a dropped/thrown bomb2 actor caught in another
+      // bomb's blast radius chain-detonates instead of just being knocked aside like any other
+      // physics object — the actor-world equivalent of the tile-to-tile branch above.
+      const actorDef = actorDefs[actor.defId];
+      if (actorDef && isCarryBombKind(actorDef.temperament)) {
+        detonateCarriedBombAt(roomId, actor.id);
+        return;
+      }
       const dx = (actor.x + actor.w / 2) - (gx * TILE + TILE / 2);
       const dy = (actor.y + actor.h / 2) - (gy * TILE + TILE / 2);
       const dd = Math.hypot(dx, dy) || 1;
@@ -6860,30 +6916,62 @@
   }
 
   // v2.34: direct request — "Crates should be destroyed when they touch lethal (lava, fire,
-  // etc). Not all objects should, though." Scoped to PUSHABLE_KIND specifically (a wooden crate
-  // burning/sinking is intuitive) rather than every CARRYABLE_KIND — magnet/trampoline/bomb2/
-  // cannon2 and the new Large Stone are all left untouched by lethal, Large Stone deliberately so
-  // (it's meant to survive sitting in lava — see LARGE_STONE_KIND's own comment, "build a bridge
-  // across the lava by throwing them"). Only catches a NON-blocking lethal tile (none:lethal —
-  // lava/fire, the pool-you-fall-into case the request names): a blocking lethal (solid:lethal,
-  // a spike trap) already stops a crate at its edge via ordinary collision, the same reason
-  // checkPlayerTileContacts' own lethal/hazard/bouncy reactions are gated off blocking geometry
-  // too — there's no cell to actually overlap, so a thrown crate bonking into a spike WALL merely
-  // bumps it like any other wall, it doesn't currently get destroyed by that contact; flag this
-  // scope boundary to the user before trying to extend it to blocking lethal too.
-  // `destroyed` guards against re-firing every frame during the ~220ms popVanish window.
+  // etc). Not all objects should, though." Originally scoped to PUSHABLE_KIND specifically.
+  // Object-to-object interaction matrix: the matrix's own Lethal row assumed a hazard ball and a
+  // bomb both already reacted to lethal — investigation (an exhaustive grep for any lethal-
+  // reaction code path) found NEITHER did, a real, previously-undocumented gap, not something
+  // this patch is narrowing. Widened to also cover HAZARD_BALL_KIND (destroyed, same as a crate —
+  // "a hazard ball sinking in lava" is exactly as intuitive as a crate doing the same) and any
+  // isCarryBombKind actor (detonated via detonateCarriedBombAt instead of silently vanishing —
+  // the matrix's own question, "does a lethal tile detonate a bomb that touches it, or just
+  // destroy it silently," is answered here: detonates, matching "a bomb explodes when destroyed"
+  // as the more game-like reading over a quiet disappearance). magnet/trampoline/cannon2 and the
+  // new Large Stone are still left untouched by lethal, Large Stone deliberately so (it's meant to
+  // survive sitting in lava — see LARGE_STONE_KIND's own comment, "build a bridge across the lava
+  // by throwing them"); magnet/trampoline/cannon2 are left as an acknowledged, unasked-for-either-
+  // way gap rather than silently widened further. Only catches a NON-blocking lethal tile
+  // (none:lethal — lava/fire, the pool-you-fall-into case the request names): a blocking lethal
+  // (solid:lethal, a spike trap) already stops an object at its edge via ordinary collision, the
+  // same reason checkPlayerTileContacts' own lethal/hazard/bouncy reactions are gated off blocking
+  // geometry too — there's no cell to actually overlap, so a thrown crate bonking into a spike
+  // WALL merely bumps it like any other wall; flag this scope boundary before extending it to
+  // blocking lethal too. `destroyed` guards against re-firing every frame during the ~220ms
+  // popVanish window.
   function checkPhysicsObjectLethalContacts(actor) {
     if (actor.destroyed) return;
     for (const { cx, cy } of overlappedCells(actor)) {
-      if (modifierAt(cx, cy) === "lethal") { destroyPhysicsObjectInLethal(actor); return; }
+      if (modifierAt(cx, cy) === "lethal") {
+        const def = actorDefs[actor.defId];
+        if (def && isCarryBombKind(def.temperament)) { detonateCarriedBombAt(currentRoomId, actor.id); return; }
+        destroyPhysicsObjectInLethal(actor);
+        return;
+      }
     }
   }
   function destroyPhysicsObjectInLethal(actor) {
     actor.destroyed = true;
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
-    log("The crate is destroyed!");
+    log("Destroyed by lethal!");
     setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
+  }
+  // Object-to-object interaction matrix: a NEW reaction — the matrix's own Lethal row marked
+  // NPC "✓" but no such reaction existed anywhere in the code before this patch (confirmed by
+  // grep; triggerLethalHazard is player-only, called from exactly three sites, none of them
+  // reachable for a non-player actor). Mirrors triggerGravityWellCapture's own established
+  // "a steering character is sent back to its own spawn point, never destroyed" convention
+  // exactly, rather than inventing a second shape for the same idea.
+  function checkNpcLethalContacts(actor) {
+    for (const { cx, cy } of overlappedCells(actor)) {
+      if (modifierAt(cx, cy) === "lethal") { triggerNpcLethalReset(actor); return; }
+    }
+  }
+  function triggerNpcLethalReset(actor) {
+    actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
+    actor.displacedCooldown = 0;
+    playActorSound(actor, "splat");
+    playRecipe(actor, "popVanish");
+    log("Caught in lethal — sent back to its spawn point!");
   }
 
   // "Gravity Well: a black hole" — this is the NON-player half of the capture reaction (see
@@ -7240,7 +7328,13 @@
     const isHot = roomId === currentRoomId;
     const targetActors = isHot ? actors : room.actors;
     const bombActor = targetActors.find(a => a.id === actorId);
-    if (!bombActor) return; // already gone — undo, New Project, room reset, etc.
+    // Object-to-object interaction matrix: a chain reaction (a blast catching a second armed
+    // bomb actor) and a lethal-tile detonation can now both reach this same function from a
+    // second direction while the first detonation is still mid-flight (its own removeActorById
+    // delayed by RECIPES.bombBlast.duration) — this guard is what makes every call site safe to
+    // call "just in case" without each one needing its own double-detonation check.
+    if (!bombActor || bombActor.detonating) return; // already gone, or already going off
+    bombActor.detonating = true;
     if (isHot) {
       const player = actors.find(a => a.isPlayer);
       if (player && player.carrying === actorId) player.carrying = null; // "explodes in your hands"
@@ -7298,6 +7392,13 @@
       if (Math.abs(actor.vy) < 1) actor.vy = 0;
     } else {
       const inGravity = gravityOn();
+      // Large Stone is too heavy for any optional force to budge — wind/fan already had this
+      // exemption (just below), and the object-to-object interaction-matrix pass found sticky was
+      // the one force that had been left out of the same "heavy" boundary purely because it never
+      // went through a per-kind allow-list to begin with (isStuckToSticky/isOnStickyGround are
+      // both fully kind-agnostic, confirmed by reading them directly) — computed up here, before
+      // the sticky checks below, instead of its own later spot, so both can read it.
+      const isLargeStone = temperament === LARGE_STONE_KIND;
       // v2.20.3: sticky is a timed CLING, not indefinite climbing — touching a sticky wall freezes
       // the actor in place (no movement input at all, see the input section below) for
       // STICKY_CLING_MS, then automatically starts letting go (the existing gradual release ramp)
@@ -7308,13 +7409,13 @@
       // so a NEW touch (a different wall, or the same one after fully letting go) gets its own
       // full cling, but sliding down alongside the same continuous contact past the cap doesn't
       // re-freeze every frame.
-      const touchingSticky = inGravity && isStuckToSticky(actor);
+      const touchingSticky = inGravity && !isLargeStone && isStuckToSticky(actor);
       if (touchingSticky) actor.stickyClingT += dt * 1000; else actor.stickyClingT = 0;
       const stuck = touchingSticky && actor.stickyClingT <= STICKY_CLING_MS;
       // v2.20: how much a kid's own movement input is damped while standing in/on sticky ground —
       // see isOnStickyGround/STICKY_MOVE_MULT. Deliberately doesn't touch wind/fan/radial forces
       // below — mud slows YOUR OWN push, not a conveyor or a fan blowing through it.
-      const stickyMoveMult = isOnStickyGround(actor) ? STICKY_MOVE_MULT : 1;
+      const stickyMoveMult = (!isLargeStone && isOnStickyGround(actor)) ? STICKY_MOVE_MULT : 1;
       // Wind/conveyor (and, v2.19, a fan's projected version of the same force, and a magnet/
       // gravity well's radial pull) fold into the same ax/ay that player input and steering feed
       // into applyAxisFriction, rather than adding straight to velocity beforehand — friction
@@ -7323,12 +7424,9 @@
       // carry a standing-still player" bug that shape produced). Folding it into ax/ay first means
       // friction sees these as real, ongoing thrust and stops opposing them, same as it already
       // does for a held movement key.
-      // Large Stone is too heavy for wind/fan to budge — the one weight-class exemption from every
-      // optional force (see isForceSusceptible's own comment, "Unify physics-object interactions").
       // Unlike bounce/cannon/magnet, wind and fan never had a per-kind allow-list at all — they
       // already applied to literally every other actor by position alone — so this is a narrow
       // subtraction for the one exception, not a new default-in check.
-      const isLargeStone = temperament === LARGE_STONE_KIND;
       const windAccel = isLargeStone ? { ax: 0, ay: 0 } : windAccelFor(actor);
       checkWhooshSurface(actor, windAccel);
       const radialAccel = radialForceAccelFor(actor, player);
@@ -7515,11 +7613,30 @@
       // same place the player's own cannon-fire moved to in v2.21. v2.31 adds the one genuinely
       // non-blocking tile reaction a thrown object can trigger: flipping a switch it flies into.
       const def = actorDefs[actor.defId];
-      if (def && CARRYABLE_KINDS.includes(def.temperament)) { checkPhysicsObjectSwitchContacts(actor); checkPhysicsObjectGoalContacts(actor); }
-      // v2.34: "crates should be destroyed when they touch lethal" — PUSHABLE_KIND only, see
-      // checkPhysicsObjectLethalContacts' own comment on why the other carryables (and Large
-      // Stone specifically) are deliberately excluded.
-      if (def && def.temperament === PUSHABLE_KIND) checkPhysicsObjectLethalContacts(actor);
+      const temperament = def ? def.temperament : null;
+      // Object-to-object interaction matrix: Button's own gate was still CARRYABLE_KINDS-only,
+      // narrower than every other widened reaction in this file (bounce/cannon/magnet/wind all
+      // already reach a hazard ball and a steering NPC) — this is the actual fix for "Button
+      // ignores a thrown hazard ball" and "a chaser can't trip a Button." Deliberately
+      // PHYSICS_OBJECT_KINDS-or-steering here, NOT isForceSusceptible — that gate exists
+      // specifically to carve Large Stone OUT of optional forces, and a Large Stone resting on a
+      // Button should absolutely trip it (confirmed already working before this patch, since
+      // Large Stone was already in CARRYABLE_KINDS — this widening only ADDS hazard ball/NPC, it
+      // never narrows anything). Goal's own gate stays CARRYABLE_KINDS-only and untouched — see
+      // checkPhysicsObjectGoalContacts' own comment: a wandering NPC winning the game by its own
+      // steering was never the ask (the Catapult Factory sample's whole premise depends on this).
+      if (temperament && (PHYSICS_OBJECT_KINDS.includes(temperament) || isSteeringCharacter(temperament))) checkPhysicsObjectSwitchContacts(actor);
+      if (def && CARRYABLE_KINDS.includes(temperament)) checkPhysicsObjectGoalContacts(actor);
+      // v2.34: "crates should be destroyed when they touch lethal" — originally PUSHABLE_KIND
+      // only. Object-to-object interaction matrix: investigation found NO lethal reaction existed
+      // anywhere for a hazard ball, a bomb actor, or an NPC despite several matrix cells assuming
+      // one did — widened here rather than left as a silent gap. See
+      // checkPhysicsObjectLethalContacts' own comment for the full per-kind breakdown (crate/
+      // hazard ball destroyed, a bomb detonates instead of silently vanishing, an NPC is sent back
+      // to its own spawn point rather than destroyed) and why Large Stone/collectible are still
+      // deliberately excluded.
+      if (temperament === PUSHABLE_KIND || temperament === HAZARD_BALL_KIND || isCarryBombKind(temperament)) checkPhysicsObjectLethalContacts(actor);
+      if (isSteeringCharacter(temperament)) checkNpcLethalContacts(actor);
       // "Gravity Well: a black hole" — see checkGravityWellContacts' own comment for its scope
       // (physics objects + steering characters, same population the well's own pull already
       // reaches) and why it's called unconditionally here rather than gated like the three checks
@@ -9777,7 +9894,7 @@
       countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
-      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
@@ -9872,6 +9989,7 @@
       `const HAZARD_COOLDOWN_MS = ${HAZARD_COOLDOWN_MS}, DIG_DURATION_MS = ${DIG_DURATION_MS};`,
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
+      `const BOMB_IMPACT_DETONATE_SPEED = ${BOMB_IMPACT_DETONATE_SPEED};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
       `const BARRIER_SLIDE_MS = ${BARRIER_SLIDE_MS};`,
       `const CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
