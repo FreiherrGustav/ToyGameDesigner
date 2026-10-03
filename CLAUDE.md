@@ -4776,6 +4776,134 @@ this one) and a dedicated export test (door transition, toggle flip, both confir
 freshly exported standalone game) all run error-free; and a final debug-hook-free sanity pass
 (`grep -n "toyDebug" index.html` returning nothing) confirmed clean.
 
+## Unify physics-object interactions: one shared category, not per-mechanic allow-lists
+
+A refactor of existing, proven mechanics, treated accordingly — careful, isolated, verified
+against the full existing sample suite before and after, not mixed into other feature work. Direct
+report: bombs don't bounce off trampolines despite the v2.28 "widened to physics objects" patch;
+most objects can't be loaded into a cannon; most objects can't be affected by wind. The actual
+shape of the problem, confirmed by reading every gate before touching any of them: bounce
+(`CARRYABLE_KINDS`), cannon-loading (`STANDABLE_OBJECT_KINDS`), and magnet (a narrow inline
+`pushable-or-collectible` check) each maintained their own separate allow-list of which actor kinds
+they applied to — every time a new object type was added, someone had to remember to update every
+list individually, and missing one left a silent, uncaught gap, the default outcome rather than the
+exception.
+
+**The fix, generalizing `CARRYABLE_KINDS`'s own existing pattern rather than building a parallel
+system**: `PHYSICS_OBJECT_KINDS` (`CARRYABLE_KINDS.concat([HAZARD_BALL_KIND])`) is the one shared
+answer to "does this actor kind have a genuine physics body" — every carryable (already a full
+position/velocity/collision body) plus the hazard ball (same, just never hand-placed or carryable).
+`isForceSusceptible(temperament)` is the default-in gate the four optional forces — bounce/
+trampoline reflection, cannon loading, wind/fan force, magnet pull — now all read from:
+`PHYSICS_OBJECT_KINDS.includes(temperament) && temperament !== LARGE_STONE_KIND`. A new object type
+gets all four for free the moment it's defined, the opposite of needing to be individually wired
+into four separate places.
+
+**Deliberately NOT extended to characters.** `isForceSusceptible` does not include `wanderer`/
+`chaser`/`fleer`/`stationary` — those are CHARACTERS, not OBJECTS, and keep their own fixed
+reaction table (`resolveActorContact`). "NPCs only ever react to geometry, never to modifiers" (the
+v2.28 bounce-widening patch's own stated line) is an existing, deliberate design decision this
+refactor does not move — the reported gaps and the request itself were both about objects
+specifically (bomb, "most objects," cannon-loadable things), never about a wandering NPC's own
+reactions.
+
+**The one legitimate exception: Large Stone.** Already built heavy and lethal-immune for the
+bridge-building puzzle use case (v2.34) — "too heavy to be pushed around by wind, launched by a
+cannon, bounced by a trampoline, or dragged by a magnet" is the same identity, coherently extended,
+not a gap. `isForceSusceptible` carves it out by name. Resist adding more exceptions as new object
+types arrive — a thing that seems to need one is a prompt to ask whether it's really in Large
+Stone's weight class, not a reason to let exceptions multiply the way the original per-mechanic
+gaps did.
+
+**Gravity gets no type-based exemption, not even for Large Stone — confirmed already true, not
+something this patch had to build.** Wind/cannon/bounce/magnet are optional forces layered on top
+of baseline weight; gravity isn't one of them, it's what gives "heavy" its meaning. Read through
+`stepActor`'s own gravity branch before writing anything: it was already fully kind-agnostic, with
+exactly the three contextual (not identity-based) exemptions the task asked for already in place —
+actively carried (`stepActor`'s own early `if (actor.carried) return`), stuck to a sticky wall
+(`isStuckToSticky`, itself also already kind-agnostic, no list of any kind), and a room with gravity
+globally off. Nothing needed changing here; this section exists to document that it was checked, not
+assumed.
+
+**What actually changed, mechanically** (every call site found by grep, not assumed complete):
+- **Bounce**: `resolveAxis`'s `isPhysicsObject` and `bounceOffTrampolineObjects`'s
+  `actorIsPhysicsObject` both switched from `CARRYABLE_KINDS.includes(...)` to
+  `isForceSusceptible(...)` — Large Stone is the only thing this actually removes (it was already
+  in `CARRYABLE_KINDS`); hazard ball's own separate, pre-existing "always bounces off every wall"
+  rule (`isHazardBall`, unconditional, unrelated to the bouncy modifier) is untouched and still
+  OR'd in alongside it.
+- **Cannon loading**: both of `triggerCannon`'s trigger-gating call sites (`resolveAxis`'s own
+  collision-time trigger, and the build-mode drag handler's `fireBlockingTileReaction`) switched
+  from `STANDABLE_OBJECT_KINDS.includes(...)` to `isForceSusceptible(...)` — this is the real fix
+  for "most objects can't be loaded into a cannon": a hazard ball, or a dropped/thrown magnet,
+  Trampoline object, bomb2, or cannon2, can now trigger a cannon it's shoved or thrown into, the
+  same as a pushed crate always could. `STANDABLE_OBJECT_KINDS` itself is untouched and still used
+  exactly as before for `shovePushables`/`actorBlockedByOtherPushables`/the crush-on-fall-from-above
+  reaction — "can other actors stand on or be blocked by this" is a different physical trait than
+  any of the four forces this refactor unifies, not one of the five named mechanics, and out of
+  scope.
+- **Magnet**: `radialForceAccelFor`'s `magnetable` switched from a narrow `temperament ===
+  PUSHABLE_KIND || temperament === "collectible"` check to `isForceSusceptible(temperament) ||
+  temperament === "collectible"` — collectible is kept as its own explicit OR rather than folded
+  into `PHYSICS_OBJECT_KINDS`, since a collectible has no driven physics body at all (`stepActor`'s
+  own `stationary`/`collectible` early-return skips the entire branch that computes
+  `radialForceAccelFor` in the first place) — this was already dead/unreachable code before this
+  patch and stays exactly as dormant after it, not something this refactor is scoped to fix.
+- **Wind/fan**: these never had a per-kind allow-list at all — confirmed by reading `windAccelFor`/
+  `fanAccelFor` before writing anything, both are purely positional and were already folded into
+  every non-stationary/collectible actor's `ax`/`ay` unconditionally, characters included. So
+  "most objects can't be affected by wind" wasn't actually a code gap to widen — the fix here is
+  narrower than the other three: a single `isLargeStone` subtraction in `stepActor` zeroes both
+  accels for Large Stone specifically, rather than a new default-in check for everyone else (who
+  already had it).
+- **Sticky cling**: `isStuckToSticky` needed no change at all — already kind-agnostic, confirmed by
+  reading it, not assumed.
+
+**Verification, scaled to how foundational this is.** Confirmed directly (not inferred from the
+code read alone): a thrown bomb2 bounces off both a Trampoline TILE and a dropped Trampoline
+OBJECT actor; a hazard ball bumped into a cannon2 tile triggers it (`cannonCooldown` set); a magnet
+tile now pulls a hazard ball that sat still before (no regression on the existing pushable/
+collectible pull); wind still blows a hazard ball exactly as before (confirming the "already
+kind-agnostic" finding rather than assuming it); Large Stone is now confirmed immune to all four —
+no bounce, no cannon-firing, no wind push, no magnet pull — while still falling under gravity with
+no exemption and still landing/resting normally. The concrete payoff named in the request was
+verified end to end, not left as a theoretical consequence: a Large Stone pushed into a `none:lethal`
+tile (lava) falls in, settles, and survives — `checkPhysicsObjectLethalContacts`'s own existing
+`PUSHABLE_KIND`-only scope (v2.34, Large Stone deliberately excluded) already made this possible
+before this patch; this refactor's own contribution was confirming it actually works as a real
+emergent mechanic, not assuming it from reading two functions' scopes in isolation.
+
+**Regression risk, assessed directly rather than just re-running every sample and hoping.** Grepped
+every built-in sample's own board-building source before trusting the change was safe: no sample
+places a `magnet` tile anywhere, and no sample places a Large Stone actor anywhere — meaning both
+the widened and the newly-narrowed halves of this refactor touch zero existing sample content by
+construction, not just by a passing test run. The bounce widening to hazard ball is redundant with
+hazard ball's own pre-existing always-bounce rule (no behavior change there either). The cannon
+widening is the one genuinely new category of interaction an existing sample could exercise (a
+hazard ball or dropped carryable now able to trigger a cannon it never could before) — confirmed
+directly that The World's Worst Elevator, the one sample that chains cannon with the most other
+mechanics, still completes its full intended sequence (fall → wind → bounce → platform → switch →
+gate → cannon → door → trampoline → goal) end to end with zero errors, in both the live editor and
+a freshly exported standalone game. The full 8-sample regression sweep (Cheese Heist, Tunnel
+Trouble, Dungeon Diving, The Monster's Den, The World's Worst Elevator, Spin Cycle, The Catapult
+Factory, The Gravity Switcheroo) each load, enter Play, and run a real held-right session with zero
+console errors.
+
+**Export pipeline**: `PHYSICS_OBJECT_KINDS` got its own `constantsSource` line; `isForceSusceptible`
+was added to `runtimeFunctions`. Every function this change touches
+(`resolveAxis`, `bounceOffTrampolineObjects`, `radialForceAccelFor`, `stepActor`, the drag handler's
+`fireBlockingTileReaction`) was already shared into the export from earlier patches, so no new
+export-side gaps were introduced — confirmed directly: a fresh export of The World's Worst Elevator
+contains both new identifiers and completes its full playthrough in the exported file too.
+
+Verified with Playwright (19 targeted checks plus the full regression sweep and export test): bomb-
+off-trampoline-tile, bomb-off-trampoline-object, hazard-ball-triggers-cannon, wind-still-affects-
+hazard-ball, magnet-now-pulls-hazard-ball, Large-Stone-immune-to-wind, Large-Stone-immune-to-
+magnet, Large-Stone-still-falls-under-gravity, Large-Stone-sinks-into-lava-and-survives, the full
+8-sample regression sweep, The World's Worst Elevator's complete sequence replayed end to end in
+both the live editor and a fresh export, and a final debug-hook-free sanity pass (`grep -n
+"toyDebug" index.html` returning nothing).
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
