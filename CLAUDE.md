@@ -5691,6 +5691,44 @@ red not blue, stays open, re-locks with the key restored on Play restart and Bui
 chaser harmless, expiry inside lava kills; two stars don't stack; a real export with all three plays
 standalone (2 hearts shown, a red key chip, star running, zero errors). The debug hook was stripped.
 
+## Locked Door — a Fixture that only a Key opens
+
+Direct request: a new Fixture, "Locked Door, only openable with the key," with user-supplied art
+(`LOCKED_DOOR_ART`, used verbatim). Geometry id `lockeddoor` (`LOCKED_DOOR_GEOMETRY`), palette label
+"locked door", caption "Only a key of its color opens it." Single orientation, color-taggable.
+
+**Reads only Keys, never channels.** It blocks (`isBlockingGeometry`) until opened per cell. `isCellBlocking`
+and `resolveAxis`'s own blocking check both consult `lockedDoorOpenAt(cx, cy)` — deliberately NOT
+`isChannelOn`, so a same-color Button/Plate/Gate-style channel can never open it (verified: red switch on,
+door still blocks). Opening is by touch, not by pickup: `checkLockedDoorUnlock(player)`, called from
+`stepActor` next to `checkPlayerTileContacts`, opens any closed Locked Door within 3px of the player whose
+color has a held Key (`keyChannelsUnlocked`) — so a Key picked up across the level doesn't open it remotely
+the way it does a Gate. The door stays open for the session and the Key is not consumed (one red Key opens
+every red Locked Door). An untagged door counts as red, the same default a Key has.
+
+**State**: transient `lockedDoorsOpen` (`roomCellKey` -> true), reset exactly where `keyChannelsUnlocked`
+is (`clearTransientRuntimeState`, `restoreCollectedPowerups`, export `restartStandaloneGame`), so Play
+restart and Build "Reset to start" re-lock it. Never saved — the board stays unmodified (nothing is erased).
+**Look**: closed shows the art; open ghosts to 25% with a channel-colored outline (the Gate/`solid` open
+treatment, via `gateOpen`); the corner color badge shows which key fits. **Palette**: reuses the Key's
+picker mode (`renderColorSwatches` `keyMode`) so it shows the 5 colors with no "none" option.
+
+**Deviation to know about**: it sits in the Fixtures row as asked, but Fixtures were documented as
+walk-through, never-solid pads (`FIXTURE_GEOMETRIES`). Nothing branches on that list beyond palette
+rendering, so this works, but "Fixture" no longer strictly means non-blocking. **Art caveat**: the supplied
+art is a single 6-pixel row, so a placed door currently reads as a thin brown line plus its color badge
+— flagged to the user, not altered.
+
+**Export**: `lockedDoorOpenAt`, `lockedDoorColorAt`, `checkLockedDoorUnlock` added to `runtimeFunctions`;
+`LOCKED_DOOR_GEOMETRY` constant line; `lockedDoorsOpen` declared/reset in the export template.
+No saved-data change: new geometry id, nothing to migrate or backfill.
+
+Verified with Playwright (26 checks): blocks with no key; a lit red channel doesn't open it; red key opens it
+on touch (not on pickup) and the player walks through; key not consumed; blue key doesn't open a red door;
+untagged door opens with red; Play restart and Build Reset re-lock; real palette UI (swatch, caption, 5-color
+picker, painting places `lockeddoor` with a color); exported game blocked without a key and wins with one,
+zero errors; 8-sample sweep + export clean; no debug hook in the repo file.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

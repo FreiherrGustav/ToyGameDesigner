@@ -505,6 +505,11 @@
   // and its left/right mirrored rendering (see drawGameplayTile's own PUSH_BUTTON_GEOMETRY branch),
   // which now shows on/off state instead of which side was last pushed.
   const PUSH_BUTTON_GEOMETRY = "pushbutton";
+  // Locked Door: a Fixture-row piece that BLOCKS until a Key of its channel color is held and the
+  // player walks up to it (see lockedDoorOpenAt/checkLockedDoorUnlock). Unlike a Gate it ignores
+  // Buttons/Plates entirely — only a Key opens it — and it opens by being touched, not the moment
+  // the key is picked up. Single orientation, color-taggable (no color = red, same as a Key's default).
+  const LOCKED_DOOR_GEOMETRY = "lockeddoor";
   // v2.19: fan is a discrete, switchable Object built entirely on top of the existing wind force
   // calculation (WIND_FORCE/windAt) — same "one swatch, four storable orientations" trick as cannon
   // and wind itself, just on the geometry axis instead of the modifier axis, since a fan is a thing
@@ -539,7 +544,7 @@
   // already-painted "switch" cell on load, the same "deleted geometry, same failure shape" pattern
   // migrateLegacyCannonBomb/migrateLegacyFacingObjects already established.
   const GEOMETRIES = [
-    "none", "solid", "goal", "plate", "door", ...BARRIER_ORDER, PUSH_BUTTON_GEOMETRY,
+    "none", "solid", "goal", "plate", "door", ...BARRIER_ORDER, PUSH_BUTTON_GEOMETRY, LOCKED_DOOR_GEOMETRY,
     ...CANNON2_ORDER, BOMB2_GEOMETRY, "warp", ...FAN_ORDER,
     "magnet", "gravitywell", ...SPAWNER_ORDER, "trampoline"
   ];
@@ -610,7 +615,7 @@
   // already know it as — see renderObjectSwatches/renderFixtureSwatches.
   // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
-  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate", gravitywell: "black hole" };
+  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -946,7 +951,7 @@
   // v2.37: Button (PUSH_BUTTON_GEOMETRY) replaces "switch" here outright — see that geometry's own
   // top-of-file comment for the full story of why, and migrateLegacySwitchToButton for what happens
   // to an already-painted switch tile on load.
-  const FIXTURE_GEOMETRIES = ["goal", "plate", "door", "warp", "gravitywell", PUSH_BUTTON_GEOMETRY];
+  const FIXTURE_GEOMETRIES = ["goal", "plate", "door", LOCKED_DOOR_GEOMETRY, "warp", "gravitywell", PUSH_BUTTON_GEOMETRY];
   // v2.41: direct request to cut the palette's own prose down — "the UI should teach through
   // affordances... not documentation." The old per-section paragraphs explaining what a row of
   // similar-looking Objects/Fixtures/Ground-Effects/Lethal swatches each actually DO (as opposed to
@@ -984,6 +989,7 @@
     goal: "Touch it, you win.",
     plate: "On while you're standing there.",
     door: "Leads somewhere new.",
+    [LOCKED_DOOR_GEOMETRY]: "Only a key of its color opens it.",
     warp: "Zap. You're elsewhere.",
     gravitywell: "A black hole. Walk close and it sucks you in.",
     [PUSH_BUTTON_GEOMETRY]: "Flips a color on — for good.",
@@ -1273,6 +1279,7 @@
   const KEY_TINT_FROM = ["#f9d941", "#fcef78", "#efb027"]; // KEY_ART's three yellows: body, highlight, shadow
   let spareHearts = 0;             // Play-only hit buffer (see takePlayerHit)
   let starTimer = 0;               // ms of ghost mode left (live in Build too)
+  let lockedDoorsOpen = {};        // roomCellKey -> true once a held Key opened that Locked Door this session
   let keyChannelsUnlocked = {};    // color -> true once a same-color Key was picked up this session
   let lastHeartCount = 1;          // HUD only: detects a heart being spent so it can pop
   let collectedPowerups = [];      // Build-only: {roomId, actor} so "Reset to start" can bring them back
@@ -1489,7 +1496,7 @@
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
     playReadyUntil = null;
-    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; collectedPowerups = [];
+    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {}; collectedPowerups = [];
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
@@ -2172,7 +2179,13 @@
   ], { A: "#2c0e6c", B: "#a641f9", C: "#33039b", D: "#000000" });
   const BLACK_HOLE_FRAMES = [BLACK_HOLE_FRAME1_ART, BLACK_HOLE_FRAME2_ART, BLACK_HOLE_FRAME3_ART, BLACK_HOLE_FRAME4_ART, BLACK_HOLE_FRAME5_ART, BLACK_HOLE_FRAME6_ART];
   const BLACK_HOLE_FRAME_MS = 130;
+  // Locked Door (Custom, new) — user-supplied art, used as given.
+  const LOCKED_DOOR_ART = pat([
+    ".AAAAAA.", "........", "........", "........",
+    "........", "........", "........", "........"
+  ], { A: "#6e3618" });
   const GEOMETRY_ICONS = {
+    [LOCKED_DOOR_GEOMETRY]: LOCKED_DOOR_ART,
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
     // v2.22: trap/diggable no longer live here — they're modifiers now (MODIFIERS), so a
     // solid+trap or solid+diggable tile shows the plain "solid" icon above (or a named ground
@@ -5079,7 +5092,7 @@
   function renderColorSwatches() {
     const isTile = paintMode === "tile";
     renderColorSwatchesInto("groundColorSwatches", "groundColorBlock", isTile && selectedGeometry === "solid");
-    const keyMode = paintMode === "actor" && selectedActorDefId === "colKey";
+    const keyMode = (paintMode === "actor" && selectedActorDefId === "colKey") || (isTile && selectedGeometry === LOCKED_DOOR_GEOMETRY);
     if (keyMode && !selectedChannelColor) selectedChannelColor = CHANNEL_COLORS[0];
     renderColorSwatchesInto("objectColorSwatches", "objectColorBlock", keyMode || (isTile && isColorTaggable(selectedGeometry) && selectedGeometry !== "solid"), keyMode);
   }
@@ -5699,6 +5712,7 @@
     // v2.33: Gate is now a 4-orientation family (BARRIER_ORDER) — see that constant's own comment.
     if (BARRIER_ORDER.includes(geometry)) return true;
     if (geometry === "trampoline") return true; // a real object you land on, not a walk-through pad
+    if (geometry === LOCKED_DOOR_GEOMETRY) return true; // open/closed per cell: see isCellBlocking/lockedDoorOpenAt
     // v2.21: bomb/cannon/magnet/spawner/fan are physical objects, not walk-through decoration or
     // ghost tiles — a kid should bump into one, not phase through it (direct feedback: walking
     // through them made grabbing one feel glitchy, since there was nothing physically there to
@@ -5730,7 +5744,26 @@
       const color = colorAt(cx, cy);
       if (color && isChannelOn(color)) return false; // a same-colored switch/plate has this gate open
     }
+    if (geometry === LOCKED_DOOR_GEOMETRY && lockedDoorOpenAt(cx, cy)) return false;
     return true;
+  }
+  // Locked Door helpers. Its color defaults to the first channel color (red) when untagged, matching
+  // a Key's own default. Only a Key opens it — isChannelOn (Buttons/Plates) is deliberately NOT consulted.
+  function lockedDoorOpenAt(cx, cy) { return !!lockedDoorsOpen[roomCellKey(currentRoomId, cx, cy)]; }
+  function lockedDoorColorAt(cx, cy) { return colorAt(cx, cy) || CHANNEL_COLORS[0]; }
+  // The player walking up to a closed Locked Door while holding a Key of its color opens it (for the
+  // session: it stays open, the key isn't used up). "Walking up" = within 3px of its edge.
+  function checkLockedDoorUnlock(player) {
+    const c0 = Math.floor((player.x - 3) / TILE), c1 = Math.floor((player.x + player.w + 3) / TILE);
+    const r0 = Math.floor((player.y - 3) / TILE), r1 = Math.floor((player.y + player.h + 3) / TILE);
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) {
+      if (geometryAt(cx, cy) !== LOCKED_DOOR_GEOMETRY || lockedDoorOpenAt(cx, cy)) continue;
+      const color = lockedDoorColorAt(cx, cy);
+      if (!keyChannelsUnlocked[color]) continue;
+      lockedDoorsOpen[roomCellKey(currentRoomId, cx, cy)] = true;
+      sounds.doorCreak();
+      log("Unlocked with the " + color + " key!");
+    }
   }
 
   // Gravity is a single shared switch, not per-actor: the palette toggle sets it once as an
@@ -6045,6 +6078,7 @@
           const gateColor = colorAt(cx, cy);
           if (gateColor && isChannelOn(gateColor)) continue; // a same-colored switch/plate has this gate standing open
         }
+        if (geometry === LOCKED_DOOR_GEOMETRY && lockedDoorOpenAt(cx, cy)) continue;
         // v2.20: a hazard ball (the spawner's default content) always bounces off every wall
         // regardless of the wall's own modifier — the prototype's "bounces off everything"
         // behavior — rather than only reacting to a bouncy tile the way the player does. The
@@ -6593,7 +6627,7 @@
       list.push(actor);
     });
     collectedPowerups = [];
-    keyChannelsUnlocked = {}; starTimer = 0;
+    keyChannelsUnlocked = {}; lockedDoorsOpen = {}; starTimer = 0;
     renderPlayHUD();
   }
 
@@ -7831,6 +7865,7 @@
 
     if (actor.isPlayer) {
       checkPlayerTileContacts(actor);
+      checkLockedDoorUnlock(actor);
     } else {
       // A pushable (or grabbed-then-thrown bomb/magnet/cannon/trampoline) has no lives/goal/door
       // business of its own — everything else it does (falling, colliding, crushing) already
@@ -8200,7 +8235,7 @@
     // retired the separate permanent-toggle "Switch" fixture outright and gave Button its exact
     // job instead (see PUSH_BUTTON_GEOMETRY's own comment) — it's now the one that reads a
     // channel permanently (switchChannels), plate the one that reads it momentarily.
-    return geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || FAN_ORDER.includes(geometry);
+    return geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || geometry === LOCKED_DOOR_GEOMETRY || FAN_ORDER.includes(geometry);
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -9328,7 +9363,7 @@
     // A colored solid tile currently gated open just shows as a faint, hollow outline —
     // visibly "not really there right now" — rather than the normal full block, so its passable
     // state reads at a glance the same way any other reaction here does.
-    const gateOpen = tile.geometry === "solid" && extra && extra.color && extra.channelOn;
+    const gateOpen = (tile.geometry === "solid" || tile.geometry === LOCKED_DOOR_GEOMETRY) && extra && extra.color && extra.channelOn;
     let icon = GEOMETRY_ICONS[tile.geometry];
     if (extra && extra.skinDef) {
       // a named skin (grass/stone/dirt/snow/spike/a kid's own) — real art instead of the built-in
@@ -9587,9 +9622,10 @@
             extra = { windingUp: !!(state && state.windUp), loaded: !!spawnerContents[spawnerKey] };
           }
           if (isLive && isColorTaggable(tile.geometry)) {
-            const color = colorBoard[y][bx];
+            const isLockedDoor = tile.geometry === LOCKED_DOOR_GEOMETRY;
+            const color = colorBoard[y][bx] || (isLockedDoor ? CHANNEL_COLORS[0] : null);
             if (color) {
-              extra = Object.assign({}, extra, { color, channelOn: isChannelOn(color) });
+              extra = Object.assign({}, extra, { color, channelOn: isLockedDoor ? lockedDoorOpenAt(bx, y) : isChannelOn(color) });
               // v2.23: how far along Barrier's slide is, from channelStateSince's last-flip
               // timestamp — purely a render input, see drawGameplayTile's own barrier branch.
               if (BARRIER_ORDER.includes(tile.geometry)) {
@@ -10147,7 +10183,7 @@
     gameData.rooms.forEach(r => { purgeSpawnedActors(r.actors); resetActorsToSpawn(r.actors, r.startPos); });
 
     const runtimeFunctions = [
-      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable,
+      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
@@ -10203,6 +10239,7 @@
       `const CANNON_FAMILIES = [CANNON2_ORDER];`,
       `const BOMB2_GEOMETRY = ${JSON.stringify(BOMB2_GEOMETRY)};`,
       `const PUSH_BUTTON_GEOMETRY = ${JSON.stringify(PUSH_BUTTON_GEOMETRY)};`,
+      `const LOCKED_DOOR_GEOMETRY = ${JSON.stringify(LOCKED_DOOR_GEOMETRY)};`,
       `const PLATE_INDICATOR_OFF_HEX = ${JSON.stringify(PLATE_INDICATOR_OFF_HEX)}, PLATE_INDICATOR_ON_HEX = ${JSON.stringify(PLATE_INDICATOR_ON_HEX)};`,
       `const CARRY_BOMB2_KIND = ${JSON.stringify(CARRY_BOMB2_KIND)}, CARRY_CANNON2_KIND = ${JSON.stringify(CARRY_CANNON2_KIND)};`,
       `const CARRY_BOMB2_DEF_ID = ${JSON.stringify(CARRY_BOMB2_DEF_ID)}, CARRY_CANNON2_DEF_ID = ${JSON.stringify(CARRY_CANNON2_DEF_ID)};`,
@@ -10384,7 +10421,7 @@
   let roomTransition = null;
   let score = 0, intensity = 0;
   let lives = DEFAULT_LIVES;
-  let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, collectedPowerups = [], lastHeartCount = 1;
+  let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let playReadyUntil = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
@@ -10428,7 +10465,7 @@
     roomTransition = null;
     score = 0; intensity = 0;
     lives = DEFAULT_LIVES;
-    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {};
+    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {};
     playSessionEnded = null;
     playReadyUntil = performance.now() + READY_DURATION_MS;
     currentRoomId = null;
