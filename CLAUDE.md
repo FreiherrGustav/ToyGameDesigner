@@ -5727,6 +5727,33 @@ untagged door opens with red; Play restart and Build Reset re-lock; real palette
 picker, painting places `lockeddoor` with a color); exported game blocked without a key and wins with one,
 zero errors; 8-sample sweep + export clean; no debug hook in the repo file.
 
+## Riding is gravity-only: pushing a crate south in a top-down room stuttered at 1.5x speed
+
+Direct report: "glitchy behavior when pushing crates north to south on the screen," plus similar
+strangeness walking north/south on slippery tiles. Traced per-frame rather than guessed. Free-roam
+walking (plain and ice, N/S/diagonal) is clean — a constant 3.7px/frame at the 220px/s cap — so the
+physics itself was fine; the crate push was not: pushing a crate SOUTH alternated 7.3px/3.7px per
+frame for both player and crate (~330px/s, 1.5x the cap), while pushing NORTH was a clean 3.7.
+
+**Root cause: the moving-platform riding step (see "Moving platforms (riding...)") has no notion of
+gravity.** It treats any actor whose bottom edge is within `RIDE_CONTACT_EPSILON` of a standable
+object's top edge (with x overlap) as a rider and re-applies the platform's frame delta to it. In a
+top-down (gravity-off) room, a player pushing a crate south sits flush against the crate's NORTH face —
+geometrically identical to "standing on top" — so each frame the crate's own shove delta was added to the
+player a second time, which also made the next frame's overlap (and shove) larger: the 2x/1x sawtooth.
+North pushes were immune only because the player is then below the crate. **Fix**: the riding step only
+runs when `gravityOn()` — "on top of" is meaningless without gravity. Verified riding still works under
+gravity (rider on a crate drifting on a conveyor is carried the full 240px with it).
+
+**Not reproduced: the slippery N/S "sticky" feel.** Walking N/S/diagonally across an all-ice room matches
+plain ground frame for frame (identical vy and dy), including release, so ice physics isn't it. If it
+happened with a crate or Moving Platform nearby it was probably this same bug (ice makes crates keep
+sliding ahead of a following player, which is exactly the flush-behind setup); if it still happens
+without either, it needs a repro (gravity on/off, which tiles, any objects nearby).
+
+Verified with Playwright: free-roam crate push S/N never steps more than 3.7px/frame; gravity riding
+intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept out of the repo file.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

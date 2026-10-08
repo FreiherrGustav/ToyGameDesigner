@@ -8157,8 +8157,13 @@
     // generalization, not a full physics simulation" scope pushable-stacking already accepted,
     // and the only case actually asked for (a tile conveys the platform; the platform conveys
     // whoever's standing on it) only ever needs one level anyway.
+    // Gravity-mode only: "resting on top" means nothing in a top-down room, where an actor
+    // standing flush against a crate's north face is just pushing it south — treating it as a
+    // rider re-applied the crate's own shove delta to the player, so pushing a crate south ran
+    // ~1.5x speed in an alternating 2x/1x stutter (pushing north was clean, since the player is
+    // then below the crate, not "on" it).
     const rideLinks = [];
-    for (const platform of snapshot) {
+    for (const platform of (gravityOn() ? snapshot : [])) {
       const pdef = actorDefs[platform.defId];
       if (!pdef || !STANDABLE_OBJECT_KINDS.includes(pdef.temperament)) continue;
       const riderIds = [];
