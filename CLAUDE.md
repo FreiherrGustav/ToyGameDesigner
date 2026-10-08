@@ -5541,6 +5541,44 @@ containing a painted black hole contains both new constants and animates it (6 d
 ~1.1s) with zero errors; the full 8-sample sweep and the standard export test pass. The
 capture/pull mechanics were not re-traced since nothing they read changed beyond log-string text.
 
+## Sound polish: a quieter master bus and a voice limiter (no more stacking)
+
+Direct feedback, two parts: (1) sound is "very loud" next to other websites; (2) sounds stack into
+an annoying drone — standing on a bouncy tile retriggered `boing` every few frames with every copy
+playing out in full (~0.47s each), and a spawner's pile of chasers sitting in one spot did the same
+with catch/bump sounds. Both fixes live in the two playback functions, so every reaction in both
+engines gets them with no per-call-site changes.
+
+**Loudness.** Every chip design is normalized to peak 0.7 and `playChip` connected it straight to
+`ctx.destination`. Both engines now connect to `getMasterBus()` instead: a gain of `MASTER_VOLUME`
+(0.3, about -10 dB — a judgment call; it's the one knob to retune) into a `DynamicsCompressor` used
+as a safety limiter (threshold -14 dB, ratio 12, fast attack), so a legitimate pile-up of
+*different* sounds can't spike either. The legacy engine's relative balance to the chip engine is
+unchanged (its peak was already lower); both just sit under the same master.
+
+**Stacking.** `claimVoice(key, durationMs)` is the gate `playChip` (key = design name) and
+`playPatch` (key = `patch:<id>`) pass before creating any audio nodes. Per key it enforces a minimum
+gap between starts and a cap on simultaneous copies (`SOUND_LIMITS`, default `SOUND_LIMIT_DEFAULT`
+= 80ms / 2 copies; boing and trampolineBoing 250ms / 1 copy, so a settling bounce is a steady
+boing every ~0.5s at most instead of a pile; splat 1 copy), plus `SOUND_MAX_TOTAL` (10) live voices
+overall. A second copy that is allowed to overlap plays at `SOUND_OVERLAP_GAIN` (0.55). A refused
+trigger is simply dropped — the copy already playing covers it, nothing is queued. Different sounds
+never block each other (boing + splat + kaboom in one tick all play). This deliberately throttles by
+sound *name*, not by source actor, since the complaint was the aggregate noise.
+
+**Export pipeline**: `getMasterBus`/`claimVoice` added to `runtimeFunctions`; one `constantsSource`
+line ships `MASTER_VOLUME`/`SOUND_LIMIT_DEFAULT`/`SOUND_LIMITS`/`SOUND_MAX_TOTAL`/
+`SOUND_OVERLAP_GAIN`; `masterBus` and `activeVoices` declared by hand in the export template next to
+`audioCtx`.
+
+Verified in Chromium by hooking Web Audio: the bus builds once (0.3 gain + one compressor);
+60 boings over ~0.6s start 2 voices (was 60); 40 same-tick thuds start 1; legacy-engine spam is
+capped; three different sounds in one tick all play; a sound plays again after finishing; finished
+voices are pruned; an exported game builds the limiter bus and plays with zero errors; 8-sample
+sweep and export test clean. Not covered: actually listening — loudness is a number picked
+by judgment and may want one more nudge. Standing on a bouncy tile was verified at the sound layer
+(the throttle), not by scripting a physical bounce.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

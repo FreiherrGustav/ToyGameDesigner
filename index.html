@@ -4158,6 +4158,62 @@
     return audioCtx;
   }
 
+  // ---- Output bus and voice limiter (sound-polish pass) ----
+  // Two direct complaints: everything played at full chip level (peak 0.7 straight to the
+  // speakers — far hotter than a typical website), and sounds STACKED: standing on a bouncy tile,
+  // or a spawner's pile of chasers sitting in one spot, retriggered the same sound every few
+  // frames and every copy played out in full, so voices piled up into a loud drone.
+  // MASTER_VOLUME is the one knob for overall loudness. Every sound (both engines) goes through
+  // getMasterBus(): a master gain into a compressor acting as a safety limiter, so even a legitimate
+  // pile-up of different sounds can't spike. claimVoice() is the gate every playChip/playPatch call
+  // passes first: per sound name, a minimum gap between starts and a cap on simultaneous copies
+  // (SOUND_LIMITS, falling back to SOUND_LIMIT_DEFAULT), plus a global cap. A refused trigger is
+  // simply skipped — the sound already playing covers it, and nothing needs to be queued.
+  // A second copy that is allowed to overlap plays quieter (SOUND_OVERLAP_GAIN).
+  const MASTER_VOLUME = 0.3;
+  const SOUND_LIMIT_DEFAULT = { gap: 80, max: 2 };
+  const SOUND_LIMITS = {
+    boing: { gap: 250, max: 1 }, trampolineBoing: { gap: 250, max: 1 },
+    thunk: { gap: 90, max: 2 }, splat: { gap: 150, max: 1 },
+    kaboom: { gap: 100, max: 2 }, cat: { gap: 120, max: 2 }
+  };
+  const SOUND_MAX_TOTAL = 10;
+  const SOUND_OVERLAP_GAIN = 0.55;
+  let masterBus = null;
+  let activeVoices = []; // { key, startAt, endAt } in performance.now() ms
+  function getMasterBus() {
+    const ctx = getAudioCtx();
+    if (!masterBus) {
+      const input = ctx.createGain();
+      input.gain.value = MASTER_VOLUME;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -14;
+      limiter.knee.value = 10;
+      limiter.ratio.value = 12;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.12;
+      input.connect(limiter);
+      limiter.connect(ctx.destination);
+      masterBus = input;
+    }
+    return masterBus;
+  }
+  // Returns a loudness multiplier for this trigger: 0 = skip it, 1 = normal, less = an overlapping copy.
+  function claimVoice(key, durationMs) {
+    const now = performance.now();
+    activeVoices = activeVoices.filter(v => v.endAt > now);
+    if (activeVoices.length >= SOUND_MAX_TOTAL) return 0;
+    const lim = SOUND_LIMITS[key] || SOUND_LIMIT_DEFAULT;
+    let same = 0, lastStart = -Infinity;
+    for (let i = 0; i < activeVoices.length; i++) {
+      const v = activeVoices[i];
+      if (v.key === key) { same++; if (v.startAt > lastStart) lastStart = v.startAt; }
+    }
+    if (same >= lim.max || now - lastStart < lim.gap) return 0;
+    activeVoices.push({ key, startAt: now, endAt: now + durationMs });
+    return same ? SOUND_OVERLAP_GAIN : 1;
+  }
+
   // Rendered once per sound name, on first use, and cached as a real AudioBuffer — never re-run
   // through renderChipDesign on a repeat trigger.
   const chipBufferCache = {};
@@ -4185,13 +4241,15 @@
       const ctx = getAudioCtx();
       const buffer = getChipBuffer(name);
       if (!buffer) return;
+      const overlap = claimVoice(name, (buffer.duration / pitchMult) * 1000);
+      if (!overlap) return;
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       src.playbackRate.value = pitchMult;
       const gain = ctx.createGain();
-      gain.gain.value = 0.35 + 0.65 * velocity; // velAmpScale, ported from the v2.18 engine below
+      gain.gain.value = (0.35 + 0.65 * velocity) * overlap; // velAmpScale, ported from the v2.18 engine below
       src.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(getMasterBus());
       src.start();
     } catch (e) { /* audio not available, ignore */ }
   }
@@ -4272,7 +4330,9 @@
       const ctx = getAudioCtx();
       const now = ctx.currentTime;
       const rootFreq = patch.rootFreq * pitchMult;
-      const peak = 0.3 * velAmpScale(velocity);
+      const overlap = claimVoice("patch:" + patchId, (patch.env.attack + patch.env.decay + patch.env.release + 0.05) * 1000);
+      if (!overlap) return;
+      const peak = 0.3 * velAmpScale(velocity) * overlap;
 
       const mixer = ctx.createGain();
       mixer.gain.value = 1;
@@ -4322,7 +4382,7 @@
       const gain = ctx.createGain();
       gain.gain.value = 0;
       tail.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(getMasterBus());
 
       const env = patch.env;
       gain.gain.setValueAtTime(0, now);
@@ -9936,7 +9996,7 @@
       drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
-      getAudioCtx, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
+      getAudioCtx, getMasterBus, claimVoice, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
       playPatch, playActorSound,
       chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
       chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
@@ -10038,6 +10098,7 @@
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS};`,
+      `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
       `const GAMEPLAY_TILE_DEFS = ${JSON.stringify(GAMEPLAY_TILE_DEFS)};`,
@@ -10108,6 +10169,8 @@
   let audioCtx = null;
   let noiseBufferCache = null; // getNoiseBuffer()'s own cache — shared runtime source, declared here by hand
   let chipBufferCache = {}; // getChipBuffer()'s own cache — same reason
+  let masterBus = null; // getMasterBus()'s own output chain — same reason
+  let activeVoices = []; // claimVoice()'s live-voice list — same reason
 
   // v2.21 fix: spawnActorAt/placeCarryableActor (shared runtime source) both do
   // nextActorInstId++, but nothing ever declared it here — a real, pre-existing bug (a spawner
