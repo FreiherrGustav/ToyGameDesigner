@@ -5715,9 +5715,7 @@ picker mode (`renderColorSwatches` `keyMode`) so it shows the 5 colors with no "
 
 **Deviation to know about**: it sits in the Fixtures row as asked, but Fixtures were documented as
 walk-through, never-solid pads (`FIXTURE_GEOMETRIES`). Nothing branches on that list beyond palette
-rendering, so this works, but "Fixture" no longer strictly means non-blocking. **Art caveat**: the supplied
-art is a single 6-pixel row, so a placed door currently reads as a thin brown line plus its color badge
-— flagged to the user, not altered.
+rendering, so this works, but "Fixture" no longer strictly means non-blocking. **Art**: the first paste was a nearly blank placeholder; the real steel-plate-with-keyhole art replaced it.
 
 **Export**: `lockedDoorOpenAt`, `lockedDoorColorAt`, `checkLockedDoorUnlock` added to `runtimeFunctions`;
 `LOCKED_DOOR_GEOMETRY` constant line; `lockedDoorsOpen` declared/reset in the export template.

@@ -2179,11 +2179,11 @@
   ], { A: "#2c0e6c", B: "#a641f9", C: "#33039b", D: "#000000" });
   const BLACK_HOLE_FRAMES = [BLACK_HOLE_FRAME1_ART, BLACK_HOLE_FRAME2_ART, BLACK_HOLE_FRAME3_ART, BLACK_HOLE_FRAME4_ART, BLACK_HOLE_FRAME5_ART, BLACK_HOLE_FRAME6_ART];
   const BLACK_HOLE_FRAME_MS = 130;
-  // Locked Door (Custom, new) — user-supplied art, used as given.
+  // Locked Door — user-supplied art, used as given.
   const LOCKED_DOOR_ART = pat([
-    ".AAAAAA.", "........", "........", "........",
-    "........", "........", "........", "........"
-  ], { A: "#6e3618" });
+    "..AAAA..", ".ABBBBA.", "CDBDDBDC", "ABBBBBBA",
+    "CDBDDBEC", "ABBBBBBA", "CDBDDBDC", "AABBBBAA"
+  ], { A: "#3b4658", B: "#8a9eba", C: "#4d5c71", D: "#000000", E: "#fcef78" });
   const GEOMETRY_ICONS = {
     [LOCKED_DOOR_GEOMETRY]: LOCKED_DOOR_ART,
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
