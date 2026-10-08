@@ -272,6 +272,11 @@
     width: 100%;
   }
 
+  .hudHeart { color: #ff4d6d; }
+  .heartPop { display: inline-block; position: absolute; animation: heartPop .45s ease-out forwards; pointer-events: none; }
+  @keyframes heartPop { from { transform: scale(1); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+  #heartsRow { position: relative; }
+  .hudKey { display: inline-block; border-radius: 4px; padding: 0 3px; margin-right: 2px; font-size: 12px; }
   #hud {
     font-size: 14px;
     font-weight: bold;
@@ -423,7 +428,7 @@
       <button class="tbtn" id="exportBtn">⬇ Export game</button>
     </div>
     <div class="toolbar">
-      <div id="hud"><span id="livesRow" style="display:none;">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
+      <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
       <div id="autosaveHint" class="hint" style="margin:0;"></div>
     </div>
     <div class="toolbar" id="roomTabRow"></div>
@@ -956,6 +961,10 @@
   // the "immediate and plainly visible, no decision to front-load" case the palette's own prose
   // reduction already covers by just deleting those sections' hints outright, no caption needed).
   const CAPTION_TEXT = {
+    // Power-ups (v2.42) — keyed by their collectible defId, wired in renderCollectibleSwatches
+    colHeart: "Takes a hit for you.",
+    colKey: "Opens gates of its color.",
+    colStar: "Nothing can hurt you. For a bit.",
     // Camera (CAMERA_MODES)
     fixed: "Shows the whole room.",
     follow: "Keeps you in view.",
@@ -1252,6 +1261,21 @@
   let buildSnapshot = null; // { rooms, doorLinks, gravityEnabled, wrapHEnabled, wrapVEnabled, currentRoomId, playerRoomId }
   const DEFAULT_LIVES = 3;
   let lives = DEFAULT_LIVES;
+  // Heart / Key / Star (v2.42) — three collectibles that finally DO something. They share the
+  // "collectible" temperament with cheese/gem/coin (so they pick up, pop and render the same way)
+  // but must never count toward "collect everything" nor trigger that win — POWERUP_DEF_IDS is the
+  // one small closed list that tells them apart, deliberately not a new temperament.
+  const POWERUP_DEF_IDS = ["colHeart", "colKey", "colStar"];
+  const MAX_SPARE_HEARTS = 3;      // spare hearts on top of the always-full base heart (4 shown max)
+  const HIT_INVULN_MS = 1200;      // flicker window after a spare heart takes a hit
+  const STAR_DURATION_MS = 6000;   // ghost mode length
+  const STAR_WARNING_MS = 1500;    // last stretch flickers faster
+  const KEY_TINT_FROM = ["#f9d941", "#fcef78", "#efb027"]; // KEY_ART's three yellows: body, highlight, shadow
+  let spareHearts = 0;             // Play-only hit buffer (see takePlayerHit)
+  let starTimer = 0;               // ms of ghost mode left (live in Build too)
+  let keyChannelsUnlocked = {};    // color -> true once a same-color Key was picked up this session
+  let lastHeartCount = 1;          // HUD only: detects a heart being spent so it can pop
+  let collectedPowerups = [];      // Build-only: {roomId, actor} so "Reset to start" can bring them back
   let playSessionEnded = null; // null while playing; "win" or "lose" once a session resolves — freezes the frame loop
   // How long a fresh Play session (or a retry after game-over) holds everything still before the
   // action actually starts — the genre-standard "READY!" beat (Pac-Man, most arcade games) rather
@@ -1465,9 +1489,11 @@
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
     playReadyUntil = null;
+    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; collectedPowerups = [];
   }
   function enterPlayMode() {
     if (playerRoomId == null) { log("Place a player first!"); return; }
+    restoreCollectedPowerups(); // a heart/key/star grabbed while tinkering in Build must be there when Play starts
     snapshotCurrentRoomState(); // flush the hot room's own gravity/wrap/camera/pan fields before cloning below
     buildSnapshot = {
       rooms: structuredClone(rooms), doorLinks: structuredClone(doorLinks),
@@ -4150,7 +4176,7 @@
   // not just felt" distinction v2.20.1 gave it, rather than losing it to consolidation; kaboom is
   // the one fixed, non-parametric entry (FamiTracker track 69 "explode", tuned against a real
   // recording, unchanged by any knob). ----
-  const CHIP_DESIGNS = {"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904,50.96,50.758,51.223,51.921,52.402,52.436,52.067,51.507,50.996,50.687,50.614,50.716,50.888,51.033,51.09,51.04,50.899,50.702],"v":[14,14,14,14,13,12,11,11,10,9,8,8,7,7,6,6,6,5,5,4,4,4,4,3,2,2,1,1],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[36.0025,32.9986,28.0054,24.0025,22.9994,22.9994,22.9994,22.9994,22.9994,36.0025,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798,20.8798,20.8798,20.8798,34.9994,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798],"v":[15,15,15,15,15,0,0,0,0,10,10,10,10,10,10,0,0,0,0,2,2,2,2,2,2,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,0,6,6,0,0,0,0,2,2,2,15,15,15,2,2,2,2,2,2,2,2,2,2,2],"v":[15,15,15,15,15,15,15,15,15,10,10,10,10,10,10,2,2,2,2,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}};
+  const CHIP_DESIGNS = {"heartUp":{"ch":[{"t":"p1","n":[64,64,64,64,68,68,68,68,71,71,71,71,71,71,71,71],"v":[12,12,12,11,12,12,12,11,13,12,11,10,8,6,4,2],"d":2},{"t":"p2","n":[52,52,52,52,56,56,56,56,59,59,59,59,59,59,59,59],"v":[6,6,6,5,6,6,6,5,7,6,5,5,4,3,2,1],"d":1}]},"keyGet":{"ch":[{"t":"p1","n":[76,76,76,76,83,83,83,83,83,83,83,83],"v":[12,12,11,10,13,13,12,11,9,7,4,2],"d":1},{"t":"tr","n":[52,52,52,52,59,59,59,59,59,59,59,59],"v":[15,15,15,15,15,15,15,15,15,15,0,0],"d":0}]},"starPower":{"ch":[{"t":"p1","n":[72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96,96,96],"v":[12,12,12,12,12,12,12,12,12,12,12,12,11,11,10,10,9,8,7,6,5,4,2,1],"d":2},{"t":"p2","n":[0,0,72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96],"v":[0,0,6,6,6,6,6,6,6,6,6,6,5,5,5,4,4,3,3,2,2,1,1,0],"d":0}]},"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904,50.96,50.758,51.223,51.921,52.402,52.436,52.067,51.507,50.996,50.687,50.614,50.716,50.888,51.033,51.09,51.04,50.899,50.702],"v":[14,14,14,14,13,12,11,11,10,9,8,8,7,7,6,6,6,5,5,4,4,4,4,3,2,2,1,1],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[36.0025,32.9986,28.0054,24.0025,22.9994,22.9994,22.9994,22.9994,22.9994,36.0025,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798,20.8798,20.8798,20.8798,34.9994,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798],"v":[15,15,15,15,15,0,0,0,0,10,10,10,10,10,10,0,0,0,0,2,2,2,2,2,2,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,0,6,6,0,0,0,0,2,2,2,15,15,15,2,2,2,2,2,2,2,2,2,2,2],"v":[15,15,15,15,15,15,15,15,15,10,10,10,10,10,10,2,2,2,2,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}};
 
   let audioCtx = null;
   function getAudioCtx() {
@@ -4282,6 +4308,8 @@
     splat: () => playChip("splat"), gotcha: () => playChip("splat"),
     boom: () => playChip("kaboom"), shot: () => playChip("kaboom"),
     celebrate: () => playChip("ding"),
+    heartUp: () => playChip("heartUp"), keyGet: () => playChip("keyGet"),
+    starPower: () => playChip("starPower"), starEnd: () => playChip("starPower", 0.5, 0.6),
     doorCreak: () => playChip("creak"),
     slide: () => playChip("swoosh"), wind: () => playChip("wind"), warp: () => playChip("zip"),
   };
@@ -4978,13 +5006,14 @@
       sw.title = def.name;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      drawArtToCtx(c.getContext("2d"), id === "colKey" ? tintedKeyArt(def.art, selectedChannelColor) : def.art, ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = def.name;
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCollectible(id));
+      wireCaption(sw, CAPTION_TEXT[id]); // only the three power-ups have entries; every other collectible stays uncaptioned
       container.appendChild(sw);
     });
     const plus = document.createElement("div");
@@ -5011,13 +5040,14 @@
   // never at the same time (a selected geometry belongs to exactly one of those tabs), so each
   // tab gets its own mount point showing/hiding independently rather than one block that would
   // need to physically relocate itself between them.
-  function renderColorSwatchesInto(containerId, blockId, show) {
+  function renderColorSwatchesInto(containerId, blockId, show, keyMode) {
     const container = document.getElementById(containerId);
     const block = document.getElementById(blockId);
     block.style.display = show ? "block" : "none";
     if (!show) return;
     container.innerHTML = "";
-    const options = [null, ...CHANNEL_COLORS];
+    // A Key always has a color (no "none" option) — the picker doubles as the key's own color row.
+    const options = keyMode ? CHANNEL_COLORS.slice() : [null, ...CHANNEL_COLORS];
     // v2.41: the two-doors-per-color cap used to only be explained in a paragraph here and
     // enforced reactively (wireColoredDoor refuses + reverts + logs) once a kid actually tried a
     // third door — per the patch's own rule 3, that's a discoverability gap to fix with an
@@ -5025,7 +5055,7 @@
     // this same row, so the limit is something a kid sees when they reach for it instead of
     // something they'd have had to read about first. Scoped to the Door swatch specifically —
     // every other color-taggable geometry (solid/barrier/plate/pushbutton) has no such cap.
-    const isDoorColor = containerId === "objectColorSwatches" && selectedGeometry === "door";
+    const isDoorColor = !keyMode && containerId === "objectColorSwatches" && selectedGeometry === "door";
     options.forEach(color => {
       const sw = document.createElement("div");
       const full = isDoorColor && color && findDoorsWithColor(color).length >= 2;
@@ -5040,6 +5070,7 @@
         sw.addEventListener("click", () => {
           selectedChannelColor = color;
           renderColorSwatches();
+          if (keyMode) renderCollectibleSwatches(); // the key swatch itself wears the chosen color
         });
       }
       container.appendChild(sw);
@@ -5048,7 +5079,9 @@
   function renderColorSwatches() {
     const isTile = paintMode === "tile";
     renderColorSwatchesInto("groundColorSwatches", "groundColorBlock", isTile && selectedGeometry === "solid");
-    renderColorSwatchesInto("objectColorSwatches", "objectColorBlock", isTile && isColorTaggable(selectedGeometry) && selectedGeometry !== "solid");
+    const keyMode = paintMode === "actor" && selectedActorDefId === "colKey";
+    if (keyMode && !selectedChannelColor) selectedChannelColor = CHANNEL_COLORS[0];
+    renderColorSwatchesInto("objectColorSwatches", "objectColorBlock", keyMode || (isTile && isColorTaggable(selectedGeometry) && selectedGeometry !== "solid"), keyMode);
   }
 
   // v2.14: activeTab is derived from `kind` itself rather than passed in separately — pushable
@@ -5637,7 +5670,7 @@
   // occupied (plateChannelsActive, momentary) — see the state comments on each for why they're
   // tracked so differently underneath.
   function isChannelOn(color) {
-    return !!switchChannels[color] || !!plateChannelsActive[color];
+    return !!switchChannels[color] || !!plateChannelsActive[color] || !!keyChannelsUnlocked[color];
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
@@ -6331,7 +6364,17 @@
 
   // ============== Reaction table (physics terms) ==============
   function countCollectibles() {
-    return actors.filter(a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible"; }).length;
+    // Heart/Key/Star share the collectible temperament but are power-ups, never part of "all collected".
+    return actors.filter(a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible" && !POWERUP_DEF_IDS.includes(a.defId); }).length;
+  }
+  // Game-wide, not per-room: today every room's win condition doubles as the game's win (see
+  // roundComplete), so a goal-less side room must not be able to end a game whose real win is a
+  // goal tile elsewhere. The hot room's live `board` is used for itself in case rooms[i].board is stale.
+  function gameHasGoalTile() {
+    return rooms.some(r => {
+      const b = r.id === currentRoomId ? board : r.board;
+      return b.some(row => row.some(k => k && k.split(":")[0] === "goal"));
+    });
   }
 
   // goal and full collection both funnel through here — one completion reaction, two ways to
@@ -6354,7 +6397,8 @@
     }
     log("Round complete!");
   }
-  function maybeRoundCompleteFromCollectibles() { if (countCollectibles() === 0) roundComplete(); }
+  // Collecting everything wins ONLY when the game has no goal tile — a goal always takes over.
+  function maybeRoundCompleteFromCollectibles() { if (!gameHasGoalTile() && countCollectibles() === 0) roundComplete(); }
 
   // Ends a Play session in victory — distinct from Build's reset-and-keep-tinkering loop, and
   // distinct from a mid-game reset with lives remaining: this freezes the session (see frame())
@@ -6378,6 +6422,28 @@
     renderPlayHUD();
     if (lives <= 0) { triggerGameOver(); return true; }
     return false;
+  }
+
+  // Star = ghost mode: nothing can hurt the player (except lethal tiles, which also ignore it —
+  // see triggerLethalHazard — but only WHILE the star is up; they bite the instant it ends).
+  function starActive() { return starTimer > 0; }
+  // The single door every non-lethal hit goes through (hazard, chaser catch, falling-crate crush).
+  // Returns "star" (nothing happened), "absorbed" (a spare heart took it — no life lost, no
+  // reset), "gameover", or "life" (a life was spent; callers do their usual reset). Lethal never
+  // comes through here: hearts don't help against lava. Build mode has no hearts or lives, so it
+  // falls straight through to consumeLifeIfPlaying()'s own no-op.
+  function takePlayerHit(source) {
+    if (starTimer > 0) return "star";
+    if (appMode === "play" && !playSessionEnded && spareHearts > 0) {
+      spareHearts--;
+      const player = actors.find(a => a.isPlayer);
+      // invulnT is its own field (not hazardCooldown, which triggerLethalHazard also gates on) so
+      // a lethal tile touched during the flicker window still kills.
+      if (player) player.invulnT = HIT_INVULN_MS;
+      renderPlayHUD();
+      return "absorbed";
+    }
+    return consumeLifeIfPlaying() ? "gameover" : "life";
   }
 
   // `silent` skips the stinger + log line while still freezing the session right away (see
@@ -6426,8 +6492,19 @@
       log("Oof!");
       if (npcActor.spawnerKey && !npcActor.ttlPopped) despawnSpawnedActor(npcActor);
     } else if (temperament === "chaser") {
+      if (starTimer > 0 || playerActor.invulnT > 0) return; // ghost mode / flicker window: can't be caught
       playActorSound(npcActor, "gotcha");
       playRecipe(playerActor, "caughtPunt");
+      if (appMode === "play" && !playSessionEnded && spareHearts > 0) {
+        // A spare heart takes the catch: the same punt plays but there's no reset to start and no
+        // life lost — just a shove apart and the flicker window so it can't re-catch next frame.
+        takePlayerHit("chaser");
+        const away = Math.sign((playerActor.x + playerActor.w / 2) - (npcActor.x + npcActor.w / 2)) || 1;
+        playerActor.vx = away * HAZARD_KNOCKBACK_SPEED; playerActor.flashTimer = 1;
+        pushApart(playerActor, npcActor);
+        log("A heart took that hit!");
+        return;
+      }
       // Build mode: consumeLifeIfPlaying() is a no-op (returns false) and this plays out exactly
       // as it always has. Play mode: this is one of the two events that cost a life; at zero
       // lives the punt still plays (it's still a satisfying hit), but the respawn below is
@@ -6446,6 +6523,8 @@
       playRecipe(npcActor, "popVanish");
       log("Pop!");
       setTimeout(() => { removeActorById(npcActor.id); }, RECIPES.popVanish.duration);
+    } else if (temperament === "collectible" && POWERUP_DEF_IDS.includes(npcActor.defId)) {
+      collectPowerup(playerActor, npcActor); // never calls maybeRoundCompleteFromCollectibles
     } else if (temperament === "collectible") {
       playActorSound(npcActor, "pop");
       playRecipe(npcActor, "popVanish");
@@ -6475,6 +6554,59 @@
       // (only checkPlayerTileContacts/the Build-mode drag handler ever call triggerCannon).
       triggerCannon(playerActor, "cannon2-" + npcActor.cannonDir);
     }
+  }
+
+  // Heart / Key / Star pickup. Never counts as a collectible and never checks the collection win —
+  // otherwise grabbing a heart in a room with no ordinary collectibles (count already 0) would win.
+  function collectPowerup(playerActor, npcActor) {
+    if (npcActor.collected) return;
+    if (npcActor.defId === "colHeart") {
+      if (appMode === "play") {
+        if (spareHearts >= MAX_SPARE_HEARTS) return; // at the cap: ignored, the heart stays put
+        spareHearts++;
+      }
+      sounds.heartUp();
+      log("Heart! A spare hit.");
+    } else if (npcActor.defId === "colKey") {
+      const color = npcActor.channel || CHANNEL_COLORS[0];
+      keyChannelsUnlocked[color] = true;
+      sounds.keyGet();
+      log("A " + color + " key! Every " + color + " gate opens.");
+    } else if (npcActor.defId === "colStar") {
+      starTimer = STAR_DURATION_MS; // picking up another just refills to full, never stacks
+      sounds.starPower();
+      log("Star! Nothing can hurt you. For a bit.");
+    }
+    npcActor.collected = true;
+    if (appMode !== "play") collectedPowerups.push({ roomId: currentRoomId, actor: npcActor });
+    playRecipe(npcActor, "popVanish");
+    setTimeout(() => { if (npcActor.collected) removeActorById(npcActor.id); }, RECIPES.popVanish.duration);
+    renderPlayHUD();
+  }
+  // Build's "Reset to start": bring back every power-up picked up since (and re-lock keys, end the star).
+  function restoreCollectedPowerups() {
+    collectedPowerups.forEach(({ roomId, actor }) => {
+      const room = rooms.find(r => r.id === roomId);
+      const list = roomId === currentRoomId ? actors : (room && room.actors);
+      if (!list || list.some(a => a.id === actor.id)) { actor.collected = false; return; }
+      actor.collected = false;
+      list.push(actor);
+    });
+    collectedPowerups = [];
+    keyChannelsUnlocked = {}; starTimer = 0;
+    renderPlayHUD();
+  }
+
+  // The key's channel color shows on the key itself: its three yellows are swapped for shades of
+  // that color via the same recoloredArt the pressure plate's indicator already uses.
+  function shadeHex(hex, f) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(f >= 0 ? v + (255 - v) * f : v * (1 + f)))));
+    return "#" + ch.map(v => v.toString(16).padStart(2, "0")).join("");
+  }
+  function tintedKeyArt(art, color) {
+    const base = CHANNEL_COLOR_HEX[color || CHANNEL_COLORS[0]];
+    return recoloredArt(recoloredArt(recoloredArt(art, KEY_TINT_FROM[0], base), KEY_TINT_FROM[1], shadeHex(base, 0.45)), KEY_TINT_FROM[2], shadeHex(base, -0.35));
   }
 
   // Any two actors colliding: velocities reflect off each other (a real bounce, elastic-ish).
@@ -6511,6 +6643,7 @@
 
   function triggerHazard(actor) {
     if (actor.hazardCooldown > 0) return;
+    if (starTimer > 0 || actor.invulnT > 0) return; // ghost mode / post-heart flicker: nothing happens at all
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
     playActorSound(actor, "yelp");
     actor.flashTimer = 1;
@@ -6521,7 +6654,8 @@
     actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
     log("Ouch! Hazard knockback.");
-    consumeLifeIfPlaying(); // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — no isPlayer guard needed
+    // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — no isPlayer guard needed
+    if (takePlayerHit("hazard") === "absorbed") log("A heart took that hit!");
   }
 
   // v2.18: lethal is hazard's more severe sibling — same touch-detection, same cooldown gate, but
@@ -6539,6 +6673,7 @@
   // would bury the one new comedic beat this patch adds under a dark overlay before it's even had
   // a chance to play, and would stack the game-over jingle right on top of the splat sound.
   function triggerLethalHazard(actor) {
+    if (starTimer > 0) return; // ghost mode — deliberately NOT setting hazardCooldown, so it bites the moment the star ends
     if (actor.hazardCooldown > 0) return;
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
     playActorSound(actor, "splat");
@@ -7153,7 +7288,9 @@
   function steeringAccelFor(actor, player) {
     const def = actorDefs[actor.defId];
     if (!def) return { ax: 0, ay: 0 };
-    if (def.temperament === "wanderer") {
+    // A starred (ghost-mode) player isn't a valid target: chasers and fleers just wander instead.
+    const loseTrack = starTimer > 0 && (def.temperament === "chaser" || def.temperament === "fleer");
+    if (def.temperament === "wanderer" || loseTrack) {
       let h = wanderHeadings[actor.id];
       const now = performance.now();
       if (!h || now > h.until) {
@@ -7657,6 +7794,7 @@
     else if (actor.vx < -8) actor.facingDir = -1;
 
     if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
+    if (actor.invulnT > 0) actor.invulnT -= dt * 1000;
     if (actor.goalCooldown > 0) actor.goalCooldown -= dt * 1000;
     if (actor.flipCooldown > 0) actor.flipCooldown -= dt * 1000;
     if (actor.bouncyCooldown > 0) actor.bouncyCooldown -= dt * 1000;
@@ -7947,6 +8085,10 @@
   }
 
   function tick(dt) {
+    if (starTimer > 0) {
+      starTimer -= dt * 1000;
+      if (starTimer <= 0) { starTimer = 0; sounds.starEnd(); }
+    }
     updatePressurePlates();
     updateChannelTransitions();
     const player = actors.find(a => a.isPlayer);
@@ -8513,6 +8655,8 @@
       // placed" already means exactly that for every actor.
       platformAxis: "x", platformT: 0
     };
+    // A Key carries its own channel color (v2.42), read from the shared color picker at placement.
+    if (actor.defId === "colKey") actor.channel = selectedChannelColor || CHANNEL_COLORS[0];
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
     // `room.startPos` (see activateRoom), the same way board/colorBoard/actors stay in sync purely
@@ -8870,6 +9014,7 @@
   // actually placed by hand.
   document.getElementById("resetBtn").addEventListener("click", () => {
     purgeSpawnedActors(actors);
+    restoreCollectedPowerups(); // Build reset: picked-up hearts/keys/stars come back, keys re-lock, star ends
     resetActorsToSpawn(actors, startPos);
     log("Reset to start.");
   });
@@ -9498,6 +9643,7 @@
       if (!def) return;
       const posed = !!def.poses;
       let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
+      if (actor.defId === "colKey") art = tintedKeyArt(art, actor.channel);
 
       let t;
       if (posed) {
@@ -9571,6 +9717,11 @@
         } else delete animState[actor.id];
       }
       if (actor.flashTimer > 0) t.alpha *= (Math.floor(now / 50) % 2 === 0) ? 0.35 : 1;
+      // Ghost mode reads as translucent + flickering the whole time, flickering visibly faster for
+      // the last STAR_WARNING_MS as the warning that it's about to end. A spare heart's hit leaves
+      // its own quick flicker (invulnT) so a kid can see why a chaser can't re-catch them.
+      if (actor.isPlayer && starTimer > 0) t.alpha *= (Math.floor(now / (starTimer <= STAR_WARNING_MS ? 55 : 130)) % 2 === 0) ? 0.4 : 0.8;
+      if (actor.invulnT > 0) t.alpha *= (Math.floor(now / 70) % 2 === 0) ? 0.3 : 1;
       // A carried/dropped bomb's fuse ticking needs the same visible warning the tile version
       // already gives (drawGameplayTile's own `extra.armed` flicker) — same alpha flicker, same
       // 120ms period, just keyed off `fuseTimerId` (actively ticking, not held/paused) instead of
@@ -9895,6 +10046,24 @@
     const livesRow = document.getElementById("livesRow");
     livesRow.style.display = appMode === "play" ? "inline" : "none";
     document.getElementById("livesVal").textContent = lives;
+    // Hearts: one always-full base heart plus a filled heart per spare; spending one pops it.
+    const heartsRow = document.getElementById("heartsRow");
+    if (heartsRow) {
+      heartsRow.style.display = appMode === "play" ? "inline" : "none";
+      const shown = 1 + spareHearts;
+      let html = "";
+      for (let i = 0; i < shown; i++) html += "<span class='hudHeart'>❤</span>";
+      if (shown < lastHeartCount) html += "<span class='hudHeart heartPop'>❤</span>";
+      heartsRow.innerHTML = html + " &nbsp;";
+      lastHeartCount = shown;
+    }
+    // Keys: a small colored chip per unlocked channel, so a gate opening off-screen still gives feedback.
+    const keysRow = document.getElementById("keysRow");
+    if (keysRow) {
+      const colors = CHANNEL_COLORS.filter(c => keyChannelsUnlocked[c]);
+      keysRow.style.display = colors.length ? "inline" : "none";
+      keysRow.innerHTML = colors.map(c => "<span class='hudKey' style='background:" + CHANNEL_COLOR_HEX[c] + "'>🔑</span>").join("") + " &nbsp;";
+    }
     const el = document.getElementById("scoreVal");
     if (el) el.textContent = score;
   }
@@ -9950,6 +10119,7 @@
   // export, since there's no palette to refresh.
   function exportStandaloneGame() {
     if (playerRoomId == null) { log("Place a player first — nothing to export yet."); return; }
+    restoreCollectedPowerups(); // same reason as enterPlayMode: never bake a build-time pickup's absence into a shipped game
 
     // v2.17: gravity/wrap/camera/pan live on each room object now, not as separate top-level
     // fields — flush the currently-hot room's own live values into it before cloning below (the
@@ -9984,7 +10154,8 @@
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
-      countCollectibles, roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
+      countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
+      roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
@@ -10097,6 +10268,7 @@
       `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
+      `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
@@ -10137,6 +10309,12 @@
   #wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px; }
   #gameCanvas { background:#000; image-rendering:pixelated; border:3px solid var(--panel-light); border-radius:4px; touch-action:none; }
   #hud { font-size:16px; font-weight:bold; color:var(--accent); }
+  .hudHeart { color: #ff4d6d; }
+  .heartPop { display: inline-block; position: absolute; animation: heartPop .45s ease-out forwards; pointer-events: none; }
+  @keyframes heartPop { from { transform: scale(1); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+  #heartsRow { position: relative; }
+  .hudKey { display: inline-block; border-radius: 4px; padding: 0 3px; margin-right: 2px; font-size: 12px; }
+
   #log { font-size:12px; color:#bbb; max-height:50px; overflow-y:auto; width:768px; max-width:100%; }
   #errorOverlay { position:fixed; inset:0; background:rgba(10,10,14,0.85); display:none; align-items:center; justify-content:center; z-index:1000; }
   #errorOverlayCard { background:var(--panel); border-radius:12px; padding:24px 28px; max-width:360px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,0.5); }
@@ -10147,7 +10325,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="hud"><span id="livesRow">❤ <span id="livesVal">3</span> &nbsp;</span>Score: <span id="scoreVal">0</span></div>
+  <div id="hud"><span id="livesRow">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
   <canvas id="gameCanvas" width="768" height="576"></canvas>
   <div id="log"></div>
 </div>
@@ -10206,6 +10384,7 @@
   let roomTransition = null;
   let score = 0, intensity = 0;
   let lives = DEFAULT_LIVES;
+  let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let playReadyUntil = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
@@ -10249,6 +10428,7 @@
     roomTransition = null;
     score = 0; intensity = 0;
     lives = DEFAULT_LIVES;
+    spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {};
     playSessionEnded = null;
     playReadyUntil = performance.now() + READY_DURATION_MS;
     currentRoomId = null;

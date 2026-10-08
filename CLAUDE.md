@@ -5579,6 +5579,118 @@ sweep and export test clean. Not covered: actually listening — loudness is a n
 by judgment and may want one more nudge. Standing on a bouncy tile was verified at the sound layer
 (the throttle), not by scripting a physical bounce.
 
+## Heart, Key, Star — the three power-up collectibles, and a stricter collection win (v2.44)
+
+(The patch note called itself v2.42; CLAUDE.md already uses v2.42/v2.42.1 and informally refers to
+"v2.43-era" for the READY! pause, so this is labeled v2.44 — see "Version labels are not reliable".)
+
+Heart, Key and Star have existed as collectible art since v2.27 (`colHeart`/`colKey`/`colStar` in
+`COLLECTIBLE_SEEDS`) and did nothing but pop. They now have behavior, all built from systems that
+already existed; the only new state is `spareHearts`, `starTimer`, `keyChannelsUnlocked` and a
+per-key `channel`. No scripting layer, no new temperament: `POWERUP_DEF_IDS` is the one small closed
+list that tells them apart from cheese/gem/coin.
+
+**The win rule changed first.** Collecting every ordinary collectible wins ONLY if the game has no
+goal tile. `gameHasGoalTile()` is game-wide (any room's board has geometry `goal`) because every
+room's win condition already doubles as the game's win (`roundComplete`) — per-room would let a
+goal-less side room end a game whose real win is a goal elsewhere. `maybeRoundCompleteFromCollectibles`
+is guarded with it, so Build and Play agree; `triggerGoal` is untouched. `countCollectibles()` excludes
+`POWERUP_DEF_IDS`, and power-up pickup (`collectPowerup`) never calls the collection check at all —
+otherwise a heart in a room with no ordinary collectibles (count already 0) would win instantly.
+Sample audit: only The Monster's Den and The Gravity Switcheroo have both a goal and ordinary
+collectibles — both now win by goal only (Monster's Den's goal is the intended win and is reachable;
+Switcheroo's collectibles are now just points, which also removes the old bait-gem workaround's
+reason to exist but is harmless). Cheese Heist has NO goal tile, so collection still wins there
+(confirmed by collecting the last cheese in a real Play session). The other five have goals and no
+ordinary collectibles — unaffected.
+
+**Heart = a hit buffer on top of lives.** One always-full base heart plus up to `MAX_SPARE_HEARTS`
+(3) spares, Play-only, reset on Play start/restart (via `clearTransientRuntimeState`) and on game
+over. Every non-lethal hit goes through `takePlayerHit(source)`: star active -> nothing; a spare ->
+spend it (no life lost, no reset to start, `HIT_INVULN_MS` 1.2s flicker window); otherwise
+`consumeLifeIfPlaying()` exactly as before. Callers keep their own side effects: `triggerHazard`
+bails before cooldown/knockback when starred or flickering and otherwise does its usual yelp+flash+
+knockback (a falling-crate crush reaches it too); the chaser-catch branch plays the same `caughtPunt`
+but, when a spare absorbs it, skips the reset and shoves the player clear instead. **Deliberate
+deviation from the note**: the flicker window is a new `actor.invulnT`, not `hazardCooldown`.
+`triggerLethalHazard` gates on `hazardCooldown`, so reusing it would have made a lethal tile touched
+during the flicker harmless — and "lethal ignores hearts" is the whole point of the tile. Lethal is
+otherwise untouched (full hearts + lava = instant game over, verified). A Heart at the cap is ignored
+and stays on the floor. Build has no hearts: it pops with its sound and Reset restores it. HUD: the
+old `❤ 3` lives readout is now `Lives 3` (so two red-heart readouts don't sit side by side) next to a
+heart row (base + spares; spending one plays a CSS pop on a ghost heart).
+
+**Key = a permanent button you pick up.** A key carries a per-actor `channel` (set from the shared
+channel color picker in `placeNewActor`; old saves without one default to the first color, red).
+Picking it up sets `keyChannelsUnlocked[color]` — a third source in `isChannelOn`, next to
+`switchChannels` and `plateChannelsActive` — so every same-color gate opens with its existing ghost
+treatment, and same-color fans/buttons/plates share it (intentional emergent behavior, not
+special-cased). The key renders tinted via `tintedKeyArt` (three `recoloredArt` swaps of KEY_ART's
+yellows for shades of the channel color); the picker shows, without a "none" option and without the
+door two-per-color cap, whenever a Key is the selected Object, and the key's own palette swatch wears
+the chosen color. HUD: a small colored key chip per unlocked color, so a gate opening off-screen under a
+Follow/Runner camera still gives feedback. Keys re-lock on Play restart and Build Reset. Not built
+(per the note): the carried-key-spent-on-one-lock variant.
+
+**Star = ghost mode, `STAR_DURATION_MS` (6s).** Pickup sets/refills `starTimer` (never stacks);
+`tick()` counts it down in Build too and plays a small expiry blip. While up: `takePlayerHit` returns
+immediately, `triggerHazard`/the chaser branch bail out, `triggerLethalHazard` returns WITHOUT setting
+`hazardCooldown` (so a lethal tile the player is standing in kills the frame after the star ends —
+verified), chasers/fleers fall into `steeringAccelFor`'s wander branch (`loseTrack`), walls stay solid
+(it is not a noclip). Cue: the player renders translucent and flickering the whole time and flickers
+visibly faster for the last `STAR_WARNING_MS` (1.5s) — no hidden state. Art is the existing yellow
+`STAR_ART`; the sound is original chip synthesis.
+
+**Sounds** (three new `CHIP_DESIGNS` entries, literal arrow functions in `sounds`): `heartUp` (rising
+E-G#-B arpeggio), `keyGet` (bright two-note blip), `starPower` (quick shimmering arpeggio), plus
+`starEnd` = `playChip("starPower", 0.5, 0.6)` for the expiry blip. Rendered and checked for length/peak
+(0.27s/0.20s/0.40s, peak 0.7), but **hand-written per-frame data, never listened to** — if they don't
+sound right, retune them in the sound designer. Spending a heart reuses the existing yelp/thunk.
+
+**Captions**: `CAPTION_TEXT` gained `colHeart`/`colKey`/`colStar` ("Takes a hit for you.", "Opens gates
+of its color.", "Nothing can hurt you. For a bit."), and `renderCollectibleSwatches` now calls
+`wireCaption` — every other collectible id has no entry and stays uncaptioned, as before.
+
+**Build mode details**: because collected pickups are *removed* from `actors`, a Build-time pickup is
+recorded in `collectedPowerups` and `restoreCollectedPowerups()` (Build "Reset to start", and also
+entering Play and exporting, so a heart grabbed while tinkering isn't baked out of Play/the shipped
+game) puts them back, re-locks keys and ends the star. Ordinary collectibles still do NOT come back on
+Build Reset — a pre-existing behavior, left alone. Power-ups award no score.
+
+**Spawner**: a spawner loaded with a Heart/Key/Star just spawns a pickup like any collectible (verified
+for Key). `spawnerContents` holds only a defId, so a spawned Key has no `channel` and defaults to red.
+
+**Export / saves**: `gameHasGoalTile`, `starActive`, `takePlayerHit`, `collectPowerup`, `shadeHex`,
+`tintedKeyArt` added to `runtimeFunctions`; one `constantsSource` line ships `POWERUP_DEF_IDS`,
+`MAX_SPARE_HEARTS`, `HIT_INVULN_MS`, `STAR_DURATION_MS`, `STAR_WARNING_MS`, `KEY_TINT_FROM`; the export
+template declares `spareHearts`/`starTimer`/`keyChannelsUnlocked`/`collectedPowerups`/`lastHeartCount`
+by hand, resets them in `restartStandaloneGame`, and has the new `#heartsRow`/`#keysRow` HUD markup and
+CSS. `channel` survives snapshot -> JSON -> restore (actors are cloned wholesale; confirmed). No new seed
+ids, so no "append missing built-in seed" backfill is needed — confirmed the three ids are already in
+`COLLECTIBLE_SEEDS` and `restoreProjectSnapshot`'s existing append line covers them. (There is no
+`object-interaction-matrix.md` in the repo — the earlier matrix lives in its CLAUDE.md section — so the
+matrix rows below are recorded here.)
+
+**Interaction matrix additions.** heart × hazard: spare absorbed, knockback+flicker, no life lost;
+heart × chaser: spare absorbed, same punt but no reset, flicker prevents re-catch; heart × crush:
+same as hazard (crush calls `triggerHazard`); heart × lethal: ignored — still instant game over.
+key × gate: opens same-color `barrier`/channel-gated `solid`, permanent for the session; key × fan:
+same-color fan turns on (shared `isChannelOn`); key × button/plate: share the channel (button toggle
+and plate momentary still work alongside it). star × chaser/fleer: lose track and wander; star ×
+hazard/crush/chaser contact: nothing; star × lethal: harmless until the star ends, then deadly at once;
+star × walls/gates: still solid. Not covered either way: star/hearts × gravity-well capture, runner
+camera fail, NPC-lethal (unchanged).
+
+Verified with Playwright (36 behavior checks, 17 export checks, plus the 8-sample sweep): goal +
+collectibles does not win by collection but the goal wins; no-goal collection wins; a lone Heart/Key/
+Star in a collectible-free room never wins; heart absorbs a hazard, a chaser and a falling crate with no
+life lost and no reset, flicker prevents re-catch, no spare loses a life and resets as before; 4 hearts
+cap at 3 spare with the 4th left on the floor; lava with full hearts still ends the game; red key opens
+red not blue, stays open, re-locks with the key restored on Play restart and Build Reset; a channel-less
+(old-save) key defaults to red; star starts at full, chaser stops steering at the player, hazard/lava/
+chaser harmless, expiry inside lava kills; two stars don't stack; a real export with all three plays
+standalone (2 hearts shown, a red key chip, star running, zero errors). The debug hook was stripped.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
