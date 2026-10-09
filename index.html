@@ -759,6 +759,7 @@
 
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
   const SPAWN_INTERVAL_MS = 2500;
+  const SPAWNER_VIEW_MARGIN_PX = 64; // a spawner keeps running this far beyond the screen edge (2 tiles)
   const SPAWNER_WINDUP_MS = 350;
   // v2.34: SPAWNER_MAX_CONCURRENT (a hard per-spawner population cap) removed outright — direct
   // feedback that a spawner should always fire on schedule, never skip a cycle for having "too
@@ -7994,6 +7995,16 @@
         if (!SPAWNER_ORDER.includes(geometry)) continue;
         const key = roomCellKey(currentRoomId, x, y);
         const state = spawnerRuntime[key] || (spawnerRuntime[key] = { clock: 0, windUp: false, warnedBlocked: false });
+        // A spawner only runs while it's on (or just beside) the screen. In a Follow/Runner room the
+        // board is up to 3 screens wide, and spawners used to keep firing the whole time they were
+        // far off-screen — so a kid arrived to find a big pile of spawned characters waiting that
+        // they never saw being made. Off-screen the clock simply pauses (nothing is lost; it resumes
+        // when the spawner comes back into view). Fixed rooms are always fully on-screen.
+        const viewLeft = appMode === "build" ? editorPanCol * TILE : cameraX;
+        if ((x + 1) * TILE < viewLeft - SPAWNER_VIEW_MARGIN_PX || x * TILE > viewLeft + COLS * TILE + SPAWNER_VIEW_MARGIN_PX) {
+          state.windUp = false;
+          continue;
+        }
         state.clock += dt * 1000;
         // v2.35.2: direct bug report — a spawner with nothing but a wall or the room's own edge
         // immediately in its facing direction (e.g. a north-facing spawner sitting on row 0) could
@@ -9345,6 +9356,15 @@
         // a named skin (lava/fire/a kid's own) over walkable ground — real art instead of the
         // plain tinted wash below, same as any other geometry gets once one's painted (see below)
         drawRotatedArt(ctx, currentSkinFrame(extra.skinDef), x, y, TILE, cell, extra.skinRotation);
+        // same "effect under a skin" tint the solid-geometry path applies below: without it a sticky
+        // patch and a slippery patch painted with the same skin are indistinguishable.
+        if (tile.modifier !== extra.skinDef.modifier && !windDir && MODIFIER_SWATCH_COLORS[tile.modifier]) {
+          ctx.save();
+          ctx.globalAlpha = 0.4;
+          ctx.fillStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
+          ctx.fillRect(x, y, TILE, TILE);
+          ctx.restore();
+        }
         return;
       }
       if (tile.modifier !== "none") {
@@ -9460,6 +9480,18 @@
       // anything either way; the wind arrow stays regardless, since it's a real gameplay cue (which
       // way the wind pushes you), not a design-time hint.
       const skinned = extra && extra.skinDef;
+      // A skin hides which Ground Effect is under it, and two skinned tiles can look identical while
+      // one is slippery ice and the other sticky mud (reported: a kid walked what looked like one
+      // continuous slippery patch and kept slowing down). So whenever the tile's effect isn't the
+      // one its skin already implies, tint it in that effect's color — in Play and export too,
+      // since this is gameplay information, not just an authoring hint like the ring.
+      if (skinned && tile.modifier !== extra.skinDef.modifier && !windDir && MODIFIER_SWATCH_COLORS[tile.modifier]) {
+        ctx.save();
+        ctx.globalAlpha = 0.32;
+        ctx.fillStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.restore();
+      }
       if (appMode === "build" && !skinned) {
         ctx.save();
         ctx.strokeStyle = MODIFIER_SWATCH_COLORS[tile.modifier];
@@ -10252,7 +10284,7 @@
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
-      `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS};`,
+      `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS}, SPAWNER_VIEW_MARGIN_PX = ${SPAWNER_VIEW_MARGIN_PX};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
       `const CHANNEL_COLORS = ${JSON.stringify(CHANNEL_COLORS)};`,
       `const CHANNEL_COLOR_HEX = ${JSON.stringify(CHANNEL_COLOR_HEX)};`,
