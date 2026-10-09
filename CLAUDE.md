@@ -5790,6 +5790,10 @@ Root cause found by watching the user's recording (claude-real-video + a static 
 
 The collision-triggered bomb detonation in `resolveAxis` (fast impact >= `BOMB_IMPACT_DETONATE_SPEED`) now applies to physics objects only; steering characters (wanderer/chaser/fleer) bumping a bomb tile just stop at its edge. Bomb blasts still knock enemies back, and a player touch still arms the fuse. This narrows the earlier interaction-matrix patch, which had included NPCs.
 
+## The Ice Cave replaces Spin Cycle
+
+The hand-coded "Spin Cycle" sample (and its sample-scoped art, `buildSpinCycleGame`, `drawSpinCycleIcon`) was removed and replaced by the user's own project (`my-project_6.json`), shipped the same way as The Monster's Den: `ICE_CAVE_PROJECT` embeds the snapshot and `buildIceCaveGame()` calls `restoreProjectSnapshot(structuredClone(...))`. Rooms are named "The Ice Cave" and "The Frightened Yeti". Actors were reset to spawn with zero velocity, spawner-made actors were dropped, and stale `spawnerContents` keys (cells no longer holding a spawner) were removed. Earlier sections describing Spin Cycle's layout and traces are history, not the current level. Verified via the 15-check sweep (loads, plays 3s, export clean); the level itself was not re-traced or playtested beyond that.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
