@@ -6160,7 +6160,7 @@
         // crate — which can never exceed walking speed — still just stops at the bomb's edge like
         // before; only a real throw or cannon shot clears it. Same isForceSusceptible/
         // isSteeringCharacter population every other widened reaction in this block already uses.
-        else if (isBombGeometry(geometry) && (isPhysicsObject || isSteeringNPC) && speedAtImpact >= BOMB_IMPACT_DETONATE_SPEED) {
+        else if (isBombGeometry(geometry) && isPhysicsObject && speedAtImpact >= BOMB_IMPACT_DETONATE_SPEED) {
           cancelBombArm(roomCellKey(currentRoomId, cx, cy));
           detonateBombAt(currentRoomId, cx, cy);
         }

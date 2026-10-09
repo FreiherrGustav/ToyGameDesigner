@@ -5786,6 +5786,10 @@ Root cause found by watching the user's recording (claude-real-video + a static 
 
 `resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but now passes `silent` to `reflectActorsApart` when either one is a collectible, stationary, hazard ball, or steering character (wanderer/chaser/fleer), so crowds of enemies no longer produce a constant boing. Physics is unchanged; only the sound is dropped. Object-vs-object bumps (crates, bombs, magnets...) still sound. Verified only via the 15-check regression sweep, not a dedicated audio-hook test.
 
+## Enemies can't set off bombs
+
+The collision-triggered bomb detonation in `resolveAxis` (fast impact >= `BOMB_IMPACT_DETONATE_SPEED`) now applies to physics objects only; steering characters (wanderer/chaser/fleer) bumping a bomb tile just stop at its edge. Bomb blasts still knock enemies back, and a player touch still arms the fuse. This narrows the earlier interaction-matrix patch, which had included NPCs.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
