@@ -7189,11 +7189,27 @@
   // "a steering character is sent back to its own spawn point, never destroyed" convention
   // exactly, rather than inventing a second shape for the same idea.
   function checkNpcLethalContacts(actor) {
+    if (actor.destroyed) return;
     for (const { cx, cy } of overlappedCells(actor)) {
       if (modifierAt(cx, cy) === "lethal") { triggerNpcLethalReset(actor); return; }
     }
   }
   function triggerNpcLethalReset(actor) {
+    if (actor.destroyed) return;
+    // A spawner-made character has no "home" of its own — its spawn point is just the spawner's
+    // launch cell. Sending it back there made a chaser that keeps running into lethal pop out of the
+    // spawner again and again, which looked exactly like the spawner firing several times a second
+    // (a user's recording: a stream of chasers leaving the spawner while the log repeated "Caught in
+    // lethal — sent back to its spawn point!"). Spawned content is disposable, so it is removed here
+    // and the spawner makes a fresh one on its own schedule; hand-placed characters still go home.
+    if (actor.spawnerKey) {
+      actor.destroyed = true;
+      playActorSound(actor, "splat");
+      playRecipe(actor, "popVanish");
+      log("Caught in lethal!");
+      setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
+      return;
+    }
     actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
     actor.displacedCooldown = 0;
     playActorSound(actor, "splat");
@@ -7241,7 +7257,9 @@
   // Large Stone's established identity elsewhere; flag this plainly since it's a judgment call, not
   // something the user confirmed directly.
   function triggerGravityWellCapture(actor, temperament) {
-    if (isSteeringCharacter(temperament)) {
+    // same reasoning as triggerNpcLethalReset: spawner-made characters are destroyed, not "sent home"
+    // to the spawner's launch cell, so they don't read as the spawner firing over and over.
+    if (isSteeringCharacter(temperament) && !actor.spawnerKey) {
       actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
       actor.displacedCooldown = 0;
       playActorSound(actor, "splat");
