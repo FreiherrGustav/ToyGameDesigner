@@ -5766,6 +5766,10 @@ intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept o
 
 The palette name for `pushbutton` is now "switch" (`GEOMETRY_LABELS`; internal id unchanged). Rendering no longer mirrors the whole tile: `SWITCH_OFF_ART`/`SWITCH_ON_ART` draw the same housing with the lever (red knob + two dark stem squares) one square left (off) or right (on); `drawGameplayTile` just picks one (`SWITCH_ON_ART` has its own `constantsSource` line). In Build mode, clicking an already-placed Switch of the same color with the Switch swatch selected flips its starting state (`paintGeometryModifierAt`, once per stroke via `cannonRotateStrokeCells`): colored flips `switchChannels[color]`, uncolored flips the room's gravity. Play starts from that state because the Play snapshot already captures `switchChannels` and per-room gravity. Default is off.
 
+## The Monster's Den is now a user-authored project snapshot
+
+The built-in sample was replaced by the user's own hand-built version (`The_Monsters_Den.json`). `MONSTERS_DEN_PROJECT` embeds that project (rooms, actorDefs, ground/background defs, switchChannels, etc.) and `buildMonstersDenGame()` just calls `restoreProjectSnapshot(structuredClone(MONSTERS_DEN_PROJECT))`, so it gets every backward-compat migration for free. Actors were stripped to placement fields (position reset to spawn, zero velocity) and stale `spawnerContents` keys for cells that no longer hold a spawner were dropped. The old maze string (`MONSTERS_DEN_MAZE`) and placement code are gone, so earlier sections describing that layout (single-row den, red Barrier/Button, orange Barrier/Plate trap) are history, not the current level. To swap it again, re-export from the editor and regenerate the constant the same way.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
