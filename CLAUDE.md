@@ -5756,7 +5756,7 @@ intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept o
 
 ## NPC–collectible contact is silent
 
-`resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but passes `silent` to `reflectActorsApart` when either is a collectible, so a wanderer/chaser brushing a collectible no longer plays `boing`. Player pickup sounds are untouched.
+`triggerImpact` also skips the landing thud for collectibles (walls). `resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but passes `silent` to `reflectActorsApart` when either is a collectible, so a wanderer/chaser brushing a collectible no longer plays `boing`. Player pickup sounds are untouched.
 
 ## Git / commit conventions
 

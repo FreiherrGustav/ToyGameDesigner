@@ -6393,6 +6393,8 @@
       actor.impactAxis = axis;
     }
     // a light hop and a fall from height shouldn't sound the same — see sounds.thud()
+    const idef = actorDefs[actor.defId];
+    if (idef && idef.temperament === "collectible") return; // collectibles never make impact sounds
     if (axis === "y" && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
   }
 
