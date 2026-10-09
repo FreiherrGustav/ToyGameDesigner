@@ -5758,6 +5758,10 @@ intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept o
 
 `triggerImpact` also skips the landing thud for collectibles (walls). `resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but passes `silent` to `reflectActorsApart` when either is a collectible, so a wanderer/chaser brushing a collectible no longer plays `boing`. Player pickup sounds are untouched.
 
+## Dropped objects land in front of the player
+
+`dropCarriedObject` places the object one body-width ahead of `player.facingDir` (same y as before), not on top of the player. If that spot is blocked by tiles (`actorBlockedByTiles`) it falls back to the old on-player spot so nothing is buried in a wall. Throws are unchanged.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

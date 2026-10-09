@@ -7530,8 +7530,12 @@
     player.carrying = null;
     if (!obj) return;
     obj.carried = false;
-    obj.x = player.x + player.w / 2 - obj.w / 2;
+    // Set down in front of the way the player faces, not on top of them; if that spot is walled
+    // off, fall back to the player's own spot (the old behavior) so it can't be buried in a tile.
+    const dropDir = player.facingDir || 1;
     obj.y = player.y + player.h - obj.h;
+    obj.x = player.x + player.w / 2 + dropDir * (player.w / 2 + obj.w / 2 + 1) - obj.w / 2;
+    if (actorBlockedByTiles(obj)) obj.x = player.x + player.w / 2 - obj.w / 2;
     obj.vx = 0; obj.vy = 0;
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
