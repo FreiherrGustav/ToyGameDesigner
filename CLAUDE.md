@@ -5782,6 +5782,10 @@ Follow-up to the off-screen pause: a user's saved project (two spawners, 24 spaw
 
 Root cause found by watching the user's recording (claude-real-video + a static ffmpeg got frames out of it): the spawner was firing at its normal 2.5s period, but its chasers kept running straight (no pathfinding) into lethal tiles and `triggerNpcLethalReset` teleported each one back to its `spawnX/spawnY` — for a spawner-made actor that is the spawner's launch cell — so a stream of chasers kept popping out of the spawner while the log repeated "Caught in lethal — sent back to its spawn point!". `triggerNpcLethalReset` and `triggerGravityWellCapture` now destroy a spawner-made character (`actor.spawnerKey`: `destroyed` flag, splat + `popVanish`, delayed `removeActorById`) instead of resetting it; hand-placed characters still go home. `checkNpcLethalContacts`/`triggerNpcLethalReset` also bail on `actor.destroyed` so the fade window can't re-trigger. The SPAWNER_MAX_LIVE cap from the previous patch stays as a separate safety valve. Tooling note: the recording only decoded with a real ffmpeg (pip's `imageio-ffmpeg` static build works when apt is broken); Playwright's bundled ffmpeg is VP8-only.
 
+## Enemy-vs-enemy bumps are silent
+
+`resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but now passes `silent` to `reflectActorsApart` when either one is a collectible, stationary, hazard ball, or steering character (wanderer/chaser/fleer), so crowds of enemies no longer produce a constant boing. Physics is unchanged; only the sound is dropped. Object-vs-object bumps (crates, bombs, magnets...) still sound. Verified only via the 15-check regression sweep, not a dedicated audio-hook test.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

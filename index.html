@@ -6463,8 +6463,10 @@
     const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
     if (!playerActor) {
       // NPCs brushing past collectibles are silent — only the bounce between two non-collectibles is heard.
-      const isCol = a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible"; };
-      reflectActorsApart(moverActor, otherActor, isCol(moverActor) || isCol(otherActor));
+      // Also silent for enemies (any steering character, stationary, or a hazard ball): crowds of them
+      // bumping each other made a constant boing. Object-vs-object bumps (crates, bombs...) still sound.
+      const isQuiet = a => { const d = actorDefs[a.defId]; const t = d && d.temperament; return t === "collectible" || t === "stationary" || t === HAZARD_BALL_KIND || isSteeringCharacter(t); };
+      reflectActorsApart(moverActor, otherActor, isQuiet(moverActor) || isQuiet(otherActor));
       return;
     }
     const npcActor = playerActor === moverActor ? otherActor : moverActor;
