@@ -5754,6 +5754,10 @@ without either, it needs a repro (gravity on/off, which tiles, any objects nearb
 Verified with Playwright: free-roam crate push S/N never steps more than 3.7px/frame; gravity riding
 intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept out of the repo file.
 
+## NPC–collectible contact is silent
+
+`resolveActorContact`'s no-player branch still reflects two touching non-player actors apart, but passes `silent` to `reflectActorsApart` when either is a collectible, so a wanderer/chaser brushing a collectible no longer plays `boing`. Player pickup sounds are untouched.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

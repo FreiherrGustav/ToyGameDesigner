@@ -6495,7 +6495,9 @@
   function resolveActorContact(moverActor, otherActor) {
     const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
     if (!playerActor) {
-      reflectActorsApart(moverActor, otherActor);
+      // NPCs brushing past collectibles are silent — only the bounce between two non-collectibles is heard.
+      const isCol = a => { const d = actorDefs[a.defId]; return d && d.temperament === "collectible"; };
+      reflectActorsApart(moverActor, otherActor, isCol(moverActor) || isCol(otherActor));
       return;
     }
     const npcActor = playerActor === moverActor ? otherActor : moverActor;
@@ -6644,8 +6646,8 @@
   }
 
   // Any two actors colliding: velocities reflect off each other (a real bounce, elastic-ish).
-  function reflectActorsApart(a, b) {
-    sounds.boing();
+  function reflectActorsApart(a, b, silent) {
+    if (!silent) sounds.boing();
     const dx = (a.x + a.w / 2) - (b.x + b.w / 2);
     const dy = (a.y + a.h / 2) - (b.y + b.h / 2);
     const horizontal = Math.abs(dx) >= Math.abs(dy);
