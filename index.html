@@ -376,7 +376,7 @@
         <div class="swatch-row" id="groundColorSwatches"></div>
         <div class="hint" style="margin-top:2px;">
           None: this wall always blocks, same as ever. Pick a color and it only blocks while
-          nothing of that color is currently on — a matching Button over in Fixtures, or a plate
+          nothing of that color is currently on — a matching Switch over in Fixtures, or a plate
           over in Objects, is what turns it off.
         </div>
       </div>
@@ -615,7 +615,7 @@
   // already know it as — see renderObjectSwatches/renderFixtureSwatches.
   // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
-  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "button", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
+  const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "switch", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
   // faint tint for a none+modifier tile) — see drawGameplayTile().
@@ -2184,6 +2184,19 @@
     "..AAAA..", ".ABBBBA.", "CDBDDBDC", "ABBBBBBA",
     "CDBDDBEC", "ABBBBBBA", "CDBDDBDC", "AABBBBAA"
   ], { A: "#3b4658", B: "#8a9eba", C: "#4d5c71", D: "#000000", E: "#fcef78" });
+  // The Switch (internal id "pushbutton"): a grey housing with a lever — red knob plus the two dark
+  // grey stem squares under it — that sits one square LEFT inside the housing when off and one
+  // square RIGHT when on. Only the lever moves; the housing never shifts. The two arrays differ
+  // only in where the lever is drawn.
+  const SWITCH_LEGEND = { A: "#f46583", B: "#eb370c", C: "#e41606", D: "#f3383b", E: "#4d5c71", F: "#3b4658", G: "#687287", H: "#000000" };
+  const SWITCH_OFF_ART = pat([
+    "........", ".ABC....", ".BCD....", ".CDD....",
+    "EFEFEEE.", "GFHFHFG.", "GGGGGGG.", "........"
+  ], SWITCH_LEGEND);
+  const SWITCH_ON_ART = pat([
+    "........", "...ABC..", "...BCD..", "...CDD..",
+    "EEEFEFE.", "GFHFHFG.", "GGGGGGG.", "........"
+  ], SWITCH_LEGEND);
   const GEOMETRY_ICONS = {
     [LOCKED_DOOR_GEOMETRY]: LOCKED_DOOR_ART,
     solid: makeDefaultArt(GEOMETRY_SWATCH_COLORS.solid),
@@ -2210,10 +2223,7 @@
     // this is now the one real two-state toggle fixture (walk onto it, see PUSH_BUTTON_GEOMETRY's
     // own comment), but keeps its own distinct art and left/right mirror unchanged — drawGameplayTile
     // mirrors it to show on/off state now instead of which side was last pushed.
-    pushbutton: pat([
-      "........", "..ABC...", "..BCD...", "..CDD...",
-      "EEFEFEE.", "GFHFHFG.", "GGGGGGG.", "........"
-    ], { A: "#f46583", B: "#eb370c", C: "#e41606", D: "#f3383b", E: "#4d5c71", F: "#3b4658", G: "#687287", H: "#000000" }),
+    pushbutton: SWITCH_OFF_ART,
     door: pat([
       "MMMMMMMM", "MKKKKKKM", "MKKKKKKM", "MKKKKKKM",
       "MKKKKKKM", "MKKKKkKM", "MKKKKKKM", "MMMMMMMM"
@@ -8350,6 +8360,27 @@
       groundSkinRotationBoard[gy][gx] = 0;
       return;
     }
+    if (selectedGeometry === PUSH_BUTTON_GEOMETRY) {
+      // A fresh click on an already-placed Switch of the same color flips its starting state (it
+      // defaults to off) instead of re-placing it — same click-based, once-per-stroke trick as the
+      // cannon rotate. Colored: flips that color's channel; uncolored: flips the room's gravity.
+      // Play starts from whatever this is left at (the Play snapshot captures switchChannels).
+      const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
+      if (existingTile && existingTile.geometry === PUSH_BUTTON_GEOMETRY && (colorBoard[gy][gx] || null) === (selectedChannelColor || null)) {
+        const strokeKey = "s" + gx + "," + gy;
+        if (cannonRotateStrokeCells.has(strokeKey)) return;
+        cannonRotateStrokeCells.add(strokeKey);
+        const color = colorBoard[gy][gx];
+        if (color) {
+          switchChannels[color] = !switchChannels[color];
+        } else {
+          gravityEnabled = !gravityEnabled;
+          renderGameRuleSwatches();
+        }
+        sounds.flip();
+        return;
+      }
+    }
     if (BARRIER_ORDER.includes(selectedGeometry)) {
       // v2.33: same place-then-rotate trick, but Gate also carries a channel color like fan/door/
       // solid/plate — see isColorTaggable. Rotating also decides which way it slides open, see
@@ -9430,15 +9461,7 @@
       // shared gravity toggle instead — see triggerFlip), so it shows whichever way THAT boolean
       // currently reads — the exact "the tile shows the state it drives" idea "switch" used to.
       const on = (extra && extra.color) ? extra.channelOn : gravityOn();
-      if (on) {
-        ctx.save();
-        ctx.translate(x + TILE, y);
-        ctx.scale(-1, 1);
-        drawArtScaled(ctx, icon, 0, 0, TILE, cell);
-        ctx.restore();
-      } else {
-        drawArtScaled(ctx, icon, x, y, TILE, cell);
-      }
+      drawArtScaled(ctx, on ? SWITCH_ON_ART : icon, x, y, TILE, cell);
     } else if (BARRIER_ORDER.includes(tile.geometry)) {
       // A moveable wall/door: slides straight out of the tile in its own facing direction as it
       // opens, straight back as it closes, instead of solid's own instant ghost-outline —
@@ -10252,6 +10275,7 @@
       `const CANNON_FAMILIES = [CANNON2_ORDER];`,
       `const BOMB2_GEOMETRY = ${JSON.stringify(BOMB2_GEOMETRY)};`,
       `const PUSH_BUTTON_GEOMETRY = ${JSON.stringify(PUSH_BUTTON_GEOMETRY)};`,
+      `const SWITCH_ON_ART = ${JSON.stringify(SWITCH_ON_ART)};`,
       `const LOCKED_DOOR_GEOMETRY = ${JSON.stringify(LOCKED_DOOR_GEOMETRY)};`,
       `const PLATE_INDICATOR_OFF_HEX = ${JSON.stringify(PLATE_INDICATOR_OFF_HEX)}, PLATE_INDICATOR_ON_HEX = ${JSON.stringify(PLATE_INDICATOR_ON_HEX)};`,
       `const CARRY_BOMB2_KIND = ${JSON.stringify(CARRY_BOMB2_KIND)}, CARRY_CANNON2_KIND = ${JSON.stringify(CARRY_CANNON2_KIND)};`,

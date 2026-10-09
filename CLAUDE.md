@@ -5762,6 +5762,10 @@ intact; Locked Door tests, 8-sample sweep and export unchanged. Test hook kept o
 
 `dropCarriedObject` places the object one body-width ahead of `player.facingDir` (same y as before), not on top of the player. If that spot is blocked by tiles (`actorBlockedByTiles`) it falls back to the old on-player spot so nothing is buried in a wall. Throws are unchanged.
 
+## Button is now "Switch": a sliding lever, and a clickable starting state
+
+The palette name for `pushbutton` is now "switch" (`GEOMETRY_LABELS`; internal id unchanged). Rendering no longer mirrors the whole tile: `SWITCH_OFF_ART`/`SWITCH_ON_ART` draw the same housing with the lever (red knob + two dark stem squares) one square left (off) or right (on); `drawGameplayTile` just picks one (`SWITCH_ON_ART` has its own `constantsSource` line). In Build mode, clicking an already-placed Switch of the same color with the Switch swatch selected flips its starting state (`paintGeometryModifierAt`, once per stroke via `cannonRotateStrokeCells`): colored flips `switchChannels[color]`, uncolored flips the room's gravity. Play starts from that state because the Play snapshot already captures `switchChannels` and per-room gravity. Default is off.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
