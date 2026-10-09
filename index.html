@@ -759,6 +759,7 @@
 
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
   const SPAWN_INTERVAL_MS = 2500;
+  const SPAWNER_MAX_LIVE = 8; // per spawner; see tickSpawners' safety valve
   const SPAWNER_VIEW_MARGIN_PX = 64; // a spawner keeps running this far beyond the screen edge (2 tiles)
   const SPAWNER_WINDUP_MS = 350;
   // v2.34: SPAWNER_MAX_CONCURRENT (a hard per-spawner population cap) removed outright — direct
@@ -8041,7 +8042,14 @@
         // not a population cap, just not materializing a brand-new actor fully overlapping an
         // existing one with literally no room to appear in ("overlapping with no place to go" is
         // the one case where skipping this cycle, not piling up exact-overlapping clones, is right).
-        const destOccupied = cellOccupiedByActor(x + dir.x, y + dir.y);
+        // Safety valve (reported: a saved project had 24 spawned characters alive from two spawners
+        // and the board was overwhelmed): a spawner stops adding new ones while SPAWNER_MAX_LIVE of
+        // its own are still around, and resumes the moment one is gone (the clock keeps counting, so
+        // it fires right away then). Not a timer — nothing already on the board is ever removed.
+        let liveOwn = 0;
+        for (const a of actors) if (a.spawnerKey === key && !a.ttlPopped) liveOwn++;
+        const atCap = liveOwn >= SPAWNER_MAX_LIVE;
+        const destOccupied = atCap || cellOccupiedByActor(x + dir.x, y + dir.y);
         const timeToNext = SPAWN_INTERVAL_MS - state.clock;
         // the wind-up pulse — a brief physical "tell" right before firing, a structural stand-in
         // for a numeric countdown this toy never shows anywhere (see renderRoomContents). Suppressed
@@ -10284,7 +10292,7 @@
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
-      `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS}, SPAWNER_VIEW_MARGIN_PX = ${SPAWNER_VIEW_MARGIN_PX};`,
+      `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS}, SPAWNER_VIEW_MARGIN_PX = ${SPAWNER_VIEW_MARGIN_PX}, SPAWNER_MAX_LIVE = ${SPAWNER_MAX_LIVE};`,
       `const HAZARD_BALL_KIND = ${JSON.stringify(HAZARD_BALL_KIND)}, HAZARD_BALL_DEF_ID = ${JSON.stringify(HAZARD_BALL_DEF_ID)};`,
       `const CHANNEL_COLORS = ${JSON.stringify(CHANNEL_COLORS)};`,
       `const CHANNEL_COLOR_HEX = ${JSON.stringify(CHANNEL_COLOR_HEX)};`,
