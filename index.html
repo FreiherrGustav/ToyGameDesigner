@@ -875,6 +875,11 @@
   const CARRY_BOMB2_DEF_ID = "carrybomb2";
   const CARRY_CANNON2_DEF_ID = "carrycannon2";
   function isCarryBombKind(temperament) { return temperament === CARRY_BOMB2_KIND; }
+  // A bomb is a crate-like body (gravity, shoved, stood on) once it's an actor: a bomb tile in a
+  // room with gravity turns into one (convertBombTilesToActors), and a fall of more than
+  // BOMB_FALL_DETONATE_TILES tiles detonates it on landing — short drops just let it rest.
+  STANDABLE_OBJECT_KINDS.push(CARRY_BOMB2_KIND);
+  const BOMB_FALL_DETONATE_TILES = 6;
   // Every temperament tryGrabOrDrop() will actually pick up — pushable (already an ordinary actor)
   // plus the grabbed-off-the-board kinds above.
   const CARRYABLE_KINDS = [PUSHABLE_KIND, CARRY_MAGNET_KIND, CARRY_TRAMPOLINE_KIND, CARRY_BOMB2_KIND, CARRY_CANNON2_KIND, LARGE_STONE_KIND];
@@ -5626,6 +5631,8 @@
       if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      // Touching an unlit bomb with the player lights it, same as bumping the tile always did.
+      if (actor.isPlayer && isCarryBombKind(def.temperament) && other.fuseTimerId == null && !other.detonating) startOrResumeBombFuse(other);
       // A Moving Platform is never shoved — it's self-driven on a fixed track, not something a kid
       // or another object can push out of the way. It still needs to be stood-on-able (same as a
       // resting pushable), so a mover is simply clamped flush against whichever edge it hit instead
@@ -6810,7 +6817,7 @@
   // Picks a painted bomb/magnet/trampoline/cannon-* cell bodily up off the board and turns it into
   // a real actor at that cell's center — see CARRYABLE_KINDS' own comment on why this is a
   // conversion-on-grab rather than a second palette entry or a full tile-to-actor migration.
-  function convertGrabbedTileToActor(gx, gy, geometry) {
+  function convertGrabbedTileToActor(gx, gy, geometry, silent) {
     let defId;
     if (geometry === BOMB2_GEOMETRY) defId = CARRY_BOMB2_DEF_ID;
     else if (geometry === "magnet") defId = CARRY_MAGNET_DEF_ID;
@@ -6836,8 +6843,21 @@
     colorBoard[gy][gx] = null;
     const actor = placeCarryableActor(defId, gx * TILE + TILE / 2, gy * TILE + TILE / 2, carryableGeometryDirection(geometry));
     if (transferredFuseMs != null) { actor.fuseArmed = true; actor.fuseRemainingMs = transferredFuseMs; }
-    log("Picked up the " + actorDefs[defId].name + "!");
+    if (!silent) log("Picked up the " + actorDefs[defId].name + "!");
     return actor;
+  }
+
+  // Gravity rooms: a bomb tile can't fall, so it becomes a real bomb actor (same conversion a grab
+  // does, just unprompted and unarmed — touching it still lights it, see shovePushables). Rooms
+  // without gravity keep the plain tile.
+  function convertBombTilesToActors() {
+    for (let gy = 0; gy < ROWS; gy++) {
+      const row = board[gy];
+      for (let gx = 0; gx < row.length; gx++) {
+        const cell = row[gx];
+        if (cell && cell.startsWith(BOMB2_GEOMETRY + ":")) convertGrabbedTileToActor(gx, gy, BOMB2_GEOMETRY, true);
+      }
+    }
   }
 
   // Same actor shape placeNewActor()/spawnActorAt() build, minus anything player/spawner-specific
@@ -6889,6 +6909,7 @@
   // that reacts specially here — see pauseBombFuseIfTicking's own comment.
   function attachCarryable(player, obj) {
     obj.carried = true;
+    obj.fallStartY = null; // a held bomb forgets any earlier fall
     obj.vx = 0; obj.vy = 0;
     obj.impactMag = 0; // no stale wobble bleeding into the carried render
     player.carrying = obj.id;
@@ -7000,7 +7021,8 @@
   }
 
   function stepActor(actor, dt, player) {
-    if (actor.dragging) return; // frozen while the editor is dragging it
+    if (actor.dragging) return;
+    const vyBefore = actor.vy; // frozen while the editor is dragging it
     // v2.21: "no physics of its own while held, follows the player" — its x/y are driven directly
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
     // attachCarryable's setTimeout) since that's a real-time timer, not part of this per-frame step.
@@ -7294,6 +7316,15 @@
       // above (it does its own temperament gate internally, since it applies to a different,
       // wider set than any single one of those).
       checkGravityWellContacts(actor);
+      // A bomb that lands after falling more than BOMB_FALL_DETONATE_TILES goes off; it keeps
+      // track of the highest point of its current fall (rising resets it, resting resets it).
+      if (isCarryBombKind(temperament) && gravityOn() && !actor.detonating && !actor.carried) {
+        const landed = vyBefore > 0 && (actor.grounded || actor.vy <= 0);
+        if (landed && actor.fallStartY != null && actor.y - actor.fallStartY > BOMB_FALL_DETONATE_TILES * TILE) {
+          detonateCarriedBombAt(currentRoomId, actor.id);
+        }
+        if (actor.vy < 0 || actor.grounded || actor.fallStartY == null) actor.fallStartY = actor.y;
+      }
     }
     checkActorContacts(actor, actors);
 
@@ -7532,6 +7563,7 @@
     }
     updatePressurePlates();
     updateChannelTransitions();
+    if (gravityOn()) convertBombTilesToActors();
     const player = actors.find(a => a.isPlayer);
     // v2.21: the carried object's position is driven directly here, every frame, rather than
     // through the normal per-actor physics step (stepActor early-returns for it) — "no physics of
@@ -9659,7 +9691,7 @@
       chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
       chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
       bounceOffTrampolineObjects, carryableGeometryDirection, isCarryableTileGeometry,
-      tryGrabNearestCarryable, convertGrabbedTileToActor, placeCarryableActor, attachCarryable,
+      tryGrabNearestCarryable, convertGrabbedTileToActor, convertBombTilesToActors, placeCarryableActor, attachCarryable,
       dropCarriedObject, throwCarriedObject, detonateCarriedBombAt, pauseBombFuseIfTicking, startOrResumeBombFuse,
       removeActorById, log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];
@@ -9744,6 +9776,7 @@
       `const CANNON_LAUNCH_SPEED = ${CANNON_LAUNCH_SPEED}, CANNON_COOLDOWN_MS = ${CANNON_COOLDOWN_MS};`,
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
       `const BOMB_IMPACT_DETONATE_SPEED = ${BOMB_IMPACT_DETONATE_SPEED};`,
+      `const BOMB_FALL_DETONATE_TILES = ${BOMB_FALL_DETONATE_TILES};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
       `const BARRIER_SLIDE_MS = ${BARRIER_SLIDE_MS};`,
       `const CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
