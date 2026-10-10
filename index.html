@@ -600,8 +600,8 @@
   // geometry (solid, or a solid-based ground texture) — paired with "none" they're harmless no-ops,
   // same as e.g. "sticky" already is geometry-agnostic without every combination being equally
   // useful.
-  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", ...WIND_ORDER];
-  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", "wind"];
+  const MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", "indestructible", ...WIND_ORDER];
+  const PALETTE_MODIFIERS = ["none", "slippery", "bouncy", "hazard", "lethal", "sticky", "diggable", "trap", "indestructible", "wind"];
   // Anything not listed here just shows its own id, unchanged — nothing needs a friendlier label
   // right now, but the mechanism (MODIFIER_LABELS[modifier] || modifier, see renderSurfaceSwatches)
   // stays available for the next id that reads as engine-jargon rather than a toy word.
@@ -632,7 +632,7 @@
     sticky: "#cddc39",
     // v2.22: diggable/trap keep the exact swatch colors they had as GEOMETRY_SWATCH_COLORS entries
     // before this patch moved them to the modifier axis — same taupe/brown identity, just relabeled.
-    diggable: "#a1887f", trap: "#8d6e63",
+    diggable: "#a1887f", trap: "#8d6e63", indestructible: "#607d8b",
     wind: "#80deea",
     "wind-n": "#80deea", "wind-e": "#80deea", "wind-s": "#80deea", "wind-w": "#80deea"
   };
@@ -1011,6 +1011,7 @@
     sticky: "Slows you to a crawl.",
     diggable: "Dig in. Hold on.",
     trap: "Looks safe. Isn't.",
+    indestructible: "Bombs can't touch it.",
     wind: "Pushes you along.",
     // Lethals row — only the four built-in groundTileDefs ids; a kid's own custom Lethal (drawn by
     // them, named by them) has nothing a caption could usefully say that they don't already know.
@@ -4138,7 +4139,7 @@
     // blocking is already selected, default it to solid — a kid who deliberately wants the walk-over
     // pad can still pick "none" ground first, same as before. hazard/lethal/sticky are left alone:
     // each already has a real, distinct, intended reading on "none" ground (puddle/lava/mud).
-    if (modifier === "bouncy" && selectedGeometry === "none") selectedGeometry = "solid";
+    if ((modifier === "bouncy" || modifier === "indestructible") && selectedGeometry === "none") selectedGeometry = "solid";
     // v2.24 fix: this used to also clear selectedGroundSkinId, which meant a kid could never
     // actually combine a Ground texture with a Ground Effect — picking grass, then bouncy, silently
     // dropped grass back to a flat "solid" the instant you painted, even though the two rows are
@@ -6306,6 +6307,8 @@
         return;
       }
       if (!isBombItself && tile.geometry !== "solid") return;
+      // Ground Effect "indestructible": a blast leaves this neighbor standing.
+      if (!isBombItself && tile.modifier === "indestructible") return;
       // v2.27: the bomb's OWN cell shows EXPLOSION_ART instead of scaling up its own icon (see the
       // tile-anim render loop's art-override); a cleared solid NEIGHBOR keeps its old look (the
       // wall itself deforming), since that's a wall being destroyed, not the explosion itself.

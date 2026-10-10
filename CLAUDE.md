@@ -5842,6 +5842,10 @@ Reported on `my-project_7.json` (a Catapult Factory variant with a default-conte
 
 Bombs in spawners: a bomb is a painted tile, so with the bomb swatch selected, clicking a spawner tile calls `toggleSpawnerContent(gx, gy, CARRY_BOMB2_DEF_ID)` (same replace/clear-on-repeat rules; mouse and touch). `spawnActorAt` gives a spawned bomb actor the fuse fields a grab would. It then behaves as any bomb actor (falls in gravity rooms, detonates after a drop over 6 tiles, lit when the player pushes it). Spawned bombs count against `SPAWNER_MAX_LIVE`. Verified in a hooked copy; 16-check sweep/export pass.
 
+## Ground Effect: indestructible
+
+A new modifier, `indestructible` (palette swatch after trap, caption "Bombs can't touch it.", slate ring/tint via `MODIFIER_SWATCH_COLORS`). `detonateBombAt` skips a neighbor cell carrying it, so a blast leaves it standing (a bomb's own cell still clears, and chain reactions into neighboring bombs are unchanged). Like bouncy, picking it with plain `none` ground selected defaults the geometry to solid. Nothing else destroys tiles except the player-triggered `trap`, so no other path needed a check. Old saves need no migration (new modifier id). Verified with a hooked blast test and the 16-check sweep/export; the bomb actor path uses the same `detonateBombAt`.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
