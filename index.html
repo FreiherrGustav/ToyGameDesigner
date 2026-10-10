@@ -7871,14 +7871,19 @@
       cannonRotateStrokeCells.add(strokeKey);
       const existingTile = board[gy][gx] ? GAMEPLAY_TILE_DEFS[board[gy][gx]] : null;
       if (existingTile && existingTile.geometry === selectedGeometry && WIND_ORDER.includes(existingTile.modifier)) {
+        // Same conveyor already here: direction is left alone, but painting over it with a different
+        // texture (or none) still re-skins it.
+        if (groundSkinBoard[gy][gx] !== selectedGroundSkinId) { groundSkinBoard[gy][gx] = selectedGroundSkinId; groundSkinRotationBoard[gy][gx] = 0; }
         return;
       }
       const key = roomCellKey(currentRoomId, gx, gy);
       delete digProgress[key];
       cancelBombArm(key);
       board[gy][gx] = gameplayKey(selectedGeometry, WIND_ORDER[0]);
-      colorBoard[gy][gx] = isColorTaggable(selectedGeometry) ? selectedChannelColor : null;
-      groundSkinBoard[gy][gx] = null; // wind is picked from the flat Surface swatch, never a named skin
+      colorBoard[gy][gx] = (!selectedGroundSkinId && isColorTaggable(selectedGeometry)) ? selectedChannelColor : null;
+      // A selected Ground texture (stone, brick...) survives under the conveyor effect, same as every
+      // other Ground Effect; it used to be forced to null here, so textured conveyors always came out plain grey.
+      groundSkinBoard[gy][gx] = selectedGroundSkinId;
       groundSkinRotationBoard[gy][gx] = 0;
       return;
     }

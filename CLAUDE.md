@@ -5820,6 +5820,10 @@ In Play (and exported games), a life-costing hit that leaves lives (hazard, chas
 
 `GRAVITY_SWITCHEROO_PROJECT` embeds the user's own hand-built version (rooms "Through the Door" and "The Gravity Switcheroo"), loaded via `restoreProjectSnapshot` like The Monster's Den, The Ice Cave and The World's Worst Elevator. Actors were reset to spawn with zero velocity, the 8 spawner-made actors in the upload were dropped, and the spawner at (22,12) in room 1 keeps its loaded content. The old coded builder and its `GRAV_*` art/`fillGravRect` helpers are gone, so the earlier Gravity Switcheroo layout/trace section is history; `drawGravitySwitcherooIcon` and the `GRAVITY_OFF_POP_SPEED` mechanic are unchanged. Verified by the 16-check sweep/export only; the level itself wasn't re-traced.
 
+## Conveyors keep their Ground texture (stone + wind drew as plain grey)
+
+Reported on Sushi Train Panic: hand-drawing a stone-textured conveyor produced a generic grey solid tile. Root cause: `paintGeometryModifierAt`'s wind branch (the one that paints a fresh `wind-*` tile at `WIND_ORDER[0]`) hard-nulled `groundSkinBoard` ("wind is a flat Surface swatch, never a skin"), contradicting the v2.24 rule that Ground and Ground Effects are independent axes. The sample looked right only because `buildSushiTrainGame` sets skins directly. Fix: the branch stamps `selectedGroundSkinId` (and skips the channel-color tag when a skin is selected, like the general path); painting over an existing conveyor of the same geometry still leaves its direction alone but now re-skins it. `setWindDirectionAt` never touched the skin, so the arrow picker already preserved it (verified). Verified with a hooked copy through the real palette (stone + wind -> `solid:wind-n` + `gndStone`; picker to south keeps the skin) plus the 16-check sweep/export; no saved-data change.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
