@@ -5798,6 +5798,10 @@ The hand-coded "Spin Cycle" sample (and its sample-scoped art, `buildSpinCycleGa
 
 In The Monster's Den the monster was a correctly-defined chaser that never moved. Actors in a project JSON authored before `displacedCooldown` existed don't carry that field, so `stepActor`'s steering gate `actor.displacedCooldown <= 0` evaluated `undefined <= 0` -> false and steering never ran, forever (the Ice Cave sample's characters were exposed to the same thing). The gate is now `!(actor.displacedCooldown > 0)`, which treats a missing value as "not displaced". Verified by tracing the Den's monster: it now charges toward the player and stops against the closed red gate. Lesson: any new per-actor numeric field must be read with a missing-value-safe comparison, since embedded/imported projects skip `createActor`'s defaults.
 
+## The World's Worst Elevator is now a user-authored project; bounce sound is quieter and shorter
+
+`WORST_ELEVATOR_PROJECT` embeds the user's own hand-built version (rooms "The Lobby" and "The Penthouse (Probably)"), loaded via `restoreProjectSnapshot` like The Monster's Den and The Ice Cave; actors reset to spawn, spawner state stripped. The old coded builder and `fillWorstElevatorRect` are gone, so the earlier Worst Elevator layout/trace sections are history. Separately, the `boing` chip design (plain bouncy tiles) was cut from 28 frames to 10 with peak volume 14 -> 8; `trampolineBoing` is unchanged. Hand-edited data, not listened to; retune in the sound designer if needed. Verified by the 15-check sweep/export only; the level itself wasn't re-traced.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
