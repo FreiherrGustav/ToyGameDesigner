@@ -5828,6 +5828,10 @@ Reported on Sushi Train Panic: hand-drawing a stone-textured conveyor produced a
 
 Reported: with 3 lives, dying to a lethal tile was an instant game over. That was the documented v2.18 design ("instant KO"), but it contradicts the lives HUD, so `triggerLethalHazard` now goes through `consumeLifeIfPlaying(true)`: one life lost, level restart after the splat if lives remain, game over (with the stinger after the splat animation) only on the last life. Hearts still do NOT absorb lethal, and star ghost mode still defers it. `triggerLethalHazard` is also what Runner's `checkRunnerFailState` calls, so being caught by the Runner camera now costs a life too. **Not changed**: black-hole capture (`triggerPlayerGravityWellCapture`) is still an instant game over; it is the same shape and probably wants the same treatment if the user agrees. Earlier sections saying lethal is "instant game over" are history. Verified with a hooked copy in Cheese Heist (lives 3->2->1->0, game over only at 0, level restarted in between) plus the 16-check sweep; the export reuses the same shared functions, not separately played.
 
+## Sushi Train Panic is now a user-authored project
+
+`SUSHI_TRAIN_PROJECT` embeds the user's own hand-built version (rooms "The Kitchen Floor" and "The Sushi Train"), loaded via `restoreProjectSnapshot` like The Monster's Den, The Ice Cave, The World's Worst Elevator and The Gravity Switcheroo. Actors were reset to spawn with zero velocity, the 3 spawner-made crates in the upload were dropped, and the spawner at (19,11) keeps its loaded crate. The old coded builder is gone, so the earlier "Sushi Train Panic" layout/trace section above is history; `drawSushiTrainIcon` is unchanged. The level itself was not re-traced; the earlier gating guarantees (gate can't be passed without the plate) apply to the old layout only. Verified by the 16-check sweep/export.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
