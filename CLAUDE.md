@@ -5860,6 +5860,10 @@ Reported (with the exported `index_49.html`, which is identical to the editor bu
 
 Also hardened, not reproduced: a user reported that the bombs held by gates blow up first thing. `my-project_7.json` as saved does NOT do this in Build or Play (bombs stay on the gates, zero detonations over 9s), so the exact trigger is unknown. One real hole found and closed: the >6-tile fall rule's origin (`fallStartY`) was never cleared by `resetActorsToSpawn` or by teleports, so a bomb moved (Reset, Play restart, drag, door) after resting at a different height could land and count a fall from its OLD height. `resetActorsToSpawn` now clears it, and `stepActor` forgets it whenever an actor jumps more than two tiles between ticks. If bombs still blow at load, the saved project is needed to trace it.
 
+## Trampoline bounces decay for objects (it still took a minute to stop)
+
+Follow-up: with the rest threshold in, a crate/ball on a Trampoline still bounced for about a minute. Cause: Trampoline restitution is 0.97, so each bounce only loses 3% — from a long drop that is ~57 bounces to fall under the 130px/s rest speed. Now only the player bounces at `TRAMPOLINE_RESTITUTION`; any other actor (tile branch in `resolveAxis`, and `bounceOffTrampolineObjects`) uses `BOUNCE_RESTITUTION` (0.82). Measured from a 16-tile drop onto a trampoline or bouncy floor: 7 boings, then rest (crate and hazard ball). A thrown object still rebounds off a trampoline, just no longer forever.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

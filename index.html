@@ -5463,7 +5463,8 @@
         // ball never read it, since they have no steering contribution to suppress in the first
         // place).
         if (bouncy && !actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
-        const restitution = isTrampolineGeom ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
+        // only the player gets the trampoline's springy 0.97; at 0.97 a crate/ball took about a minute to stop
+        const restitution = (isTrampolineGeom && actor.isPlayer) ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
         // v2.20.1: a bounce needs to SOUND like a bounce, not like an ordinary landing — the two
         // used to be indistinguishable (both just played the generic thud via triggerImpact).
         // v2.28: now plays for a bouncing physics object too, not just the player — a thrown crate
@@ -5721,7 +5722,7 @@
           const settles = bouncy && !actor.isPlayer && actor.vy < BOUNCE_REST_SPEED;
           triggerImpact(actor, "y", actor.vy, bouncy && !settles);
           if (bouncy && !settles) {
-            actor.vy = -actor.vy * TRAMPOLINE_RESTITUTION;
+            actor.vy = -actor.vy * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION);
             if (actor.isPlayer) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
