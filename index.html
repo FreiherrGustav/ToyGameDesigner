@@ -5469,6 +5469,10 @@
         // wall-caroming (isHazardBall alone, not isPhysicsObject) — that one bounces off EVERY wall,
         // and a boing on every single hit would be constant noise, not a discrete event.
         const bounceSound = isTrampolineGeom ? sounds.trampolineBoing : sounds.boing;
+        // A hazard ball bounces off EVERY surface by design, so it only earns a boing on a tile that is
+        // itself bouncy/trampoline; a plain floor or wall hit by one (a spawner's default content
+        // rattling around) stays silent.
+        const boingHeard = actor.isPlayer || (isPhysicsObject && !isHazardBall) || (isHazardBall && (modifier === "bouncy" || isTrampolineGeom));
         // A blocking lethal tile (a spike floor) is only meant to punish actually stepping on
         // it from above — bumping its side while just walking up next to it, or bonking its
         // underside, stops you like any other solid wall and nothing more. Captured before the
@@ -5495,13 +5499,13 @@
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && boingHeard) bounceSound();
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && boingHeard) bounceSound();
           }
         } else {
           if (actor.vy > 0) {
@@ -5517,14 +5521,14 @@
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
-              if (actor.isPlayer || isPhysicsObject) bounceSound();
+              if (boingHeard) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
             triggerImpact(actor, "y", actor.vy, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
-            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
+            if (bouncy && boingHeard) bounceSound();
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
@@ -8181,14 +8185,15 @@
   // pool alongside it (the old v2.19 shape, which read as "the spawner is still trying to do
   // multiple objects" once more than one kind had ever been loaded). Clicking the SAME kind that's
   // already loaded clears it back to the default hazard ball; clicking a DIFFERENT kind swaps it.
-  function toggleSpawnerContent(gx, gy) {
-    if (selectedActorDefId === playerDefId) { log("Can't load the player into a spawner."); return; }
+  function toggleSpawnerContent(gx, gy, defIdOverride) {
+    const loadId = defIdOverride || selectedActorDefId;
+    if (loadId === playerDefId) { log("Can't load the player into a spawner."); return; }
     const key = roomCellKey(currentRoomId, gx, gy);
-    if (spawnerContents[key] === selectedActorDefId) {
+    if (spawnerContents[key] === loadId) {
       delete spawnerContents[key];
       log("Spawner emptied — back to the default hazard ball.");
     } else {
-      spawnerContents[key] = selectedActorDefId;
+      spawnerContents[key] = loadId;
       log("Loaded into spawner — replaces whatever was loaded before.");
     }
   }
@@ -8228,6 +8233,9 @@
       carried: false,
       spawnerKey
     };
+    // a spawned bomb needs the same fuse bookkeeping a grabbed one carries
+    const spawnDef = actorDefs[defId];
+    if (spawnDef && isCarryBombKind(spawnDef.temperament)) { actor.fuseArmed = false; actor.fuseRemainingMs = BOMB_FUSE_MS; actor.fuseTimerId = null; actor.fuseStartedAt = 0; }
     actors.push(actor);
     // v2.20: an arrival deserves the same "something happened" treatment a despawn already gets
     // (sounds.pop()/popVanish there) — a materialize chime plus the same bounce-in pop the
@@ -8412,6 +8420,9 @@
       return;
     }
     if (paintMode === "erase") { isPaintingBoard = true; eraseAt(gx, gy, px, py); return; }
+    // The bomb is a painted tile, not an actor kind, so loading one into a spawner is "paint a bomb
+    // onto the spawner" — it spawns the same freely-moving bomb a grab produces.
+    if (paintMode === "tile" && isBombGeometry(selectedGeometry) && SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy, CARRY_BOMB2_DEF_ID); return; }
     if (paintMode === "tile") { isPaintingBoard = true; cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); return; }
     if (paintMode === "background") { isPaintingBoard = true; paintBackgroundAt(gx, gy); return; }
   });
@@ -8485,7 +8496,8 @@
       return;
     }
     isPaintingBoard = true;
-    if (paintMode === "tile") { cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); }
+    if (paintMode === "tile" && isBombGeometry(selectedGeometry) && SPAWNER_ORDER.includes(geometryAt(gx, gy))) toggleSpawnerContent(gx, gy, CARRY_BOMB2_DEF_ID);
+    else if (paintMode === "tile") { cannonRotateStrokeCells.clear(); paintGeometryModifierAt(gx, gy); }
     else if (paintMode === "background") paintBackgroundAt(gx, gy);
     else if (paintMode === "erase") eraseAt(gx, gy, px, py);
     e.preventDefault();
