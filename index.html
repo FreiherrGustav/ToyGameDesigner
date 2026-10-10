@@ -3430,6 +3430,98 @@
     ctx.beginPath(); ctx.moveTo(9, 14); ctx.lineTo(12, 19); ctx.lineTo(15, 14); ctx.closePath(); ctx.fill();
   }
 
+  // "Sushi Train Panic" — conveyors are the whole joke. Two rooms: a one-screen teach room (a single
+  // short belt, harmless, no text) and the kitchen itself. Every belt here is just `solid` + a wind
+  // modifier (a conveyor is wind on a solid tile, see windAccelFor) — no new piece, no new engine
+  // behavior. The chain: a spawner (facing south) drops a crate on the bottom belt, which carries
+  // it west into an incinerator; the cat has to take the crate for a ride through the tunnel under
+  // the top belt, hop up onto the top belt (which runs the other way), and let it carry the crate
+  // east onto a plate pressed against a stop wall — the plate opens the gate to the goal. Measured
+  // numbers this layout relies on (traced, see CLAUDE.md): a belt carries a standing cat at the
+  // walking cap (220px/s) and a crate at NPC_MAX_SPEED (160px/s); walking against a belt is still
+  // 220px/s; JUMP_VELOCITY gives ~4 tiles of rise, so any wall/ledge the cat is NOT meant to climb
+  // is >= 5 tiles (160px) above where it would jump from.
+  function buildSushiTrainGame() {
+    const GATE_COLOR = "red";
+    const solid = (x, y) => { board[y][x] = gameplayKey("solid", "none"); };
+    const skin = (x, y, id) => { groundSkinBoard[y][x] = id; };
+    const wall = (x0, y0, x1, y1, skinId) => {
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { solid(x, y); if (skinId) skin(x, y, skinId); }
+    };
+    const belt = (x0, x1, y, mod) => { for (let x = x0; x <= x1; x++) board[y][x] = gameplayKey("solid", mod); };
+    const fire = (x0, y0, x1, y1) => {
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { board[y][x] = gameplayKey("none", "lethal"); skin(x, y, "lthFire"); }
+    };
+
+    // ---- Room 1: "The Kitchen Floor" — one short belt, nothing that can hurt ----
+    const room1 = createEmptyRoom("The Kitchen Floor");
+    room1.gravityEnabled = true; room1.wrapHEnabled = false; room1.wrapVEnabled = false; room1.cameraMode = "fixed";
+    rooms.push(room1);
+    activateRoom(room1.id);
+    wall(0, 17, 23, 17, "gndStone");
+    wall(0, 0, 23, 0, "gndStone");
+    wall(0, 1, 0, 16, "gndStone");
+    wall(23, 1, 23, 16, "gndStone");
+    belt(2, 6, 17, "wind-e"); // the teach belt: the cat starts ON it and is carried toward the door without touching a key
+    board[16][11] = gameplayKey("door", "none");
+    placeExampleActor(PLAYER_DEF_ID, 3, 16);
+
+    // ---- Room 2: "The Sushi Train" ----
+    const room2 = createEmptyRoom("The Sushi Train");
+    room2.gravityEnabled = true; room2.wrapHEnabled = false; room2.wrapVEnabled = false; room2.cameraMode = "fixed";
+    rooms.push(room2);
+    room2.startPos = { x: 17 * TILE + 5, y: 16 * TILE + 5 };
+    activateRoom(room2.id);
+    wall(0, 17, 23, 17, "gndStone");   // floor
+    wall(0, 0, 23, 0, "gndStone");     // ceiling
+    wall(0, 1, 0, 16, "gndStone");     // left wall
+    wall(23, 1, 23, 16, "gndStone");   // right wall
+
+    // The incinerator: a fire pit at the far west end of the bottom belt (and the floor beside it).
+    fire(1, 12, 3, 16);
+
+    // Bottom belt L (runs WEST, toward the incinerator) with the counter K and a step to reach it.
+    belt(4, 19, 13, "wind-w");
+    wall(20, 13, 21, 13, "gndBrick");  // K: a plain counter, flush with L's start — the cat can stand still here
+    wall(22, 15, 22, 16, "gndBrick");  // step from the floor up to K
+
+    // Top belt U (runs EAST, toward the plate), a stop wall at its end, and the plate beside the wall.
+    belt(9, 18, 11, "wind-e");
+    wall(19, 8, 19, 10, "gndBrick");   // the stop wall: tall enough that K can't jump over it (see header)
+    board[10][18] = gameplayKey("plate", "none"); colorBoard[10][18] = GATE_COLOR;
+    // Deliberately NO plate on the bottom belt. An earlier draft put a second same-color plate in the
+    // tunnel so a crate riding past would flicker the gate — a trace found a cat camped at the gate
+    // walks straight through each flicker (a crate passes every 2.5s), so the goal wasn't gated.
+
+    // The spawner sits in the stop wall's base, facing south, dropping crates onto L's first tile.
+    board[11][19] = gameplayKey("spawner-s", "none");
+    spawnerContents[roomCellKey(room2.id, 19, 11)] = PUSHABLE_DEF_ID;
+
+    // The way up and out: from the wall's top, jump up-left onto the end of the corridor floor.
+    wall(1, 5, 18, 5, "gndBrick");     // the corridor floor — open air above the wall (cols 19-22) is how you get on it
+    for (let y = 1; y <= 4; y++) { board[y][5] = gameplayKey("barrier-n", "none"); colorBoard[y][5] = GATE_COLOR; }
+    board[4][2] = gameplayKey("goal", "none");
+
+    // doorLinks: room 1's door arrives on the floor of room 2, east of the pit.
+    doorLinks[roomCellKey(room1.id, 11, 16)] = { toRoomId: room2.id, toX: 17, toY: 16 };
+
+    activateRoom(room1.id);
+    return room1;
+  }
+  function drawSushiTrainIcon(ctx) {
+    // A plate with a little maki roll on a conveyor belt (tread marks + arrows) — "the train," at a glance.
+    ctx.fillStyle = "#37474f"; ctx.fillRect(1, 15, 22, 6);
+    ctx.fillStyle = "#90a4ae";
+    for (let x = 2; x < 22; x += 4) ctx.fillRect(x, 17, 2, 2);
+    ctx.fillStyle = "#eceff1";
+    ctx.beginPath(); ctx.ellipse(12, 12, 9, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#263238"; ctx.fillRect(8, 6, 8, 6);
+    ctx.fillStyle = "#fafafa"; ctx.fillRect(9, 7, 6, 4);
+    ctx.fillStyle = "#ef5350"; ctx.fillRect(11, 8, 2, 2);
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath(); ctx.moveTo(3, 2); ctx.lineTo(8, 4); ctx.lineTo(3, 6); ctx.closePath(); ctx.fill();
+  }
+
   // v2.19.3: a third example, contributed as a finished two-room dungeon-crawler build --
   // hand-drawn custom characters, a custom (unused, blank) lethal tile slot, five custom
   // backgrounds, and six door pairs, five colored plus one colorless. Its one bug (the
@@ -8866,6 +8958,7 @@
     { name: "The Ice Cave", builder: buildIceCaveGame, draw: drawIceCaveIcon },
     { name: "The Catapult Factory", builder: buildCatapultFactoryGame, draw: drawCatapultFactoryIcon },
     { name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
+    { name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
