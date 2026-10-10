@@ -5812,6 +5812,10 @@ In The Monster's Den the monster was a correctly-defined chaser that never moved
 
 Complaint: enemies in a crowded project (`my-project_6.json`) made a sound constantly while walking over tiles and bumping each other. Instrumenting `sounds.*`/`playChip` showed the remaining sources were landing thuds (`triggerImpact`), bounce/trampoline boings gated on `isSteeringNPC`, and the walk-over `triggerBouncyLaunch` boing. Now silent for non-player steering characters, stationary NPCs and hazard balls: the `triggerImpact` thud, the four `bounceSound()` sites in `resolveAxis`, the `bounceOffTrampolineObjects` trampolineBoing, and `triggerBouncyLaunch`'s boing (player only). Physics is unchanged, and the player and physics objects (crates, bombs...) keep their sounds. Contact reactions with the player (oof/gotcha/pop) are untouched. Verified at the sound layer in the user's project (enemy-driven sounds gone from Play; build mode 6 -> 2 thuds) plus the 16-check sweep/export. Not listened to.
 
+## Dying with lives left resets the whole level
+
+In Play (and exported games), a life-costing hit that leaves lives (hazard, chaser catch, falling-crate crush) now restarts the level to its starting conditions after `LEVEL_RESET_DELAY_MS` (650ms, so the hit animation plays): `consumeLifeIfPlaying` schedules `restartLevelKeepingLives()`, which runs the normal Play restart (`restartPlaySessionFromSnapshot`, or `restartStandaloneGame` in an export) and restores the already-reduced life count. Everything else returns to start: actors/spawner population, collected items, doors, switches, keys, hearts, star, camera, and the READY! pause plays again. The old chaser-catch teleport-to-start is now Build-mode only. Absorbed-by-heart hits and lethal/game-over are unchanged. Verified in Cheese Heist: lives 3 -> 2, moved actors/player back at spawn, READY shown; last life still ends the game; 16-check sweep/export clean. The export's reset path was not separately played through.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

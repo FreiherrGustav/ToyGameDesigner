@@ -1542,6 +1542,15 @@
     renderAll();
     log("Play started!");
   }
+  // Dying with lives left puts the whole level back to its starting conditions (actors, doors,
+  // keys, hearts, camera) but keeps the lives already spent.
+  const LEVEL_RESET_DELAY_MS = 650;
+  function restartLevelKeepingLives() {
+    const keep = lives;
+    restartPlaySessionFromSnapshot();
+    lives = keep;
+    renderPlayHUD();
+  }
   function exitToBuildMode() {
     currentRoomId = null; // same reason as above — avoid saving live Play state into the restored rooms
     rooms = buildSnapshot.rooms;
@@ -6093,6 +6102,11 @@
     lives--;
     renderPlayHUD();
     if (lives <= 0) { triggerGameOver(); return true; }
+    // Lives remain: after the hit animation plays out, the whole level goes back to its starting
+    // conditions (not just the player), keeping only the reduced life count.
+    setTimeout(() => {
+      if (appMode === "play" && !playSessionEnded) restartLevelKeepingLives();
+    }, LEVEL_RESET_DELAY_MS);
     return false;
   }
 
@@ -6189,7 +6203,7 @@
       log(causedGameOver ? "Caught! Game over." : "Caught! Off you go...");
       const resetPos = { x: startPos.x, y: startPos.y };
       setTimeout(() => {
-        if (causedGameOver) return;
+        if (causedGameOver || appMode === "play") return; // Play: the whole level resets instead (consumeLifeIfPlaying)
         playerActor.x = resetPos.x; playerActor.y = resetPos.y;
         playerActor.vx = 0; playerActor.vy = 0;
         playRecipe(playerActor, "caughtBounceIn");
@@ -10029,6 +10043,7 @@
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS};`,
+      `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
@@ -10173,6 +10188,12 @@
   // "try again" instruction points here instead: any key or a canvas tap restarts the session
   // fresh from the original exported game data.
   const initialGameData = JSON.parse(JSON.stringify(GAME_DATA));
+  function restartLevelKeepingLives() {
+    const keep = lives;
+    restartStandaloneGame();
+    lives = keep;
+    renderPlayHUD();
+  }
   function restartStandaloneGame() {
     rooms = JSON.parse(JSON.stringify(initialGameData.rooms));
     doorLinks = JSON.parse(JSON.stringify(initialGameData.doorLinks));
