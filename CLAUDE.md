@@ -5846,6 +5846,10 @@ Bombs in spawners: a bomb is a painted tile, so with the bomb swatch selected, c
 
 A new modifier, `indestructible` (palette swatch after trap, caption "Bombs can't touch it.", slate ring/tint via `MODIFIER_SWATCH_COLORS`). `detonateBombAt` skips a neighbor cell carrying it, so a blast leaves it standing (a bomb's own cell still clears, and chain reactions into neighboring bombs are unchanged). Like bouncy, picking it with plain `none` ground selected defaults the geometry to solid. Nothing else destroys tiles except the player-triggered `trap`, so no other path needed a check. Old saves need no migration (new modifier id). Verified with a hooked blast test and the 16-check sweep/export; the bomb actor path uses the same `detonateBombAt`.
 
+## Four more channel colors (pink, yellow, cyan, brown)
+
+`CHANNEL_COLORS` grew from 5 to 9 names and `CHANNEL_COLOR_HEX` gained matching hexes (pink `#ec407a`, yellow `#fdd835`, cyan `#00bcd4`, brown `#795548`). Nothing else changed: channels are keyed by name everywhere (color layer, switch/plate/key state, door pairing, key tint, HUD chips, export constants), so the picker, gates, buttons, plates, keys, locked doors and doors all pick them up. Old saves are unaffected. White/grey were skipped (too close to the ghost/steel looks). Not built: user-defined colors (a "+" swatch with a saved `customChannelColors` list) — estimated 1-2 hours if 9 turns out to be too few. Doors still pair two per color, so this also raises the door-pair limit to 9. Verified: the picker wraps to two rows of five, and the 16-check sweep/export passes.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

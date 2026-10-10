@@ -1040,8 +1040,8 @@
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
   // Assigning one of the five real colors switches a switch/plate over to toggling that color's
   // own independent channel instead, and makes a matching-colored door/solid tile listen to it.
-  const CHANNEL_COLORS = ["red", "orange", "green", "blue", "purple"];
-  const CHANNEL_COLOR_HEX = { red: "#e53935", orange: "#fb8c00", green: "#43a047", blue: "#1e88e5", purple: "#8e24aa" };
+  const CHANNEL_COLORS = ["red", "orange", "green", "blue", "purple", "pink", "yellow", "cyan", "brown"];
+  const CHANNEL_COLOR_HEX = { red: "#e53935", orange: "#fb8c00", green: "#43a047", blue: "#1e88e5", purple: "#8e24aa", pink: "#ec407a", yellow: "#fdd835", cyan: "#00bcd4", brown: "#795548" };
   // v2.27: the pressure plate's own baked-in indicator-strip color (see GEOMETRY_ICONS.plate) reads
   // red for "off" as drawn; drawGameplayTile's plate branch swaps it to this green (reusing the same
   // green CHANNEL_COLOR_HEX.green already means everywhere else in this file) whenever the plate's
