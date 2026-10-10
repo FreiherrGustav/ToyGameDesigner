@@ -5875,11 +5875,11 @@
   // The only place lives are ever spent. Build mode never calls this path at all in practice,
   // but the guard is here anyway so the exact same trigger functions (triggerHazard, the
   // chaser-catch branch) can call this unconditionally regardless of mode.
-  function consumeLifeIfPlaying() {
+  function consumeLifeIfPlaying(silentGameOver) {
     if (appMode !== "play" || playSessionEnded) return false;
     lives--;
     renderPlayHUD();
-    if (lives <= 0) { triggerGameOver(); return true; }
+    if (lives <= 0) { triggerGameOver(silentGameOver); return true; }
     // Lives remain: after the hit animation plays out, the whole level goes back to its starting
     // conditions (not just the player), keeping only the reduced life count.
     setTimeout(() => {
@@ -6149,13 +6149,17 @@
     actor.vx = 0; actor.vy = 0;
     // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — same as
     // triggerHazard, no isPlayer guard needed
-    const causedGameOver = appMode === "play" && !playSessionEnded;
-    if (causedGameOver) {
-      lives = 0;
-      triggerGameOver(true);
-      setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+    // Lethal costs a life like any other hit (hearts don't absorb it); with lives left the level
+    // restarts after the splat animation, only the last life ends the game.
+    const inPlay = appMode === "play" && !playSessionEnded;
+    if (inPlay) {
+      lives = Math.max(lives, 1); // consumeLifeIfPlaying decrements; never start from <=0
+      const gameOver = consumeLifeIfPlaying(true);
+      if (gameOver) setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+      log(gameOver ? "Splat! Game over." : "Splat! Lost a life (" + lives + " left).");
+    } else {
+      log("Splat!");
     }
-    log(causedGameOver ? "Splat! Instant game over." : "Splat!");
   }
 
   // "Gravity Well: a black hole" — the player's own half of the capture reaction (see
