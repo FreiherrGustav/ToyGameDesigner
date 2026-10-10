@@ -1545,6 +1545,7 @@
     // time to get their bearings before e.g. Runner mode's camera starts closing in — the genre-
     // standard "READY!" beat (frame()'s own gating skips tick() entirely until this elapses).
     playReadyUntil = performance.now() + READY_DURATION_MS;
+    syncChannelsToHotRoom();
     renderAll();
     log("Play started!");
   }
@@ -6430,6 +6431,7 @@
     actors.push(player);
     if (carried) actors.push(carried); // position catches up on the very next tick() carry-follow step
     playerRoomId = link.toRoomId;
+    syncChannelsToHotRoom();
 
     roomTransition = {
       startedAt: performance.now(),
@@ -7363,6 +7365,16 @@
   // updatePressurePlates() so it sees this frame's fresh plate state, not last frame's. Cheap
   // (CHANNEL_COLORS is 5 entries) and runs unconditionally every tick, same as updatePressurePlates
   // itself, regardless of whether any barrier is even on the board.
+  // A freshly loaded room (door arrival, Play start/restart, exported game boot) used to draw its
+  // gates from stale or empty channel state until the first tick ran — frozen for the READY!/door
+  // transition windows — so a gate whose channel was already on (a switch thrown, a crate resting
+  // on a plate) showed shut and then slid open, and one held open by the room it just left showed
+  // open and then slammed shut. This settles every channel to its true reading for the hot room
+  // right away, marked as long-settled so no slide plays.
+  function syncChannelsToHotRoom() {
+    updatePressurePlates();
+    CHANNEL_COLORS.forEach(color => { channelStateSince[color] = { on: isChannelOn(color), since: -1e9 }; });
+  }
   function updateChannelTransitions() {
     const now = performance.now();
     CHANNEL_COLORS.forEach(color => {
@@ -9693,7 +9705,7 @@
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
-      updatePressurePlates, updateChannelTransitions,
+      updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, despawnSpawnedActor,
@@ -9945,6 +9957,7 @@
   const gctx = gameCanvas.getContext("2d");
 
   activateRoom(playerRoomId);
+  syncChannelsToHotRoom();
   playReadyUntil = performance.now() + READY_DURATION_MS;
   renderPlayHUD();
 
@@ -9978,6 +9991,7 @@
     currentRoomId = null;
     grabKeyDownAt = null;
     activateRoom(playerRoomId);
+    syncChannelsToHotRoom();
     renderPlayHUD();
   }
 
