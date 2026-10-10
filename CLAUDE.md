@@ -5816,6 +5816,10 @@ Complaint: enemies in a crowded project (`my-project_6.json`) made a sound const
 
 In Play (and exported games), a life-costing hit that leaves lives (hazard, chaser catch, falling-crate crush) now restarts the level to its starting conditions after `LEVEL_RESET_DELAY_MS` (650ms, so the hit animation plays): `consumeLifeIfPlaying` schedules `restartLevelKeepingLives()`, which runs the normal Play restart (`restartPlaySessionFromSnapshot`, or `restartStandaloneGame` in an export) and restores the already-reduced life count. Everything else returns to start: actors/spawner population, collected items, doors, switches, keys, hearts, star, camera, and the READY! pause plays again. The old chaser-catch teleport-to-start is now Build-mode only. Absorbed-by-heart hits and lethal/game-over are unchanged. Verified in Cheese Heist: lives 3 -> 2, moved actors/player back at spawn, READY shown; last life still ends the game; 16-check sweep/export clean. The export's reset path was not separately played through.
 
+## The Gravity Switcheroo is now a user-authored project
+
+`GRAVITY_SWITCHEROO_PROJECT` embeds the user's own hand-built version (rooms "Through the Door" and "The Gravity Switcheroo"), loaded via `restoreProjectSnapshot` like The Monster's Den, The Ice Cave and The World's Worst Elevator. Actors were reset to spawn with zero velocity, the 8 spawner-made actors in the upload were dropped, and the spawner at (22,12) in room 1 keeps its loaded content. The old coded builder and its `GRAV_*` art/`fillGravRect` helpers are gone, so the earlier Gravity Switcheroo layout/trace section is history; `drawGravitySwitcherooIcon` and the `GRAVITY_OFF_POP_SPEED` mechanic are unchanged. Verified by the 16-check sweep/export only; the level itself wasn't re-traced.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
