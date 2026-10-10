@@ -1152,6 +1152,10 @@
   // without the normal movement cap clamping the horizontal component back down mid-flight —
   // see stepActor()'s recentlyLaunched exemption.
   const CANNON_COOLDOWN_MS = 800;
+  // A cannon LOADS whatever hits it (the actor is pulled into the barrel, hidden and frozen) and fires
+  // it this long later from the muzzle at the fixed CANNON_LAUNCH_SPEED/45-degree direction, so every shot
+  // from a given cannon follows the same arc no matter how it was hit.
+  const CANNON_LOAD_MS = 300;
   const BOMB_FUSE_MS = 1200;       // a beat to run away in before it goes off
   const BOMB_BLAST_KNOCKBACK_SPEED = 480;
   // Object-to-object interaction matrix: "a launched or thrown object colliding with a bomb at
@@ -5217,9 +5221,9 @@
   // a "solid" conveyor's own surface has to be read from cellsUnderneath() instead, gated on
   // actually resting there (grounded + genuinely blocking), or every solid tile in the level
   // would double as a conveyor the moment anything so much as brushed past its top edge.
-  function windAccelFor(actor) {
+  function windAccelFor(actor, conveyorOnly) {
     let ax = 0, ay = 0;
-    for (const { cx, cy } of overlappedCells(actor)) {
+    for (const { cx, cy } of (conveyorOnly ? [] : overlappedCells(actor))) {
       const dir = windAt(cx, cy);
       if (dir) { ax += dir.x * WIND_FORCE; ay += dir.y * WIND_FORCE; }
     }
@@ -5407,6 +5411,10 @@
 
   function resolveAxis(actor, axis, dt) {
     const def = actorDefs[actor.defId];
+    // Just fired from a cannon: ignore that one tile until the actor has fully left it.
+    const exitCell = actor.cannonExit;
+    if (exitCell && (actor.x + actor.w <= exitCell.cx * TILE || actor.x >= (exitCell.cx + 1) * TILE ||
+                     actor.y + actor.h <= exitCell.cy * TILE || actor.y >= (exitCell.cy + 1) * TILE)) actor.cannonExit = null;
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     for (let cy = r0; cy <= r1; cy++) {
@@ -5431,6 +5439,7 @@
             digProgress[key] = progress;
           }
         }
+        if (actor.cannonExit && actor.cannonExit.cx === cx && actor.cannonExit.cy === cy) continue;
         if (!isBlockingGeometry(geometry, actor, modifier)) continue;
         if (isChannelGateGeometry(geometry)) {
           const gateColor = colorAt(cx, cy);
@@ -5611,7 +5620,7 @@
   // pushing/landing this call — never its own obstacle either).
   function actorBlockedByOtherPushables(candidate, selfId, moverId) {
     for (const other of actors) {
-      if (other.id === selfId || other.id === moverId || other.carried) continue;
+      if (other.id === selfId || other.id === moverId || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
       if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (candidate.x < other.x + other.w && candidate.x + candidate.w > other.x &&
@@ -5641,7 +5650,7 @@
   // velocity (PUSHABLE_KIND's "zero self-driven accel") beyond an occasional bounce.
   function shovePushables(actor, axis) {
     for (const other of actors) {
-      if (other.id === actor.id || other.carried) continue;
+      if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
       if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
@@ -5699,7 +5708,7 @@
   // bouncy too, since that needs a genuinely new actor-vs-actor collision model, not this one).
   function bounceOffTrampolineObjects(actor, axis) {
     for (const other of actors) {
-      if (other.id === actor.id || other.carried) continue;
+      if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
       if (!def || def.temperament !== CARRY_TRAMPOLINE_KIND) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
@@ -5888,7 +5897,7 @@
     // v2.21: a carried object is glued right above the player's own head (see tick()'s carry-follow
     // update) — close enough that its AABB can graze the player's. None of the reactions below
     // should ever fire on something the player is currently holding.
-    if (npcActor.carried) return;
+    if (npcActor.carried || npcActor.cannonLoad) return;
     const def = actorDefs[npcActor.defId];
     const temperament = def ? def.temperament : null;
 
@@ -5972,7 +5981,7 @@
       // function, same cooldown, just reusing the direction it was aimed at when grabbed
       // (cannonDir) instead of a board cell's geometry string. Player-only, matching the tile
       // (only checkPlayerTileContacts/the Build-mode drag handler ever call triggerCannon).
-      triggerCannon(playerActor, "cannon2-" + npcActor.cannonDir);
+      triggerCannon(playerActor, "cannon2-" + npcActor.cannonDir, null, null, npcActor.x + npcActor.w / 2, npcActor.y + npcActor.h / 2);
     }
   }
 
@@ -6238,21 +6247,43 @@
   // collision call sites do; a dropped/resting carried-cannon actor's own contact reaction, which
   // has no cell, doesn't), a quick muzzle-flash plays right at the cannon's mouth instead of on
   // the actor being launched — a flash needs to stay put, not fly off with whatever it just fired.
-  function triggerCannon(actor, geometry, cx, cy) {
-    if (actor.cannonCooldown > 0) return;
+  function triggerCannon(actor, geometry, cx, cy, anchorX, anchorY) {
+    if (actor.cannonCooldown > 0 || actor.cannonLoad) return;
+    if (anchorX == null) { anchorX = cx * TILE + TILE / 2; anchorY = cy * TILE + TILE / 2; }
+    // Loaded: pulled into the barrel at the cannon's own centre, frozen and hidden until it fires
+    // (stepActor -> tickCannonLoad). Where/how the actor hit the cannon no longer matters.
+    actor.cannonLoad = { geometry, t: CANNON_LOAD_MS, cx, cy, ax: anchorX, ay: anchorY };
     actor.cannonCooldown = CANNON_COOLDOWN_MS;
-    const dir = CANNON_DIRECTIONS[geometry];
+    actor.vx = 0; actor.vy = 0;
+    actor.x = anchorX - actor.w / 2; actor.y = anchorY - actor.h / 2;
+    sounds.thud(0.6);
+    if (cx != null && cy != null) tileAnimState[cx + "," + cy] = { recipe: "boopPulse", t: performance.now(), geometry, modifier: "none" };
+    log("Loaded!");
+  }
+  function tickCannonLoad(actor, dt) {
+    const L = actor.cannonLoad;
+    actor.x = L.ax - actor.w / 2; actor.y = L.ay - actor.h / 2;
+    actor.vx = 0; actor.vy = 0;
+    L.t -= dt * 1000;
+    if (L.t <= 0) fireLoadedCannon(actor);
+  }
+  function fireLoadedCannon(actor) {
+    const L = actor.cannonLoad;
+    actor.cannonLoad = null;
+    const dir = CANNON_DIRECTIONS[L.geometry];
+    actor.x = L.ax - actor.w / 2; actor.y = L.ay - actor.h / 2;
     actor.vx = dir.x * CANNON_LAUNCH_SPEED;
     actor.vy = dir.y * CANNON_LAUNCH_SPEED;
-    // A fired steering character gets the same short "not in control" beat a bounce gives one —
-    // see isSteeringCharacter's own comment. Harmless to set unconditionally on any non-player
-    // actor; a pushable/hazard ball has no steering contribution to suppress in the first place.
+    actor.cannonCooldown = CANNON_COOLDOWN_MS;
+    // The cannon's own tile is solid; let this actor pass out through it (see resolveAxis).
+    actor.cannonExit = (L.cx != null) ? { cx: L.cx, cy: L.cy } : null;
+    // A fired steering character gets the same short "not in control" beat a bounce gives one.
     if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
     sounds.shot();
     actor.impactMag = 0.7;
     actor.impactWobbleT = 0;
     actor.impactAxis = "y";
-    if (cx != null && cy != null) tileAnimState[cx + "," + cy] = { recipe: "muzzleFlash", t: performance.now(), geometry, modifier: "none", art: PARTICLE_ART };
+    if (L.cx != null) tileAnimState[L.cx + "," + L.cy] = { recipe: "muzzleFlash", t: performance.now(), geometry: L.geometry, modifier: "none", art: PARTICLE_ART };
     log("Shot!");
   }
 
@@ -6707,7 +6738,7 @@
 
   function checkActorContacts(actor, allActors) {
     for (const other of allActors) {
-      if (other.id === actor.id) continue;
+      if (other.id === actor.id || other.cannonLoad || actor.cannonLoad) continue;
       if (actor.x < other.x + other.w && actor.x + actor.w > other.x &&
           actor.y < other.y + other.h && actor.y + actor.h > other.y) {
         const key = contactKey(actor, other);
@@ -7046,6 +7077,7 @@
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
     // attachCarryable's setTimeout) since that's a real-time timer, not part of this per-frame step.
     if (actor.carried) return;
+    if (actor.cannonLoad) { tickCannonLoad(actor, dt); return; }
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
     // v2.15: a custom character made "the player" (see playerDefId) keeps whatever temperament
@@ -7117,7 +7149,8 @@
       // Unlike bounce/cannon/magnet, wind and fan never had a per-kind allow-list at all — they
       // already applied to literally every other actor by position alone — so this is a narrow
       // subtraction for the one exception, not a new default-in check.
-      const windAccel = isLargeStone ? { ax: 0, ay: 0 } : windAccelFor(actor);
+      // too heavy for air currents, but a conveyor belt under it still carries it
+      const windAccel = windAccelFor(actor, isLargeStone);
       checkWhooshSurface(actor, windAccel);
       const radialAccel = radialForceAccelFor(actor, player);
       const fanAccel = isLargeStone ? { ax: 0, ay: 0, near: false } : fanAccelFor(actor);
@@ -7165,7 +7198,7 @@
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
-        if (!stuck) {
+        if (!stuck && !(actor.cannonCooldown > 0)) { // no steering mid-shot: the arc is fixed
           if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
           if (inGravity) {
             wantsJump = keys[" "] || up;
@@ -8297,6 +8330,7 @@
       }
       actor.vx = 0; actor.vy = 0;
       actor.fallStartY = null; actor.lastY = null;
+      actor.cannonLoad = null; actor.cannonExit = null;
     });
   }
 
@@ -9202,6 +9236,7 @@
     actorsArg.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
+      if (actor.cannonLoad) return; // inside the barrel
       const posed = !!def.poses;
       let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
       if (actor.defId === "colKey") art = tintedKeyArt(art, actor.channel);
@@ -9718,7 +9753,7 @@
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
-      triggerGoal, triggerFlip, triggerCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
+      triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
@@ -9805,6 +9840,7 @@
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
       `const CANNON_DIRECTIONS = ${JSON.stringify(CANNON_DIRECTIONS)};`,
+      `const CANNON_LOAD_MS = ${CANNON_LOAD_MS};`,
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
