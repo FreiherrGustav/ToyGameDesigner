@@ -5774,13 +5774,13 @@
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
           } else if (actor.vx < 0) {
             actor.x = (cx + 1) * TILE;
             triggerImpact(actor, "x", actor.vx, bouncy);
             actor.vx = bouncy ? -actor.vx * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
-            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
           }
         } else {
           if (actor.vy > 0) {
@@ -5796,14 +5796,14 @@
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
-              if (actor.isPlayer || isPhysicsObject || isSteeringNPC) bounceSound();
+              if (actor.isPlayer || isPhysicsObject) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
           } else if (actor.vy < 0) {
             actor.y = (cy + 1) * TILE;
             triggerImpact(actor, "y", actor.vy, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
-            if (bouncy && (actor.isPlayer || isPhysicsObject || isSteeringNPC)) bounceSound();
+            if (bouncy && (actor.isPlayer || isPhysicsObject)) bounceSound();
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
@@ -5987,7 +5987,7 @@
             actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
-            if (actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC) sounds.trampolineBoing();
+            if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
           } else { actor.vy = 0; actor.grounded = true; }
         } else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
       }
@@ -6029,6 +6029,8 @@
     // a light hop and a fall from height shouldn't sound the same — see sounds.thud()
     const idef = actorDefs[actor.defId];
     if (idef && idef.temperament === "collectible") return; // collectibles never make impact sounds
+    // enemies/characters walking around (and balls rolling) never thud on landing — crowds made a constant clutter
+    if (!actor.isPlayer && idef && (isSteeringCharacter(idef.temperament) || idef.temperament === "stationary" || idef.temperament === HAZARD_BALL_KIND)) return;
     if (axis === "y" && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
   }
 
@@ -6397,7 +6399,7 @@
   function triggerBouncyLaunch(actor, modifier) {
     if (actor.bouncyCooldown > 0) return;
     actor.bouncyCooldown = 350;
-    sounds.boing();
+    if (actor.isPlayer) sounds.boing();
     const launchSpeed = BOUNCY_LAUNCH_SPEED;
     if (gravityOn()) {
       actor.vy = -launchSpeed;
