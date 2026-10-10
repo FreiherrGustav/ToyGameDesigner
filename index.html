@@ -1124,6 +1124,7 @@
   // inside the dead zone: cameraX is simply never touched there, not eased toward itself.
   const CAMERA_DEADZONE_SHIFT_RATE = 16;
   const BOUNCE_RESTITUTION = 0.82;
+  const BOUNCE_REST_SPEED = 130; // a floor impact slower than this just lands instead of bouncing
   // A plain bouncy WALL (solid+bouncy hit on the x-axis) used to just reflect whatever horizontal
   // speed the player already had — jumping straight up between two close bouncy walls carries
   // almost no vx, so the reflection barely moved you: no "vector" quality, direct feedback. These
@@ -5512,13 +5513,20 @@
         } else {
           if (actor.vy > 0) {
             actor.y = cy * TILE - actor.h;
-            triggerImpact(actor, "y", actor.vy, bouncy);
-            if (bouncy) {
+            // A resting object on a bouncy floor used to be re-bounced every single frame (gravity adds
+            // a sliver of vy, the reflection flips it, repeat), which looked still but sounded like an
+            // endless boing — reflect only real impacts, anything slower just lands. The player on a
+            // Trampoline keeps its guaranteed launch, so it is exempt.
+            const settles = bouncy && !(isTrampolineGeom && actor.isPlayer) && actor.vy < BOUNCE_REST_SPEED;
+            triggerImpact(actor, "y", actor.vy, bouncy && !settles);
+            if (bouncy && !settles) {
               actor.vy = -actor.vy * restitution;
               // The Trampoline object's whole "extra jumping power" pitch: reflection alone still
               // scales with impact speed (a gentle step barely bounces, same as plain bouncy), so
               // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
-              if (isTrampolineGeom) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+              // Only the player gets the guaranteed minimum launch: for a crate/bomb/ball it handed back
+              // MORE energy than it landed with, so objects on a trampoline bounced forever.
+              if (isTrampolineGeom && actor.isPlayer) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
               // Same "jump off it for more lift" assist as a wall bounce, plain-bouncy-floor only —
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
@@ -5710,10 +5718,11 @@
           const actorIsPhysicsObject = actorDef && isForceSusceptible(actorDef.temperament);
           const actorIsSteeringNPC = actorDef && isSteeringCharacter(actorDef.temperament);
           const bouncy = actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
-          triggerImpact(actor, "y", actor.vy, bouncy);
-          if (bouncy) {
+          const settles = bouncy && !actor.isPlayer && actor.vy < BOUNCE_REST_SPEED;
+          triggerImpact(actor, "y", actor.vy, bouncy && !settles);
+          if (bouncy && !settles) {
             actor.vy = -actor.vy * TRAMPOLINE_RESTITUTION;
-            actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+            if (actor.isPlayer) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
             if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
@@ -7328,6 +7337,10 @@
       // A bomb that lands after falling more than BOMB_FALL_DETONATE_TILES goes off; it keeps
       // track of the highest point of its current fall (rising resets it, resting resets it).
       if (isCarryBombKind(temperament) && gravityOn() && !actor.detonating && !actor.carried) {
+        // A teleport (Reset to start, Play restart, a drag, a door) is not a fall: forget the old
+        // fall origin whenever the actor jumped more than two tiles between ticks.
+        if (actor.lastY != null && Math.abs(actor.y - actor.lastY) > TILE * 2) actor.fallStartY = actor.y;
+        actor.lastY = actor.y;
         const landed = vyBefore > 0 && (actor.grounded || actor.vy <= 0);
         if (landed && actor.fallStartY != null && actor.y - actor.fallStartY > BOMB_FALL_DETONATE_TILES * TILE) {
           detonateCarriedBombAt(currentRoomId, actor.id);
@@ -8282,6 +8295,7 @@
         if (def && def.temperament === MOVING_PLATFORM_KIND) actor.platformT = 0;
       }
       actor.vx = 0; actor.vy = 0;
+      actor.fallStartY = null; actor.lastY = null;
     });
   }
 
@@ -9795,7 +9809,7 @@
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
       `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
-      `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION};`,
+      `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION}, BOUNCE_REST_SPEED = ${BOUNCE_REST_SPEED};`,
       `const BOUNCY_WALL_KICK = ${BOUNCY_WALL_KICK}, BOUNCY_WALL_LIFT = ${BOUNCY_WALL_LIFT};`,
       `const BOUNCY_LAUNCH_SPEED = ${BOUNCY_LAUNCH_SPEED}, HAZARD_KNOCKBACK_SPEED = ${HAZARD_KNOCKBACK_SPEED};`,
       `const GRAVITY_OFF_POP_SPEED = ${GRAVITY_OFF_POP_SPEED};`,
