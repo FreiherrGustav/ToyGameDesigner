@@ -5794,6 +5794,10 @@ The collision-triggered bomb detonation in `resolveAxis` (fast impact >= `BOMB_I
 
 The hand-coded "Spin Cycle" sample (and its sample-scoped art, `buildSpinCycleGame`, `drawSpinCycleIcon`) was removed and replaced by the user's own project (`my-project_6.json`), shipped the same way as The Monster's Den: `ICE_CAVE_PROJECT` embeds the snapshot and `buildIceCaveGame()` calls `restoreProjectSnapshot(structuredClone(...))`. Rooms are named "The Ice Cave" and "The Frightened Yeti". Actors were reset to spawn with zero velocity, spawner-made actors were dropped, and stale `spawnerContents` keys (cells no longer holding a spawner) were removed. Earlier sections describing Spin Cycle's layout and traces are history, not the current level. Verified via the 15-check sweep (loads, plays 3s, export clean); the level itself was not re-traced or playtested beyond that.
 
+## Characters from imported projects never moved: `displacedCooldown` was undefined
+
+In The Monster's Den the monster was a correctly-defined chaser that never moved. Actors in a project JSON authored before `displacedCooldown` existed don't carry that field, so `stepActor`'s steering gate `actor.displacedCooldown <= 0` evaluated `undefined <= 0` -> false and steering never ran, forever (the Ice Cave sample's characters were exposed to the same thing). The gate is now `!(actor.displacedCooldown > 0)`, which treats a missing value as "not displaced". Verified by tracing the Den's monster: it now charges toward the player and stops against the closed red gate. Lesson: any new per-actor numeric field must be read with a missing-value-safe comparison, since embedded/imported projects skip `createActor`'s defaults.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

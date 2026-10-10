@@ -7433,7 +7433,7 @@
             if (up && !down) ay += -MOVE_ACCEL * stickyMoveMult; else if (down && !up) ay += MOVE_ACCEL * stickyMoveMult;
           }
         }
-      } else if (!stuck && actor.displacedCooldown <= 0) {
+      } else if (!stuck && !(actor.displacedCooldown > 0)) {
         // Steering is withheld entirely while displacedCooldown is counting down — "who's in
         // control, and for how long" after a bounce/wind/cannon/magnet event, not a partial blend
         // with the AI still fighting the physics underneath it. See isSteeringCharacter's comment.
