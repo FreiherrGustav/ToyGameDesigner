@@ -5988,6 +5988,15 @@ another actor each time. Findings and fixes:
 Tests: `tests/bombs.test.js` (pile stays on the board and is silent, no overlapping stacks, blast undone by Reset,
 stack migration, stray recovery). `recoverStrayActor`/`cellOccupiedByStandable` are in the export's `runtimeFunctions`.
 
+## Keys no longer act as a channel (they only open Locked Doors)
+
+The v2.44 power-up patch made a picked-up Key a third source in `isChannelOn`, so a green key opened every
+green Gate, fan, button and plate. The user's intent was always that a Key only unlocks Locked Doors and is
+never a trigger like a Switch. `isChannelOn` is back to `switchChannels || plateChannelsActive`;
+`keyChannelsUnlocked` now only feeds `checkLockedDoorUnlock` (touch a same-color Locked Door while holding that
+color's key) and the HUD key chips. The earlier "Key = a permanent button" and key-x-gate/fan/button matrix notes
+above are history. Verified on `my-project_9.json`: picking up the green key changes no channel and no Gate.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
@@ -5999,3 +6008,4 @@ stack migration, stray recovery). `recoverStrayActor`/`cellOccupiedByStandable` 
 - Nothing else in the repo needs updating for a typical feature patch —
   no lockfile, no build artifacts, no test files (those are scratchpad-only
   and never committed).
+

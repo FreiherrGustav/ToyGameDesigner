@@ -5084,7 +5084,8 @@
   // occupied (plateChannelsActive, momentary) — see the state comments on each for why they're
   // tracked so differently underneath.
   function isChannelOn(color) {
-    return !!switchChannels[color] || !!plateChannelsActive[color] || !!keyChannelsUnlocked[color];
+    // Keys are NOT a channel source: they only ever open Locked Doors (checkLockedDoorUnlock).
+    return !!switchChannels[color] || !!plateChannelsActive[color];
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
