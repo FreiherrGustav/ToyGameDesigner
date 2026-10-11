@@ -5910,7 +5910,10 @@ recorded on the hot room as `room.surprises = [{seed, templateId, rect, sig}]`; 
 content so "untouched" can be told from "the kid edited it". When nothing fits, a three-button dialog
 (`surpriseAskFull`, same seed on every button) offers **Create a new room** / **Overwrite part of this room**
 / **Cancel**. Overwrite ranks every position by how much of the *kid's own* stuff it would replace
-(untouched earlier surprises cost 0, edited ones count as the kid's), never picks a rectangle holding the
+(untouched earlier surprises cost 0, edited ones count as the kid's) and picks at random among everything
+about as cheap as the best (exactly as cheap when the best costs nothing; +30% otherwise), steering away from
+the surprise placed most recently so repeated presses rotate through the room instead of re-replacing one
+spot (a strict minimum used to land in the same place every time — fixed), never picks a rectangle holding the
 player, and its sub-label says "Only replaces an untouched surprise" or "Replaces some of your own stuff
 (undo brings it back)". `opts.noOverwrite` hides it (Stage 2's Try-this must never overwrite). Each press is
 one `pushUndoSnapshot()`. The first surprise in a room places the project's one player; later ones, and

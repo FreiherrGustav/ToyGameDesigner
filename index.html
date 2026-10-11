@@ -9968,7 +9968,8 @@
       return !!t && isBlockingGeometry(t.geometry, { isPlayer: true }, t.modifier);
     };
     const usedColors = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < colorBoard[0].length; x++) { const c = colorBoard[y][x]; if (c && !usedColors.includes(c)) usedColors.push(c); }
-    return { occ, usedColors, viewStart: editorPanCol, viewEnd: Math.min(editorPanCol + COLS, roomCols()), playerCell, blockAt, rects, empty: surpriseRoomIsEmpty(room) };
+    const lastRect = (room.surprises && room.surprises.length) ? room.surprises[room.surprises.length - 1].rect : null;
+    return { occ, usedColors, lastRect, viewStart: editorPanCol, viewEnd: Math.min(editorPanCol + COLS, roomCols()), playerCell, blockAt, rects, empty: surpriseRoomIsEmpty(room) };
   }
   // Where could a w×h footprint go? "free": a rectangle (plus a 1-tile margin) where nothing is.
   // "overwrite": every position, ranked by how much of the kid's own stuff it would replace.
@@ -9992,11 +9993,24 @@
         let cost = 0, hard = false;
         for (let y = oy; y < oy + h; y++) for (let x = ox; x < ox + w; x++) { const v = ctx.occ[y][x]; if (v === 3) hard = true; else if (v === 1) cost++; }
         if (hard) continue;
-        if (cost < best) { best = cost; out.length = 0; }
-        if (cost === best) out.push({ ox, oy, cost });
+        out.push({ ox, oy, cost });
       }
     }
     if (mode === "free" && out.length) { const top = Math.max(...out.map(c => c.snug)); return out.filter(c => c.snug === top); }
+    if (mode === "overwrite" && out.length) {
+      // Cheapest first, but not one single spot forever: keep everything about as cheap as the best (exactly as
+      // cheap when it costs the kid nothing), and steer away from the surprise that was just placed so repeated
+      // presses rotate through the room instead of re-replacing the same section.
+      const best = Math.min(...out.map(c => c.cost));
+      const limit = best === 0 ? 0 : best + Math.ceil(best * 0.3);
+      let pool = out.filter(c => c.cost <= limit);
+      const last = ctx.lastRect;
+      if (last) {
+        const apart = pool.filter(c => c.ox + w <= last.x || last.x + last.w <= c.ox || c.oy + h <= last.y || last.y + last.h <= c.oy);
+        if (apart.length) pool = apart;
+      }
+      return pool;
+    }
     return out;
   }
 

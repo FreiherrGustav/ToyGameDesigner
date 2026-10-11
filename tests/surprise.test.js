@@ -253,6 +253,21 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   });
   console.log("packed room:", JSON.stringify(packed));
   if (!packed.pending || !packed.untouched || !(packed.cost > 0)) fail("packed room " + JSON.stringify(packed));
+  // overwriting must not pick the same section every time: fill a room, overwrite repeatedly, count distinct spots
+  const spread = await page.evaluate(() => {
+    __st.reset();
+    for (let n = 0; n < 14; n++) { const r = __st.press(8200 + n, { chaos: false }); if (r && r.pending) { document.getElementById("surpriseFullOverlay").remove(); break; } }
+    const spots = new Set(), hits = [];
+    for (let i = 0; i < 12; i++) { const r = __st.press(8300 + i, { chaos: false, full: "overwrite" }); if (r && r.rect) { spots.add(r.rect.x + "," + r.rect.y); hits.push(r.overwroteKidStuff); } }
+    // and with the kid's own stuff lying around too (cost > 0 everywhere): still rotates
+    __st.reset();
+    for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x * 7 + y * 3) % 11 === 0) __st.paint(x, y, "solid:none");
+    const spots2 = new Set();
+    for (let i = 0; i < 12; i++) { const r = __st.press(8400 + i, { chaos: false, full: "overwrite" }); if (r && r.rect) spots2.add(r.rect.x + "," + r.rect.y); }
+    return { distinct: spots.size, kidHits: hits.filter(Boolean).length, distinctPacked: spots2.size };
+  });
+  console.log("overwrite spread:", JSON.stringify(spread));
+  if (spread.distinct < 3 || spread.kidHits || spread.distinctPacked < 3) fail("overwrite keeps choosing the same spot " + JSON.stringify(spread));
   // the real button opens the dialog and Cancel changes nothing
   await page.evaluate(() => { __st.reset(); for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x + y) % 3 === 0) __st.paint(x, y, "solid:none"); });
   const boardBefore = await page.evaluate(() => JSON.stringify(__st.state().board));
