@@ -23,6 +23,8 @@ const HOOK = `
     defs: () => actorDefs, paint: (x, y, key) => { board[y][x] = key; },
     place: (defId, x, y) => { selectedActorDefId = defId; return placeNewActor(x * TILE + TILE / 2, y * TILE + TILE / 2); },
     setGravity: v => { gravityEnabled = v; }, room: () => { snapshotCurrentRoomState(); return rooms.find(r => r.id === currentRoomId); },
+    select: (pm, g, m, kind, defId) => { paintMode = pm; selectedGeometry = g; selectedModifier = m; selectedActorKind = kind; selectedActorDefId = defId; },
+    piece: () => surpriseSelectedPiece(), tryThis: seed => surpriseTry(seed), forPiece: k => surpriseTemplatesFor(k), pieceKeys: () => Object.keys(SURPRISE_PIECE_MATCH),
     templateById: id => SURPRISE_TEMPLATES.find(t => t.id === id)
   };
 `;
@@ -106,7 +108,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
       const seed = 5000 + k * 37;
       const ok = await page.evaluate(({ id, seed, check }) => {
         __st.reset();
-        const rep = __st.press(seed, { templateId: id, chaos: false });
+        const rep = __st.press(seed, { templateId: id, chaos: false, canonical: true });
         if (!rep || !rep.templateId) return false;
         __st.play();
         const h = { plateSeen: false, side0: null, chaserOk: true };
@@ -295,6 +297,84 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   });
   console.log("two rooms:", JSON.stringify(kid));
   if (kid.exceptions) fail("two rooms " + JSON.stringify(kid));
+
+  // ---- 7. Stage 2: "Try this" ----
+  // every template builds canonically (no chaos, plain fills), plays 5s clean, and the plain pieces really are plain
+  const canon = await page.evaluate((ids) => {
+    const bad = [];
+    for (const id of ids) for (let k = 0; k < 5; k++) {
+      try {
+        __st.reset();
+        const rep = __st.press(7000 + k * 11, { templateId: id, chaos: false, canonical: true });
+        if (!rep || !rep.templateId) { bad.push(id + " no build"); continue; }
+        const defs = __st.defs();
+        const odd = __st.room().actors.filter(a => !a.isPlayer && !["pushable", "largestone", "wanderer1", "colCheese", "hazardball"].includes(a.defId) && defs[a.defId].temperament !== "chaser" && defs[a.defId].temperament !== "wanderer" && defs[a.defId].temperament !== "collectible");
+        if (odd.length) bad.push(id + " odd actor " + odd[0].defId);
+        const skins = __st.room().groundSkinBoard.flat().filter(Boolean).filter(x => !String(x).startsWith("lth"));
+        if (skins.length) bad.push(id + " has a wall skin");
+        __st.play(); __st.tick(300); __st.stop();
+      } catch (e) { bad.push(id + " " + e); }
+    }
+    return bad;
+  }, ids);
+  console.log("canonical builds:", canon.length ? JSON.stringify(canon.slice(0, 5)) : "ok");
+  if (canon.length) fail("canonical " + canon.slice(0, 5));
+  // every piece key finds at least one template that really has it in its legend
+  const keys = await page.evaluate(() => __st.pieceKeys());
+  for (const k of keys) {
+    const found = await page.evaluate(k => __st.forPiece(k), k);
+    if (!found.length) fail("no template features piece " + k);
+  }
+  // selecting each piece in the palette -> Try this builds a template containing it
+  const sel = [
+    ["tile", "fan-e", "none", "player", null, "fan"], ["tile", "cannon2-ne", "none", "player", null, "cannon"], ["tile", "spawner-n", "none", "player", null, "spawner"],
+    ["tile", "barrier-n", "none", "player", null, "gate"], ["tile", "trampoline", "none", "player", null, "tramp"], ["tile", "magnet", "none", "player", null, "magnet"],
+    ["tile", "bomb2", "none", "player", null, "bomb"], ["tile", "gravitywell", "none", "player", null, "hole"], ["tile", "pushbutton", "none", "player", null, "button"],
+    ["tile", "plate", "none", "player", null, "plate"], ["tile", "solid", "bouncy", "player", null, "bounce"], ["tile", "solid", "sticky", "player", null, "sticky"],
+    ["tile", "solid", "slippery", "player", null, "slick"], ["tile", "none", "lethal", "player", null, "lava"], ["tile", "solid", "wind-e", "player", null, "belt"],
+    ["actor", "none", "none", "pushable", "pushable", "crate"], ["actor", "none", "none", "largestone", "largestone", "stone"]
+  ];
+  for (const [pm, g, m, kind, defId, want] of sel) {
+    const r = await page.evaluate(({ pm, g, m, kind, defId, want }) => {
+      __st.reset();
+      const d = defId === "pushable" ? "pushable" : defId;
+      __st.select(pm, g, m, kind, d);
+      const piece = __st.piece();
+      const rep = __st.tryThis(4242);
+      const t = rep && rep.templateId && __st.templateById(rep.templateId);
+      const has = t && __st.forPiece(want).includes(t.id);
+      return { piece, built: !!(rep && rep.templateId), has: !!has, tid: rep && rep.templateId, fallback: !!(rep && rep.fallback), gravityFlipped: rep && rep.gravityFlipped, wrapH: rep && rep.wrapH };
+    }, { pm, g, m, kind, defId, want });
+    if (r.piece !== want || !r.built || !r.has || r.fallback || r.gravityFlipped || r.wrapH) fail("try this " + want + " " + JSON.stringify(r));
+  }
+  console.log("try-this selections checked:", sel.length);
+  // nothing relevant selected -> falls back to a plain Surprise Me
+  const fb = await page.evaluate(() => { __st.reset(); __st.select("actor", "none", "none", "player", null); const rep = __st.tryThis(777); return { fallback: !!(rep && rep.fallback), built: !!(rep && rep.templateId) }; });
+  if (!fb.fallback || !fb.built) fail("fallback " + JSON.stringify(fb));
+  // never overwrites: in a packed room Try this changes nothing, offers only new-room/cancel, and new-room leaves the old board alone
+  const nov = await page.evaluate(() => {
+    __st.reset();
+    for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x + y) % 3 === 0) __st.paint(x, y, "solid:none");
+    __st.select("tile", "fan-e", "none", "player", null);
+    const before = JSON.stringify(__st.state().board);
+    const rep = __st.tryThis(6001);
+    const labels = [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent);
+    const same = JSON.stringify(__st.state().board) === before;
+    const ov = document.getElementById("surpriseFullOverlay");
+    const newBtn = ov && ov.querySelector("button");
+    if (newBtn) newBtn.click();
+    return { pending: !!(rep && rep.pending), labels, same, oldKept: JSON.stringify(__st.snapshot().rooms[0].board) === before, rooms: __st.snapshot().rooms.length };
+  });
+  console.log("try-this in a full room:", JSON.stringify(nov));
+  if (!nov.pending || !nov.same || nov.labels.some(l => /overwrite/i.test(l)) || nov.labels.length !== 2 || !nov.oldKept || nov.rooms !== 2) fail("try this never overwrites " + JSON.stringify(nov));
+  // one undo undoes a try; caption is set; the real button works and is in the Objects tab
+  const ui = await page.evaluate(() => { __st.reset(); const s0 = __st.sig(); __st.select("tile", "magnet", "none", "player", null); const rep = __st.tryThis(9001); const s1 = __st.sig(); __st.undo(); return { built: !!rep.templateId, changed: s0 !== s1, undone: __st.sig() === s0, caption: document.getElementById("captionBar").textContent }; });
+  if (!ui.built || !ui.changed || !ui.undone || !/Surprise #9001/.test(ui.caption)) fail("try this undo/caption " + JSON.stringify(ui));
+  await page.evaluate(() => { __st.reset(); });
+  await page.click("[data-tab=object], #tabObject, button:has-text('Objects')").catch(() => {});
+  const btnVisible = await page.evaluate(() => { const b = document.getElementById("tryThisBtn"); return !!b && b.offsetParent !== null; });
+  console.log("try-this button visible in Objects tab:", btnVisible);
+  if (!btnVisible) fail("try this button not visible in the Objects tab");
 
   if (errors.length) fail("page errors: " + errors.slice(0, 3).join(" | "));
   await browser.close();

@@ -196,6 +196,8 @@
   }
   #surpriseBtn:hover { border-color: var(--accent); }
   body.play-mode #surpriseBtn { display: none; }
+  #tryThisBtn { display: block; margin: 0 0 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border, #444); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  #tryThisBtn:hover { border-color: var(--accent); }
   #surpriseFullOverlay { position: fixed; inset: 0; background: rgba(10,10,14,0.85); display: flex; align-items: center; justify-content: center; z-index: 1000; }
   .surpriseFullCard { background: var(--panel); border-radius: 12px; padding: 18px 20px; max-width: 360px; width: 90%; display: flex; flex-direction: column; gap: 10px; }
   .surpriseFullTitle { font-size: 16px; font-weight: 600; color: var(--accent); }
@@ -367,6 +369,7 @@
     </div>
 
     <div id="objectPropertiesBlock" style="display:none;">
+      <button id="tryThisBtn" type="button" aria-label="Try this in a sample">🎲 Try this</button>
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
@@ -10024,6 +10027,14 @@
       ball: surprisePick(rng, kit.balls), pet: surprisePick(rng, kit.pets), chaser: surprisePick(rng, kit.chasers),
       reward: surprisePick(rng, kit.rewards)
     };
+    if (opts.canonical) {
+      // Try-this: the plain, expected version of the template (no random skins, no random pet/reward/ball)
+      fills.wallSkin = null;
+      fills.ball = HAZARD_BALL_DEF_ID;
+      fills.pet = kit.pets[0]; fills.reward = kit.rewards[0];
+      fills.chaser = defaultDefIdForKind("chaser") || kit.chasers[0];
+      kit.pets = [kit.pets[0]]; kit.rewards = [kit.rewards[0]];
+    }
     const chaos = opts.chaos !== false;
     const native = template.gravity === "on";
     const gravity = chaos && rng() < SURPRISE_GRAVITY_CHAOS ? !native : native;
@@ -10112,7 +10123,8 @@
     opts = opts || {};
     const ctx = opts.ctx || surpriseHotContext();
     const { eligible } = surpriseEligibleTemplates();
-    const pool = opts.templateId ? eligible.filter(t => t.id === opts.templateId) : eligible;
+    const pool = opts.templateId ? eligible.filter(t => t.id === opts.templateId)
+      : opts.templateIds ? eligible.filter(t => opts.templateIds.includes(t.id)) : eligible;
     if (!pool.length) return null;
     const trng = mulberry32(surpriseHash(seed, 0));
     const template = pool[Math.floor(trng() * pool.length) % pool.length];
@@ -10249,6 +10261,69 @@
     ov.appendChild(card);
     document.body.appendChild(ov);
   }
+  // ---- Stage 2: "Try this" (Objects tab). Reads the selected palette piece, finds templates that
+  // feature it (a lookup over the templates' own legends, no logic of its own), and builds one in its
+  // canonical form. Never overwrites: a full room only offers "new room" or cancel.
+  const SURPRISE_PIECE_MATCH = {
+    fan: n => n.startsWith("fan:"), cannon: n => n.startsWith("cannon:"), spawner: n => n.startsWith("spawner"),
+    tramp: n => n === "tramp", magnet: n => n === "magnet", bomb: n => n === "bomb", hole: n => n === "hole",
+    button: n => n === "button" || n === "button0", plate: n => n === "plate", gate: n => n === "gate",
+    stone: n => n === "stone", crate: n => n === "crate" || n.startsWith("spawnerc"), lava: n => n === "lava",
+    spike: n => n === "spike", bounce: n => n === "bounce", sticky: n => n === "sticky", slick: n => n === "slick",
+    belt: n => n.startsWith("belt:"), chaser: n => n === "chaser", pet: n => n === "pet" || n === "pet*",
+    reward: n => n === "reward" || n === "reward*"
+  };
+  function surpriseTemplatesFor(pieceKey) {
+    const match = SURPRISE_PIECE_MATCH[pieceKey];
+    if (!match) return [];
+    return surpriseEligibleTemplates().eligible.filter(t => Object.values(t.legend).some(match)).map(t => t.id);
+  }
+  // What is selected in the palette right now, as one of the SURPRISE_PIECE_MATCH keys (or null).
+  function surpriseSelectedPiece() {
+    if (paintMode === "actor") {
+      if (selectedActorKind === PUSHABLE_KIND) return "crate";
+      if (selectedActorKind === LARGE_STONE_KIND) return "stone";
+      const def = actorDefs[selectedActorDefId];
+      if (!def) return null;
+      if (def.temperament === "collectible") return "reward";
+      if (def.temperament === "chaser") return "chaser";
+      if (def.temperament === "wanderer" || def.temperament === "fleer") return "pet";
+      return null;
+    }
+    if (paintMode !== "tile") return null;
+    const g = selectedGeometry, m = selectedModifier;
+    if (FAN_ORDER.includes(g)) return "fan";
+    if (CANNON2_ORDER.includes(g)) return "cannon";
+    if (SPAWNER_ORDER.includes(g)) return "spawner";
+    if (BARRIER_ORDER.includes(g)) return "gate";
+    if (g === "trampoline") return "tramp";
+    if (g === "magnet") return "magnet";
+    if (g === BOMB2_GEOMETRY) return "bomb";
+    if (g === "gravitywell") return "hole";
+    if (g === PUSH_BUTTON_GEOMETRY) return "button";
+    if (g === "plate") return "plate";
+    if (m === "bouncy") return "bounce";
+    if (m === "sticky") return "sticky";
+    if (m === "slippery") return "slick";
+    if (m === "lethal") return g === "none" ? "lava" : "spike";
+    if (WIND_ORDER.includes(m)) return "belt";
+    return null;
+  }
+  function surpriseTry(seed) {
+    if (appMode !== "build") return null;
+    if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
+    const piece = surpriseSelectedPiece();
+    const ids = piece ? surpriseTemplatesFor(piece) : [];
+    if (!ids.length) return Object.assign({ fallback: true }, surpriseMe(seed, { noOverwrite: true }));
+    return surpriseMe(seed, { templateIds: ids, canonical: true, chaos: false, noOverwrite: true });
+  }
+  window.surpriseTry = surpriseTry;
+  (function wireTryThisButton() {
+    const btn = document.getElementById("tryThisBtn");
+    btn.addEventListener("click", () => { try { playChip("rattle"); } catch (e) { /* audio can be unavailable */ } surpriseTry(); });
+    btn.addEventListener("mouseenter", () => setCaption("Pick an item, then try it in a sample."));
+    btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
+  })();
   window.surpriseMe = surpriseMe; // console entry point: surpriseMe(4821)
   (function wireSurpriseButton() {
     const btn = document.getElementById("surpriseBtn");

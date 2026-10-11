@@ -5942,6 +5942,22 @@ three outcomes (overwrite prefers untouched surprises, new room, cancel changes 
 reports a non-zero overwrite cost and does nothing until asked; two rooms keep a single player.
 1000 seeds: 0 failures in every template. Not done: Stage 2 ("Try this" in the Objects tab, never overwrites).
 
+### Surprise Me, Stage 2: "Try this" (Objects tab)
+
+A 🎲 **Try this** button at the top of the Objects tab (`#tryThisBtn`; hover caption "Pick an item, then try it
+in a sample."). It reads the selected palette piece (`surpriseSelectedPiece()`: a geometry like fan/cannon/
+spawner/Gate/trampoline/magnet/bomb/black hole/button/plate, a Ground Effect like bouncy/sticky/slippery/lethal/
+conveyor, or crate/large stone/chaser/wanderer/collectible), finds templates that feature it
+(`surpriseTemplatesFor` — a lookup over each template's own `legend` via `SURPRISE_PIECE_MATCH`, no per-piece
+logic) and builds one via `surpriseMe(seed, { templateIds, canonical: true, chaos: false, noOverwrite: true })`.
+**Canonical** = no chaos (native gravity, no wrap), no random wall skin, hazard-ball spawner content, and the
+project's default pet/chaser/reward instead of random ones. **Never overwrites**: a full room offers only
+"Create a new room" / "Cancel". Nothing relevant selected (player, a custom character, erase...) falls back
+to a plain Surprise Me (chaos on, still no overwrite). Same placement, undo step, caption and log as the dice.
+Editor-only, not exported. Tests (`tests/surprise.test.js` section 7): every template builds canonically and
+plays 5s clean, every piece key matches a template, 17 palette selections each build a template containing
+their piece, fallback, never-overwrite in a packed room, undo + caption, button visible in Objects.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
