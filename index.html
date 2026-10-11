@@ -1266,6 +1266,9 @@
   let doorLinks = {};       // "roomId:x,y" -> {toRoomId, toX, toY}
   function roomCellKey(roomId, x, y) { return roomId + ":" + x + "," + y; }
   let digProgress = {};     // roomCellKey -> ms of sustained digging (holding Down) accumulated eroding a diggable wall
+  // Build-mode blasts: what a bomb destroyed while a kid was editing (tiles and hand-placed bomb actors), so
+  // "Reset to start" can put it back. Transient, never saved.
+  let buildBlastLog = [];
   let bombArmed = {};       // roomCellKey -> true while a bomb's fuse is lit
   // v2.19: roomCellKey -> defId — which single actor/object def is loaded into a given spawner
   // tile. Placing an actor onto an existing spawner tile loads it instead of placing a live
@@ -1731,6 +1734,19 @@
   // color tag the cell carries: switchChannels is keyed purely by color, never by which geometry
   // drove it, so an old red switch and a newly-painted red Button read the exact same channel state
   // with nothing else to migrate.
+  // Older saves can hold piles of hand-placed objects (bombs/crates...) sharing one identical spawn point —
+  // painting a bomb onto an occupied cell used to stack another one every time. They can never be told apart
+  // after a Reset, and a pile like that shoved itself off the board; keep one per spawn point.
+  function migrateStackedObjects(room) {
+    const seen = new Set();
+    room.actors = room.actors.filter(a => {
+      const d = actorDefs && actorDefs[a.defId];
+      if (a.isPlayer || a.spawnerKey || !d || !STANDABLE_OBJECT_KINDS.includes(d.temperament)) return true;
+      const k = a.defId + "@" + a.spawnX + "," + a.spawnY;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+  }
   function migrateLegacySwitchToButton(board) {
     for (let y = 0; y < board.length; y++) {
       for (let x = 0; x < board[y].length; x++) {
@@ -1791,6 +1807,7 @@
   // never part of the snapshot in the first place; a caller that also wants those reset (New
   // Project, JSON load) does so itself on top of this.
   function restoreProjectSnapshot(snap) {
+    buildBlastLog = [];
     rooms = structuredClone(snap.rooms);
     rooms.forEach(r => migrateLegacyGroundEffects(r.board));
     rooms.forEach(r => migrateLegacyCannonBomb(r));
@@ -1813,6 +1830,7 @@
     playerRoomId = snap.playerRoomId;
     actorDefs = structuredClone(snap.actorDefs);
     migrateStaleFactoryArt(actorDefs);
+    rooms.forEach(r => migrateStackedObjects(r));
     // older saves predate the carryable-actor built-ins (v2.21's grab/carry feature) — same
     // "older saves predate X" fallback pattern as collectibleSlotIds/groundTileDefs below, just for
     // a handful of actorDefs' own entries instead of a whole separate field. Without this, loading
@@ -5693,6 +5711,13 @@
         continue;
       }
       const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
+      // Two objects that are already deeply interpenetrating (a stack made by painting onto an occupied
+      // cell, old saves, Reset onto the same spawn) didn't just collide this frame — shoving/re-seating
+      // them every frame made each hop up onto its neighbour forever (a runaway tower, bombs ending up
+      // thousands of pixels off the board). Only a genuine, shallow contact is resolved here.
+      const depth = axis === "x" ? Math.min(actor.x + actor.w, other.x + other.w) - Math.max(actor.x, other.x)
+        : Math.min(actor.y + actor.h, other.y + other.h) - Math.max(actor.y, other.y);
+      if (depth > (axis === "x" ? actor.w : actor.h) * 0.75) continue;
       if (axis === "x") {
         if (actor.vx > 0) {
           const delta = (actor.x + actor.w) - other.x;
@@ -5911,6 +5936,12 @@
       // Also silent for enemies (any steering character, stationary, or a hazard ball): crowds of them
       // bumping each other made a constant boing. Object-vs-object bumps (crates, bombs...) still sound.
       const isQuiet = a => { const d = actorDefs[a.defId]; const t = d && d.temperament; return t === "collectible" || t === "stationary" || t === HAZARD_BALL_KIND || isSteeringCharacter(t); };
+      // Objects merely resting against each other (a stack of bombs/crates sitting still) aren't colliding —
+      // bouncing them apart every half second made a pile twitch and boing forever. Only a real closing speed counts.
+      const cdx = (moverActor.x + moverActor.w / 2) - (otherActor.x + otherActor.w / 2);
+      const cdy = (moverActor.y + moverActor.h / 2) - (otherActor.y + otherActor.h / 2);
+      const closing = Math.abs(cdx) >= Math.abs(cdy) ? (otherActor.vx - moverActor.vx) * Math.sign(cdx || 1) : (otherActor.vy - moverActor.vy) * Math.sign(cdy || 1);
+      if (closing < 40) return;
       reflectActorsApart(moverActor, otherActor, isQuiet(moverActor) || isQuiet(otherActor));
       return;
     }
@@ -6376,6 +6407,10 @@
       // tile-anim render loop's art-override); a cleared solid NEIGHBOR keeps its old look (the
       // wall itself deforming), since that's a wall being destroyed, not the explosion itself.
       if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier, art: isBombItself ? EXPLOSION_ART : undefined };
+      if (appMode === "build" && !isBombItself) {
+        const tRoom = rooms.find(r => r.id === roomId);
+        buildBlastLog.push({ type: "tile", roomId, x, y, key: cellKey, color: (isHot ? colorBoard : tRoom.colorBoard)[y][x] || null, skin: (isHot ? groundSkinBoard : tRoom.groundSkinBoard)[y][x] || null });
+      }
       targetBoard[y][x] = null;
     });
 
@@ -6921,12 +6956,25 @@
   // Gravity rooms: a bomb tile can't fall, so it becomes a real bomb actor (same conversion a grab
   // does, just unprompted and unarmed — touching it still lights it, see shovePushables). Rooms
   // without gravity keep the plain tile.
+  function cellOccupiedByStandable(gx, gy) {
+    const x0 = gx * TILE, y0 = gy * TILE;
+    return actors.some(a => {
+      if (a.carried || a.cannonLoad || a.isPlayer) return false;
+      const d = actorDefs[a.defId];
+      if (!d || !STANDABLE_OBJECT_KINDS.includes(d.temperament)) return false;
+      return a.x < x0 + TILE && a.x + a.w > x0 && a.y < y0 + TILE && a.y + a.h > y0;
+    });
+  }
   function convertBombTilesToActors() {
     for (let gy = 0; gy < ROWS; gy++) {
       const row = board[gy];
       for (let gx = 0; gx < row.length; gx++) {
         const cell = row[gx];
-        if (cell && cell.startsWith(BOMB2_GEOMETRY + ":")) convertGrabbedTileToActor(gx, gy, BOMB2_GEOMETRY, true);
+        if (cell && cell.startsWith(BOMB2_GEOMETRY + ":")) {
+          // painting a bomb onto a cell another object already fills would stack them; the tile waits until it's free
+          if (cellOccupiedByStandable(gx, gy)) continue;
+          convertGrabbedTileToActor(gx, gy, BOMB2_GEOMETRY, true);
+        }
       }
     }
   }
@@ -7076,6 +7124,11 @@
     // call "just in case" without each one needing its own double-detonation check.
     if (!bombActor || bombActor.detonating) return; // already gone, or already going off
     bombActor.detonating = true;
+    if (appMode === "build" && !bombActor.spawnerKey) {
+      const copy = structuredClone(Object.assign({}, bombActor, { fuseTimerId: null }));
+      delete copy.detonating;
+      buildBlastLog.push({ type: "actor", roomId, actor: copy });
+    }
     if (isHot) {
       const player = actors.find(a => a.isPlayer);
       if (player && player.carrying === actorId) player.carrying = null; // "explodes in your hands"
@@ -7089,6 +7142,18 @@
     } else {
       targetActors.splice(targetActors.indexOf(bombActor), 1); // off-screen room — no one's watching it pop
     }
+  }
+
+  // Safety net: an object that somehow ends up far outside the room (physics glitches, corrupt saves) goes
+  // back to where it was placed instead of flying off forever; spawner-made ones are simply removed.
+  function recoverStrayActor(actor) {
+    if (actor.isPlayer || actor.carried || actor.cannonLoad) return;
+    const lim = TILE * 3;
+    const bad = !Number.isFinite(actor.x) || !Number.isFinite(actor.y) || actor.y < -ROWS * TILE || actor.y > ROWS * TILE + lim
+      || (!wrapHEnabled && (actor.x < -lim || actor.x > roomCols() * TILE + lim));
+    if (!bad) return;
+    if (actor.spawnerKey || !Number.isFinite(actor.spawnX) || !Number.isFinite(actor.spawnY)) { removeActorById(actor.id); return; }
+    actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0; actor.fallStartY = null; actor.lastY = null;
   }
 
   function stepActor(actor, dt, player) {
@@ -7708,6 +7773,7 @@
       // room's geometry. Stop; it simply sits paused until its own room is active again.
       if (roomTransition) break;
       stepActor(actor, dt, player);
+      recoverStrayActor(actor);
     }
     for (const link of rideLinks) {
       const platform = actors.find(a => a.id === link.platformId);
@@ -8613,8 +8679,29 @@
   // actually got back to its true "nothing's happened yet" state. purgeSpawnedActors removes
   // every spawner-made actor outright first; resetActorsToSpawn then handles everything a kid
   // actually placed by hand.
+  // Build-mode blasts are playful but should never cost a kid their level: Reset to start puts back every
+  // tile and hand-placed bomb a Build-mode explosion destroyed (a tile only if its cell is still empty).
+  function restoreBuildBlasts() {
+    const log = buildBlastLog; buildBlastLog = [];
+    log.forEach(e => {
+      const room = rooms.find(r => r.id === e.roomId);
+      if (!room) return;
+      const isHot = e.roomId === currentRoomId;
+      if (e.type === "tile") {
+        const b = isHot ? board : room.board;
+        if (b[e.y][e.x]) return;
+        b[e.y][e.x] = e.key;
+        (isHot ? colorBoard : room.colorBoard)[e.y][e.x] = e.color;
+        (isHot ? groundSkinBoard : room.groundSkinBoard)[e.y][e.x] = e.skin;
+      } else {
+        const list = isHot ? actors : room.actors;
+        if (!list.some(a => a.id === e.actor.id)) list.push(e.actor);
+      }
+    });
+  }
   document.getElementById("resetBtn").addEventListener("click", () => {
     purgeSpawnedActors(actors);
+    restoreBuildBlasts();
     restoreCollectedPowerups(); // Build reset: picked-up hearts/keys/stars come back, keys re-lock, star ends
     resetActorsToSpawn(actors, startPos);
     log("Reset to start.");
@@ -10417,7 +10504,7 @@
       chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
       chipDesignLength, chipAt, renderChipDesign, getChipBuffer, playChip,
       bounceOffTrampolineObjects, carryableGeometryDirection, isCarryableTileGeometry,
-      tryGrabNearestCarryable, convertGrabbedTileToActor, convertBombTilesToActors, placeCarryableActor, attachCarryable,
+      tryGrabNearestCarryable, convertGrabbedTileToActor, convertBombTilesToActors, cellOccupiedByStandable, recoverStrayActor, placeCarryableActor, attachCarryable,
       dropCarriedObject, throwCarriedObject, detonateCarriedBombAt, pauseBombFuseIfTicking, startOrResumeBombFuse,
       removeActorById, log, addScore, roomCellKey, gameplayKey, frame, handleFatalError
     ];

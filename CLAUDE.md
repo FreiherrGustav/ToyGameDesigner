@@ -5958,6 +5958,36 @@ Editor-only, not exported. Tests (`tests/surprise.test.js` section 7): every tem
 plays 5s clean, every piece key matches a template, 17 palette selections each build a template containing
 their piece, fallback, never-overwrite in a packed room, undo + caption, button visible in Objects.
 
+## Bomb piles, Build-mode blasts, and a stack that twitched forever (from `my-project_9.json`)
+
+A saved Catapult Factory variant held 71 bomb actors: 56 of them off the board (y about -28150) and many sharing
+one identical spawn point (20 on a single cell). Painting a bomb onto a cell a bomb already fills used to stack
+another actor each time. Findings and fixes:
+
+- **Runaway stacks.** `shovePushables` re-seated deeply overlapping objects every frame, so each hopped up onto its
+  neighbour forever. Reset-to-start on the real save put the 56 stray bombs back on their spawns and 20 frames later
+  all of them were off the board again (reproduced before the fix, gone after). Now a contact deeper than 75% of the
+  body is not resolved (only genuine, shallow contacts are), `convertBombTilesToActors` waits while another
+  standable object fills the cell (`cellOccupiedByStandable`), `migrateStackedObjects` keeps one hand-placed
+  standable object per identical spawn point on load, and `recoverStrayActor` (called after each `stepActor`) sends an
+  object that ends up far outside the room back to its spawn (spawner-made ones are removed).
+- **The endless boing.** Two non-player objects merely resting against each other (the spawner's pile, bombs on
+  gates) were "reflected apart" every 500ms, boing included. `resolveActorContact`'s non-player branch now ignores
+  contacts with a closing speed under 40px/s.
+- **Reset after a Build-mode blast.** Blast damage in Build mode is logged (`buildBlastLog`: cleared solid tiles with
+  their color/skin, and hand-placed bomb actors that went off) and "Reset to start" restores it (`restoreBuildBlasts`;
+  a tile only if its cell is still empty). Play mode already restored everything from its snapshot. Loading a project
+  clears the log.
+- **Not found: the explosion at load.** The file as saved loads and runs quietly (no detonation in 40s in Build or Play);
+  it is the already-damaged result of earlier sessions. Unconfirmed theory: bombs held up by gates fall >6 tiles when
+  their gate's channel opens (a key, a plate, a stone dropping on a plate), which detonates them by design. If a fresh
+  load still blows up, send a screen recording or the autosave state at that moment.
+- **The red gate "opening on its own" is the level's own chain**: the green key opens the green gate (54,2) that holds a
+  Large Stone, the stone falls onto the red plate (54,4), and the red channel turns on (verified by trace).
+
+Tests: `tests/bombs.test.js` (pile stays on the board and is silent, no overlapping stacks, blast undone by Reset,
+stack migration, stray recovery). `recoverStrayActor`/`cellOccupiedByStandable` are in the export's `runtimeFunctions`.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
