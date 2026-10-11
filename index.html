@@ -661,11 +661,14 @@
   // firing up-and-out (ne/nw) rises faster than gravity can immediately cancel, arcs over, and
   // only comes back down once gravity actually wins out. Math.SQRT1_2 = 1/√2, the unit-vector
   // component of a 45° angle.
+  // Tuned (with CANNON_LAUNCH_SPEED 700 and GRAVITY 1450) so a level shot rises ~4 tiles and lands ~9 tiles
+  // away: vx = 343, vy = 609. Horizontal friction is switched off for the flight (actor.ballistic).
+  const CANNON_DIR_X = 0.49, CANNON_DIR_Y = 0.8717;
   const CANNON_DIRECTIONS = {
-    "cannon2-ne": { x: Math.SQRT1_2, y: -Math.SQRT1_2 },
-    "cannon2-se": { x: Math.SQRT1_2, y: Math.SQRT1_2 },
-    "cannon2-sw": { x: -Math.SQRT1_2, y: Math.SQRT1_2 },
-    "cannon2-nw": { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
+    "cannon2-ne": { x: CANNON_DIR_X, y: -CANNON_DIR_Y },
+    "cannon2-se": { x: CANNON_DIR_X, y: CANNON_DIR_Y },
+    "cannon2-sw": { x: -CANNON_DIR_X, y: CANNON_DIR_Y },
+    "cannon2-nw": { x: -CANNON_DIR_X, y: -CANNON_DIR_Y }
   };
   // Cardinal, not diagonal like cannon — a sustained push reads better along a straight axis
   // than at 45°, and it needs to work standing still on a "none" floor (an air current) just as
@@ -2139,6 +2142,11 @@
 
   // Rotates an 8x8 pixel-art array 90° clockwise — used to derive the other three cannon
   // orientations from a single hand-drawn base icon instead of authoring four separately.
+  function mirrorArtH(art) {
+    const out = new Array(ART * ART).fill(null);
+    for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) out[y * ART + (ART - 1 - x)] = art[y * ART + x];
+    return out;
+  }
   function rotateArt90CW(art) {
     const out = new Array(ART * ART).fill(null);
     for (let y = 0; y < ART; y++) {
@@ -2159,8 +2167,9 @@
     "BAAAAA..", ".A..A...", "..CB....", ".ABBB..."
   ], { A: "#3b4658", B: "#4d5c71", C: "#8a9eba", D: "#687287" });
   const CANNON2_ICON_SE = rotateArt90CW(CANNON2_ICON_NE);
-  const CANNON2_ICON_SW = rotateArt90CW(CANNON2_ICON_SE);
-  const CANNON2_ICON_NW = rotateArt90CW(CANNON2_ICON_SW);
+  // Facing the other way is a mirror image, not an upside-down rotation: west = east flipped left-right.
+  const CANNON2_ICON_SW = mirrorArtH(CANNON2_ICON_SE);
+  const CANNON2_ICON_NW = mirrorArtH(CANNON2_ICON_NE);
 
   // v2.19: one fan icon (pointing north, its "fan-n" orientation), the other 3 generated the same
   // way cannon's are — a circular housing with a chevron showing which way it blows.
@@ -6328,6 +6337,7 @@
     actor.vx = dir.x * CANNON_LAUNCH_SPEED;
     actor.vy = dir.y * CANNON_LAUNCH_SPEED;
     actor.cannonCooldown = CANNON_COOLDOWN_MS;
+    actor.ballistic = true; actor.ballisticT = 0; // a real arc: no horizontal friction until it lands (stepActor)
     // The cannon's own tile is solid; let this actor pass out through it (see resolveAxis).
     actor.cannonExit = (L.cx != null) ? { cx: L.cx, cy: L.cy } : null;
     // A fired steering character gets the same short "not in control" beat a bounce gives one.
@@ -7285,7 +7295,7 @@
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
-        if (!stuck && !(actor.cannonCooldown > 0)) { // no steering mid-shot: the arc is fixed
+        if (!stuck && !(actor.cannonCooldown > 0) && !actor.ballistic) { // no steering mid-shot: the arc is fixed
           if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
           if (inGravity) {
             wantsJump = keys[" "] || up;
@@ -7302,7 +7312,14 @@
         if (!inGravity) ay += steer.ay * stickyMoveMult;
       }
 
-      applyAxisFriction(actor, "x", dt, ax);
+      // A cannon shot flies as a true parabola: horizontal friction would eat its sideways speed in a
+      // quarter second (it used to stop dead 1-2 tiles out and drop). Only in gravity rooms, and it ends
+      // on landing (a wall hit zeroes vx through resolveAxis as usual).
+      if (actor.ballistic) {
+        actor.ballisticT = (actor.ballisticT || 0) + dt * 1000;
+        if (!inGravity || (actor.grounded && actor.ballisticT > 150)) actor.ballistic = false;
+      }
+      if (!(actor.ballistic && inGravity)) applyAxisFriction(actor, "x", dt, ax);
       const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
       // v2.20: sticky ground caps top speed too, not just acceleration — MOVE_ACCEL is high enough
       // that a kid reaches MAX_SPEED well within a second even at STICKY_MOVE_MULT's damped
@@ -7319,7 +7336,7 @@
       // blast) already track "how recently was this actor hit", so reusing them here costs
       // nothing new and just lets friction bring the speed back down naturally instead of an
       // instant hard clamp.
-      const recentlyLaunched = actor.cannonCooldown > 0 || actor.bouncyCooldown > 0 || actor.flashTimer > 0;
+      const recentlyLaunched = actor.cannonCooldown > 0 || actor.bouncyCooldown > 0 || actor.flashTimer > 0 || !!actor.ballistic;
 
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
@@ -8417,7 +8434,7 @@
         if (def && def.temperament === MOVING_PLATFORM_KIND) actor.platformT = 0;
       }
       actor.vx = 0; actor.vy = 0;
-      actor.fallStartY = null; actor.lastY = null;
+      actor.fallStartY = null; actor.lastY = null; actor.ballistic = false;
       actor.cannonLoad = null; actor.cannonExit = null;
     });
   }

@@ -5997,6 +5997,10 @@ never a trigger like a Switch. `isChannelOn` is back to `switchChannels || plate
 color's key) and the HUD key chips. The earlier "Key = a permanent button" and key-x-gate/fan/button matrix notes
 above are history. Verified on `my-project_9.json`: picking up the green key changes no channel and no Gate.
 
+## Cannon: mirrored (not upside-down) west art, and a real parabolic arc
+
+West-facing cannons are now the east art flipped left-right (`mirrorArtH`: SW = mirror of SE, NW = mirror of NE) instead of a 90-degree rotation chain that put the cannon upside down. The shot itself was stopping 1-2 tiles out because `applyAxisFriction` runs on x every frame, airborne or not, and ate the 495px/s sideways speed in ~0.27s. A fired actor now carries `ballistic` (set in `fireLoadedCannon`; cleared on landing, or immediately in a gravity-off room) and skips horizontal friction and the speed-cap clamp while it flies, and steering/input stay off for the flight. Launch vector is `CANNON_DIR_X/Y` = (0.49, 0.8717) at `CANNON_LAUNCH_SPEED` 700, i.e. vx 343, vy 609: about 4 tiles above the cannon and 9 tiles away on level ground (measured 9.2-9.4 for crate and player, both directions). This supersedes the earlier 45-degree numbers. Not re-traced: the Catapult Factory / Worst Elevator cannon legs (their ~3-tile arcs are now much longer), and gravity-off rooms keep the old friction behavior.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
