@@ -5870,6 +5870,64 @@ Follow-up: with the rest threshold in, a crate/ball on a Trampoline still bounce
 
 **Large Stone and conveyors.** Large Stone was fully wind-immune (v2.x "too heavy"), which included conveyor belts, so it never moved. `windAccelFor(actor, conveyorOnly)`: for Large Stone only the belt under it counts; open-air wind tiles and fans still don't push it. In `my-project_9.json` the stone also sat against a solid block one tile to its right on the belt; with that block removed it rides the belt (cols 31 to 54 in about 6s) and carries things standing on it. Verified in that project and in a synthetic belt.
 
+## Surprise Me — a dice button that builds a small, funny, live arrangement (Stage 1; v2.45)
+
+(The patch note said "v2.44"; that label is already taken by the power-ups section, so this is v2.45.)
+
+A 🎲 button next to Samples (Build mode only, hidden in Play). It places existing pieces from a closed
+table, `SURPRISE_TEMPLATES` — no new rules, no scripting, no new piece or engine behavior. Code lives in
+one block right before the Boot section of `index.html`; it is editor-only and **not** in the export
+(an exported file contains none of its identifiers — verified — and rooms it makes export/save/undo/
+autosave like any other room).
+
+**Template table.** Twelve entries (`id`, 3–4 funny `names`, `rows`/`legend` fixed layout ~10–13×7,
+`gravity`, `wrap`, `requires`, `expect`): Pinball Parlor, The Fan Club, Moat Problem, Sticky Situation,
+Slippery Kitchen, Zero-G Piñata, Conveyor Commute, Button Orchestra, Chaser Parade, Gravity Well Soup,
+Magnet Mischief, Bomb Staircase. `requires` keys map to cheap "does this exist in this build" probes in
+`SURPRISE_REQUIRES`; a failing probe silently skips the template (`surpriseEligibleTemplates()` lists
+skipped ones + why). All twelve are eligible today — the behaviors they lean on (belt carries a crate,
+wind moves NPCs, magnet pulls crates/NPCs, bomb tiles become bomb actors in gravity rooms) are asserted
+by the expectation tests, not just probed. Soft slots are filled from the project's own stuff
+(`surpriseKit`): wall texture from any plain solid Ground texture (custom ones included), pets from the
+default/custom wanderers and fleers (pets always move, so no arrangement is a still life), rewards from
+the collectible kit (custom ones included, never Heart/Key/Star), chasers from any chaser def, and what
+a spawner lobs (hazard ball, crate or a wanderer). The player uses the project's own `playerDefId`, so a
+custom hero shows up in it.
+
+**Generator.** `mulberry32` PRNG; seed → template + name (stream 0) → per-attempt stream for fills, room
+settings (gravity/h-wrap from the template, always Fixed camera), channel color and footprint offset
+(bottom-aligned in the room, 0–3 rows up). `surpriseValidate` is the floors: player on a free tile,
+no lethal/hazard/bomb within 3 tiles, no chaser/hazard ball within 3 tiles, player can move, flood fill
+≥ 15 free tiles, ≤ 2 doors per color, every spawner has an open target cell, piece count bound. A
+rejected attempt re-rolls with the same seed and an attempt counter, max 20, then gives up with a log line.
+Same seed → identical board (60 seeds checked twice).
+
+**Placement (never overwrite).** `surpriseMe(seed?)`: exactly one empty room → fill it; otherwise add a
+new room tab. The editor has no room cap of its own, so Surprise Me enforces `SURPRISE_MAX_ROOMS = 12`:
+at the cap it replaces the newest Surprise room whose signature (`room.surprise.sig`: boards, skins,
+actor defs + spawn points, settings) still matches — i.e. one the kid hasn't edited — and if there is
+none it does nothing and says so in the log. `pushUndoSnapshot()` runs once before any change, so a
+press is one undo step. **Design call**: there is only ever one player project-wide, so when a player
+already lives in another room, the new room is built *without* a player (the floors still validate a
+virtual player cell) and the log says to drag them over; Surprise Me never moves or duplicates the
+kid's player. A press shows `Surprise #4821: Tuesday Bomb Situation` in the caption line (the caption
+bar keeps it after the mouse leaves the dice) and in the log; room tab is named `surprise #4821`.
+`#surprise=4821` in the URL (or `surpriseMe(4821)` in the console) rebuilds the same arrangement; the
+hash is cleared afterwards so a reload doesn't stack another copy on the autosave.
+
+**Sound.** Pressing plays a new chip design `rattle` (`CHIP_DESIGNS.rattle`, hand-written per-frame
+data, **never listened to**), the arrangement appearing plays the existing `pop`. Both go through
+`playChip` directly; nothing was added to `sounds`, so the export's literal-arrow rule is untouched.
+
+**Tests.** `tests/surprise.test.js` (not deployed; `node tests/surprise.test.js [fuzzCount]`) injects a
+throwaway debug hook into a copy of `index.html` in the OS temp dir — the repo file stays hook-free —
+and runs: fuzz of N seeds (generate, press, enter Play, 10 simulated seconds via `tick(1/60)` with no
+input; fails on exception, missing player, NaN, dead/hit on frame one, frozen board, or unsatisfiable
+floors), per-template `expect` checks on 8 seeds each, determinism, non-destructive + single-undo,
+room-cap replace, and single-player. 1000 seeds: 0 failures in every template. Not done: Stage 2.
+Also checked by hand: an exported game containing a Surprise room plays error-free and contains none of
+the Surprise code; `#surprise=4821` in the URL builds "Black Hole Buffet".
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

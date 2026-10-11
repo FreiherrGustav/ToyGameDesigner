@@ -185,6 +185,17 @@
     white-space: nowrap;
   }
   #samplesBtn:hover { border-color: var(--accent); }
+  #surpriseBtn {
+    background: transparent;
+    border: 1px solid var(--panel-light);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #surpriseBtn:hover { border-color: var(--accent); }
+  body.play-mode #surpriseBtn { display: none; }
 
   /* ---------- Samples modal ---------- */
   #samplesModalOverlay {
@@ -293,6 +304,7 @@
   </div>
   <div id="topBarDivider" aria-hidden="true"></div>
   <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
+  <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
 </div>
 
 <div id="samplesModalOverlay" style="display:none;">
@@ -9691,6 +9703,350 @@
   renderPixelCanvas();
   renderAll();
 
+  // ============== Surprise Me (editor-only; never part of the standalone export) ==============
+  // A dice button that builds a small, live, slightly-wrong arrangement out of the project's own
+  // pieces. It is a closed table of templates plus a seeded picker — no new rules, no scripting:
+  // every piece placed here is an ordinary tile/actor that already works. Non-destructive: it
+  // fills a single empty room, otherwise it adds a new room tab (see surpriseMe).
+  //
+  // Legend pieces are short names resolved by surpriseResolvePiece; "@slot" style choices (the wall
+  // texture, what a spawner lobs, the reward, the pet) are filled once per arrangement from the
+  // project's OWN stuff — a kid's custom characters/collectibles/ground textures are eligible.
+  CHIP_DESIGNS.rattle = { ch: [
+    { t: "nz", n: [8, 12, 6, 13, 7, 11, 5, 12, 8, 10], v: [12, 0, 12, 0, 12, 0, 10, 0, 8, 3], d: 0 },
+    { t: "p1", n: [60, 0, 64, 0, 67, 0, 62, 0, 66, 70], v: [6, 0, 6, 0, 6, 0, 6, 0, 6, 4], d: 2 }
+  ] };
+  const SURPRISE_MAX_ROOMS = 12; // soft cap on room tabs for Surprise Me only (the editor has none of its own)
+  const SURPRISE_MAX_ATTEMPTS = 20;
+  const SURPRISE_TEMPLATES = [
+    { id: "pinball", names: ["Pinball Parlor", "The Bouncy Machine", "Ball Pit Disaster", "Tuesday Pinball Situation"],
+      gravity: "on", wrap: "off", requires: ["spawner", "bouncy", "trampoline"],
+      expect: { fact: "the spawner has fired at least twice (two or more live spawns)", check: "spawnCount2", needsInput: false },
+      legend: { B: "bounce", s: "spawner:e", t: "tramp", P: "player", "=": "wall" },
+      rows: ["BBBBBBBB....", "Bs.....B....", "B......B....", "B...t..B....", "B.t....B....", "B......B..P.", "BBBBBBBB===="] },
+    { id: "fanclub", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
+      gravity: "on", wrap: "off", requires: ["fan", "plate", "gate"],
+      expect: { fact: "the fan blows the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false },
+      legend: { "#": "wall", f: "fan:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward" },
+      rows: ["##########", "#......#.#", "#......#.#", "#......#.#", "#......#.#", "#fPc..pGo#", "##########"] },
+    { id: "moat", names: ["Moat Problem", "The Floor Is Lava", "Stone Cold Bridge", "Lava Lamp Lunch"],
+      gravity: "on", wrap: "either", requires: ["lava", "largestone"],
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { "#": "wall", L: "lava", P: "player", S: "stone", c: "crate", w: "pet", o: "reward" },
+      rows: ["............", "............", "............", "............", ".P.Sc....w.o", "#####LLL####", "############"] },
+    { id: "sticky", names: ["Sticky Situation", "Bounce Then Stick", "Velcro Tuesday", "The Gummy Wall"],
+      gravity: "on", wrap: "either", requires: ["sticky", "bouncy"],
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { Y: "sticky", b: "bounce", "=": "wall", P: "player", o: "reward", w: "pet" },
+      rows: ["............", "........Y.o.", "........Y...", "........Y...", "...P....Y.w.", "........Y...", "bbbbbbbb===="] },
+    { id: "slippery", names: ["Slippery Kitchen", "Soapy Launch Pad", "Ice Skating To Nowhere", "Wet Floor Sign Missing"],
+      gravity: "on", wrap: "either", requires: ["slippery", "trampoline", "lethal"],
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { i: "slick", "=": "wall", P: "player", t: "tramp", "^": "spike", o: "reward", w: "pet" },
+      rows: ["............", ".........o..", "............", "............", "............", ".P..w....t^.", "iiiiiiiii==="] },
+    { id: "zeropinata", names: ["Zero-G Pinata", "Candy Cannon", "Crates Everywhere", "Floaty Party"],
+      gravity: "off", wrap: "off", requires: ["cannon"],
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { "#": "wall", c: "crate", n: "cannon:ne", P: "player", w: "pet" },
+      rows: ["############", "#.....cc...#", "#.....c....#", "#..........#", "#P.n.......#", "#.........w#", "############"] },
+    { id: "conveyor", names: ["Conveyor Commute", "Rush Hour Crate", "Belt Up", "The Slow Escalator"],
+      gravity: "on", wrap: "off", requires: ["conveyor", "plate", "gate"],
+      expect: { fact: "the belt carries the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false },
+      legend: { "#": "wall", ">": "belt:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward" },
+      rows: ["##########", "#......#.#", "#......#.#", "#......#.#", "#......#.#", "#P.c..pGo#", "#>>>>>>###"] },
+    { id: "orchestra", names: ["Button Orchestra", "Too Many Buttons", "Push Everything", "The Clicky Room"],
+      gravity: "on", wrap: "off", requires: ["button", "gate"],
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { "#": "wall", G: "gate", b: "button", P: "player", o: "reward" },
+      rows: ["#############", "#..#.....#..#", "#..#.....#..#", "#..#.....#..#", "#..#.....#..#", "#o.G.bPbbGo.#", "#############"] },
+    { id: "chaserparade", names: ["Chaser Parade", "Fan Versus Monster", "Blow It Back", "The Windy Corridor"],
+      gravity: "off", wrap: "off", requires: ["fan", "npcWind"],
+      expect: { fact: "the fan holds the chaser back: it stays west of the fan for five seconds", check: "chaserHeld", needsInput: false },
+      legend: { "#": "wall", C: "chaser", f: "fan:w", P: "player" },
+      rows: ["############", "#..........#", "#..........#", "#.C..f...P.#", "#..........#", "#..........#", "############"] },
+    { id: "holesoup", names: ["Gravity Well Soup", "Black Hole Buffet", "Down The Drain", "Orbit Practice"],
+      gravity: "off", wrap: "off", requires: ["spawner", "blackhole"],
+      expect: { fact: "the spawner keeps lobbing balls into the room (two or more live spawns)", check: "spawnCount2", needsInput: false },
+      legend: { "#": "wall", s: "spawner:e", h: "hole", P: "player" },
+      rows: ["############", "#s.........#", "#........h.#", "#..........#", "#..........#", "#P.........#", "############"] },
+    { id: "magnet", names: ["Magnet Mischief", "Crate Attraction", "Stuck On You", "The Clingy Magnet"],
+      gravity: "on", wrap: "off", requires: ["magnet"],
+      expect: { fact: "the magnet drags a crate toward it (at least 20px in three seconds)", check: "crateTowardMagnet", needsInput: false },
+      legend: { "=": "wall", P: "player", c: "crate", m: "magnet", w: "pet" },
+      rows: ["............", "............", "............", "............", ".....c......", ".P..cc..m.w.", "============"] },
+    { id: "bombstairs", names: ["Tuesday Bomb Situation", "Staircase Of Regret", "Bomb Staircase", "Explosive Stairs"],
+      gravity: "on", wrap: "off", requires: ["bombActors"],
+      expect: { fact: "the bomb tiles turn into real bomb actors and settle", check: "bombActors", needsInput: false },
+      legend: { "=": "wall", "#": "wall", P: "player", c: "crate", b: "bomb", w: "pet" },
+      rows: ["............", "...........#", "...........#", "..........c#", ".........bb#", ".P.w....bcc#", "============"] }
+  ];
+  // Does each interaction a template relies on exist in this build? A missing one silently skips
+  // the template (surpriseEligibleTemplates reports why). Behavior itself is asserted by the tests.
+  const SURPRISE_REQUIRES = {
+    spawner: () => SPAWNER_ORDER.length > 0 && typeof spawnActorAt === "function",
+    bouncy: () => !!GAMEPLAY_TILE_DEFS["solid:bouncy"],
+    trampoline: () => !!GAMEPLAY_TILE_DEFS["trampoline:none"],
+    fan: () => FAN_ORDER.length > 0 && typeof fanAccelFor === "function",
+    plate: () => !!GAMEPLAY_TILE_DEFS["plate:none"] && typeof updatePressurePlates === "function",
+    gate: () => BARRIER_ORDER.length > 0,
+    lava: () => !!GAMEPLAY_TILE_DEFS["none:lethal"],
+    largestone: () => !!actorDefs[LARGE_STONE_DEF_ID],
+    sticky: () => !!GAMEPLAY_TILE_DEFS["solid:sticky"],
+    slippery: () => !!GAMEPLAY_TILE_DEFS["solid:slippery"],
+    lethal: () => !!GAMEPLAY_TILE_DEFS["solid:lethal"],
+    cannon: () => CANNON2_ORDER.length > 0 && typeof triggerCannon === "function",
+    conveyor: () => !!GAMEPLAY_TILE_DEFS["solid:wind-e"] && typeof windAccelFor === "function",
+    button: () => !!GAMEPLAY_TILE_DEFS[PUSH_BUTTON_GEOMETRY + ":none"],
+    npcWind: () => typeof isSteeringCharacter === "function" && typeof windAccelFor === "function",
+    blackhole: () => !!GAMEPLAY_TILE_DEFS["gravitywell:none"] && typeof checkGravityWellContacts === "function",
+    magnet: () => !!GAMEPLAY_TILE_DEFS["magnet:none"] && typeof radialForceAccelFor === "function",
+    bombActors: () => typeof convertBombTilesToActors === "function" && !!GAMEPLAY_TILE_DEFS[BOMB2_GEOMETRY + ":none"]
+  };
+  function surpriseEligibleTemplates() {
+    const eligible = [], skipped = [];
+    SURPRISE_TEMPLATES.forEach(t => {
+      const missing = t.requires.filter(r => { try { return !SURPRISE_REQUIRES[r](); } catch (e) { return true; } });
+      if (missing.length) skipped.push({ id: t.id, reason: "missing " + missing.join(", ") });
+      else eligible.push(t);
+    });
+    return { eligible, skipped };
+  }
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function surpriseHash(seed, salt) { return (Math.imul(seed | 0, 0x9E3779B1) ^ Math.imul((salt | 0) + 1, 0x85EBCA6B)) >>> 0; }
+  function surprisePick(rng, list) { return list[Math.floor(rng() * list.length) % list.length]; }
+
+  // What the project itself offers to fill the soft slots with.
+  function surpriseKit() {
+    const skins = groundSlotIds.filter(id => { const d = groundTileDefs[id]; return d && d.geometry === "solid" && d.modifier === "none" && d.frames && d.frames.length; });
+    // pets always move (wanderers/fleers) so no arrangement is ever a frozen still life
+    const pets = [defaultDefIdForKind("wanderer")].filter(Boolean)
+      .concat(customActorSlotIds.filter(id => actorDefs[id] && id !== playerDefId && ["wanderer", "fleer"].includes(actorDefs[id].temperament)));
+    const chasers = Object.keys(actorDefs).filter(id => actorDefs[id].temperament === "chaser" && id !== playerDefId);
+    const rewards = collectibleSlotIds.filter(id => actorDefs[id] && !POWERUP_DEF_IDS.includes(id));
+    const balls = [HAZARD_BALL_DEF_ID, HAZARD_BALL_DEF_ID, PUSHABLE_DEF_ID].concat(pets.filter(id => actorDefs[id].temperament === "wanderer"));
+    return { skins, pets, chasers, rewards, balls };
+  }
+  function surpriseResolvePiece(name, fills) {
+    const g = (geometry, modifier, extra) => Object.assign({ tile: { key: gameplayKey(geometry, modifier || "none") } }, extra || {});
+    const dir = name.includes(":") ? name.split(":")[1] : null;
+    switch (name.split(":")[0]) {
+      case "wall": return { tile: { key: gameplayKey("solid", "none"), skin: fills.wallSkin } };
+      case "bounce": return g("solid", "bouncy");
+      case "slick": return g("solid", "slippery");
+      case "sticky": return g("solid", "sticky");
+      case "tramp": return g("trampoline");
+      case "magnet": return g("magnet");
+      case "hole": return g("gravitywell");
+      case "bomb": return g(BOMB2_GEOMETRY);
+      case "belt": return g("solid", "wind-" + dir);
+      case "fan": return g("fan-" + dir);
+      case "cannon": return g("cannon2-" + dir);
+      case "spawner": return Object.assign(g("spawner-" + dir), { spawnerContent: fills.ball });
+      case "plate": return { tile: { key: gameplayKey("plate", "none"), color: fills.color } };
+      case "gate": return { tile: { key: gameplayKey(BARRIER_ORDER[0], "none"), color: fills.color } };
+      case "button": return { tile: { key: gameplayKey(PUSH_BUTTON_GEOMETRY, "none"), color: fills.color } };
+      case "lava": return { tile: { key: gameplayKey("none", "lethal"), skin: groundTileDefs.lthLava ? "lthLava" : null } };
+      case "spike": return { tile: { key: gameplayKey("solid", "lethal"), skin: groundTileDefs.lthSpike ? "lthSpike" : null } };
+      case "player": return { player: true };
+      case "crate": return { actor: PUSHABLE_DEF_ID };
+      case "stone": return { actor: LARGE_STONE_DEF_ID };
+      case "pet": return { actor: fills.pet };
+      case "chaser": return { actor: fills.chaser };
+      case "reward": return { actor: fills.reward };
+    }
+    throw new Error("Surprise Me: unknown piece " + name);
+  }
+  // One attempt of building a template into a plain description (no editor state is touched).
+  function surpriseBuildSpec(seed, attempt, template, name) {
+    const rng = mulberry32(surpriseHash(seed, attempt + 1));
+    const kit = surpriseKit();
+    const fills = {
+      wallSkin: rng() < 0.5 ? null : surprisePick(rng, kit.skins.length ? kit.skins : [null]),
+      color: surprisePick(rng, CHANNEL_COLORS),
+      ball: surprisePick(rng, kit.balls),
+      pet: surprisePick(rng, kit.pets),
+      chaser: surprisePick(rng, kit.chasers),
+      reward: surprisePick(rng, kit.rewards.length ? kit.rewards : [EXAMPLE_CHEESE_DEF_ID])
+    };
+    const gravity = template.gravity === "on" ? true : template.gravity === "off" ? false : rng() < 0.5;
+    const wrapH = template.wrap === "either" ? rng() < 0.3 : false;
+    const w = template.rows[0].length, h = template.rows.length;
+    const ox = Math.floor(rng() * (COLS - w + 1));
+    const oy = ROWS - h - Math.floor(rng() * 4);
+    const spec = { seed, attempt, templateId: template.id, name, gravity, wrapH, wrapV: false, ox, oy, w, h, color: fills.color,
+      tiles: [], actors: [], spawners: [], player: null };
+    template.rows.forEach((row, ry) => {
+      for (let rx = 0; rx < w; rx++) {
+        const ch = row[rx];
+        if (ch === ".") continue;
+        const piece = surpriseResolvePiece(template.legend[ch], fills);
+        const x = ox + rx, y = oy + ry;
+        if (piece.tile) {
+          if (!GAMEPLAY_TILE_DEFS[piece.tile.key]) throw new Error("Surprise Me: no tile " + piece.tile.key);
+          spec.tiles.push({ x, y, key: piece.tile.key, color: piece.tile.color || null, skin: piece.tile.skin || null });
+        }
+        if (piece.spawnerContent) spec.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
+        if (piece.actor) spec.actors.push({ x, y, defId: piece.actor });
+        if (piece.player) spec.player = { x, y };
+      }
+    });
+    return spec;
+  }
+  // The floors: reject a layout that would hand the kid a dead, stuck, or unbounded start.
+  function surpriseValidate(spec) {
+    const tileAt = new Map(spec.tiles.map(t => [t.x + "," + t.y, t]));
+    const blocking = (x, y) => {
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return true;
+      const t = tileAt.get(x + "," + y);
+      if (!t) return false;
+      const def = GAMEPLAY_TILE_DEFS[t.key];
+      return isBlockingGeometry(def.geometry, { isPlayer: true }, def.modifier);
+    };
+    if (spec.tiles.length + spec.actors.length > 160) return "too many pieces";
+    if (!spec.player) return "no player cell";
+    const p = spec.player;
+    if (blocking(p.x, p.y)) return "player inside a solid";
+    for (const t of spec.tiles) {
+      const def = GAMEPLAY_TILE_DEFS[t.key];
+      const risky = def.modifier === "lethal" || def.modifier === "hazard" || def.geometry === BOMB2_GEOMETRY;
+      if (risky && Math.max(Math.abs(t.x - p.x), Math.abs(t.y - p.y)) <= 3) return "hazard within 3 tiles of the player";
+    }
+    for (const a of spec.actors) {
+      const risky = actorDefs[a.defId] && (actorDefs[a.defId].temperament === "chaser" || actorDefs[a.defId].temperament === HAZARD_BALL_KIND);
+      if (risky && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 3) return "chaser within 3 tiles of the player";
+    }
+    if (blocking(p.x - 1, p.y) && blocking(p.x + 1, p.y) && blocking(p.x, p.y - 1) && blocking(p.x, p.y + 1)) return "player cannot move";
+    const seen = new Set([p.x + "," + p.y]), queue = [[p.x, p.y]];
+    while (queue.length) {
+      const [x, y] = queue.pop();
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+        const nx = x + dx, ny = y + dy, k = nx + "," + ny;
+        if (!seen.has(k) && !blocking(nx, ny)) { seen.add(k); queue.push([nx, ny]); }
+      });
+    }
+    if (seen.size < 15) return "fewer than 15 free tiles reachable";
+    const doorsPerColor = {};
+    for (const t of spec.tiles) {
+      if (GAMEPLAY_TILE_DEFS[t.key].geometry === "door") { doorsPerColor[t.color] = (doorsPerColor[t.color] || 0) + 1; if (doorsPerColor[t.color] > 2) return "more than two doors of one color"; }
+    }
+    for (const s of spec.spawners) {
+      const t = tileAt.get(s.x + "," + s.y);
+      const dir = SPAWNER_DIRECTIONS[GAMEPLAY_TILE_DEFS[t.key].geometry];
+      if (!dir || blocking(s.x + dir.x, s.y + dir.y)) return "spawner has no open target";
+    }
+    return null;
+  }
+  // seed -> template -> name; re-rolls (same seed, attempt counter) when a floor rejects an attempt.
+  function generateSurprise(seed, opts) {
+    opts = opts || {};
+    const { eligible } = surpriseEligibleTemplates();
+    const pool = opts.templateId ? eligible.filter(t => t.id === opts.templateId) : eligible;
+    if (!pool.length) return null;
+    const trng = mulberry32(surpriseHash(seed, 0));
+    const template = pool[Math.floor(trng() * pool.length) % pool.length];
+    const name = template.names[Math.floor(trng() * template.names.length) % template.names.length];
+    const failures = [];
+    for (let attempt = 0; attempt < SURPRISE_MAX_ATTEMPTS; attempt++) {
+      const spec = surpriseBuildSpec(seed, attempt, template, name);
+      const why = surpriseValidate(spec);
+      if (!why) { spec.attempts = attempt + 1; return spec; }
+      failures.push(why);
+    }
+    return { failed: true, templateId: template.id, failures };
+  }
+  function surpriseRoomSignature(room) {
+    const s = JSON.stringify([room.board, room.colorBoard, room.groundSkinBoard, room.actors.map(a => [a.defId, a.spawnX, a.spawnY]),
+      room.gravityEnabled, room.wrapHEnabled, room.wrapVEnabled]);
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0;
+    return h;
+  }
+  function surpriseRoomIsEmpty(room) {
+    if (room.actors.length > 0) return false;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < room.board[0].length; x++) if (room.board[y][x] || room.backgroundBoard[y][x]) return false;
+    return true;
+  }
+  // Paints a finished spec into the HOT room using the editor's own placement code.
+  function surpriseApplySpec(spec) {
+    gravityEnabled = spec.gravity; wrapHEnabled = spec.wrapH; wrapVEnabled = spec.wrapV;
+    cameraMode = "fixed"; editorPanCol = 0;
+    spec.tiles.forEach(t => {
+      board[t.y][t.x] = t.key;
+      if (t.color) colorBoard[t.y][t.x] = t.color;
+      if (t.skin) { groundSkinBoard[t.y][t.x] = t.skin; groundSkinRotationBoard[t.y][t.x] = 0; }
+    });
+    const savedSel = selectedActorDefId;
+    const place = (defId, x, y) => { selectedActorDefId = defId; return placeNewActor(x * TILE + TILE / 2, y * TILE + TILE / 2); };
+    spec.actors.forEach(a => place(a.defId, a.x, a.y));
+    spec.spawners.forEach(s => { if (s.content) spawnerContents[roomCellKey(currentRoomId, s.x, s.y)] = s.content; });
+    let playerPlaced = false;
+    if (spec.player && playerRoomId == null) { place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
+    selectedActorDefId = savedSel;
+    return playerPlaced;
+  }
+  let lastSurpriseCaption = "";
+  // The button. Returns a small report object (also handy from the console: surpriseMe(4821)).
+  function surpriseMe(seed, opts) {
+    if (appMode !== "build") return null;
+    if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
+    const spec = generateSurprise(seed, opts);
+    if (!spec || spec.failed) { log("Surprise me couldn't build #" + seed + " — try again."); return spec || null; }
+    snapshotCurrentRoomState();
+    const hot = rooms.find(r => r.id === currentRoomId);
+    let mode;
+    if (rooms.length === 1 && surpriseRoomIsEmpty(hot)) mode = "fill";
+    else if (rooms.length < SURPRISE_MAX_ROOMS) mode = "new";
+    else {
+      const old = rooms.slice().reverse().find(r => r.surprise && r.surprise.sig === surpriseRoomSignature(r));
+      if (!old) { log("Surprise me: every room tab is used and none of them is an untouched surprise — nothing changed."); return { skipped: "room cap" }; }
+      mode = "replace:" + old.id;
+    }
+    pushUndoSnapshot(); // the whole press is one undo step
+    if (mode.startsWith("replace:")) {
+      const oldId = Number(mode.slice(8));
+      Object.keys(spawnerContents).filter(k => k.startsWith(oldId + ":")).forEach(k => delete spawnerContents[k]);
+      Object.keys(digProgress).filter(k => k.startsWith(oldId + ":")).forEach(k => delete digProgress[k]);
+      if (playerRoomId === oldId) playerRoomId = null;
+      rooms = rooms.filter(r => r.id !== oldId);
+      if (currentRoomId === oldId) { currentRoomId = null; activateRoom(rooms[0].id); }
+      mode = "new";
+    }
+    if (mode === "new") {
+      const room = createEmptyRoom("surprise #" + seed);
+      rooms.push(room);
+      activateRoom(room.id);
+    } else {
+      rooms.find(r => r.id === currentRoomId).name = "surprise #" + seed;
+    }
+    const playerPlaced = surpriseApplySpec(spec);
+    snapshotCurrentRoomState();
+    const room = rooms.find(r => r.id === currentRoomId);
+    room.surprise = { seed, templateId: spec.templateId, sig: surpriseRoomSignature(room) };
+    renderRoomTabs();
+    renderAll();
+    const caption = "Surprise #" + seed + ": " + spec.name;
+    lastSurpriseCaption = caption;
+    setCaption(caption);
+    log(caption + (playerPlaced ? "" : " (your player lives in another room — drag them over to join in)"));
+    try { playChip("pop"); } catch (e) { /* audio can be unavailable */ }
+    return { seed, templateId: spec.templateId, name: spec.name, mode, attempts: spec.attempts, playerPlaced, roomId: room.id };
+  }
+  window.surpriseMe = surpriseMe; // console entry point: surpriseMe(4821)
+  (function wireSurpriseButton() {
+    const btn = document.getElementById("surpriseBtn");
+    btn.addEventListener("click", () => { try { playChip("rattle"); } catch (e) { /* audio can be unavailable */ } surpriseMe(); });
+    btn.addEventListener("mouseenter", () => setCaption("Surprise me."));
+    btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
+  })();
+
   // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
   // Captured now — after every built-in actor/background def above has been seeded and the
   // initial empty board is in place, but before any auto-save restore might replace them — so
@@ -9699,6 +10055,14 @@
   const FACTORY_DEFAULT_SNAPSHOT = captureProjectSnapshot();
   if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");
   updateUndoRedoButtons();
+  // #surprise=4821 in the URL rebuilds that exact arrangement (then clears the hash so a reload
+  // doesn't stack another copy on top of the autosave).
+  (function surpriseFromHash() {
+    const m = /^#surprise=(\d+)$/.exec(location.hash || "");
+    if (!m) return;
+    surpriseMe(Number(m[1]));
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* file:// may refuse */ }
+  })();
 
   // ============== Export: standalone playable file ==============
   // The exported file is a second, self-contained HTML document: the current build's data
