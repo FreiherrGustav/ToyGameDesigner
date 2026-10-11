@@ -6007,6 +6007,10 @@ West-facing cannons are now the east art flipped left-right (`mirrorArtH`: SW = 
 - **The "random game reset".** Not a reset bug: a life was being lost. The south-facing spawner at (14,8) launches a bomb at ~420px/s downward; one landing beside/on the player counted as a "falling crate crush" (`resolveActorContact`, vy>200 from above) -> `triggerHazard` -> lose a life -> whole level restarts. Caught by spying `triggerHazard` during a random-input fuzz (stack + the offending actor: a spawner bomb, vy 533-565). Now a bomb never crushes (its danger is its blast) and any fresh spawn (`bouncyCooldown` still running) never crushes. Crates falling from height still do.
 - Tooling: the fuzz (`p11f.js`-style: random keys + teleport next to bombs + hazard spy) is the way to find "random" resets. 6 runs x 90s after the fix: no hazard hits. Not found: any hidden off-screen colliding object (there is none; the 54 bombs in room 2 are inert).
 
+## The Bomb Factory replaces The Catapult Factory
+
+The coded Catapult Factory sample (`buildCatapultFactoryGame`, its factory-panel/girder/hazard-stripe/blueprint art constants and `fillFactoryRect` helpers) was removed and replaced by the user's own project (`Bomb_Factory.json`), shipped like the other user-authored samples: `BOMB_FACTORY_PROJECT` embeds the snapshot and `buildBombFactoryGame()` calls `restoreProjectSnapshot(structuredClone(...))`. Rooms are "The Bomb Factory" and "The Bomb Factory Annex"; the textures it uses (`cfPanel`/`cfGirder`/`cfHazardStripe`, blueprint backgrounds) live in the project's own `groundTileDefs`/`backgroundTileDefs`. Actors were reset to spawn with zero velocity and spawner-made actors dropped (6 + 8); the three spawners keep their loaded bombs/crate. Earlier Catapult Factory sections (three routes, rule-one gating, cannon traces) are history, not the current level; it was not re-traced or playtested beyond loading, playing and exporting cleanly (16-check sweep).
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
