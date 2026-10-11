@@ -5811,7 +5811,7 @@
   // own math, forever, for as long as anything sits on a floor under gravity. Below this floor
   // it's equilibrium noise, not a hit worth a sound or a fresh wobble; a genuine landing (even
   // a light one) clears it easily, since a mere one-tile fall already saturates mag toward 1.
-  const IMPACT_NOISE_FLOOR = 0.15;
+  const IMPACT_NOISE_FLOOR = 0.4; // ~100px/s: a resting object that skips one long frame (gravity x2 frames) isn't a landing
   function impactWobbleValue(actor) {
     if (!actor.impactMag) return 0;
     return actor.impactMag * Math.exp(-IMPACT_WOBBLE_DECAY * actor.impactWobbleT) * Math.cos(IMPACT_WOBBLE_FREQ * actor.impactWobbleT);
@@ -6035,7 +6035,10 @@
       // bounce reaction to add here; reflecting velocities on top of it would just fight the shove.
       // v2.34: generalized from PUSHABLE_KIND alone to STANDABLE_OBJECT_KINDS — a falling Large
       // Stone crushes just as hard as a falling crate; both share the exact same physics shape.
-      if (npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
+      // A spawner's launch burst is a shove, not a fall: a fresh spawn (bouncyCooldown still running) never crushes.
+      // A bomb's danger is its blast, never its weight (a falling bomb crushing you reset the level).
+      const freshSpawn = (npcActor.spawnerKey && npcActor.bouncyCooldown > 0) || isCarryBombKind(temperament);
+      if (!freshSpawn && npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
     } else if (temperament === CARRY_CANNON2_KIND) {
