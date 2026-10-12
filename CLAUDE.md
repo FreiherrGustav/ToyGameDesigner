@@ -6132,6 +6132,83 @@ a key) had to be respected when approaching a road lane (a test, not a level, is
 numbers (lane speeds, float counts) are a first pass. Horizontal lanes are not used. The goal is a whole column,
 so any row wins. Screenshots were taken in Build/Play at several camera positions and the gallery tile checked.
 
+## "Rock Bottom" — a Boulder-Dash-shaped digging cave (gravity, dirt you dig, boulders you drop)
+
+`buildRockBottomGame()` / `drawRockBottomIcon` / `RB_MAP`, registered last in `SAMPLE_GAMES`. Gallery line (the gallery has no
+description field, so it lives here): *"A princess drops her tiara gems down the old well and digs down after them: dig the dirt,
+let the boulders fall where you want them."* One 72x18 Follow-camera room, gravity on, no wrap, **no goal tile**: collecting all
+12 gems wins (v2.44 rule: collection wins only when no goal tile exists). No Heart/Key/Star. **No engine code changed** — every piece
+is an existing mechanic; the sample-scoped skins/backgrounds/actor defs live inside the builder (so nothing leaks into new projects
+and nothing depends on an autosave). The player is the existing Princess preset art ("Princess Pip", `rbHero`), the beast is the
+existing monster preset art as a `chaser` (`rbBeast`).
+
+**Layout** (`RB_MAP`, generated from ASCII; `#` bedrock, `D` dirt, `.` sky, `G` grass-on-rock, `T` grass dirt). Rows 0-2 sky, row 3
+grass, row 17 bedrock. Part 1 is the hub (cols 24-44) and the other four parts are bedrock-sealed chambers entered through one-dirt
+plugs, so any order of 2/3/4 works. Everything below the surface has a cave wall behind it (five palettes, 2-3 decorations each:
+roots, worms, mushrooms, bricks, pipes, bones, glow, claw marks, eyes, crystals, glowshrooms) and every solid cell has a skin: dirt =
+warm brown speckle (3 variants + grass dirt), bedrock = cool, dark, chunky-outlined cracked blocks (4 variants per part palette,
+one per part with a fossil/gold fleck/ember seam/claw marks/crystal decoration). Lava reuses the built-in `lthLava`.
+
+1. **Topsoil** — start on the surface, walk off into the old well (cell 26), land in a pre-dug corridor (row 10) with two gems. A
+   dirt shelf at (34,10) holds two stacked crates above it; the pillar east of it is five tiles of bedrock with the third gem on top
+   in a sealed pocket. Dig the shelf from the side: both crates fall one cell and stack (44px). Stand on the stack, jump to the
+   pillar top. The pillar is 5 tall *because jump apex is 122/127/130px at 30/60/144fps* — a 4-tall pillar (128px) is reachable or
+   not depending on frame rate; with one crate (apex+22 = 144-152) the 160px top is still out of reach, with two (166-174) it is in
+   (checked at all three frame rates). The chimney the stack falls in is two columns wide so the player can jump up out of the corridor
+   cell beside it (a 1-cell-wide chimney under a bedrock lid gave only 10px of headroom and made the stack unreachable).
+2. **Plate Vault** (west, row 10) — plug, hall, a dirt shelf at (19,10) with two crates stacked above it and a 2-deep pit under it with
+   the red plate at the bottom; the red gate sits at (14,10) with two gems behind it. Dig the shelf from the east and both crates fall
+   through into the pit onto the plate (0.30s). The chamber above the hall is open on both sides on purpose (see the squeeze note).
+3. **Lava Moat** (east, row 15, a one-tile-tall tunnel) — plug at (44,15), then a dirt "cork" at (52,15) sitting on a 2-deep lava pit
+   (rows 16-17) with three Large Stones stacked in a bedrock shaft above it. Dig the cork from the west: the stones fall and fill the
+   pit to 2px above the walkway; hop the 2px lip and walk on. Two gems beyond.
+4. **Beast's Tunnels** (southwest, rows 14-15) — plug at (24,15), a crate on the floor, a 1-wide **plate pit** (19,16) with the green
+   plate, a 2-wide **trap pit** (16-17,16), a green gate at (13,14-15) and the sealed lair behind it with the beast and three gems.
+   Push the crate west: it falls into the plate pit (the only hole it can reach first), the gate opens, the beast charges east, runs off
+   the edge into the trap pit and is stuck for good (a chaser can't climb even a 10px step). Hop the trap pit (24px takeoff window;
+   the tunnel is 3 tall there) and take the gems. Without the trap pit the beast catches the player (traced).
+5. **Deep Vault** (east, past the moat) — far-side crate, a blue **plate pit** at (62,16) directly in front of the blue gate (63,13-15),
+   vault with two gems. Push the crate west to east: it falls into the pit onto the plate (0.97s), the gate opens, hop out of the pit
+   and walk in. Reachable only through Part 3's tunnel, independent of Part 2 and Part 4.
+
+**Dependency answer**: 1 -> {2, 3, 4} in any order (the hub is Part 1: the well, the corridor and the shaft at cols 28-30 down to the
+lower corridor). 5 needs 3 and nothing else. Every part has a boulder-only step: 1 the stack for the pillar gem, 2/4/5 a boulder on a
+plate (the player standing on the plate cannot also be at the gate), 3 the stones (the cork cannot be broken without releasing them).
+
+**Trace table** (`tests/rockbottom.test.js`, real constants, manual 1/60 ticks):
+
+| part | steps | boulder fall | escape / what a hold-through does | margin |
+|---|---|---|---|---|
+| 1 Topsoil | well 0.73s, 2 gems, shelf 0.95s, jump to stack, jump to pillar | crates land 0.12s after the crumble | nothing can land on the digger (the crumbled cell is beside him; holding Right pushes the stack 5px into the pillar) | hold/release/early: 0 hits; pillar reachable only with the 2-stack at 30/60/144fps |
+| 2 Plate Vault | plug 0.95s, shelf 0.97s | 0.30s to rest on the plate | holding Left walks into the column and shoves both crates west along the hall (no hit); recoverable by walking back east (crate falls in) or carrying | release at the crumble: gate opens, 0 hits |
+| 3 Lava Moat | plug, cork 0.95s | stones at rest 0.37s | holding Right walks into the open pit: lava, one life, level restarts clean (verified after the real 650ms) | release at the crumble: 0 hits, crosses |
+| 4 Beast's Tunnels | plug 0.95s, push the crate ~0.8s | gate to beast-in-pit 0.93s | the player ends up standing in the 10px-deep plate pit (stuck until he jumps), beast already in its pit: no hit; falling into the trap pit = a life | hop window 24px |
+| 5 Deep Vault | push ~0.97s | n/a | holding Right cannot lose the crate (pit stops it) | gate stays open |
+
+Order independence: all six orders of {2, 3+5, 4} win after Part 1 (same solvers from each part's door); a full real-input
+playthrough (well, dig, jump, hop, push, hop...) wins with all 3 lives, and the exported file plays the Part 1/3/5 inputs with
+zero errors. Wrong-order / mistake recovery: nothing can be left unrecoverable in a way a restart (lives) does not clear — Part 2's
+shoved crates are recoverable in place; Part 3's only mistake is dying (restart restores cork, stones, player and READY!).
+
+**Engine facts found building it (reported, not patched)**:
+- A crate or stone squeezed between the player and a *solid* wall (a tile directly beside the column it falls in) is ejected upward
+  through the wall by `resolveAxis`'s landing branch (seen at y=74 above the surface, twice). Part 2's chamber is open on both sides
+  and Part 3's stones live in a shaft above the tunnel for this reason. Part 3's hold-through still ejects one stone but the level
+  restarts anyway.
+- Lava kills on *touching* the top face (walking over a lava cell at floor level kills), so a stone fill must end above the walkway;
+  two stones leave a 12px lip (needs headroom 12 on top of the player), three stones in a 2-deep pit leave 2px.
+- A running player crosses a 1-wide (32px) hole without falling (momentum), but not a 2-wide one; a hop over an open 1-wide lava pit
+  in a 1-tall tunnel works with an early jump (so the pit is never left open: the cork releases the stones the instant it breaks).
+- Digging reads the tile the AABB overlaps at the player's *own* row; with Down held the floor under his feet is dug too, so
+  every dig spot has a bedrock floor (one dirt patch, 3 wide, in the corridor floor is the "dig down here" cue).
+- Gems are removed 220ms after pickup by a real `setTimeout`, so tests that tick by hand must wait real time before counting gems or
+  checking for the win.
+
+**Cut / not done**: gems do not sparkle (collectible art is a single static frame — an animated gem would need a new frame mechanism);
+no spare stones/crates in Parts 3-5 (a spare in the tunnel can be pushed in front of the dig spot; the failure cases all restart
+cleanly); the lives/restart path is not exercised in the exported file; sound is untouched. Camera screenshots at the five Follow
+positions at the start and after digging a tunnel through every part are in `prototypes/rock-bottom-shots/`.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

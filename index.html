@@ -9098,6 +9098,146 @@
     ctx.fillStyle = "#1b1b1b"; ctx.fillRect(15, 6, 1, 1); ctx.fillRect(17, 6, 1, 1);
   }
 
+  // ============== "Rock Bottom" — a digging cave (gravity, dirt you dig, boulders you drop) ==============
+  // One 72x18 Follow-camera room. Princess Pip dropped her tiara gems down the old well and climbs after
+  // them: dig dirt, let boulders fall, collect all twelve gems (no goal tile — collecting them all wins).
+  // Five parts, each sealed by bedrock and entered through a dirt plug: 1 Topsoil (the hub: a boulder stack
+  // is the step to a pillar gem), 2 Plate Vault (drop a boulder on the red plate, the gate opens), 3 Lava
+  // Moat (dig the lid so two Large Stones fill the lava), 4 Beast's Tunnels (a green plate gate frees the
+  // beast into a pit while you keep it open with a crate), 5 Deep Vault (blue gate, plate across the moat).
+  // Every piece is an existing mechanic; the level owns fairness (see CLAUDE.md "Rock Bottom").
+  const RB_MAP = ["........................................................................", "........................................................................", "........................................................................", "GGGGGGGGGGGGGGGGGGGGGGGGGT TTTTTGGGGGTTTTTTTGGGGGGGGGGGGGGGGGGGGGGGGGGGG", "#########################D DDDDD##  #DDDDDDD############################", "#########################D DDDDD#  g#DDDDDDD############################", "#########################D DDDDD#  ##DDDDDDD############################", "###############       ###D DDDDD#  ##DDDDDDD############################", "###############    o  ###D DDDDD# o##DDDDDDD############################", "###############    o  ###D DDDDD# o##DDDDDDD############################", "###### g   g  R    D    D   g  g  D##DDDDDDD############################", "################### ########DDD#########################################", "###################r#####DDDDDDDDDDDDDDDDDDD########O###################", "##############     ######DDDDDDDDDDDDDDDDDDD########O####      B       #", "####         N          D                   ########O####      B       #", "#### g g E g N        o D                   D       D   g og   B  g  g #", "################  #n################################~#########b#########", "####################################################~###################"];
+  function buildRockBottomGame() {
+    const room = createEmptyRoom("Rock Bottom");
+    room.gravityEnabled = true; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "follow";
+    rooms.push(room);
+    activateRoom(room.id);
+    const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
+    const part = (x, y) => (x >= 24 && x <= 44) ? 1 : x < 24 ? (y >= 13 ? 4 : 2) : (x >= 63 ? 5 : 3);
+    // --- art helpers: deterministic speckle (no randomness at build time), overlays, chunky bedrock edges
+    const speck = (base, acc, dens, seed) => {
+      const a = [];
+      for (let i = 0; i < 64; i++) { const h = hash(i, seed); a.push((h % 100) < dens ? acc[(h >> 8) % acc.length] : base); }
+      return a;
+    };
+    const overlay = (a, rows, legend) => {
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const c = legend[rows[y][x]]; if (c) a[y * 8 + x] = c; }
+      return a;
+    };
+    const edges = (a, col) => { for (let i = 0; i < 64; i++) { if (i % 8 === 7 || i >= 56) a[i] = col; } return a; };
+    const CRACKS = [[10, 19, 28, 37, 45, 46, 54], [8, 17, 18, 27, 36, 44, 53, 62], [13, 21, 22, 30, 38, 39, 47, 55]];
+    const cracks = (a, k, col) => { CRACKS[k].forEach(i => { a[i] = col; }); return a; };
+    // --- Ground skins. Dirt = warm brown speckle, soft edges (you can dig it). Bedrock = cool, dark, chunky
+    // outlined blocks with cracks (you can't). Each part's bedrock has its own look.
+    const defSkin = (id, name, art, modifier) => { groundTileDefs[id] = { name, frames: [art], frameMs: 1000, geometry: "solid", modifier }; };
+    defSkin("rbGrassDirt", "grass dirt", pat(["gGgGggGg", "dgdddgdd", "dddsddsd", "dsdddddd", "dddddsdd", "dsddddds", "dddsdddd", "dddddsdd"],
+      { g: "#5fb34a", G: "#7ccc5e", d: "#8a5a34", s: "#a06b40" }), "diggable");
+    defSkin("rbGrassRock", "grass rock", pat(["gGgGggGg", "dgdddgdd", "kddkdddk", "dddddkdd", "kddddddd", "ddkdddkd", "dddddddd", "kkkkkkkk"],
+      { g: "#5fb34a", G: "#7ccc5e", d: "#4f535c", k: "#33363d" }), "none");
+    const dirtA = speck("#8a5a34", ["#a06b40", "#6e4526", "#9a6a3c"], 22, 1);
+    const dirtB = overlay(speck("#8a5a34", ["#a06b40", "#6e4526"], 14, 2), ["........", "..pp....", ".pPp....", "........", "......pp", ".....pPp", "........", "........"], { p: "#c9a27a", P: "#e2c49b" });
+    const dirtC = overlay(speck("#8a5a34", ["#a06b40", "#6e4526"], 14, 3), ["........", "r.......", ".r..r...", "..rr.r..", "......r.", "..r.....", ".r..rr..", "........"], { r: "#5e3a1c" });
+    defSkin("rbDirtA", "dirt", dirtA, "diggable"); defSkin("rbDirtB", "pebbly dirt", dirtB, "diggable"); defSkin("rbDirtC", "rooty dirt", dirtC, "diggable");
+    const ROCK = {
+      1: { base: "#555a63", dark: "#2f3238", crack: "#2a2d33", acc: ["#626872", "#4a4e57"] },
+      2: { base: "#5c5748", dark: "#2f2b21", crack: "#2a261d", acc: ["#6d6753", "#4c4739"] },
+      3: { base: "#4d2f31", dark: "#241214", crack: "#c4482a", acc: ["#5a373a", "#44292b"] },
+      4: { base: "#2f313b", dark: "#121319", crack: "#0d0e13", acc: ["#383b47", "#272933"] },
+      5: { base: "#2b3552", dark: "#0f1527", crack: "#0b1020", acc: ["#35416a", "#232c46"] }
+    };
+    const DECOR = {
+      1: ["........", "..w.....", ".wWw....", "..w.w...", "......w.", ".....wWw", "......w.", "........"],            // fossil twig
+      2: ["........", "...y....", "........", ".y......", "......y.", "...y....", "........", ".....y.."],               // gold flecks
+      3: ["........", "..r.....", "..rr....", "...r.r..", "....rr..", "....r...", "........", "........"],            // ember seam
+      4: ["..w.....", "..w.w...", "...w.w..", "...w.w..", "....w.w.", "....w.w.", ".....w..", "........"],            // claw marks
+      5: ["...c....", "..cCc...", "..cCc...", ".cCCCc..", ".cCCCc..", "..cCc...", "........", "........"]             // crystal
+    };
+    const DLEG = { 1: { w: "#d9d2bf", W: "#f2ecd8" }, 2: { y: "#e4c34a" }, 3: { r: "#ff7a3d" }, 4: { w: "#8d93a3" }, 5: { c: "#4fb6ec", C: "#d6f4ff" } };
+    for (let p = 1; p <= 5; p++) {
+      const R = ROCK[p];
+      const plain = (seed, k) => edges(cracks(speck(R.base, R.acc, 30, seed + p * 10), k, R.crack), R.dark);
+      defSkin("rbRock" + p + "A", "bedrock", plain(1, 0), "none");
+      defSkin("rbRock" + p + "B", "bedrock", plain(2, 1), "none");
+      defSkin("rbRock" + p + "C", "bedrock", plain(3, 2), "none");
+      defSkin("rbRock" + p + "D", "bedrock", overlay(plain(4, 0), DECOR[p], DLEG[p]), "none");
+    }
+    ["rbGrassDirt", "rbDirtA", "rbDirtB", "rbDirtC", "rbRock1A", "rbRock2A", "rbRock3A", "rbRock4A", "rbRock5A"].forEach(id => groundSlotIds.push(id));
+    // --- Backgrounds: sky strip up top, and a cave wall in each part's colors (this is what shows once dirt is dug out).
+    const bgDefs = {};
+    const defBg = (id, name, art) => { bgDefs[id] = { art, name }; backgroundTileDefs[id] = { art: art.slice(), name }; };
+    defBg("rbSky", "sky", speck("#8fd3ff", ["#9ddbff", "#82c8f5"], 10, 31));
+    defBg("rbSkyLow", "hazy sky", speck("#b8e4ff", ["#c8ecff", "#a8dcfa"], 10, 32));
+    defBg("rbCloud", "cloud", overlay(speck("#8fd3ff", ["#9ddbff"], 8, 33), ["........", "..wwww..", ".wWWWWw.", "wWWWWWWw", ".wwwwww.", "........", "........", "........"], { w: "#e9f6ff", W: "#ffffff" }));
+    defBg("rbBush", "bush", overlay(speck("#8fd3ff", ["#9ddbff"], 8, 34), ["........", "........", "........", "..gGg...", ".gGGGg.g", "gGGgGgGg", "gGgGGGgG", "gggggggg"], { g: "#3f9a3a", G: "#62b04e" }));
+    const BG = {
+      1: { base: "#3a2616", acc: ["#46301c", "#2f1f12"] },
+      2: { base: "#2a2618", acc: ["#35301e", "#201d12"] },
+      3: { base: "#2b1210", acc: ["#3a1a16", "#200d0b"] },
+      4: { base: "#15161c", acc: ["#1c1e26", "#101117"] },
+      5: { base: "#121a2e", acc: ["#18223c", "#0d1424"] }
+    };
+    const BGDECOR = {
+      1: [["roots", ["r.r..r.r", "r.r..r..", ".r...r..", ".....r..", "........", "........", "........", "........"], { r: "#5e3a1c" }],
+          ["worm", ["........", "........", "..pp....", "...pP...", "....pp..", "..pp....", ".pP.....", "........"], { p: "#d98a8a", P: "#f0b0b0" }],
+          ["mushroom", ["........", "........", "..mmm...", ".mMmMm..", "..sss...", "...s....", "...s....", "........"], { m: "#c4503a", M: "#f2d9c0", s: "#d9ccb0" }]],
+      2: [["bricks", ["yyyyyyyy", "y..y....", "y..y....", "yyyyyyyy", "....y..y", "....y..y", "yyyyyyyy", "........"], { y: "#4a4330" }],
+          ["pipe", ["........", "........", "pppppppp", "PPPPPPPP", "pppppppp", "........", "........", "........"], { p: "#6b5d3a", P: "#8d7b48" }],
+          ["bones", ["........", "........", "........", "w.......", "wwWw..w.", ".w.wWwww", "..w..w.w", "........"], { w: "#cfc7b0", W: "#e9e3d0" }]],
+      3: [["glow", ["........", "........", "...oo...", "..oOOo..", "...oo...", "........", "........", "........"], { o: "#8a2a1c", O: "#e0572b" }],
+          ["bones", ["........", "........", "........", "w.......", "wwWw..w.", ".w.wWwww", "..w..w.w", "........"], { w: "#b8aa95", W: "#d9cdb8" }]],
+      4: [["claws", ["........", ".w..w..w", ".w..w..w", "..w..w.w", "..w..w..", "...w..w.", "........", "........"], { w: "#3a3d4a" }],
+          ["bones", ["........", "........", "........", "w.......", "wwWw..w.", ".w.wWwww", "..w..w.w", "........"], { w: "#8a8c94", W: "#b4b6be" }],
+          ["eyes", ["........", "........", ".e..e...", "........", "........", "........", "........", "........"], { e: "#8a2a2a" }]],
+      5: [["crystal", ["........", "...c....", "..cCc...", "..cCc...", ".cCCCc..", ".cCCCc..", "........", "........"], { c: "#2f7fb0", C: "#9fe0ff" }],
+          ["glowshroom", ["........", "........", "..bbb...", ".bBbBb..", "..sss...", "...s....", "...s....", "........"], { b: "#2fa0a0", B: "#9ff0e0", s: "#6a8aa0" }]]
+    };
+    for (let p = 1; p <= 5; p++) {
+      defBg("rbCave" + p, "cave wall", speck(BG[p].base, BG[p].acc, 28, 40 + p));
+      BGDECOR[p].forEach(([nm, rows, leg], i) => defBg("rbCave" + p + "_" + i, nm, overlay(speck(BG[p].base, BG[p].acc, 28, 40 + p), rows, leg)));
+    }
+    // --- Build the board from the map
+    const KEY = { "#": 1, G: 1, T: 1, D: 1, "~": 1, R: 1, N: 1, B: 1, r: 1, n: 1, b: 1 };
+    const PLATE_COLOR = { r: "red", n: "green", b: "blue" }, GATE_COLOR = { R: "red", N: "green", B: "blue" };
+    const ACTOR = { g: "colGem", o: PUSHABLE_DEF_ID, O: LARGE_STONE_DEF_ID, E: "rbBeast" };
+    actorDefs.rbHero = { temperament: "stationary", poses: null, name: "Princess Pip", art: PRINCESS_ART.slice() };
+    actorDefs.rbBeast = { temperament: "chaser", poses: null, name: "beast", art: MONSTER_ART.slice() };
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < 72; x++) {
+      const c = RB_MAP[y][x], p = part(x, y), h = hash(x, y) % 100;
+      if (c === "." ) {
+        backgroundBoard[y][x] = y === 2 ? "rbSkyLow" : (y < 2 && h < 9) ? "rbCloud" : (y === 2 && h < 7) ? "rbBush" : "rbSky";
+        continue;
+      }
+      // cave wall behind everything below the surface, decorated sparsely
+      const decor = BGDECOR[p];
+      backgroundBoard[y][x] = (h < 14 && y > 3) ? "rbCave" + p + "_" + (hash(y, x) % decor.length) : "rbCave" + p;
+      if (c === "#") { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = "rbRock" + p + "ABCD"[h < 55 ? 0 : h < 75 ? 1 : h < 92 ? 2 : 3]; }
+      else if (c === "G") { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = "rbGrassRock"; }
+      else if (c === "T") { board[y][x] = gameplayKey("solid", "diggable"); groundSkinBoard[y][x] = "rbGrassDirt"; }
+      else if (c === "D") { board[y][x] = gameplayKey("solid", "diggable"); groundSkinBoard[y][x] = "rbDirt" + "ABC"[h < 55 ? 0 : h < 80 ? 1 : 2]; }
+      else if (c === "~") { board[y][x] = gameplayKey("none", "lethal"); groundSkinBoard[y][x] = "lthLava"; }
+      else if (GATE_COLOR[c]) { board[y][x] = gameplayKey(BARRIER_ORDER[0], "none"); colorBoard[y][x] = GATE_COLOR[c]; }
+      else if (PLATE_COLOR[c]) { board[y][x] = gameplayKey("plate", "none"); colorBoard[y][x] = PLATE_COLOR[c]; }
+    }
+    playerDefId = "rbHero";
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < 72; x++) {
+      const c = RB_MAP[y][x];
+      if (ACTOR[c]) placeExampleActor(ACTOR[c], x, y);
+    }
+    placeExampleActor("rbHero", 25, 2);
+    activateRoom(room.id);
+    return room;
+  }
+  function drawRockBottomIcon(ctx) {
+    ctx.fillStyle = "#8fd3ff"; ctx.fillRect(0, 0, 24, 6);
+    ctx.fillStyle = "#5fb34a"; ctx.fillRect(0, 6, 24, 2);
+    ctx.fillStyle = "#8a5a34"; ctx.fillRect(0, 8, 24, 16);
+    ctx.fillStyle = "#3a2616"; ctx.fillRect(3, 11, 10, 4); ctx.fillRect(10, 11, 3, 10);
+    ctx.fillStyle = "#555a63"; ctx.beginPath(); ctx.arc(8, 11, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e0572b"; ctx.fillRect(15, 20, 8, 3);
+    ctx.fillStyle = "#4fe0c0"; ctx.beginPath(); ctx.moveTo(18, 12); ctx.lineTo(21, 15); ctx.lineTo(18, 18); ctx.lineTo(15, 15); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e6fffa"; ctx.fillRect(17, 13, 2, 2);
+  }
+
   const SAMPLE_GAMES = [
     { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
     { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -9109,6 +9249,7 @@
     { name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
     { name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
     { name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
+    { name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
