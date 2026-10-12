@@ -6011,6 +6011,88 @@ West-facing cannons are now the east art flipped left-right (`mirrorArtH`: SW = 
 
 The coded Catapult Factory sample (`buildCatapultFactoryGame`, its factory-panel/girder/hazard-stripe/blueprint art constants and `fillFactoryRect` helpers) was removed and replaced by the user's own project (`Bomb_Factory.json`), shipped like the other user-authored samples: `BOMB_FACTORY_PROJECT` embeds the snapshot and `buildBombFactoryGame()` calls `restoreProjectSnapshot(structuredClone(...))`. Rooms are "The Bomb Factory" and "The Bomb Factory Annex"; the textures it uses (`cfPanel`/`cfGirder`/`cfHazardStripe`, blueprint backgrounds) live in the project's own `groundTileDefs`/`backgroundTileDefs`. Actors were reset to spawn with zero velocity and spawner-made actors dropped (6 + 8); the three spawners keep their loaded bombs/crate. Earlier Catapult Factory sections (three routes, rule-one gating, cannon traces) are history, not the current level; it was not re-traced or playtested beyond loading, playing and exporting cleanly (16-check sweep).
 
+## Movers (traffic and floaters): lanes of things that carry you or hurt you (v2.46)
+
+Shipped from the Crossing Guard Phase 0/1 work (`prototypes/crossing-guard-test.html` for the
+measurements, `toy-game-maker-v2.46-patch-notes.md` for the full design and risks). **Option B for
+wrapping** was chosen: only an actor currently riding a mover wraps by exactly one room length; everyone
+else keeps the original `applyWorldWrap` reset-to-edge rule, so no existing wrap room changes. (Label is
+informal; v2.45 is Surprise Me.) The Crossing Guard sample itself (Phase 2) is NOT built yet.
+
+**The piece.** Actor temperament `MOVER_KIND`; six fixed presets in a new Objects row "Traffic and
+floaters" (`MOVER_PRESETS`, def ids `mvScooter`/`mvCart` = *hurts*, `mvDuck`/`mvTurtle`/`mvLog`/`mvCroc` =
+*floats*), all 2 tiles wide, length 1/1/1/2/4/6, speed tier slow 60 / medium 110 / fast 180 px/s
+(`MOVER_SPEEDS`). `moverKind`/`lenTiles`/`wTiles`/`speedTier`/`moverArts`/`moverHeadArts` live on the
+**def** (so a preset is one built-in `actorDefs` entry, backfilled in `restoreProjectSnapshot`'s list);
+the placed actor only adds `moverDir` ("s" default, then n/e/w) and the transient `moverT`. Art is 8x8
+per tile cell drawn in the mover's own lane frame (heading +y), rotated per direction (`drawMover`, called
+as a prepass in `renderActors`, with ghost copies at +-one lane length so it slides on/off the edge);
+`moverHeadArts` (crocodile only) is the front cell. Click a placed mover to rotate it s->n->e->w
+(`rotateMover`, resets its phase and swaps w/h). It is not draggable; erase and replace to move it.
+
+**Motion is derived, not integrated.** Position = spawn + dir*speed*`moverT`, modulo the lane extent
+(`ROWS*TILE` vertical, `roomCols()*TILE` horizontal; `moverPlaceAt`). `stepActor` has an early-return
+branch like the Moving Platform's, so wind/fan/magnet/black hole/bounce/cannon/bomb knockback never
+apply. Movers are excluded from `checkActorContacts` and `cellOccupiedByActor` and from
+`recoverStrayActor`. `resetActorsToSpawn` resets `moverT` (Play start/restart, Build Reset), so every
+attempt's lane timing is identical.
+
+**`tickMovers(dt)` runs before the per-actor loop in `tick()`, and the order is load-bearing**: (1) decide
+riders from this frame's starting positions — any non-carried actor whose CENTER is inside a floats mover
+(modular, `moverCovers`); (2) move every mover; (3) carry each rider by the same displacement, clipped by
+`actorBlockedByTiles` (a solid post pins a rider; the log slides on); (4) hurts-contact check. Because the
+carry happens before any `stepActor`, the water check always sees post-carry positions (Phase 0: checking
+before the carry hurt a rider within a frame of the log's trailing edge). `actor.ridingMover` marks a rider
+for `applyWorldWrap`'s Option-B rule. Riding works with no gravity; the older gravity-only riding step for
+Moving Platform/standables is untouched.
+
+**Water rule.** In `checkPlayerTileContacts`, `hazard`/`lethal` ground is skipped while the player's center
+is over a floats mover (`moverFloatsUnder`); `checkNpcLethalContacts` has the same skip. In a room that
+contains a floater (`roomHasFloatingMovers`), plain Hazard only reacts when the player's CENTER cell is the
+hazard cell (stepping off a log onto the bank overlaps a water cell for a moment — traced, that was a hit
+without this rule). `triggerHazard(actor, away?, sfx?)` now returns true/false and takes an optional unit
+vector and a sound name: a water drop (only in rooms with floaters) is knocked toward `lastDryX/Y`
+(updated each frame the player is on non-hazard ground and not riding) with the new `splash` sound; a hurts
+mover hit uses the perpendicular-to-lane direction toward the side the player came from, steps the player
+clear of the lane, and plays `honk`. With no `away` the old behavior (back against velocity, straight up
+when still) is exactly unchanged — verified for a plain hazard in a room with no mover. Hearts and star
+apply for free (everything goes through `triggerHazard` -> `takePlayerHit`); lethal tiles are unaffected
+except for the float exemption. **Deviation from the patch notes**: the hurts check lives in `tickMovers`,
+not in a `resolveActorContact` branch, since movers are excluded from actor contacts.
+
+**Wrap.** A vertical lane needs the room's Wrap Up/Down on to carry a rider across the seam (horizontal: Wrap
+Left/Right); otherwise the rider is carried into the room edge and pinned like a solid. Build mode logs a
+hint when a mover is placed/rotated into such a room; it never flips the rule itself.
+
+**Sound.** `CHIP_DESIGNS.honk` (two square beeps) and `CHIP_DESIGNS.splash` (noise burst over a falling
+pulse), literal arrows in `sounds`, `SOUND_LIMITS` 250ms/1 each. Hand-written, never listened to.
+
+**Export.** `MOVER_KIND`/`MOVER_SPEEDS`/`MOVER_DIRS`/`MOVER_GHOST_COPIES` constants line; the thirteen mover
+functions (`moverDefOf` ... `tickMovers`, `drawMover`) in `runtimeFunctions`. Mover defs ship with
+`actorDefs`. No new template globals (`ridingMover`/`lastDryX/Y`/`moverT` are actor fields).
+
+**Interaction matrix rows.** floats x player/NPC/crate/bomb whose center overlaps: carried by the mover's
+displacement plus own steering. floats x Hazard/Lethal ground under a rider: skipped. hurts x player: plain
+Hazard with lane-perpendicular knockback, hearts/star apply. hurts x NPC/crate/bomb: nothing. Anything x
+mover (push, wind, fan, magnet, black hole, cannon, bounce, bomb blast): no effect. gravity x mover: none
+(unsupported in a gravity room beyond looping/carrying). solid tile x rider: clips the carry. mover x mover:
+no interaction (lanes shouldn't overlap).
+
+**Known limits / flags.** Click-placed movers snap to the clicked cell; lanes must not overlap (first mover
+in array order wins). The swatch for a preset shows its first 8x8 cell only (the duck's left half). The
+mover art is hand-drawn and plain; sprites per preset are open for the sample. Fairness (speeds/gaps) is the
+sample's job: Phase 0 limits are cars <= ~120px/s with 4+ tile gaps, floats <= ~220px/s and >= 4 tiles long;
+the shipped tiers sit inside that, except the fast scooter (180) which wants wide gaps.
+
+Tests: `tests/movers.test.js` (37 checks, hook-injected temp copy like `tests/bombs.test.js`): rider stays put
+over ~2 laps with zero relative drift and zero hits; steering adds; +-4px edge sweep both edges with jittered
+dt; lane spacing stable over 50s; walk-off to the bank; solid-post pin; car knockback direction/honk; water
+drop knockback toward the last dry spot/splash; plain hazard unchanged without a floater; Play hearts/no
+heart/star; Reset phases; snapshot round trip and old-snapshot backfill; rotate cycle; immunity; NPC on a log
+over lethal; horizontal lane; palette row + canvas placement + click-rotate + caption; and an exported file
+whose rider is carried on a log with no hit and zero errors. Also re-run: 16-check sweep/export,
+`tests/bombs.test.js`, `tests/surprise.test.js`.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so

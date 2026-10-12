@@ -376,6 +376,8 @@
       <div class="swatch-row" id="fixtureSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Collectibles</div>
       <div class="swatch-row" id="collectibleSwatches"></div>
+      <div class="section-title" style="margin-top:10px;">Traffic and floaters</div>
+      <div class="swatch-row" id="moverSwatches"></div>
       <div id="objectColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="objectColorSwatches"></div>
@@ -1016,6 +1018,8 @@
     [PUSHABLE_KIND]: "Push it. Stacks, too.",
     [LARGE_STONE_KIND]: "Heavy. Lava-proof.",
     [MOVING_PLATFORM_KIND]: "Rides back and forth. Click to go up and down instead.",
+    moverFloats: "Carries you. Water can't get you while you're on it.",
+    moverHurts: "Knocks you back. Look both ways.",
     // Fixtures row (FIXTURE_GEOMETRIES)
     goal: "Touch it, you win.",
     plate: "On while you're standing there.",
@@ -1846,7 +1850,7 @@
     // (unrenamed) after v2.27.2 removed the original bomb/cannon def ids entirely — any future
     // built-in actor def needs the same one-line addition here (see this comment's own note
     // further up).
-    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID, LARGE_STONE_DEF_ID, MOVING_PLATFORM_DEF_ID].forEach(id => {
+    [PUSHABLE_DEF_ID, HAZARD_BALL_DEF_ID, CARRY_MAGNET_DEF_ID, CARRY_TRAMPOLINE_DEF_ID, CARRY_BOMB2_DEF_ID, CARRY_CANNON2_DEF_ID, LARGE_STONE_DEF_ID, MOVING_PLATFORM_DEF_ID].concat(MOVER_DEF_IDS).forEach(id => {
       if (!actorDefs[id]) actorDefs[id] = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs[id]);
     });
     nextActorDefId = snap.nextActorDefId;
@@ -2543,6 +2547,59 @@
   actorDefs[MOVING_PLATFORM_DEF_ID] = {
     temperament: MOVING_PLATFORM_KIND, poses: null, name: "moving platform", art: MOVING_PLATFORM_ART
   };
+  // Movers (traffic and floaters): placed objects that loop along a lane at one fixed speed and
+  // never react to anything. "floats" (log, turtle, duck, crocodile) carries whatever overlaps it and
+  // makes Hazard water safe under whoever it carries; "hurts" (scooter, cart) carries nothing and
+  // gives the plain Hazard reaction on touch. Fixed presets, not a generic editor: each is one
+  // built-in actorDefs entry (moverKind/lenTiles/wTiles/speedTier live on the DEF; the placed actor
+  // only adds moverDir and the transient moverT). Art is 8x8 per tile cell, drawn in the mover's own
+  // lane frame (heading toward +y), one cell across per `moverArts` entry and one per tile of length;
+  // the front-most length cell uses `moverHeadArts` when a preset has one.
+  const MOVER_KIND = "mover";
+  const MOVER_SPEEDS = { slow: 60, medium: 110, fast: 180 }; // px/s, a closed list
+  const MOVER_DIRS = { n: { x: 0, y: -1 }, e: { x: 1, y: 0 }, s: { x: 0, y: 1 }, w: { x: -1, y: 0 } };
+  const MOVER_DIR_ORDER = ["s", "n", "e", "w"]; // click-to-rotate cycle; "s" is the default
+  const MOVER_GHOST_COPIES = [-1, 0, 1]; // a mover wraps modularly, so it is drawn/tested at +-one lane length too
+  const MOVER_ART = {
+    scooterL: pat([
+      "........", ".KK.RRRR", ".KK.RRRR", "....RRRR", "....RRRR", "....RRRR", ".KK.RRRR", ".KK.RYYY"
+    ], { R: "#e53935", K: "#212121", Y: "#fff59d" }),
+    cartL: pat([
+      "GGGGGGGG", "GDDGDDGD", "GDDGDDGD", "GGGGGGGG", "GDDGDDGD", "GDDGDDGD", "GGGGGGGG", "KK.....K"
+    ], { G: "#b0bec5", D: "#546e7a", K: "#212121" }),
+    log: pat([
+      "DBBLBBBD", "DBBBBLBD", "DBLBBBBD", "DBBBBBLD", "DBBLBBBD", "DBBBBLBD", "DBLBBBBD", "DBBBBBLD"
+    ], { B: "#8d5a2b", D: "#6b4220", L: "#b07a45" }),
+    shell: pat([
+      "..DDDD..", ".DGGGGD.", "DGGLLGGD", "DGLGGLGD", "DGLGGLGD", "DGGLLGGD", ".DGGGGD.", "..DDDD.."
+    ], { G: "#43a047", D: "#1b5e20", L: "#a5d6a7" }),
+    duckL: pat([
+      "..YYYYYY", ".YYYYYYY", "YYYYYYYY", "YYYYYYYY", ".YYYYYYY", "..YYYYYY", "...KYYYY", "......OO"
+    ], { Y: "#fdd835", K: "#212121", O: "#fb8c00" }),
+    croc: pat([
+      "DGGDGGGD", "DGGGGDGD", "DGDGGGGD", "DGGGGGDD", "DGGDGGGD", "DGGGGDGD", "DGDGGGGD", "DGGGGGDD"
+    ], { G: "#4c8c3a", D: "#2e5a22" }),
+    crocHeadL: pat([
+      "DGGGGGGD", "DGGGGGGG", "DGGGGKKG", "DGGGGGGG", "DGGGGGGG", "DGGGGGGG", ".DGGGGGG", "..DWWDWD"
+    ], { G: "#4c8c3a", D: "#2e5a22", K: "#102a0c", W: "#f5f5f5" })
+  };
+  const MOVER_PRESETS = [
+    { id: "mvScooter", name: "scooter",          moverKind: "hurts",  lenTiles: 1, speedTier: "fast",   arts: [MOVER_ART.scooterL, mirrorArtH(MOVER_ART.scooterL)] },
+    { id: "mvCart",    name: "shopping cart",    moverKind: "hurts",  lenTiles: 1, speedTier: "slow",   arts: [MOVER_ART.cartL, mirrorArtH(MOVER_ART.cartL)] },
+    { id: "mvDuck",    name: "rubber duck",      moverKind: "floats", lenTiles: 1, speedTier: "medium", arts: [MOVER_ART.duckL, mirrorArtH(MOVER_ART.duckL)] },
+    { id: "mvTurtle",  name: "turtle",           moverKind: "floats", lenTiles: 2, speedTier: "medium", arts: [MOVER_ART.shell, MOVER_ART.shell] },
+    { id: "mvLog",     name: "log",              moverKind: "floats", lenTiles: 4, speedTier: "slow",   arts: [MOVER_ART.log, MOVER_ART.log] },
+    { id: "mvCroc",    name: "sleeping crocodile", moverKind: "floats", lenTiles: 6, speedTier: "slow", arts: [MOVER_ART.croc, MOVER_ART.croc],
+      headArts: [MOVER_ART.crocHeadL, mirrorArtH(MOVER_ART.crocHeadL)] }
+  ];
+  const MOVER_DEF_IDS = MOVER_PRESETS.map(p => p.id);
+  MOVER_PRESETS.forEach(p => {
+    actorDefs[p.id] = {
+      temperament: MOVER_KIND, poses: null, name: p.name, art: p.arts[0],
+      moverKind: p.moverKind, lenTiles: p.lenTiles, wTiles: 2, speedTier: p.speedTier,
+      moverArts: p.arts, moverHeadArts: p.headArts || null
+    };
+  });
   // v2.19: the spawner's default content when nothing's been loaded into it — a plain physical
   // hazard, not a character with intent (no temperament picker offers this kind, same as pushable
   // — see stepActor/resolveAxis's own always-bounces check and resolveActorContact's hazard-ball
@@ -3399,6 +3456,17 @@
   // the one fixed, non-parametric entry (FamiTracker track 69 "explode", tuned against a real
   // recording, unchanged by any knob). ----
   const CHIP_DESIGNS = {"heartUp":{"ch":[{"t":"p1","n":[64,64,64,64,68,68,68,68,71,71,71,71,71,71,71,71],"v":[12,12,12,11,12,12,12,11,13,12,11,10,8,6,4,2],"d":2},{"t":"p2","n":[52,52,52,52,56,56,56,56,59,59,59,59,59,59,59,59],"v":[6,6,6,5,6,6,6,5,7,6,5,5,4,3,2,1],"d":1}]},"keyGet":{"ch":[{"t":"p1","n":[76,76,76,76,83,83,83,83,83,83,83,83],"v":[12,12,11,10,13,13,12,11,9,7,4,2],"d":1},{"t":"tr","n":[52,52,52,52,59,59,59,59,59,59,59,59],"v":[15,15,15,15,15,15,15,15,15,15,0,0],"d":0}]},"starPower":{"ch":[{"t":"p1","n":[72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96,96,96],"v":[12,12,12,12,12,12,12,12,12,12,12,12,11,11,10,10,9,8,7,6,5,4,2,1],"d":2},{"t":"p2","n":[0,0,72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96],"v":[0,0,6,6,6,6,6,6,6,6,6,6,5,5,5,4,4,3,3,2,2,1,1,0],"d":0}]},"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904],"v":[8,8,7,6,5,4,3,2,1,0],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[36.0025,32.9986,28.0054,24.0025,22.9994,22.9994,22.9994,22.9994,22.9994,36.0025,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798,20.8798,20.8798,20.8798,34.9994,31.0068,28.0054,24.0025,20.9986,20.8798,20.8798],"v":[15,15,15,15,15,0,0,0,0,10,10,10,10,10,10,0,0,0,0,2,2,2,2,2,2,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,0,6,6,0,0,0,0,2,2,2,15,15,15,2,2,2,2,2,2,2,2,2,2,2],"v":[15,15,15,15,15,15,15,15,15,10,10,10,10,10,10,2,2,2,2,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}};
+  // Movers: hand-written like every other design here, never listened to — retune in the sound designer.
+  // honk = two short square-wave beeps (a hurts mover's hit); splash = a noise burst over a falling pulse
+  // (dropping into water instead of onto a log).
+  CHIP_DESIGNS.honk = { ch: [
+    { t: "p1", n: [53,53,53,53,53,53,53,53,53,53,53,53], v: [13,13,13,12,0,0,13,13,13,12,8,3], d: 2 },
+    { t: "p2", n: [56,56,56,56,56,56,56,56,56,56,56,56], v: [6,6,6,6,0,0,6,6,6,6,4,1], d: 2 }
+  ] };
+  CHIP_DESIGNS.splash = { ch: [
+    { t: "nz", n: [5,6,7,8,9,10,11,12,12,13], v: [15,14,12,10,8,6,4,3,2,0], d: 0 },
+    { t: "p1", n: [70,64,58,52,46,40,36,34], v: [9,8,7,6,4,3,2,0], d: 2 }
+  ] };
 
   let audioCtx = null;
   function getAudioCtx() {
@@ -3423,7 +3491,8 @@
   const SOUND_LIMITS = {
     boing: { gap: 250, max: 1 }, trampolineBoing: { gap: 250, max: 1 },
     thunk: { gap: 90, max: 2 }, splat: { gap: 150, max: 1 },
-    kaboom: { gap: 100, max: 2 }, cat: { gap: 120, max: 2 }
+    kaboom: { gap: 100, max: 2 }, cat: { gap: 120, max: 2 },
+    honk: { gap: 250, max: 1 }, splash: { gap: 250, max: 1 }
   };
   const SOUND_MAX_TOTAL = 10;
   const SOUND_OVERLAP_GAIN = 0.55;
@@ -3530,6 +3599,7 @@
     splat: () => playChip("splat"), gotcha: () => playChip("splat"),
     boom: () => playChip("kaboom"), shot: () => playChip("kaboom"),
     celebrate: () => playChip("ding"),
+    honk: () => playChip("honk"), splash: () => playChip("splash"),
     heartUp: () => playChip("heartUp"), keyGet: () => playChip("keyGet"),
     starPower: () => playChip("starPower"), starEnd: () => playChip("starPower", 0.5, 0.6),
     doorCreak: () => playChip("creak"),
@@ -4213,6 +4283,32 @@
     currentArt = activeArtFor(actorDefs[id]).slice();
     updateModeButtons();
     renderAll();
+  }
+  // Traffic and floaters: the fixed mover presets (MOVER_PRESETS), same swatch/select path as a
+  // collectible (the def id IS the selection) but no "+" — movers are pieces, not a kit that grows.
+  function renderMoverSwatches() {
+    const container = document.getElementById("moverSwatches");
+    if (!container) return;
+    container.innerHTML = "";
+    MOVER_DEF_IDS.forEach(id => {
+      const def = actorDefs[id];
+      if (!def) return;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (selectedActorKind === id ? " selected" : "");
+      sw.style.background = "#111";
+      sw.title = def.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      sw.appendChild(c);
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = def.name;
+      sw.appendChild(label);
+      sw.addEventListener("click", () => selectCollectible(id));
+      wireCaption(sw, def.moverKind === "floats" ? CAPTION_TEXT.moverFloats : CAPTION_TEXT.moverHurts);
+      container.appendChild(sw);
+    });
   }
   // v2.15: collectibles get their own small shelf, same "+"-grows-the-kit pattern as custom
   // characters and backgrounds, seeded with 4 built-in sprites instead of starting empty.
@@ -4985,14 +5081,17 @@
   // relevant once wrap is switched on for that axis — otherwise that edge is just solid and
   // resolveAxis() already stopped the actor there.
   function applyWorldWrap(actor) {
+    // Something riding a mover wraps by exactly one room length (continuous), so it never slips
+    // relative to the mover it is standing on; everything else keeps the original reset-to-edge rule.
+    const riding = actor.ridingMover != null;
     if (wrapHEnabled) {
       const worldWidthPx = roomCols() * TILE;
-      if (actor.x + actor.w <= 0) actor.x = worldWidthPx;
-      else if (actor.x >= worldWidthPx) actor.x = -actor.w;
+      if (actor.x + actor.w <= 0) actor.x = riding ? actor.x + worldWidthPx : worldWidthPx;
+      else if (actor.x >= worldWidthPx) actor.x = riding ? actor.x - worldWidthPx : -actor.w;
     }
     if (wrapVEnabled) {
-      if (actor.y + actor.h <= 0) actor.y = ROWS * TILE;
-      else if (actor.y >= ROWS * TILE) actor.y = -actor.h;
+      if (actor.y + actor.h <= 0) actor.y = riding ? actor.y + ROWS * TILE : ROWS * TILE;
+      else if (actor.y >= ROWS * TILE) actor.y = riding ? actor.y - ROWS * TILE : -actor.h;
     }
   }
 
@@ -5934,21 +6033,26 @@
     }
   }
 
-  function triggerHazard(actor) {
-    if (actor.hazardCooldown > 0) return;
-    if (starTimer > 0 || actor.invulnT > 0) return; // ghost mode / post-heart flicker: nothing happens at all
+  // `away` (optional unit vector) overrides the default "back against your own velocity, or straight up
+  // when standing still" knockback — movers use it so a frog dropped in water or clipped by a car is
+  // pushed toward the bank it came from, not thrown north. `sfx` ("honk"/"splash") replaces the yelp.
+  // Returns true when the hit actually fired (not cooled down / ghost / flickering).
+  function triggerHazard(actor, away, sfx) {
+    if (actor.hazardCooldown > 0) return false;
+    if (starTimer > 0 || actor.invulnT > 0) return false; // ghost mode / post-heart flicker: nothing happens at all
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
-    playActorSound(actor, "yelp");
+    if (sfx && sounds[sfx]) sounds[sfx](); else playActorSound(actor, "yelp");
     actor.flashTimer = 1;
     const speed = Math.hypot(actor.vx, actor.vy) || 1;
-    const kx = speed > 1 ? -actor.vx / speed : 0;
-    const ky = speed > 1 ? -actor.vy / speed : -1;
+    const kx = away ? away.x : (speed > 1 ? -actor.vx / speed : 0);
+    const ky = away ? away.y : (speed > 1 ? -actor.vy / speed : -1);
     actor.vx = kx * HAZARD_KNOCKBACK_SPEED;
     actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
     log("Ouch! Hazard knockback.");
     // only ever called for the player (see resolveAxis/checkPlayerTileContacts) — no isPlayer guard needed
     if (takePlayerHit("hazard") === "absorbed") log("A heart took that hit!");
+    return true;
   }
 
   // v2.18: lethal is hazard's more severe sibling — same touch-detection, same cooldown gate, but
@@ -6365,6 +6469,11 @@
     // separate "switch" geometry; Button inherited the exact same mechanism when it absorbed
     // switch's job — see PUSH_BUTTON_GEOMETRY's own comment.)
     const touchedSwitchKeys = [];
+    // Movers: while the player's center is over a floating mover, Hazard/Lethal ground does nothing.
+    const hasFloaters = roomHasFloatingMovers();
+    const floating = hasFloaters && moverFloatsUnder(player);
+    let onWater = false;
+    const centerCx = Math.floor((player.x + player.w / 2) / TILE), centerCy = Math.floor((player.y + player.h / 2) / TILE);
     for (const { cx, cy } of overlappedCells(player)) {
       const geometry = geometryAt(cx, cy);
       const modifier = modifierAt(cx, cy);
@@ -6413,10 +6522,26 @@
       // resolveAxis alone; this function must never also react to them.
       const isBlocking = isBlockingGeometry(geometry, player, modifier);
       if (isBlocking) continue;
-      if (modifier === "lethal") triggerLethalHazard(player);
-      else if (modifier === "hazard") triggerHazard(player);
+      if ((modifier === "lethal" || modifier === "hazard") && floating) { onWater = true; continue; }
+      // In a river room, plain Hazard "water" only gets you when your CENTER is over it: stepping off a
+      // log onto the bank leaves your box overlapping a water cell for a moment and that must not count.
+      if (modifier === "hazard" && hasFloaters && (cx !== centerCx || cy !== centerCy)) continue;
+      if (modifier === "lethal") { onWater = true; triggerLethalHazard(player); }
+      else if (modifier === "hazard") {
+        onWater = true;
+        // In a room with floaters the hazard is water: knock the frog back toward the last dry spot and
+        // splash, instead of the default "back against your own velocity / straight up".
+        let away = null;
+        if (hasFloaters && player.lastDryX != null) {
+          const dx = player.lastDryX - (player.x + player.w / 2), dy = player.lastDryY - (player.y + player.h / 2);
+          const len = Math.hypot(dx, dy);
+          if (len > 1) away = { x: dx / len, y: dy / len };
+        }
+        triggerHazard(player, away, hasFloaters ? "splash" : undefined);
+      }
       else if (modifier === "bouncy") triggerBouncyLaunch(player, modifier);
     }
+    if (hasFloaters && !onWater && !floating) { player.lastDryX = player.x + player.w / 2; player.lastDryY = player.y + player.h / 2; }
     switchTouchedCells[player.id] = touchedSwitchKeys;
   }
 
@@ -6514,6 +6639,7 @@
   // exactly, rather than inventing a second shape for the same idea.
   function checkNpcLethalContacts(actor) {
     if (actor.destroyed) return;
+    if (roomHasFloatingMovers() && moverFloatsUnder(actor)) return; // riding a log over lava/water
     for (const { cx, cy } of overlappedCells(actor)) {
       if (modifierAt(cx, cy) === "lethal") { triggerNpcLethalReset(actor); return; }
     }
@@ -6608,6 +6734,7 @@
   function checkActorContacts(actor, allActors) {
     for (const other of allActors) {
       if (other.id === actor.id || other.cannonLoad || actor.cannonLoad) continue;
+      if (moverDefOf(other) || moverDefOf(actor)) continue; // movers never collide with actors (they carry or hurt via tickMovers)
       if (actor.x < other.x + other.w && actor.x + actor.w > other.x &&
           actor.y < other.y + other.h && actor.y + actor.h > other.y) {
         const key = contactKey(actor, other);
@@ -6960,7 +7087,7 @@
   // Safety net: an object that somehow ends up far outside the room (physics glitches, corrupt saves) goes
   // back to where it was placed instead of flying off forever; spawner-made ones are simply removed.
   function recoverStrayActor(actor) {
-    if (actor.isPlayer || actor.carried || actor.cannonLoad) return;
+    if (actor.isPlayer || actor.carried || actor.cannonLoad || moverDefOf(actor)) return;
     const lim = TILE * 3;
     const bad = !Number.isFinite(actor.x) || !Number.isFinite(actor.y) || actor.y < -ROWS * TILE || actor.y > ROWS * TILE + lim
       || (!wrapHEnabled && (actor.x < -lim || actor.x > roomCols() * TILE + lim));
@@ -6982,6 +7109,14 @@
     // v2.15: a custom character made "the player" (see playerDefId) keeps whatever temperament
     // it already had — nothing overwrites it — so a stray "stationary"/"collectible" here must
     // never freeze it; isPlayer always wins over its def's own resting temperament.
+    if (temperament === MOVER_KIND) {
+      // Self-driven and immune to every force: tickMovers() (before the actor loop) derives its
+      // position from moverT, so there is nothing to integrate here. Just keep its box in sync.
+      if (!(actor.moverT >= 0)) actor.moverT = 0;
+      moverPlaceAt(actor);
+      actor.vx = 0; actor.vy = 0;
+      return;
+    }
     if (temperament === MOVING_PLATFORM_KIND) {
       // Self-driven, not steered or gravity-affected at all — a fixed triangle-wave oscillation
       // around its own placed spot (spawnX/spawnY, already the "reset to here" point every actor
@@ -7510,7 +7645,7 @@
   // already use, just against actors instead of geometry.
   function cellOccupiedByActor(cx, cy) {
     const left = cx * TILE, top = cy * TILE, right = left + TILE, bottom = top + TILE;
-    return actors.some(a => a.x < right && a.x + a.w > left && a.y < bottom && a.y + a.h > top);
+    return actors.some(a => !moverDefOf(a) && a.x < right && a.x + a.w > left && a.y < bottom && a.y + a.h > top);
   }
   // v2.19-v2.35: a spawned actor used to pop on its own after SPAWN_TTL_MS, a timed population
   // manager. v2.38: removed outright — direct feedback that spawned content "should be able to
@@ -7526,6 +7661,129 @@
     sounds.pop();
     playRecipe(actor, "popVanish");
     setTimeout(() => removeActorById(actor.id), RECIPES.popVanish.duration);
+  }
+
+  // ============== Movers (traffic and floaters) ==============
+  // See MOVER_KIND's comment for what these are. A mover's position is DERIVED, never integrated:
+  // spawn point + direction * speed * moverT along its lane axis, wrapped modulo the lane's extent
+  // (the room's height for a vertical lane, its usable width for a horizontal one). That makes it
+  // exact, resettable (moverT = 0) and immune to every other physics rule — it deliberately does not
+  // use applyWorldWrap. It is drawn/tested at +-one extent too (MOVER_GHOST_COPIES) so it slides on
+  // and off the room edge instead of popping.
+  function moverDefOf(actor) {
+    const d = actorDefs[actor.defId];
+    return d && d.temperament === MOVER_KIND ? d : null;
+  }
+  function moverDirOf(actor) { return MOVER_DIRS[actor.moverDir] ? actor.moverDir : "s"; }
+  function moverSpeedOf(def) { return MOVER_SPEEDS[def.speedTier] || MOVER_SPEEDS.medium; }
+  function moverIsVertical(actor) { return MOVER_DIRS[moverDirOf(actor)].y !== 0; }
+  function moverExtentPx(actor) { return moverIsVertical(actor) ? ROWS * TILE : roomCols() * TILE; }
+  function moverSetDims(actor) {
+    const def = moverDefOf(actor);
+    if (!def) return;
+    const along = Math.max(1, def.lenTiles || 1) * TILE, across = Math.max(1, def.wTiles || 2) * TILE;
+    if (moverIsVertical(actor)) { actor.w = across; actor.h = along; } else { actor.w = along; actor.h = across; }
+  }
+  function moverPlaceAt(actor) {
+    const def = moverDefOf(actor);
+    if (!def) return;
+    moverSetDims(actor);
+    const d = MOVER_DIRS[moverDirOf(actor)], ext = moverExtentPx(actor);
+    const travelled = moverSpeedOf(def) * (actor.moverT > 0 ? actor.moverT : 0);
+    const wrapTo = (v) => ((v % ext) + ext) % ext;
+    if (d.y !== 0) { actor.x = actor.spawnX; actor.y = wrapTo(actor.spawnY + d.y * travelled); }
+    else { actor.y = actor.spawnY; actor.x = wrapTo(actor.spawnX + d.x * travelled); }
+  }
+  // Is the point inside this mover (or its wrapped ghost copy)?
+  function moverCovers(m, px, py) {
+    const vertical = moverIsVertical(m), ext = moverExtentPx(m);
+    for (const k of MOVER_GHOST_COPIES) {
+      const ox = vertical ? 0 : k * ext, oy = vertical ? k * ext : 0;
+      if (px >= m.x + ox && px < m.x + m.w + ox && py >= m.y + oy && py < m.y + m.h + oy) return true;
+    }
+    return false;
+  }
+  // Does the box overlap this mover (or its ghost copy)? Used for the hurts-contact check.
+  function moverTouches(m, a) {
+    const vertical = moverIsVertical(m), ext = moverExtentPx(m);
+    for (const k of MOVER_GHOST_COPIES) {
+      const ox = vertical ? 0 : k * ext, oy = vertical ? k * ext : 0;
+      if (a.x < m.x + m.w + ox && a.x + a.w > m.x + ox && a.y < m.y + m.h + oy && a.y + a.h > m.y + oy) return ox || oy ? { ox, oy } : { ox: 0, oy: 0 };
+    }
+    return null;
+  }
+  // "Water can't get you while you're on it": true while the actor's center is over a floats mover.
+  function moverFloatsUnder(actor) {
+    const cx = actor.x + actor.w / 2, cy = actor.y + actor.h / 2;
+    for (const m of actors) {
+      if (m === actor) continue;
+      const def = moverDefOf(m);
+      if (def && def.moverKind === "floats" && moverCovers(m, cx, cy)) return true;
+    }
+    return false;
+  }
+  function roomHasFloatingMovers() {
+    return actors.some(m => { const d = moverDefOf(m); return d && d.moverKind === "floats"; });
+  }
+  // Order is load-bearing (measured): riders are DECIDED from this frame's starting positions, then
+  // the movers move, then riders are carried by the same displacement — all before any stepActor, so
+  // the water check later in the frame always sees post-carry positions (checking before the carry made
+  // a rider within one frame of a log's trailing edge take a hit).
+  function tickMovers(dt) {
+    const movers = [];
+    for (const a of actors) if (moverDefOf(a)) movers.push(a);
+    if (!movers.length) {
+      for (const a of actors) if (a.ridingMover != null) a.ridingMover = null;
+      return;
+    }
+    const floats = movers.filter(m => moverDefOf(m).moverKind === "floats");
+    const links = [];
+    for (const a of actors) {
+      if (moverDefOf(a)) continue;
+      a.ridingMover = null;
+      if (a.carried || a.cannonLoad || a.destroyed || a.dragging) continue;
+      const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+      for (const m of floats) {
+        if (moverCovers(m, cx, cy)) { links.push({ a, m }); break; }
+      }
+    }
+    for (const m of movers) {
+      if (m.dragging) continue;
+      m.moverT = (m.moverT > 0 ? m.moverT : 0) + dt;
+      moverPlaceAt(m);
+      m.vx = 0; m.vy = 0;
+    }
+    for (const { a, m } of links) {
+      const d = MOVER_DIRS[moverDirOf(m)], s = moverSpeedOf(moverDefOf(m)) * dt;
+      const dx = d.x * s, dy = d.y * s;
+      if (dx) { a.x += dx; if (actorBlockedByTiles(a)) a.x -= dx; }
+      if (dy) { a.y += dy; if (actorBlockedByTiles(a)) a.y -= dy; }
+      a.ridingMover = m.id;
+    }
+    // Hurts movers: the plain Hazard reaction on the player, knocked out of the lane toward the side
+    // they came from. (Hearts and star apply for free — triggerHazard goes through takePlayerHit.)
+    const player = actors.find(a => a.isPlayer);
+    if (player && !player.carried && !roomTransition) {
+      for (const m of movers) {
+        if (moverDefOf(m).moverKind !== "hurts") continue;
+        const hit = moverTouches(m, player);
+        if (!hit) continue;
+        const vertical = moverIsVertical(m);
+        const mcx = m.x + hit.ox + m.w / 2, mcy = m.y + hit.oy + m.h / 2;
+        const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
+        let side = vertical ? Math.sign(pcx - mcx) : Math.sign(pcy - mcy);
+        if (!side) side = vertical ? (player.lastDryX != null ? Math.sign(player.lastDryX - pcx) : 1) : (player.lastDryY != null ? Math.sign(player.lastDryY - pcy) : 1);
+        if (!side) side = 1;
+        const away = vertical ? { x: side, y: 0 } : { x: 0, y: side };
+        if (triggerHazard(player, away, "honk")) {
+          // Step clear of the lane edge so it can't be hit again the moment the cooldown ends.
+          const ox0 = player.x, oy0 = player.y;
+          if (vertical) player.x = side > 0 ? m.x + hit.ox + m.w + 1 : m.x + hit.ox - player.w - 1;
+          else player.y = side > 0 ? m.y + hit.oy + m.h + 1 : m.y + hit.oy - player.h - 1;
+          if (actorBlockedByTiles(player)) { player.x = ox0; player.y = oy0; } // a wall behind them: stay put, the knockback velocity still applies
+        }
+      }
+    }
   }
 
   function tick(dt) {
@@ -7572,6 +7830,7 @@
     // rider re-applied the crate's own shove delta to the player, so pushing a crate south ran
     // ~1.5x speed in an alternating 2x/1x stutter (pushing north was clean, since the player is
     // then below the crate, not "on" it).
+    tickMovers(dt);
     const rideLinks = [];
     for (const platform of (gravityOn() ? snapshot : [])) {
       const pdef = actorDefs[platform.defId];
@@ -8098,6 +8357,18 @@
     if (idx !== -1) actors.splice(idx, 1);
   }
 
+  // Click a placed mover to turn its lane: s -> n -> e -> w -> s. Restarts its phase at the placed
+  // spot (the lane axis changes, so the old phase has no meaning), and swaps its box to match.
+  function rotateMover(actor) {
+    const i = MOVER_DIR_ORDER.indexOf(moverDirOf(actor));
+    actor.moverDir = MOVER_DIR_ORDER[(i + 1) % MOVER_DIR_ORDER.length];
+    actor.moverT = 0;
+    moverPlaceAt(actor);
+    const d = MOVER_DIRS[actor.moverDir];
+    if (d.y !== 0 && !wrapVEnabled) log("A mover needs v-wrap on to carry things around its lane. Turn it on in Game Rules.");
+    else if (d.x !== 0 && !wrapHEnabled) log("A mover needs h-wrap on to carry things around its lane. Turn it on in Game Rules.");
+  }
+
   function placeNewActor(px, py) {
     const isPlayer = selectedActorDefId === playerDefId;
     if (isPlayer) removeAllPlayerInstances();
@@ -8134,6 +8405,14 @@
     };
     // A Key carries its own channel color (v2.42), read from the shared color picker at placement.
     if (actor.defId === "colKey") actor.channel = selectedChannelColor || CHANNEL_COLORS[0];
+    // A mover snaps to the clicked cell (its lane origin) and takes the size of its preset.
+    if (moverDefOf(actor)) {
+      actor.spawnX = actor.x = Math.floor(px / TILE) * TILE;
+      actor.spawnY = actor.y = Math.floor(py / TILE) * TILE;
+      actor.moverDir = "s"; actor.moverT = 0;
+      moverSetDims(actor);
+      if (!wrapVEnabled) log("Tip: turn on v-wrap in Game Rules so a mover can carry things all the way around its lane.");
+    }
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
     // `room.startPos` (see activateRoom), the same way board/colorBoard/actors stay in sync purely
@@ -8234,7 +8513,9 @@
         // start" actually mean something for a self-driven actor like this one.
         const def = actorDefs[actor.defId];
         if (def && def.temperament === MOVING_PLATFORM_KIND) actor.platformT = 0;
+        if (def && def.temperament === MOVER_KIND) { actor.moverT = 0; moverPlaceAt(actor); }
       }
+      actor.ridingMover = null; actor.lastDryX = null; actor.lastDryY = null;
       actor.vx = 0; actor.vy = 0;
       actor.fallStartY = null; actor.lastY = null; actor.ballistic = false;
       actor.cannonLoad = null; actor.cannonExit = null;
@@ -8382,6 +8663,7 @@
           hit.platformAxis = hit.platformAxis === "y" ? "x" : "y";
           return;
         }
+        if (hitDef && hitDef.temperament === MOVER_KIND) { rotateMover(hit); return; }
         dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; return;
       }
       // v2.19: placing an actor/object onto an existing spawner tile loads it as that spawner's
@@ -8459,6 +8741,7 @@
           e.preventDefault();
           return;
         }
+        if (hitDef && hitDef.temperament === MOVER_KIND) { rotateMover(hit); e.preventDefault(); return; }
         dragActor = hit; hit.dragging = true; hit.vx = 0; hit.vy = 0; e.preventDefault(); return;
       }
       if (SPAWNER_ORDER.includes(geometryAt(gx, gy))) { toggleSpawnerContent(gx, gy); e.preventDefault(); return; }
@@ -9152,6 +9435,31 @@
   // viewOffsetPx (real board pixels, defaults to 0) is subtracted from every actor's true board
   // position to get its screen position — the same window renderRoomContents draws, just in
   // continuous pixels rather than cells, since actors don't live on the cell grid.
+  // A mover is drawn in its own lane frame (heading toward +y) and rotated to its direction: one 8x8
+  // art per tile cell, `across` cells wide and `lenTiles` long, plus ghost copies at +-one lane length
+  // so it slides on and off the room edge.
+  function drawMover(ctx, m, viewOffsetPx) {
+    const def = moverDefOf(m);
+    if (!def || !def.moverArts) return;
+    const cell = TILE / ART;
+    const vertical = moverIsVertical(m), ext = moverExtentPx(m);
+    const along = Math.max(1, def.lenTiles || 1), across = Math.max(1, def.wTiles || 2);
+    const rot = { s: 0, n: Math.PI, e: -Math.PI / 2, w: Math.PI / 2 }[moverDirOf(m)];
+    for (const k of MOVER_GHOST_COPIES) {
+      const sx = m.x + (vertical ? 0 : k * ext) - viewOffsetPx, sy = m.y + (vertical ? k * ext : 0);
+      if (sx > COLS * TILE || sx + m.w < 0 || sy > ROWS * TILE || sy + m.h < 0) continue;
+      ctx.save();
+      ctx.translate(sx + m.w / 2, sy + m.h / 2);
+      ctx.rotate(rot);
+      for (let j = 0; j < along; j++) {
+        const arts = (j === along - 1 && def.moverHeadArts) ? def.moverHeadArts : def.moverArts;
+        for (let i = 0; i < across; i++) {
+          drawArtScaled(ctx, arts[i % arts.length], -across * TILE / 2 + i * TILE, -along * TILE / 2 + j * TILE, TILE, cell);
+        }
+      }
+      ctx.restore();
+    }
+  }
   function renderActors(ctx, actorsArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
@@ -9161,9 +9469,12 @@
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
     // object suddenly flies, which isn't discoverable by watching.
     const chargingPlayer = grabKeyDownAt != null ? actorsArg.find(a => a.isPlayer && a.carrying != null) : null;
+    // Movers draw first (they are the "ground" under whoever rides them), then everyone else on top.
+    actorsArg.forEach(actor => { if (moverDefOf(actor)) drawMover(ctx, actor, viewOffsetPx); });
     actorsArg.forEach(actor => {
       const def = actorDefs[actor.defId];
       if (!def) return;
+      if (def.temperament === MOVER_KIND) return; // drawn above
       if (actor.cannonLoad) return; // inside the barrel
       const posed = !!def.poses;
       let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
@@ -9600,6 +9911,7 @@
     renderObjectSwatches();
     renderFixtureSwatches();
     renderCollectibleSwatches();
+    renderMoverSwatches();
     renderColorSwatches();
     renderCharacterSwatches();
     renderPlayerSwatch();
@@ -10301,6 +10613,7 @@
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter,
+      moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
@@ -10387,6 +10700,7 @@
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
       `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
       `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
+      `const MOVER_KIND = ${JSON.stringify(MOVER_KIND)}, MOVER_SPEEDS = ${JSON.stringify(MOVER_SPEEDS)}, MOVER_DIRS = ${JSON.stringify(MOVER_DIRS)}, MOVER_GHOST_COPIES = ${JSON.stringify(MOVER_GHOST_COPIES)};`,
       `const MOVING_PLATFORM_KIND = ${JSON.stringify(MOVING_PLATFORM_KIND)}, MOVING_PLATFORM_DEF_ID = ${JSON.stringify(MOVING_PLATFORM_DEF_ID)};`,
       `const MOVING_PLATFORM_RANGE_TILES = ${MOVING_PLATFORM_RANGE_TILES}, MOVING_PLATFORM_SPEED = ${MOVING_PLATFORM_SPEED};`,
       `const RIDE_CONTACT_EPSILON = ${RIDE_CONTACT_EPSILON};`,
