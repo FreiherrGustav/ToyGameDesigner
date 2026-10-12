@@ -6209,6 +6209,31 @@ no spare stones/crates in Parts 3-5 (a spare in the tunnel can be pushed in fron
 cleanly); the lives/restart path is not exercised in the exported file; sound is untouched. Camera screenshots at the five Follow
 positions at the start and after digging a tunnel through every part are in `prototypes/rock-bottom-shots/`.
 
+## Death resets fire once; side-dig lock; handled objects can't crush you
+
+Three play-feel fixes reported together.
+
+1. **Lava cost two lives.** `consumeLifeIfPlaying` scheduled a level restart 650ms later, but `HAZARD_COOLDOWN_MS` is
+   450ms, so a player still standing in lava was hit again before the reset (lives 3 -> 1, two restarts; reproduced).
+   `levelResetPending` (+ `levelResetTimer`) now makes `consumeLifeIfPlaying` a no-op while a death reset is counting down,
+   and `triggerLethalHazard`/`triggerHazard`/the chaser catch return early too (no repeated splat or knockback). The timer
+   is cleared by `clearTransientRuntimeState` (every Play restart/exit) and the export's `restartStandaloneGame`. This also
+   removes a real "random reset" source: a stale timer from an earlier death used to fire after the player had already
+   restarted (or after a second overlapping hit), resetting the new session mid-play.
+2. **Other random resets (grab/move).** Not reproduced as a separate bug (throwing into a wall and grabbing the bottom crate
+   of a stack both cost nothing in tests). Hardened the crush rule instead: a falling crate/stone only crushes at
+   `CRUSH_MIN_VY` (400, ~2 tiles of fall; was 200, ~0.5 tile, so disturbing a stack could cost a life and restart the
+   level), and an object the player just dropped or threw (`safeUntil`, `SAFE_AFTER_HANDLING_MS` 2500) never crushes them.
+   If a reset still happens when grabbing/moving, a screen recording or the saved project is needed.
+3. **Side dig carried you into the hole.** Holding Right+Down through a diggable wall kept accelerating the player the
+   instant it opened (Rock Bottom's lava cork). On a horizontal dig-through `resolveAxis` now zeroes `vx` and sets
+   `actor.digLock`; `stepActor` ignores horizontal input until both left/right keys are released once. Down digs are
+   unaffected. Tests that dig then re-press a key must tick one frame between (`B.dig` in `rockbottom.test.js` does).
+   Rock Bottom Part 3's old "hold-through dies in lava" tests now assert the opposite (stops at the opening, no life lost).
+
+Export: `CRUSH_MIN_VY`/`SAFE_AFTER_HANDLING_MS` constants line; `levelResetPending`/`levelResetTimer` declared and reset
+in the export template. Tests: `tests/deathdig.test.js` (9 checks), `tests/rockbottom.test.js` updated (48 pass).
+
 ## Caveat: the Movers engine piece is "sample-only" for now
 
 The v2.46 Movers ("Traffic and floaters") engine mechanics — lane motion derived from `moverT`, rider

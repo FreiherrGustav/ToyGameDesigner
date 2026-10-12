@@ -1334,6 +1334,7 @@
   // time to get their bearings. See frame()'s own gating and drawReadyOverlay().
   const READY_DURATION_MS = 1200;
   let playReadyUntil = null; // null = not in a Ready pause; otherwise a performance.now() timestamp
+  let levelResetPending = false, levelResetTimer = null; // a life was just spent; the level restarts when the timer fires
 
   let board = [];            // ROWS x COLS, "geometry:modifier" key or null (gameplay layer) — hot room's own
   let backgroundBoard = [];  // ROWS x COLS, backgroundTileId or null (background layer) — hot room's own
@@ -1540,6 +1541,8 @@
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
     playReadyUntil = null;
+    if (levelResetTimer) clearTimeout(levelResetTimer);
+    levelResetTimer = null; levelResetPending = false; // a restart/exit cancels any death-reset still counting down
     spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {}; collectedPowerups = [];
   }
   function enterPlayMode() {
@@ -1588,6 +1591,8 @@
   // Dying with lives left puts the whole level back to its starting conditions (actors, doors,
   // keys, hearts, camera) but keeps the lives already spent.
   const LEVEL_RESET_DELAY_MS = 650;
+  const CRUSH_MIN_VY = 400;      // a falling crate/stone only crushes at this speed or more (~2 tiles of fall)
+  const SAFE_AFTER_HANDLING_MS = 2500; // an object you just dropped/threw can't crush you
   function restartLevelKeepingLives() {
     const keep = lives;
     restartPlaySessionFromSnapshot();
@@ -5381,6 +5386,10 @@
             tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: performance.now(), geometry, modifier };
             board[cy][cx] = null;
             log("Dug through!");
+            // Side dig: you were leaning on the wall holding a direction, so the moment it opens you'd
+            // run straight on through (into lava, say). Stop dead and ignore that held direction until
+            // it is released once, so the kid decides when to step into the hole.
+            if (axis === "x") { actor.vx = 0; actor.digLock = true; }
             geometry = "none"; modifier = "none"; // fully eroded — the player passes straight through this frame
           } else {
             digProgress[key] = progress;
@@ -5792,12 +5801,16 @@
   // chaser-catch branch) can call this unconditionally regardless of mode.
   function consumeLifeIfPlaying(silentGameOver) {
     if (appMode !== "play" || playSessionEnded) return false;
+    if (levelResetPending) return false; // already dying: the level is about to restart, a second hit in that window costs nothing
     lives--;
     renderPlayHUD();
     if (lives <= 0) { triggerGameOver(silentGameOver); return true; }
     // Lives remain: after the hit animation plays out, the whole level goes back to its starting
-    // conditions (not just the player), keeping only the reduced life count.
-    setTimeout(() => {
+    // conditions (not just the player), keeping only the reduced life count. Only one reset can be
+    // pending, and any manual restart/exit cancels it (clearTransientRuntimeState).
+    levelResetPending = true;
+    levelResetTimer = setTimeout(() => {
+      levelResetTimer = null; levelResetPending = false;
       if (appMode === "play" && !playSessionEnded) restartLevelKeepingLives();
     }, LEVEL_RESET_DELAY_MS);
     return false;
@@ -5881,7 +5894,7 @@
       log("Oof!");
       if (npcActor.spawnerKey && !npcActor.ttlPopped) despawnSpawnedActor(npcActor);
     } else if (temperament === "chaser") {
-      if (starTimer > 0 || playerActor.invulnT > 0) return; // ghost mode / flicker window: can't be caught
+      if (starTimer > 0 || playerActor.invulnT > 0 || levelResetPending) return; // ghost mode / flicker window / already dying: can't be caught
       playActorSound(npcActor, "gotcha");
       playRecipe(playerActor, "caughtPunt");
       if (appMode === "play" && !playSessionEnded && spareHearts > 0) {
@@ -5936,7 +5949,10 @@
       // A spawner's launch burst is a shove, not a fall: a fresh spawn (bouncyCooldown still running) never crushes.
       // A bomb's danger is its blast, never its weight (a falling bomb crushing you reset the level).
       const freshSpawn = (npcActor.spawnerKey && npcActor.bouncyCooldown > 0) || isCarryBombKind(temperament);
-      if (!freshSpawn && npcActor.vy > 200 && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
+      // An object the player just dropped/threw never crushes them (throwing at a wall drops it on your head),
+      // and a fall has to be real: ~2 tiles, not a crate settling half a tile in a stack you just disturbed.
+      const playerHandled = npcActor.safeUntil > performance.now();
+      if (!freshSpawn && !playerHandled && npcActor.vy > CRUSH_MIN_VY && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
     } else if (temperament === CARRY_CANNON2_KIND) {
@@ -6038,6 +6054,7 @@
   // pushed toward the bank it came from, not thrown north. `sfx` ("honk"/"splash") replaces the yelp.
   // Returns true when the hit actually fired (not cooled down / ghost / flickering).
   function triggerHazard(actor, away, sfx) {
+    if (levelResetPending) return false; // already dying
     if (actor.hazardCooldown > 0) return false;
     if (starTimer > 0 || actor.invulnT > 0) return false; // ghost mode / post-heart flicker: nothing happens at all
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
@@ -6070,6 +6087,7 @@
   // would bury the one new comedic beat this patch adds under a dark overlay before it's even had
   // a chance to play, and would stack the game-over jingle right on top of the splat sound.
   function triggerLethalHazard(actor) {
+    if (levelResetPending) return; // already dying: staying in the lava must not spend a second life
     if (starTimer > 0) return; // ghost mode — deliberately NOT setting hazardCooldown, so it bites the moment the star ends
     if (actor.hazardCooldown > 0) return;
     actor.hazardCooldown = HAZARD_COOLDOWN_MS;
@@ -6998,6 +7016,7 @@
     obj.x = player.x + player.w / 2 + dropDir * (player.w / 2 + obj.w / 2 + 1) - obj.w / 2;
     if (actorBlockedByTiles(obj)) obj.x = player.x + player.w / 2 - obj.w / 2;
     obj.vx = 0; obj.vy = 0;
+    obj.safeUntil = performance.now() + SAFE_AFTER_HANDLING_MS;
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     log("Dropped it.");
@@ -7031,6 +7050,7 @@
     // v2.20.1 tunneling risk that field's own comment warns about only exists when something
     // holds a direction key during the exemption window, which nothing here ever does.
     obj.bouncyCooldown = 500;
+    obj.safeUntil = performance.now() + SAFE_AFTER_HANDLING_MS;
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
@@ -7232,8 +7252,10 @@
         const right = keys["ArrowRight"] || keys["d"] || keys["D"];
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
+        if (actor.digLock && !left && !right) actor.digLock = false; // released: control is back
         if (!stuck && !(actor.cannonCooldown > 0) && !actor.ballistic) { // no steering mid-shot: the arc is fixed
-          if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
+          if (actor.digLock) { /* just dug through a side wall: held direction ignored until released */ }
+          else if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
           if (inGravity) {
             wantsJump = keys[" "] || up;
           } else {
@@ -10981,6 +11003,7 @@
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
+      `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
       `const DIGGABLE_STAGE_ICONS = ${JSON.stringify(DIGGABLE_STAGE_ICONS)};`,
@@ -11098,6 +11121,7 @@
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let playReadyUntil = null;
+  let levelResetPending = false, levelResetTimer = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
   const wanderHeadings = {};
 
@@ -11148,6 +11172,8 @@
     lives = DEFAULT_LIVES;
     spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {};
     playSessionEnded = null;
+    if (levelResetTimer) clearTimeout(levelResetTimer);
+    levelResetTimer = null; levelResetPending = false;
     playReadyUntil = performance.now() + READY_DURATION_MS;
     currentRoomId = null;
     grabKeyDownAt = null;

@@ -32,7 +32,7 @@ const LIB = `()=>{
   walk(dir,toX,max,opts){opts=opts||{};max=max||600;const q=T.P();const k=dir>0?"ArrowRight":"ArrowLeft";T.key(k,true);let t=0;
     for(;t<max;t++){T.key(" ",!!opts.hopWhenStuck&&q.vx===0&&q.grounded&&t%8===0);T.tk(1);if(T.hit()>0)break;if(dir>0?q.x>=toX:q.x<=toX)break;}
     T.key(k,false);T.key(" ",false);return t;},
-  dig(dir,cx,cy,max){max=max||300;const k=dir>0?"ArrowRight":"ArrowLeft";T.key(k,true);T.key("ArrowDown",true);let t=0;for(;t<max;t++){T.tk(1);if(board[cy][cx]===null)break;}T.key(k,false);T.key("ArrowDown",false);return t;},
+  dig(dir,cx,cy,max){max=max||300;const k=dir>0?"ArrowRight":"ArrowLeft";T.key(k,true);T.key("ArrowDown",true);let t=0;for(;t<max;t++){T.tk(1);if(board[cy][cx]===null)break;}T.key(k,false);T.key("ArrowDown",false);T.tk(1);return t;},
   hop(dir,hold,after){const k=dir>0?"ArrowRight":"ArrowLeft";T.key(k,true);T.key(" ",true);T.tk(hold||10);T.key(" ",false);T.tk(after||50);T.key(k,false);T.tk(30);},
   settle(n){T.tk(n||90)}
  };}`;
@@ -217,7 +217,7 @@ const LIB = `()=>{
   });
   console.log(JSON.stringify(p3));
   ok(p3.release.stones.join() === "510,532,554" && p3.release.hits === 0 && p3.release.crossed === true && p3.release.hitsAfterCross === 0, "release at the crumble: 3 stones fill the pit (lip 2px) and the player crosses " + JSON.stringify(p3.release));
-  ok(p3.hold.hits >= 1, "holding Right through the dig walks into the lava (costs a life): " + JSON.stringify(p3.hold));
+  ok(p3.hold.hits === 0, "holding Right through the dig no longer carries you into the lava (dig lock: the key must be released first): " + JSON.stringify(p3.hold));
   ok(p3.early.corkStands && p3.early.hits === 0, "released early: nothing happens " + JSON.stringify(p3.early));
   // the open pit is deadly and cannot be hopped (needs the stones): remove stones, remove cork, try 12 jump timings
   const hop = await run(page, () => {
@@ -384,7 +384,7 @@ const LIB = `()=>{
   await page.waitForTimeout(900);
   const e1b = await run(page, () => { T.key("ArrowRight", false); for (const k in keys) keys[k] = false; const q = T.P(); return { lives, cork: board[15][52], stones: T.list(LARGE_STONE_DEF_ID).map(a => Math.round(a.y)).sort().join(), pl: [Math.round(q.x), Math.round(q.y)], ready: playReadyUntil !== null }; });
   console.log("E1", JSON.stringify(e1), JSON.stringify(e1b));
-  ok(e1.hit >= 1 && e1b.cork === "solid:diggable" && e1b.stones === "389,421,453" && e1b.lives === 2, "hold-through in Part 3 costs one life and the level restarts clean " + JSON.stringify(e1b));
+  ok(e1.hit === 0 && e1b.cork === null && e1b.lives === 3 && e1b.pl[0] < 52 * 32, "hold-through in Part 3 stops at the opened cork: no life lost, player still outside the pit " + JSON.stringify(e1b));
   // E2. the camera never shows a bare area: look at the five Follow positions at the start
   // E3. falling into the trap pit with the beast costs a life, then restarts
   await load();
