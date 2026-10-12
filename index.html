@@ -9000,6 +9000,104 @@
   }
   // The registry a new sample joins with one entry — the modal's grid renders generically off
   // this list, so it scales from 3 to 10+ samples with no layout changes.
+  // ============== "Crossing Guard" — a Frogger-style crossing (the movers sample) ==============
+  // One 72-wide Follow-camera room, no gravity, v-wrap on so the vertical lanes loop: start bank ->
+  // a six-lane road (carts and scooters, hurts movers) -> a median bank with a heart -> a seven-lane
+  // river (logs, turtles, ducks, crocodiles, floats movers over Hazard water) -> a long goal bank.
+  // Everything is existing pieces plus the movers; the level owns fairness (see CLAUDE.md).
+  const CG_FROG_ART = pat([
+    "..W..W..", ".GKGGKG.", ".GGGGGG.", "GGGGGGGG", "GDGGGGDG", ".GGGGGG.", "GG....GG", "G......G"
+  ], { G: "#6fcf5a", D: "#3f9a3a", W: "#ffffff", K: "#1b1b1b" });
+  const CG_GRASS_A = pat(["ggghgggg", "gggggglg", "lggggggg", "gghggggg", "gggggghg", "ggglgggg", "hggggggl", "gggghggg"],
+    { g: "#62b04e", h: "#4f9c3d", l: "#7cc962" });
+  const CG_GRASS_B = pat(["gggggggg", "ggwggggg", "gwywgggg", "ggwggggg", "ggggggpg", "gggggpyp", "ggggggpg", "hggggggg"],
+    { g: "#62b04e", h: "#4f9c3d", w: "#ffffff", y: "#ffd54f", p: "#f48fb1" });
+  const CG_TREE = pat(["gggggggg", "ggddddgg", "gddeeddg", "gdeeeedg", "gddeeddg", "ggddddgg", "gggggggg", "gggggggg"],
+    { g: "#62b04e", d: "#2e7d32", e: "#43a047" });
+  const CG_BUSH = pat(["gggggggg", "gggggggg", "ggdeedgg", "gdeeeedg", "gdeedeed", "ggdddddg", "gggggggg", "gggggggg"].map(r => r.slice(0, 8)),
+    { g: "#62b04e", d: "#2e7d32", e: "#4caf50" });
+  const CG_ASPHALT = pat(["aaaaaaaa", "aabaaaaa", "aaaaaaca", "abaaaaaa", "aaaabaaa", "acaaaaaa", "aaaaaaba", "aaabaaaa"],
+    { a: "#3f434b", b: "#4a4e57", c: "#34373e" });
+  const CG_DASH = pat(["aaayyaaa", "aaayyaaa", "aaayyaaa", "aaayyaaa", "aaaaaaaa", "aaaaaaaa", "aaaaaaaa", "aaaaaaaa"],
+    { a: "#3f434b", y: "#f2c230" });
+  const CG_SIDEWALK = pat(["ssssssst", "ssssssst", "ssssssst", "tttttttt", "ssssssst", "ssssssst", "ssssssst", "tttttttt"],
+    { s: "#c4c4bc", t: "#a3a39b" });
+  const CG_FINISH = pat(["kkwwkkww", "kkwwkkww", "wwkkwwkk", "wwkkwwkk", "kkwwkkww", "kkwwkkww", "wwkkwwkk", "wwkkwwkk"],
+    { k: "#222222", w: "#f5f5f5" });
+  const CG_WATER_1 = pat(["wwwwwwww", "wlllwwww", "wwwwwwdw", "wwwwlllw", "dwwwwwww", "wwlllwww", "wwwwwwdw", "wdwwwwww"],
+    { w: "#2f80d8", l: "#5aa3ee", d: "#2468b8" });
+  const CG_WATER_2 = pat(["wwwwwwww", "wwwwlllw", "wdwwwwww", "wwlllwww", "wwwwwwdw", "wlllwwww", "dwwwwwww", "wwwwwwdw"],
+    { w: "#2f80d8", l: "#5aa3ee", d: "#2468b8" });
+  function buildCrossingGuardGame() {
+    const room = createEmptyRoom("Crossing Guard");
+    room.gravityEnabled = false; room.wrapHEnabled = false; room.wrapVEnabled = true; room.cameraMode = "follow";
+    rooms.push(room);
+    activateRoom(room.id);
+    actorDefs.cgFrog = { temperament: "stationary", poses: null, name: "frog", art: CG_FROG_ART.slice() };
+    groundTileDefs.cgWater = { name: "river water", frames: [CG_WATER_1.slice(), CG_WATER_2.slice()], frameMs: 450, geometry: "none", modifier: "hazard" };
+    groundSlotIds.push("cgWater");
+    const bgs = { cgGrassA: ["grass", CG_GRASS_A], cgGrassB: ["flowers", CG_GRASS_B], cgTree: ["tree", CG_TREE], cgBush: ["bush", CG_BUSH],
+      cgAsphalt: ["road", CG_ASPHALT], cgDash: ["road line", CG_DASH], cgSidewalk: ["sidewalk", CG_SIDEWALK], cgFinish: ["finish line", CG_FINISH] };
+    Object.keys(bgs).forEach(id => { backgroundTileDefs[id] = { art: bgs[id][1].slice(), name: bgs[id][0] }; });
+    const COLS72 = 72;
+    // columns: start bank 0-4, road 5-30 (six 2-wide lanes at 7,11,15,19,23,27 with 2-wide dry islands
+    // between them), median bank 31-35, river 36-49 (seven ADJACENT 2-wide lanes at 36,38,...,48 — no
+    // water gap between lanes, so a hop is just "be over a float of the next lane as you cross"),
+    // goal meadow 50-71 with the finish line at 62 and the goal tiles at 63.
+    const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0; // deterministic scatter, no randomness at build time
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS72; x++) {
+      const road = x >= 5 && x <= 30;
+      const river = x >= 36 && x <= 49;
+      if (road) {
+        backgroundBoard[y][x] = (x === 5 || x === 30) ? "cgSidewalk" : "cgAsphalt";
+        if ([9, 13, 17, 21, 25].includes(x) && y % 4 < 2) backgroundBoard[y][x] = "cgDash";
+      } else if (river) {
+        board[y][x] = gameplayKey("none", "hazard");
+        groundSkinBoard[y][x] = "cgWater";
+      } else {
+        const h = hash(x, y) % 100;
+        backgroundBoard[y][x] = h < 7 ? "cgTree" : h < 12 ? "cgBush" : h < 38 ? "cgGrassB" : "cgGrassA";
+        if (x === 62) backgroundBoard[y][x] = "cgFinish";
+      }
+    }
+    // keep the trees clear of the straight path across the middle rows so a bank never looks blocked
+    for (let y = 8; y <= 10; y++) for (let x = 0; x < COLS72; x++) if (backgroundBoard[y][x] === "cgTree") backgroundBoard[y][x] = "cgGrassA";
+    for (let y = 0; y < ROWS; y++) board[y][63] = gameplayKey("goal", "none");
+
+    const mv = (defId, cx, cy, dir) => { const a = placeExampleActor(defId, cx, cy); a.moverDir = dir; a.moverT = 0; moverPlaceAt(a); return a; };
+    // road: alternating directions, carts (slow) and scooters (fast, but wide gaps)
+    [0, 6, 12].forEach(r => mv("mvCart", 7, r, "s"));
+    [3, 12].forEach(r => mv("mvScooter", 11, r, "n"));
+    [1, 7, 13].forEach(r => mv("mvCart", 15, r, "s"));
+    [6, 15].forEach(r => mv("mvScooter", 19, r, "n"));
+    [2, 8, 14].forEach(r => mv("mvCart", 23, r, "s"));
+    [0, 9].forEach(r => mv("mvScooter", 27, r, "n"));
+    // river: seven adjacent lanes, alternating directions
+    [0, 9].forEach(r => mv("mvLog", 36, r, "s"));
+    [2, 8, 13].forEach(r => mv("mvTurtle", 38, r, "n"));
+    [5].forEach(r => mv("mvCroc", 40, r, "s"));
+    [0, 4, 8, 12, 16].forEach(r => mv("mvDuck", 42, r, "n"));
+    [3, 12].forEach(r => mv("mvLog", 44, r, "s"));
+    [1, 7, 13].forEach(r => mv("mvTurtle", 46, r, "n"));
+    [6].forEach(r => mv("mvCroc", 48, r, "s"));
+    // coins on the road islands and the goal meadow, a heart on the median bank
+    [[2, 4], [2, 14], [9, 5], [13, 12], [17, 6], [21, 13], [25, 4], [29, 12], [54, 5], [57, 12], [60, 8]].forEach(([x, y]) => placeExampleActor("colCoin", x, y));
+    placeExampleActor("colHeart", 33, 9);
+    playerDefId = "cgFrog";
+    placeExampleActor("cgFrog", 2, 9);
+    activateRoom(room.id);
+    return room;
+  }
+  function drawCrossingGuardIcon(ctx) {
+    ctx.fillStyle = "#3f434b"; ctx.fillRect(1, 1, 10, 22);
+    ctx.fillStyle = "#f2c230"; ctx.fillRect(5, 3, 2, 4); ctx.fillRect(5, 11, 2, 4); ctx.fillRect(5, 19, 2, 3);
+    ctx.fillStyle = "#2f80d8"; ctx.fillRect(11, 1, 12, 22);
+    ctx.fillStyle = "#8d5a2b"; ctx.fillRect(14, 3, 4, 10); ctx.fillRect(19, 11, 3, 9);
+    ctx.fillStyle = "#e53935"; ctx.fillRect(3, 14, 4, 4);
+    ctx.fillStyle = "#6fcf5a"; ctx.fillRect(15, 6, 3, 3);
+    ctx.fillStyle = "#1b1b1b"; ctx.fillRect(15, 6, 1, 1); ctx.fillRect(17, 6, 1, 1);
+  }
+
   const SAMPLE_GAMES = [
     { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
     { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -9010,6 +9108,7 @@
     { name: "The Bomb Factory", builder: buildBombFactoryGame, draw: drawBombFactoryIcon },
     { name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
     { name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
+    { name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");

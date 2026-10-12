@@ -6093,6 +6093,45 @@ over lethal; horizontal lane; palette row + canvas placement + click-rotate + ca
 whose rider is carried on a log with no hit and zero errors. Also re-run: 16-check sweep/export,
 `tests/bombs.test.js`, `tests/surprise.test.js`.
 
+## "Crossing Guard" — a Frogger-style crossing, the movers sample
+
+`buildCrossingGuardGame()` / `drawCrossingGuardIcon`, registered last in `SAMPLE_GAMES` (coded builder, not a
+saved project; its frog, water skin and Paint tiles are sample-scoped defs added inside the builder, so
+nothing leaks into new projects and it never depends on autosave). One 72-wide Follow-camera room, no
+gravity, **v-wrap on** (the vertical lanes loop), win by touching the goal column at col 63.
+
+**Layout** (columns): start bank 0-4; a six-lane road at cols 5-30 (2-wide lanes at 7,11,15,19,23,27 with
+2-wide dry islands and dashed lines between; carts = slow hurts, scooters = fast hurts with wide gaps,
+alternating s/n); median bank 31-35 with a heart; a **seven-lane river at 36-49 whose 2-wide lanes are
+ADJACENT** (logs, turtles, a crocodile, ducks, logs, turtles, a crocodile; alternating directions; water is
+`none:hazard` with an animated `cgWater` skin); goal meadow 50-71 with a finish line and coins. Coins sit on the
+road islands; hearts/coins are optional (a goal tile exists, so collection doesn't win).
+
+**Design lesson, found by tracing, not guessed**: the first layout put a 1-column water gap between river
+lanes. That is impossible: the water rule is centre-based, so the frog's centre is over open water for ~0.15s
+while crossing the gap, and drowns. Lanes must touch (a hop is "be over a float of the next lane as your centre
+crosses the boundary"), and the bank must touch the first/last lane for the same reason. Also: a rider sitting
+exactly on a float's edge is fine (centre-based), so a bot/test must not require margin around the *current*
+float.
+
+**Fairness traces** (`tests/crossingguard.test.js`, hook-injected temp copy, `requestAnimationFrame` disabled so
+every run is deterministic manual ticking; 30 checks): a patient bot (crosses a road lane only when no car will
+touch its row during the crossing; hops a river lane only when a float of the next lane will be under its centre
+at the boundary; waits on islands/floats, which are always safe) wins with **zero hits** from six different start
+delays (~16-22s); holding right from the start never wins (dies on the road); holding right through the river
+alone wins 0/12; idling for two minutes on the start bank costs nothing; per-hop "how long must a patient player
+wait" measured over 400s: road lanes 1.1-2s, river hops 0-2.3s, bank->first log 3.1s (all <= 14s asserted);
+the lives loop works in the real engine (a car hit costs a life, the level restarts after ~650ms with every mover
+phase back at 0 and READY! up); the camera follows the frog to the goal; and the **exported file** is crossed by
+the same bot with zero hits and zero errors. Tuning that came out of it: the first river had 44-67% float
+coverage per lane and was never gating (windows almost always open) — thinned to one or two floats per lane
+(33-44%) so the river now needs real timing; the bot's stopping distance (the frog coasts ~14px after releasing
+a key) had to be respected when approaching a road lane (a test, not a level, issue).
+
+**Not done / flags**: the road and river were traced with a scripted bot, not a human; the sample's tuning
+numbers (lane speeds, float counts) are a first pass. Horizontal lanes are not used. The goal is a whole column,
+so any row wins. Screenshots were taken in Build/Play at several camera positions and the gallery tile checked.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
