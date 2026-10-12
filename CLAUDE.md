@@ -6209,6 +6209,23 @@ no spare stones/crates in Parts 3-5 (a spare in the tunnel can be pushed in fron
 cleanly); the lives/restart path is not exercised in the exported file; sound is untouched. Camera screenshots at the five Follow
 positions at the start and after digging a tunnel through every part are in `prototypes/rock-bottom-shots/`.
 
+## Caveat: the Movers engine piece is "sample-only" for now
+
+The v2.46 Movers ("Traffic and floaters") engine mechanics — lane motion derived from `moverT`, rider
+carrying, the water/float rule, lane-perpendicular hurt knockback, rider-only wrap (Option B) and the
+`honk`/`splash` sounds — exist to power the **Crossing Guard** sample. The decision for now is to keep them
+as a *sample*: they may be folded into the base game in a later upgrade, but that has not been decided, and
+nothing should assume they are part of the core toolbox. In practice:
+
+- Don't treat Movers as a general palette feature when designing new pieces, templates or other samples
+  (e.g. Surprise Me / Try this must not start featuring them without an explicit go-ahead).
+- Keep the code self-contained (the mover functions, `MOVER_KIND` and the Objects-tab "Traffic and floaters"
+  row) so it can be promoted, gated or removed cleanly. If it is ever promoted, revisit the open flags in
+  the Movers section (placement snapping, lane overlap, swatch art, fairness tuning).
+- Rock Bottom, by contrast, uses only pre-existing mechanics and needs no such caveat.
+- Any other sample that adds engine behaviour should get the same treatment: flag it here as sample-only
+  until the user decides to upgrade the base game.
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
