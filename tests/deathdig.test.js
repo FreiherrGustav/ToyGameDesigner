@@ -107,6 +107,74 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   console.log("stack grab:", r6);
   ok(r6.after === r6.before, "grabbing the lower crate of a stack does not cost a life (" + r6.before + " -> " + r6.after + ")");
+
+  // 6. checkpoints: dying resets the current room only, at the door you came in by
+  await load();
+  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi"); enterPlayMode(); playReadyUntil = null; for (const k in keys) keys[k] = false; });
+  const r7 = await run(page, () => {
+    const startRoom = currentRoomId;
+    const r0 = rooms.find(r => r.id === startRoom);
+    // pick an empty cell in the start room and wall it up (progress made in the first room)
+    board[2][5] = "solid:none"; const startMarked = [startRoom, 5, 2];
+    // find a door link out of this room
+    const key = Object.keys(doorLinks).find(k => doorLinks[k].toRoomId !== startRoom && k.startsWith(roomCellKey(startRoom, 0, 0).split(",")[0].split("_")[0]) || true);
+    const link = Object.values(doorLinks).find(l => l.toRoomId !== startRoom);
+    beginRoomTransition(link); roomTransition = null;
+    const room2 = currentRoomId;
+    const p = actors.find(a => a.isPlayer);
+    const arrive = [Math.round(p.x), Math.round(p.y)];
+    // mess with room 2: break a tile, move a crate, flip a channel
+    const crate = actors.find(a => a.defId === PUSHABLE_DEF_ID);
+    const crateSpawn = crate ? [Math.round(crate.spawnX), Math.round(crate.spawnY)] : null;
+    if (crate) { crate.x += 200; }
+    const wasCell = board[1][1]; board[1][1] = "solid:none";
+    switchChannels.red = true;
+    p.x += 70; p.y -= 10;
+    triggerHazard(p); // lose a life
+    return { startRoom, room2, arrive, crateSpawn, wasCell, lives, startMarked, hasCrate: !!crate };
+  });
+  await sleep(1000);
+  const r8 = await run(page, () => {
+    const p = actors.find(a => a.isPlayer);
+    const crate = actors.find(a => a.defId === PUSHABLE_DEF_ID);
+    const startRoomObj = rooms.find(r => r.id === window.__sr);
+    return { room: currentRoomId, pos: [Math.round(p.x), Math.round(p.y)], lives, cell: board[1][1], red: !!switchChannels.red,
+      crate: crate ? [Math.round(crate.x), Math.round(crate.y)] : null, ready: playReadyUntil !== null, rooms: rooms.map(r => r.id) };
+  });
+  console.log("checkpoint:", r7, r8);
+  ok(r8.room === r7.room2, "death keeps you in the room you died in");
+  ok(Math.abs(r8.pos[0] - r7.arrive[0]) <= 1 && Math.abs(r8.pos[1] - r7.arrive[1]) <= 12, "respawn at the door you arrived by " + JSON.stringify([r8.pos, r7.arrive]));
+  ok(r8.lives === r7.lives, "life spent once (" + r8.lives + ")");
+  ok(r8.cell === r7.wasCell && !r8.red, "this room's tile and switch changes are undone");
+  if (r7.hasCrate) ok(Math.abs(r8.crate[0] - r7.crateSpawn[0]) < 40, "crate is back at its start");
+  const startStill = await run(page, () => { const sr = rooms.find(r => r.id === window.__startRoomId); return null; });
+  // first room keeps its progress: wall we added at (5,2) in the start room is still there
+  const r9 = await run(page, () => { const first = rooms[0]; return first.board[2][5]; });
+  ok(r9 === "solid:none", "other rooms keep their progress (" + r9 + ")");
+  // death in the very first room goes back to the game start, not further
+  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi"); enterPlayMode(); playReadyUntil = null; });
+  const r10 = await run(page, () => { const p = actors.find(a => a.isPlayer); window.__p0 = [Math.round(p.x), Math.round(p.y)]; p.x += 120; triggerHazard(p); return { lives }; });
+  await sleep(900);
+  const r11 = await run(page, () => { const p = actors.find(a => a.isPlayer); return { pos: [Math.round(p.x), Math.round(p.y)], p0: window.__p0, lives }; });
+  ok(Math.abs(r11.pos[0] - r11.p0[0]) <= 1, "death in the first room returns to the start " + JSON.stringify(r11));
+
+  // 7. never disappear: off the board / embedded in solid ground gets undone
+  await load();
+  const r12 = await run(page, () => {
+    const p = actors.find(a => a.isPlayer); for (let i = 0; i < 30; i++) tick(1/60);
+    const ok0 = [p.x, p.y]; p.y = -900; tick(1/60); const a = [p.x, p.y];
+    p.x = 1e9; tick(1/60); const b = [p.x, p.y];
+    p.x = NaN; tick(1/60); const c = [p.x, p.y];
+    // embedded in a solid wall for a while
+    let sx = 0, sy = 0; outer: for (let y = 5; y < 15; y++) for (let x = 5; x < 60; x++) if (board[y][x] && board[y][x].startsWith("solid") && board[y-1][x] && board[y][x+1] && board[y][x-1]) { sx = x; sy = y; break outer; }
+    p.x = sx * TILE + 4; p.y = sy * TILE + 4; for (let i = 0; i < 40; i++) tick(1/60); const d = [p.x, p.y, actorBlockedByTiles(p)];
+    return { ok0, a, b, c, d };
+  });
+  console.log("guard:", JSON.stringify(r12));
+  ok(r12.a[1] > -10 && Number.isFinite(r12.a[1]), "above the board -> put back");
+  ok(r12.b[0] < 5000, "far right -> put back");
+  ok(Number.isFinite(r12.c[0]), "NaN -> put back");
+  ok(r12.d[2] === false, "embedded in a solid wall -> put back out");
   ok(errors.length === 0, "no page errors " + errors.join("|"));
   console.log(pass + " passed, " + fails.length + " failed");
   await browser.close(); process.exit(fails.length ? 1 : 0);

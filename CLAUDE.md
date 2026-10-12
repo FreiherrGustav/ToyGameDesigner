@@ -6234,6 +6234,37 @@ Three play-feel fixes reported together.
 Export: `CRUSH_MIN_VY`/`SAFE_AFTER_HANDLING_MS` constants line; `levelResetPending`/`levelResetTimer` declared and reset
 in the export template. Tests: `tests/deathdig.test.js` (9 checks), `tests/rockbottom.test.js` updated (48 pass).
 
+## Door checkpoints, a "never disappear" guard for the player, and three sample touch-ups
+
+1. **Doors are checkpoints.** Dying with lives left no longer restarts the whole game: `respawnAtCheckpoint()` puts the
+   CURRENT room back to how it started (a fresh clone from the pristine room list — `buildSnapshot.rooms` in the editor,
+   `initialGameData.rooms` in an export, via each environment's own `pristineRoomList()`) and the player back where they
+   entered it: the arrival spot of the last door (`setCheckpoint()` runs at Play start and at the end of
+   `beginRoomTransition`) or the game start. Other rooms keep their progress. This room's own changes are undone
+   (broken walls, moved crates, collected items, spawned content) as are `switchChannels`, keys, locked doors, hearts and
+   score, which are restored from the copy stored with the checkpoint. READY! plays again; the player gets a door cooldown
+   so the door they stand on can't whisk them out. If no checkpoint applies it falls back to the old whole-level restart.
+   Game over (last life) is unchanged. Warps are not checkpoints. Earlier "restarts the whole level" notes are history.
+2. **Never disappear.** Fuzzing (random keys, teleports next to enemies, every sample) reproduced the report: a player
+   overlapping solid ground (or the room edge) deeper than a collision can resolve ping-pongs one tile per frame with
+   zero velocity and leaves the board for good. `keepPlayerOnBoard(p)` (called from `tick()` after the player's step)
+   puts the player back at the last clean spot in the same room (else the room start) when it is outside the room on a
+   non-wrapped axis (beyond `PLAYER_BOARD_MARGIN` 6px), non-finite, or embedded in solid for `PLAYER_EMBED_FRAMES` (12)
+   frames in a row, and zeroes velocity. The enemy contact reaction itself (`reflectActorsApart`) is mild; the root
+   physics weakness (deep-overlap resolution picks a side by velocity sign) is not rewritten, the guard contains it.
+   Fuzz after the guard: 0 off-board frames across all ten samples.
+3. **Sample fixes** (all embedded projects): Sushi Train room 1 — two belt tiles that pointed the wrong way, (8,12) now
+   west and (9,17) now east (interpreting "two not facing the correction direction" as the odd tile in each belt; retune
+   if another pair was meant). Worst Elevator room 2 — the upper-left wind field no longer points up: those tiles aim
+   down, and the two tiles at the diagonal edge of each row aim west. Bomb Factory room 2 — the middle wall's lower
+   part (col 12, rows 13-16) that had been saved blown away is solid again; compared against the older upload
+   `my-project_11.json`, whose other differences (lava moved, one tile at the far left) were left as the user's edits.
+
+Export: `setCheckpoint`/`respawnAtCheckpoint`/`resetActorsToSpawn`/`purgeSpawnedActors`/`keepPlayerOnBoard` in
+`runtimeFunctions`, `checkpoint` declared and set in the export template, `PLAYER_*` constants line. Tests:
+`tests/deathdig.test.js` (19 checks incl. checkpoint and guard); verified in an exported Sushi Train that a death in room 2
+returns to room 2's door.
+
 ## Caveat: the Movers engine piece is "sample-only" for now
 
 The v2.46 Movers ("Traffic and floaters") engine mechanics — lane motion derived from `moverT`, rider
