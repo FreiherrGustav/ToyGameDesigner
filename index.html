@@ -3309,6 +3309,7 @@
     rooms = [];
     nextRoomId = 1;
     doorLinks = {};
+    switchChannels = {}; // a Switch left on in the previous project must not leak into the sample
     currentRoomId = null;
     playerRoomId = null;
     actorDefs = structuredClone(FACTORY_DEFAULT_SNAPSHOT.actorDefs);
@@ -9346,7 +9347,6 @@
   // diggable/indestructible ground, cannon, fan and slippery floor are all existing pieces. The sample-scoped
   // art (belts, planks, backgrounds) lives inside the builder so nothing leaks into new projects.
   function buildLongWayOutGame() {
-    switchChannels = {}; // loadExampleGame doesn't clear Switch states; a stale "on" would start this machine by itself
     const room = createEmptyRoom("The Long Way Out");
     room.gravityEnabled = true; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
     rooms.push(room);

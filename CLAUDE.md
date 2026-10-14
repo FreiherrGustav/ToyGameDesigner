@@ -6366,10 +6366,10 @@ the chain once and wins at 31.80 s with no errors. Longest gap between discrete 
 motion (animated belt, riding crate).
 
 **Two things found, one fixed, one reported**
-- *Fixed (in the builder, not the engine)*: `loadExampleGame` never clears `switchChannels`, so a Switch left on in a previous project
-  leaked into a freshly loaded sample (this machine would start by itself and an export carried it too). The builder now starts with
-  `switchChannels = {}`. Every other sample with Switches has the same latent leak; fixing it in `loadExampleGame` is a one-line engine
-  change that was out of scope here.
+- *Fixed*: `loadExampleGame` never cleared `switchChannels`, so a Switch left on in a previous project leaked into a freshly
+  loaded sample (this machine would start by itself, and an export carried it too; every sample with Switches had the same latent
+  leak). `loadExampleGame` now resets `switchChannels = {}` alongside `doorLinks`; verified by turning Switches on, loading Cheese Heist
+  and this sample, and reading `{}` both times.
 - *Reported*: in Build mode, "Reset to start" restores every piece, tile and the blast (checked identical) but leaves Switch positions as
   they were, because Switch state is authored data. Play restart returns everything, Switches included (checked identical). So after a run
   in Build a kid must click the two Switches back (or just press Play).
