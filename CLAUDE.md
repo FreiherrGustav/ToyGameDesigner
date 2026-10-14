@@ -6376,3 +6376,22 @@ motion (animated belt, riding crate).
 
 **Starting with no input**: possible as a one-shot. If the first Switch's starting state is saved on (Build-mode click), Gate A is open at
 Play start and the whole chain runs after the READY pause (finale at 31.97 s, verified). It is not a loop: the machine is single-use.
+
+## Magnets are switchable, and hold what they touch
+
+Request (from a bomb riding a belt into a magnet in the user's Long Way Out extension and sliding straight past it): make the
+magnet activatable by Switches/Plates, and let it keep a bomb until released.
+
+- **Switchable like the Fan.** `magnet` joined `isColorTaggable`. No color = always on (every old save and sample unchanged); a color
+  = pulls only while that channel is on (`magnetActiveAt`, checked per magnet tile in `radialForceAccelFor`). The normal object color
+  picker and corner badge appear for it; a switched-off colored magnet draws at 40% alpha. A *carried* magnet actor has no color and
+  stays always-on (the tag is not copied across a grab; revisit if wanted).
+- **Why the bomb slipped past.** `MAGNET_FORCE` peaks at 900, under gravity (1450), so in a gravity room a magnet could only nudge
+  an object sideways, never catch it (traced: belt-end bomb drifted down the magnet's face and fell). New rule, `magnetHoldsActor`:
+  a physics object (`isForceSusceptible`, non-player, so Large Stone and characters are not held) touching a live magnet tile
+  (within 2px) in a gravity room is frozen with gravity suspended, using the sticky-cling `stuck` branch in `stepActor`. It drops at
+  once (no eased release) when the magnet's channel goes off. Held bombs keep their fuse/fall rules; a free-roam room is unaffected.
+- This changes untagged magnets too: anything light that touches one now sticks instead of sliding off (design call, flag if unwanted).
+- Export: `magnetActiveAt`/`magnetHoldsActor` in `runtimeFunctions`. Caption now "Pulls stuff your way, and hangs on to it."
+- Tests: `tests/magnet.test.js` (untagged holds, colored+on holds, switching off drops, colored+off does not hold); verified on the
+  user's `my-project.json` (untagged holds the belt bomb; red-off lets it pass; red-on holds, off drops). Long Way Out suite still 53/53.

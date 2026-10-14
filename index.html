@@ -1011,7 +1011,7 @@
     cannon2: "Shoots things.",
     [BOMB2_GEOMETRY]: "Boom. Eventually.",
     fan: "Blows you around.",
-    magnet: "Pulls stuff your way.",
+    magnet: "Pulls stuff your way, and hangs on to it.",
     spawner: "Makes more of something.",
     trampoline: "Launches you skyward.",
     barrier: "Opens for its color.",
@@ -5306,6 +5306,24 @@
   // included — the unparked vortex/black-hole idea. A steering character (wanderer/chaser/fleer)
   // is magnetable too now — "NPCs... participate fully" in the same four forces physics objects
   // already do (see isSteeringCharacter's own comment); the player stays excluded either way.
+  // A magnet tile is switchable the way a fan is: no color = always on, a color = only while that
+  // channel is on (Switch/Plate/Button drive it).
+  function magnetActiveAt(cx, cy) {
+    const color = colorAt(cx, cy);
+    return !color || isChannelOn(color);
+  }
+  // A live magnet HOLDS whatever physics object touches it (gravity is suspended, like a cling),
+  // so a bomb or crate can hang on it until a Switch/Plate turns the magnet off and it drops.
+  function magnetHoldsActor(actor) {
+    const m = 2;
+    const c0 = Math.floor((actor.x - m) / TILE), c1 = Math.floor((actor.x + actor.w + m - 0.01) / TILE);
+    const r0 = Math.floor((actor.y - m) / TILE), r1 = Math.floor((actor.y + actor.h + m - 0.01) / TILE);
+    for (let cy = r0; cy <= r1; cy++) for (let cx = c0; cx <= c1; cx++) {
+      if (geometryAt(cx, cy) === "magnet" && magnetActiveAt(cx, cy)) return true;
+    }
+    return false;
+  }
+
   function radialForceAccelFor(actor, player) {
     let ax = 0, ay = 0;
     const centerX = actor.x + actor.w / 2, centerY = actor.y + actor.h / 2;
@@ -5325,6 +5343,7 @@
         const isMagnet = geometry === "magnet", isWell = geometry === "gravitywell";
         if (!isMagnet && !isWell) continue;
         if (isMagnet && !magnetable) continue;
+        if (isMagnet && !magnetActiveAt(cx, cy)) continue; // a colored magnet only pulls while its channel is on
         const radiusPx = isMagnet ? magnetRadiusPx : wellRadiusPx;
         const ddx = (cx * TILE + TILE / 2) - centerX, ddy = (cy * TILE + TILE / 2) - centerY;
         const dist = Math.hypot(ddx, ddy);
@@ -7266,7 +7285,8 @@
       // re-freeze every frame.
       const touchingSticky = inGravity && !isLargeStone && isStuckToSticky(actor);
       if (touchingSticky) actor.stickyClingT += dt * 1000; else actor.stickyClingT = 0;
-      const stuck = touchingSticky && actor.stickyClingT <= STICKY_CLING_MS;
+      const magnetHeld = inGravity && !actor.isPlayer && isForceSusceptible(temperament) && magnetHoldsActor(actor);
+      const stuck = magnetHeld || (touchingSticky && actor.stickyClingT <= STICKY_CLING_MS);
       // v2.20: how much a kid's own movement input is damped while standing in/on sticky ground —
       // see isOnStickyGround/STICKY_MOVE_MULT. Deliberately doesn't touch wind/fan/radial forces
       // below — mud slows YOUR OWN push, not a conveyor or a fan blowing through it.
@@ -7397,7 +7417,7 @@
           // by anything) rather than a wall you can still drift along.
           actor.vx = 0;
           actor.vy = 0;
-          actor.stickyReleaseT = 0; // about to start releasing once the cling ends or contact breaks
+          actor.stickyReleaseT = magnetHeld ? STICKY_RELEASE_MS : 0; // a magnet lets go at once; a sticky wall eases off
         } else {
           // v2.20: "slowly letting go" — gravity ramps back up from 0 to full strength over
           // STICKY_RELEASE_MS after actually breaking contact, instead of slamming to full weight
@@ -8012,7 +8032,7 @@
     // retired the separate permanent-toggle "Switch" fixture outright and gave Button its exact
     // job instead (see PUSH_BUTTON_GEOMETRY's own comment) — it's now the one that reads a
     // channel permanently (switchChannels), plate the one that reads it momentarily.
-    return geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || geometry === LOCKED_DOOR_GEOMETRY || FAN_ORDER.includes(geometry);
+    return geometry === "plate" || geometry === "door" || geometry === "solid" || BARRIER_ORDER.includes(geometry) || geometry === PUSH_BUTTON_GEOMETRY || geometry === LOCKED_DOOR_GEOMETRY || FAN_ORDER.includes(geometry) || geometry === "magnet";
   }
 
   function paintGeometryModifierAt(gx, gy) {
@@ -9646,6 +9666,11 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(x + 2, y + 2, TILE - 4, TILE - 4);
       ctx.restore();
+    } else if (tile.geometry === "magnet" && extra && extra.color && !extra.channelOn) {
+      ctx.save();
+      ctx.globalAlpha = 0.4; // switched off: dim, so it reads as "not pulling right now"
+      drawArtScaled(ctx, icon, x, y, TILE, cell);
+      ctx.restore();
     } else if (isBombGeometry(tile.geometry) && extra && extra.armed) {
       ctx.save();
       ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
@@ -11112,7 +11137,7 @@
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
-      checkWhooshSurface, fanAccelFor, radialForceAccelFor, isStuckToSticky, isOnStickyGround,
+      checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
