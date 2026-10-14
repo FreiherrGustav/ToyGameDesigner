@@ -23,13 +23,23 @@
     user-select: none;
     -webkit-user-select: none;
   }
+  /* v2.47: the editor fills the viewport — palette is a side column with its own scroll, the
+     canvas is fitted (uniformly, see fitCanvas) into whatever is left, so nothing needs page scroll. */
+  body { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
   #app {
     display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    padding: 16px;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    gap: 12px;
+    padding: 8px 12px 12px;
+    align-items: stretch;
     justify-content: center;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  @media (max-width: 760px) {
+    body { height: auto; display: block; overflow: auto; }
+    #app { flex-wrap: wrap; padding: 16px; }
+    #paletteWrap { width: 100% !important; max-height: none !important; }
   }
   h1 {
     font-size: 18px;
@@ -42,7 +52,8 @@
     padding: 12px;
   }
   /* ---------- Game canvas ---------- */
-  #gameWrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #gameWrap { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 8px; }
+  #gameWrap .toolbar { justify-content: center; }
   #gameCanvas {
     background: #000;
     image-rendering: pixelated;
@@ -85,7 +96,9 @@
   #errorOverlayResetBtn { font-size: 14px; padding: 8px 16px; }
 
   /* ---------- Palette panel ---------- */
-  #paletteWrap { width: 260px; display: flex; flex-direction: column; gap: 12px; }
+  #paletteWrap { width: 280px; flex: 0 0 280px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+  #placeTabs { flex-wrap: nowrap; }
+  #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
   .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .swatch {
@@ -102,7 +115,7 @@
   }
   .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
   .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
-  .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; }
+  .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 1px; }
   /* v2.41: a color already claimed by two doors reads as full right where a kid would reach for
      it, instead of needing a sentence explaining the cap in advance — see renderColorSwatchesInto. */
   .swatch.full { opacity: 0.35; filter: grayscale(0.6); cursor: not-allowed; }
@@ -344,7 +357,7 @@
 
     <div>
       <div class="section-title">What to place</div>
-      <div class="mode-toggle">
+      <div class="mode-toggle" id="placeTabs">
         <button id="modeCharacter" class="active">Characters</button>
         <button id="modeObject">Objects</button>
         <button id="modeGround">Ground</button>
@@ -3860,6 +3873,46 @@
   // ============== Canvas setup ==============
   const gameCanvas = document.getElementById("gameCanvas");
   const gctx = gameCanvas.getContext("2d");
+
+  // v2.47: fit the canvas into the space the editor layout leaves it. Uniform scale only (4:3 kept,
+  // never stretched), CSS-only so the 768x576 backing store and all pointer math (which scales by
+  // getBoundingClientRect) are untouched. Presentation only.
+  function fitCanvas() {
+    const wrap = document.getElementById("gameWrap");
+    if (!wrap) return;
+    const BORDER = 6, NATURAL = 768 + BORDER;
+    let w = NATURAL;
+    const cs = getComputedStyle(wrap);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const app = document.getElementById("app");
+    const palette = document.getElementById("paletteWrap");
+    const stacked = window.matchMedia("(max-width: 760px)").matches;
+    const palW = palette && palette.offsetParent ? palette.offsetWidth + 12 : 0;
+    const availW = (stacked ? window.innerWidth - 32 : (app ? app.clientWidth - 24 : window.innerWidth) - palW) - padX;
+    w = Math.min(w, availW);
+    if (!stacked && app) {
+      let others = 0, kids = 1;
+      for (const el of wrap.children) {
+        if (el.id === "gameCanvas" || el.offsetParent === null) continue;
+        others += el.offsetHeight; kids++;
+      }
+      const availH = app.clientHeight - 20 - padY - others - (kids - 1) * 6;
+      w = Math.min(w, (availH - BORDER) * 4 / 3 + BORDER);
+    }
+    w = Math.max(320, Math.floor(w));
+    gameCanvas.style.width = w + "px";
+    gameCanvas.style.height = Math.round((w - BORDER) * 0.75 + BORDER) + "px";
+  }
+  window.addEventListener("resize", fitCanvas);
+  if (window.ResizeObserver) {
+    // deferred to the next frame so resizing the canvas never re-triggers the observer mid-callback
+    let fitQueued = false;
+    const ro = new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; setTimeout(() => { fitQueued = false; fitCanvas(); }, 0); });
+    ro.observe(document.getElementById("app"));
+    ["buildToolbar", "roomTabRow", "cameraPanRow", "log"].forEach(id => { const e = document.getElementById(id); if (e) ro.observe(e); });
+  }
+  fitCanvas();
   gameCanvas.width = COLS * TILE;
   gameCanvas.height = ROWS * TILE;
   const DISPLAY_SCALE = 1; // board is already 768x576 native at the new 32px tile size
