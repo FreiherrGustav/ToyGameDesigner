@@ -9339,6 +9339,160 @@
     ctx.fillStyle = "#e6fffa"; ctx.fillRect(17, 13, 2, 2);
   }
 
+  // ============== "The Long Way Out" — a chain-reaction contraption (one room, fixed camera, gravity on) ==============
+  // The inventor is shut in a booth with ONE Switch. Everything after it is the machine running itself:
+  // a five-leg conveyor rack, a Large Stone, a bomb and a cannon, a fan on a waxed floor, ending at a Plate
+  // that opens the booth Gate. No new engine behaviour: Gates, Plates, Switches, belts, Large Stone, bomb,
+  // diggable/indestructible ground, cannon, fan and slippery floor are all existing pieces. The sample-scoped
+  // art (belts, planks, backgrounds) lives inside the builder so nothing leaks into new projects.
+  function buildLongWayOutGame() {
+    switchChannels = {}; // loadExampleGame doesn't clear Switch states; a stale "on" would start this machine by itself
+    const room = createEmptyRoom("The Long Way Out");
+    room.gravityEnabled = true; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+    rooms.push(room);
+    activateRoom(room.id);
+    const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
+    const px = fn => { const a = []; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) a.push(fn(x, y) || null); return a; };
+    const spk = (x, y, seed, n) => (hash(x + seed * 7, y + seed * 3) % 100) < n;
+    // ---- ground skins (solid tiles you can see: planks, belts, floor, ledge, cork) ----
+    const defSkin = (id, name, art, modifier) => { groundTileDefs[id] = { name, frames: [art], frameMs: 1000, geometry: "solid", modifier }; groundSlotIds.push(id); };
+    const plank = (base, dark, hi, seed) => px((x, y) => y === 7 ? dark : x === 7 ? dark : (y === 0 ? hi : spk(x, y, seed, 12) ? hi : base));
+    defSkin("lwoPlank", "plank", plank("#8a6040", "#4b3222", "#9a7050", 1), "none");
+    defSkin("lwoFloor", "floorboard", px((x, y) => y === 0 ? "#6b4a30" : y === 7 ? "#3b2818" : x === 3 || x === 7 ? "#4a3220" : spk(x, y, 2, 14) ? "#7a5638" : "#6b4a30"), "none");
+    defSkin("lwoWaxed", "waxed floor", px((x, y) => y === 0 ? "#d9c08a" : y === 7 ? "#3b2818" : (x + y) % 5 === 0 ? "#f1dfae" : "#c9a76a"), "slippery");
+    defSkin("lwoIron", "iron plate", px((x, y) => (x === 0 || y === 0 || x === 7 || y === 7) ? "#3c4148" : (x === 1 && y === 1) || (x === 6 && y === 1) || (x === 1 && y === 6) || (x === 6 && y === 6) ? "#9aa3ad" : "#6a727c"), "indestructible");
+    defSkin("lwoCork", "cork board", px((x, y) => (x === 0 || y === 0 || x === 7 || y === 7) ? "#8a5e2c" : spk(x, y, 4, 35) ? "#a87a42" : spk(x, y, 5, 20) ? "#7a5224" : "#c79a5c"), "diggable");
+    const beltArt = (dir, f) => px((x, y) => {
+      if (y === 0) return "#5a6068"; if (y === 7) return "#1c1f23"; if (y === 6) return "#2a2e33";
+      const c = ((dir > 0 ? 2 + 2 * f : 6 - 2 * f) + 8) % 8, dx = (x - c + 8) % 8; // chevron column, wraps across the tile
+      const k = dir > 0 ? [2, 1, 0, 1, 2][y - 1] : [0, 1, 2, 1, 0][y - 1];
+      if (y >= 1 && y <= 5 && dx === (dir > 0 ? (8 - k) % 8 : k)) return "#e0b84c";
+      return (x % 4 === 3) ? "#33383e" : "#3f454c";
+    });
+    groundTileDefs.lwoBeltE = { name: "belt east", frames: [0, 1, 2, 3].map(f => beltArt(1, f)), frameMs: 50, geometry: "solid", modifier: "wind-e" };
+    groundTileDefs.lwoBeltW = { name: "belt west", frames: [0, 1, 2, 3].map(f => beltArt(-1, f)), frameMs: 50, geometry: "solid", modifier: "wind-w" };
+    groundSlotIds.push("lwoBeltE", "lwoBeltW");
+    const rimmed = (fill) => px((x, y) => (x === 0 || y === 0 || x === 7 || y === 7) ? "#4b3222" : fill(x, y));
+    defSkin("lwoPorthole", "booth window", rimmed((x, y) => { const dx = x - 3.5, dy = y - 3.5; const r = Math.hypot(dx, dy); return r > 3 ? "#8a6040" : r > 2.3 ? "#c9a24a" : y < 3 ? "#5b3f8a" : y < 5 ? "#c8704a" : "#e0a050"; }), "none");
+    // ---- the sign: 3x5 letters, two per tile, on a cream board ----
+    const GLY = { D: ["11.", "1.1", "1.1", "1.1", "11."], O: ["111", "1.1", "1.1", "1.1", "111"], N: ["1.1", "111", "111", "111", "1.1"], T: ["111", ".1.", ".1.", ".1.", ".1."],
+      P: ["111", "1.1", "111", "1..", "1.."], U: ["1.1", "1.1", "1.1", "1.1", "111"], S: ["111", "1..", "111", "..1", "111"], H: ["1.1", "1.1", "111", "1.1", "1.1"], " ": ["...", "...", "...", "...", "..."] };
+    const signTile = (a, b) => px((x, y) => {
+      if (x === 0 || y === 0 || x === 7 || y === 7) return "#b89a64";
+      const row = y - 1; if (row >= 0 && row < 5) {
+        if (x >= 1 && x <= 3 && GLY[a][row][x - 1] === "1") return "#8a2b2b";
+        if (x >= 4 && x <= 6 && GLY[b][row][x - 4] === "1") return "#8a2b2b";
+      }
+      return "#ecdfb8";
+    });
+    // ---- backgrounds: a cosy workshop, deliberately dull next to the bright machine parts ----
+    const defBg = (id, name, art) => { backgroundTileDefs[id] = { art, name }; };
+    const WALL = "#6b4b35";
+    const wallA = px((x, y) => x === 7 ? "#523725" : spk(x, y, 6, 10) ? "#775540" : WALL);
+    const wallB = px((x, y) => x === 3 ? "#523725" : spk(x, y, 7, 10) ? "#5e4230" : "#664630");
+    const wain = px((x, y) => x === 7 ? "#3f2c1e" : spk(x, y, 8, 10) ? "#563c2b" : "#4b3424");
+    const pipeH = px((x, y) => y === 3 ? "#8a7236" : y === 4 ? "#6a5626" : y === 5 ? "#4a3c1a" : (x === 0 && y >= 2 && y <= 6) ? "#3a2e14" : WALL);
+    const gear = px((x, y) => { const d = Math.hypot(x - 3.5, y - 3.5); return d < 1.2 ? WALL : d < 2.6 ? "#7a6430" : (d < 3.6 && (x + y) % 2 === 0) ? "#52431f" : WALL; });
+    const sky = (tx, ty) => px((x, y) => {
+      const X = tx * 8 + x, Y = ty * 8 + y;
+      if (X === 0 || Y === 0 || X === 15 || Y === 15) return "#3a281a";
+      if (X === 7 || X === 8 || Y === 7 || Y === 8) return "#6a4a32";
+      if (Y > 12 && (X % 5 !== 2)) return "#2a1c3a";
+      if ((X * 7 + Y * 13) % 17 === 0 && Y < 8) return "#ffe9a8";
+      return Y < 5 ? "#3b2f6b" : Y < 9 ? "#8b4a7a" : "#e0864a";
+    });
+    const clock = px((x, y) => { const d = Math.hypot(x - 3.5, y - 3.5); if (d > 3.6) return WALL; if (d > 2.7) return "#c9a24a"; if ((x === 3 || x === 4) && y >= 1 && y <= 3) return "#2a2a2a"; if ((y === 3 || y === 4) && x >= 4 && x <= 5) return "#2a2a2a"; return "#ecdfb8"; });
+    const jars = (c1, c2, c3) => px((x, y) => {
+      if (y >= 6) return y === 6 ? "#3b2a1e" : "#2e2016";
+      const jar = (x0, c) => (x >= x0 && x <= x0 + 1 && y >= 2 && y <= 5) ? (y === 2 ? "#8a6d2b" : c) : null;
+      return jar(0, c1) || jar(3, c2) || jar(6, c3) || WALL;
+    });
+    const blueprint = px((x, y) => (x === 0 || y === 0 || x === 7 || y === 7) ? WALL : (x === 1 || y === 1 || x === 6 || y === 6) ? "#9cc4ee" : ((x + y) % 3 === 0 ? "#6f9ad0" : "#3d6fa8"));
+    const rug = px((x, y) => y < 5 ? WALL : y === 5 ? "#8a2b2b" : (x % 3 === 0 ? "#d9b46a" : "#a83a3a"));
+    const cat = px((x, y) => { if (y >= 6) return (y === 6 ? "#8a2b2b" : "#a83a3a"); if (y < 3) return (x === 5 && y === 1) ? "#ecdfb8" : (x === 6 && y === 0) ? "#ecdfb8" : WALL; return (y === 3 && x >= 1 && x <= 6) || (y >= 4 && x >= 0 && x <= 7) ? ((x === 6 && y === 4) ? "#2a2a2a" : "#d28a3c") : WALL; });
+    const duck = px((x, y) => { if (y >= 6) return y === 6 ? "#7a8590" : "#4a525b"; const body = (y >= 3 && y <= 5 && x >= 1 && x <= 6) || (y === 2 && x >= 4 && x <= 5) || (y === 1 && x >= 4 && x <= 5); if (x === 7 && y === 2) return "#e8832a"; if (x === 5 && y === 1) return "#2a2a2a"; return body ? "#f2d03c" : WALL; });
+    const cuckoo = px((x, y) => { if (y === 0) return (x >= 2 && x <= 5) ? "#4b3222" : WALL; if (y === 1) return (x >= 1 && x <= 6) ? "#4b3222" : WALL; if (y >= 2 && y <= 6) { if (x === 0 || x === 7) return WALL; if (y === 3 && x === 3 || y === 3 && x === 4) return "#2a1c10"; return (x === 1 || x === 6) ? "#7a5238" : "#9a6a44"; } return (x === 3) ? "#c9a24a" : WALL; });
+    const creamBoard = px((x, y) => (x === 0 || y === 0 || x === 7 || y === 7) ? "#b89a64" : "#ecdfb8");
+    const boothWall = px((x, y) => x % 4 === 0 ? "#8e6c4a" : "#9a7650");
+    defBg("lwoWallA", "wall", wallA); defBg("lwoWallB", "wall", wallB); defBg("lwoWain", "panel", wain);
+    defBg("lwoPipe", "brass pipe", pipeH); defBg("lwoGear", "gear", gear); defBg("lwoClock", "wall clock", clock);
+    defBg("lwoWinTL", "window", sky(0, 0)); defBg("lwoWinTR", "window", sky(1, 0)); defBg("lwoWinBL", "window", sky(0, 1)); defBg("lwoWinBR", "window", sky(1, 1));
+    defBg("lwoJarsA", "jars", jars("#9fd0c8", "#cfa0e0", "#e0b070")); defBg("lwoJarsB", "jars", jars("#e08070", "#9fd0c8", "#d8d878"));
+    defBg("lwoBlueprint", "blueprint", blueprint); defBg("lwoRug", "rug", rug); defBg("lwoCat", "sleeping cat", cat); defBg("lwoDuck", "rubber duck", duck);
+    defBg("lwoCuckoo", "cuckoo clock", cuckoo); defBg("lwoBoothWall", "booth wall", boothWall); defBg("lwoSignBlank", "sign", creamBoard);
+    defBg("lwoSign1", "sign", signTile("D", "O")); defBg("lwoSign2", "sign", signTile(" ", "N")); defBg("lwoSign3", "sign", signTile("O", "T"));
+    defBg("lwoSign4", "sign", signTile("P", "U")); defBg("lwoSign5", "sign", signTile("S", "H"));
+    // ---- the board ----
+    const put = (x, y, geo, mod, color, skin) => { board[y][x] = gameplayKey(geo, mod); if (color) colorBoard[y][x] = color; if (skin) groundSkinBoard[y][x] = skin; };
+    const wood = (x, y) => put(x, y, "solid", "none", null, "lwoPlank");
+    const belt = (x0, x1, y, d) => { for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++) put(x, y, "solid", "wind-" + d, null, d === "e" ? "lwoBeltE" : "lwoBeltW"); };
+    const gate = (x, y, color) => put(x, y, BARRIER_ORDER[0], "none", color);
+    for (let x = 0; x < 24; x++) put(x, 17, "solid", "none", null, "lwoFloor");
+    // booth: interior cols 20-22 rows 14-16, Gate (purple) on its west side, one Switch inside
+    for (let y = 13; y <= 16; y++) wood(23, y);
+    for (let x = 19; x <= 23; x++) wood(x, 13);
+    put(23, 14, "solid", "none", null, "lwoPorthole");
+    for (let y = 14; y <= 16; y++) gate(19, y, "purple");
+    put(20, 16, PUSH_BUTTON_GEOMETRY, "none", "red");
+    // goal nook, walled so nothing from the machine can ever reach it
+    put(18, 16, "goal", "none"); wood(18, 15); wood(17, 15); wood(17, 16);
+    // loading: crate1 held against Gate A on the top belt; stone and bomb on their own Gates at the top left
+    gate(22, 0, "red"); gate(2, 1, "blue"); gate(1, 1, "green");
+    // the rack: five legs, each about 20 tiles (4 s)
+    belt(4, 23, 1, "w"); belt(3, 22, 3, "e"); belt(4, 23, 5, "w"); belt(3, 22, 7, "e"); belt(4, 23, 9, "w");
+    // cluster: two Plates on the floor, bomb ledge (blast-proof), cork, cannon
+    put(3, 16, "plate", "none", "blue"); put(2, 16, "plate", "none", "green");
+    put(1, 10, "solid", "indestructible", null, "lwoIron"); put(0, 9, "solid", "diggable", null, "lwoCork");
+    put(0, 16, "cannon2-ne", "none");
+    // lower right: Switch 2, Gate D holding crate3 on belt row 11, two short belts, fan + waxed floor, last Plate
+    put(8, 16, PUSH_BUTTON_GEOMETRY, "none", "yellow");
+    gate(21, 10, "yellow"); belt(10, 22, 11, "w"); belt(9, 15, 13, "e"); belt(12, 16, 15, "w");
+    put(10, 16, "fan-e", "none");
+    for (let x = 10; x <= 15; x++) put(x, 17, "solid", "slippery", null, "lwoWaxed");
+    put(16, 16, "plate", "none", "purple");
+    // ---- backgrounds on every cell ----
+    const D = {};
+    [[17, 12, "lwoWinTL"], [18, 12, "lwoWinTR"], [17, 13, "lwoWinBL"], [18, 13, "lwoWinBR"], [17, 14, "lwoJarsA"], [18, 14, "lwoJarsB"],
+     [6, 11, "lwoClock"], [7, 11, "lwoBlueprint"], [8, 11, "lwoBlueprint"], [4, 11, "lwoJarsB"], [5, 11, "lwoJarsA"],
+     [4, 16, "lwoRug"], [5, 16, "lwoCat"], [6, 16, "lwoRug"], [7, 16, "lwoDuck"], [20, 12, "lwoCuckoo"],
+     [20, 14, "lwoSign1"], [21, 14, "lwoSign2"], [22, 14, "lwoSign3"], [20, 15, "lwoSign4"], [21, 15, "lwoSign5"], [22, 15, "lwoSignBlank"],
+     [21, 16, "lwoBoothWall"], [22, 16, "lwoBoothWall"]].forEach(([x, y, id]) => { D[x + "," + y] = id; });
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < 24; x++) {
+      let id = D[x + "," + y];
+      if (!id) {
+        if (x >= 3 && (y === 0 || y === 2 || y === 4 || y === 6 || y === 8 || y === 10)) id = (hash(x, y) % 9 === 0) ? "lwoGear" : "lwoPipe";
+        else if (y >= 12) id = "lwoWain";
+        else id = ((x + y) % 2 === 0) ? "lwoWallA" : "lwoWallB";
+      }
+      backgroundBoard[y][x] = id;
+    }
+    // ---- actors: crate1 against Gate A, Large Stone and bomb on their Gates, crate2 on the cork, crate3 against Gate D ----
+    placeCarryableActor(PUSHABLE_DEF_ID, 23 * TILE + TILE / 2, 0 * TILE + TILE / 2);
+    placeCarryableActor(LARGE_STONE_DEF_ID, 2 * TILE + TILE / 2, 0 * TILE + TILE / 2);
+    placeCarryableActor(CARRY_BOMB2_DEF_ID, 1 * TILE + TILE / 2, 0 * TILE + TILE / 2);
+    placeCarryableActor(PUSHABLE_DEF_ID, 0 * TILE + TILE / 2, 8 * TILE + TILE / 2);
+    placeCarryableActor(PUSHABLE_DEF_ID, 22 * TILE + TILE / 2, 10 * TILE + TILE / 2);
+    actorDefs.lwoInventor = { temperament: "stationary", poses: null, name: "inventor", art: HERO_ART.slice() };
+    playerDefId = "lwoInventor";
+    placeExampleActor("lwoInventor", 22, 16);
+    activateRoom(room.id);
+    return room;
+  }
+  function drawLongWayOutIcon(ctx) {
+    ctx.fillStyle = "#6b4b35"; ctx.fillRect(0, 0, 24, 24);
+    ctx.fillStyle = "#3f454c";
+    ctx.fillRect(2, 4, 19, 2); ctx.fillRect(3, 9, 19, 2); ctx.fillRect(2, 14, 12, 2);
+    ctx.fillStyle = "#e0b84c"; ctx.fillRect(5, 4, 1, 2); ctx.fillRect(10, 4, 1, 2); ctx.fillRect(15, 4, 1, 2);
+    ctx.fillRect(7, 9, 1, 2); ctx.fillRect(12, 9, 1, 2); ctx.fillRect(17, 9, 1, 2);
+    ctx.fillStyle = "#c79a5c"; ctx.fillRect(15, 2, 4, 2);
+    ctx.fillStyle = "#4b3222"; ctx.fillRect(15, 16, 8, 7);
+    ctx.fillStyle = "#8a5a3a"; ctx.fillRect(16, 17, 6, 6);
+    ctx.fillStyle = "#8a4ad0"; ctx.fillRect(15, 17, 1, 5);
+    ctx.fillStyle = "#e53935"; ctx.fillRect(19, 21, 2, 2);
+    ctx.fillStyle = "#4fb6ec"; ctx.fillRect(4, 18, 3, 3);
+    ctx.fillStyle = "#f2d03c"; ctx.fillRect(9, 19, 3, 2);
+  }
+
   const SAMPLE_GAMES = [
     { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
     { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -9351,6 +9505,7 @@
     { name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
     { name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
     { name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
+    { name: "The Long Way Out", builder: buildLongWayOutGame, draw: drawLongWayOutIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");

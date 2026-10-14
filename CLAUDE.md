@@ -6312,3 +6312,67 @@ They have no reference image ("taken from the game"). Editing, dirty tracking, R
 ## Princess, second pass
 
 `PRINCESS_ART` replaced with the user's edited version from the sprite editor (used verbatim): yellow hair with a green gem at the crown, `#66d6ff` dress, `#3b8bbd` waist. Supersedes the "Princess recolored" section's palette. Rock Bottom's "Princess Pip" picks it up automatically; Princess characters already applied in saved projects keep their old art. The sprite editor's preloaded "Princess" still holds the previous art (it is a snapshot).
+
+## "The Long Way Out" — a chain-reaction contraption sample (one room, no engine changes)
+
+`buildLongWayOutGame()` / `drawLongWayOutIcon`, registered last in `SAMPLE_GAMES`. One fixed 24x18 room, gravity on, no wrap, nothing
+that hurts. The inventor is shut in a booth (interior cols 20-22, rows 14-16) with ONE Switch under a painted sign (DO NOT PUSH, the only
+text). Everything after that flip is the machine running itself. **No new pieces, rules or engine behaviour**: every part is an existing
+mechanic; the belt/plank/floor skins and every background tile are sample-scoped defs added inside the builder. Phase 0 prototypes and
+numbers are in `prototypes/long-way-out-handoffs.js` (50 runs per hand-off); the reliability suite is `tests/longwayout.test.js [runs]`
+(53 checks). Screenshots: `prototypes/long-way-out-shots/`.
+
+**The machine (times from the first Switch flip, 60 fps, identical in all 100 runs):**
+| t (s) | what happens |
+|---|---|
+| 0 | Switch (red) opens Gate A; crate 1, held against it as a wall on the top belt, is free at 0.25 |
+| 0.25-21.9 | five conveyor legs, each about 20 tiles and 4.2 s, crate 1 drops from leg to leg (4.1, 8.4, 12.8, 17.1) and lands on Plate P1 (blue) at 21.87 |
+| 21.87 | P1 opens the blue Gate: the Large Stone falls onto Plate P2 (green) at 22.77 |
+| 22.77 | P2 opens the green Gate: the bomb falls 9 rows, detonates on the blast-proof ledge and clears the diggable cork (23.40) |
+| 23.4 | crate 2 falls onto the cannon, loads, fires (23.93) and lands on Switch 2 (yellow) at 25.03 |
+| 25.03 | Switch 2 opens Gate D: crate 3, held against it on the lower right belt, rides three belts, then a fan pushes it along waxed (slippery) floor onto the last Plate (purple) at 31.80 |
+| 31.80 | the purple Plate opens the booth Gate; the player walks out to the goal (win at about 32.1) |
+
+**Mechanism use (honest count)**: belt x9 legs, Gate x5 (A, blue, green, D, booth), Plate x3, Switch x2, crate x3, plus one each of
+Large Stone, bomb, diggable, indestructible, cannon, fan, slippery. Belts, Gates and Plates are used far more than twice: the
+brief's "none more than twice" cannot be met together with "35-40 s", because conveyors (5 tiles/s for crates, stone and bombs alike, measured)
+are the only slow piece. **Duration is 31.8 s to the Gate, not 35-40**; the room has no more space for belts (the cannon arc clears the
+rack by about 37 px and reaches rows 12-16 across cols 1-9, the booth and goal nook take the bottom right).
+
+**Cut from the approved list, with reasons:** Trampoline (a crate bounces straight up about 4 tiles, airborne friction kills any sideways
+speed, and its only use re-flips a Switch on re-entry), Magnet and Black Hole (no free floor space once the rack is long enough; a
+magnet is always on and would also pull crate 1 or crate 2 off their plates). Movers were not used (sample-only).
+
+**Techniques worth reusing**
+- *A Gate as a wall*: a crate on a belt, pressed against a closed barrier in its own row, sits perfectly still until the channel flips,
+  then rides the belt. It gives a long first leg without any timer and makes the start unambiguous.
+- *Stacked belts at 2-row spacing*: a crate rides the row above its belt, so legs can be 2 rows apart (10 px clearance). A belt end drops
+  the crate at the next tile column (airborne friction kills its speed), so each leg starts exactly one column past the previous end.
+- *Mirrored for space*: stone, bomb and cannon live in the left 3 columns; the booth is bottom right, so the rack ends next to them.
+- A belt tile can carry skin art with the matching `wind-e`/`wind-w` modifier (animated chevrons at `frameMs` 50 match the 160 px/s belt
+  speed), which avoids the mismatched-modifier tint.
+
+**Rule one (gated exit), proven by trying:** the booth is closed by a 3-tile Gate, a roof and walls. Idle for 60 s: nothing moves, no win.
+Mashing every key (jump, E, direction) for 60 s without ever touching the Switch side: the player never leaves, never grabs, never wins.
+After the flip, mashing keys for the whole run: the player never leaves the booth before the purple Plate (x >= 640 px), is never within
+grab range of a piece (closest 118-155 px, range 41.6), and every beat time is identical to the unmashed run. 20 entries on the Switch in
+5 s give 4 flips (the engine's 500 ms flip cooldown) and the finale time is unchanged: Gate A is clear of crate 1 before a second flip is
+possible, and a Gate that re-closes on a crate either leaves it on top (closed within 233 ms) or the crate is already through.
+
+**Reliability numbers**: 100 of 100 runs win; every beat has min = median = max (zero spread); no `Math.random` calls in a run (no random
+element anywhere; no spawners). Frame rate: 30 fps within 0.05 s of 60 fps, 120 fps +0.14 s, 144 fps +0.13 s (the finale is later by
+two frames, the final state is identical, all win). 90 s idle after the finale: no errors, no wins, nothing drifts. Standalone export: runs
+the chain once and wins at 31.80 s with no errors. Longest gap between discrete events is a rack leg, about 4.2 s of continuous visible
+motion (animated belt, riding crate).
+
+**Two things found, one fixed, one reported**
+- *Fixed (in the builder, not the engine)*: `loadExampleGame` never clears `switchChannels`, so a Switch left on in a previous project
+  leaked into a freshly loaded sample (this machine would start by itself and an export carried it too). The builder now starts with
+  `switchChannels = {}`. Every other sample with Switches has the same latent leak; fixing it in `loadExampleGame` is a one-line engine
+  change that was out of scope here.
+- *Reported*: in Build mode, "Reset to start" restores every piece, tile and the blast (checked identical) but leaves Switch positions as
+  they were, because Switch state is authored data. Play restart returns everything, Switches included (checked identical). So after a run
+  in Build a kid must click the two Switches back (or just press Play).
+
+**Starting with no input**: possible as a one-shot. If the first Switch's starting state is saved on (Build-mode click), Gate A is open at
+Play start and the whole chain runs after the READY pause (finale at 31.97 s, verified). It is not a loop: the machine is single-use.
