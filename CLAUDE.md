@@ -6294,3 +6294,7 @@ nothing should assume they are part of the core toolbox. In practice:
   no lockfile, no build artifacts, no test files (those are scratchpad-only
   and never committed).
 
+
+## Princess recolored (less Peach)
+
+`PRINCESS_ART` redrawn: dress in `#8cc5e8` with `#3b8bbd` shading and `#badef5` hem, a `#badef5` tiara with a `#3b8bbd` center gem across the hair (replacing the blue hair gems), and a two-tone diamond (`#badef5` over `#3b8bbd`) on her chest. Hair and face unchanged. The preset only copies art onto a def (and Rock Bottom's `rbHero` copies it at build time), so no stale-art migration is needed; already-applied Princess characters in saved projects keep their old pink look. "Pink blob" (`PRINCESS_POSES`) is untouched. Only checked by a load/render pass, not a visual review in-app.
