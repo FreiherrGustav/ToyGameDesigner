@@ -6395,3 +6395,18 @@ magnet activatable by Switches/Plates, and let it keep a bomb until released.
 - Export: `magnetActiveAt`/`magnetHoldsActor` in `runtimeFunctions`. Caption now "Pulls stuff your way, and hangs on to it."
 - Tests: `tests/magnet.test.js` (untagged holds, colored+on holds, switching off drops, colored+off does not hold); verified on the
   user's `my-project.json` (untagged holds the belt bomb; red-off lets it pass; red-on holds, off drops). Long Way Out suite still 53/53.
+
+## "The Over-Engineered Escape" replaces "The Long Way Out" (user-authored, durability-tested)
+
+`OVER_ENGINEERED_PROJECT` embeds the user's own contraption (`my-project_5.json`), loaded via `restoreProjectSnapshot` like the other user-authored samples; `buildOverEngineeredEscapeGame()` / `drawOverEngineeredIcon`. The coded Long Way Out builder, its icon and `tests/longwayout.test.js` are gone, so the Long Way Out section above (and `prototypes/long-way-out-*`) is history. Actors reset to spawn, spawner state stripped.
+
+**Verified solvable:** a clock-driven recipe at 60 fps (9 macros) ends in a win, also after lingering on the roof; the cascade and booth opening work at 30/60/90/144 fps. Climbing out of the booth works at 60/90/144 fps only (impossible at 30 fps: known limit). **Verified gated:** 0 wins in ~210 random-input runs. Suite: `node tests/overengineered.test.js [fuzzRuns]` (63 checks, includes a 12-sample load/play sweep).
+
+**Engine fixes found by fuzzing this level (shared code):**
+- Delayed removals (popVanish, bomb blast, collect) now use `removeActorObject(obj)` (by identity) instead of `removeActorById`: a stale timer could delete a different actor that reused the id. Added to `runtimeFunctions`.
+- `dropCarriedObject` tries in-front, behind, then above the player, rejecting any spot overlapping tiles or the player; if none fits the object stays carried ("No room to put it down here."). Fixes a crate dropped on/into the player that was used to tunnel out of the booth.
+- `shovePushables` seats via `seatX`/`seatY`, which revert if the result would overlap tiles (no ping-pong/tunnelling through walls).
+- `keepPlayerOnBoard`: the embed counter decays on clean frames instead of resetting only on a perfect run.
+- Fixed a `ReferenceError` (`radiusPx` -> `magnetRadiusPx`) in the carried-magnet branch.
+
+**Known limit:** an exported game cannot restart without reloading the page.
