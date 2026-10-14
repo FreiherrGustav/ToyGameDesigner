@@ -40,7 +40,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));
   page.on("dialog", d => d.accept());
-  await page.goto("file://" + tmp);
+  await page.goto("file://" + tmp + "#t");
   await page.waitForFunction(() => window.__st);
   const tmpls = await page.evaluate(() => __st.templatesFull());
   const ids = tmpls.map(t => t.id);

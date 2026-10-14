@@ -42,7 +42,7 @@ const LIB = `()=>{
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
   await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__ev);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
   await page.evaluate(l => window.__ev(l)(), LIB);
   const load = () => run(page, () => {
     if (appMode === "play") exitToBuildMode();
@@ -405,7 +405,7 @@ const LIB = `()=>{
   const ctx2 = await browser.newContext(); const pg2 = await ctx2.newPage(); const e2 = [];
   pg2.on("pageerror", e => e2.push(String(e))); pg2.on("dialog", d => d.accept());
   await pg2.addInitScript(() => { window.requestAnimationFrame = () => 0; localStorage.clear(); });
-  await pg2.goto("file://" + tmp); await pg2.waitForFunction(() => window.__ev);
+  await pg2.goto("file://" + tmp + "#t"); await pg2.waitForFunction(() => window.__ev);
   await pg2.click("#samplesBtn").catch(() => {});
   const viaModal = await pg2.evaluate(() => { const cards = [...document.querySelectorAll("#samplesGrid *")].filter(e => e.textContent.trim() === "Rock Bottom"); return cards.length; });
   ok(viaModal > 0, "Rock Bottom card is in the Samples modal");

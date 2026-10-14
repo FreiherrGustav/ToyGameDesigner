@@ -3,7 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Toy Game-Maker</title>
+<title>TinyGameMaker — a toy for making games</title>
+<!-- Static copies of APP_NAME: crawlers/link previews don't run JS, so a rename is APP_NAME plus these head tags. -->
+<meta name="description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="TinyGameMaker — a toy for making games">
+<meta property="og:description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta property="og:image" content="og-image.png"><!-- PLACEHOLDER: replace with the real preview image path/URL -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TinyGameMaker — a toy for making games">
+<meta name="twitter:description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta name="twitter:image" content="og-image.png"><!-- PLACEHOLDER: same as og:image -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%231e1f26'/%3E%3Crect x='2' y='2' width='12' height='12' fill='%238d6e63'/%3E%3Crect x='2' y='2' width='12' height='2' fill='%23ffd166'/%3E%3Crect x='2' y='12' width='12' height='2' fill='%23ffd166'/%3E%3Crect x='2' y='2' width='2' height='12' fill='%23ffd166'/%3E%3Crect x='12' y='2' width='2' height='12' fill='%23ffd166'/%3E%3Cpath d='M4 4h2v2H4zM6 6h4v4H6zM10 10h2v2h-2zM10 4h2v2h-2zM4 10h2v2H4z' fill='%235d4037'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #1e1f26;
@@ -315,10 +326,43 @@
     color: var(--accent);
     margin-left: auto;
   }
+
+  /* ---------- Landing screen (v2.47): a state of this page over a live, dimmed game ---------- */
+  #landing { display: none; position: fixed; inset: 0; z-index: 500; align-items: center; justify-content: center;
+    background: rgba(12, 12, 20, 0.66); overflow-y: auto; padding: 16px; }
+  body.landing #landing { display: flex; }
+  /* the real canvas becomes the backdrop: covers the viewport, 4:3 kept (cropped, never stretched) */
+  body.landing #topBar, body.landing #paletteWrap, body.landing #gameWrap > :not(#gameCanvas) { display: none !important; }
+  body.landing #app { padding: 0; }
+  body.landing #gameWrap { position: fixed; inset: 0; padding: 0; background: #000; overflow: hidden; z-index: 1; }
+  body.landing #gameCanvas { position: absolute !important; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: max(100vw, 133.34vh) !important; height: auto !important; aspect-ratio: 4 / 3; border: 0 !important; border-radius: 0; }
+  #landingPanel { max-width: 640px; width: 100%; text-align: center; margin: auto; }
+  #landingWordmark { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace; font-weight: 900;
+    font-size: clamp(34px, 8vw, 64px); letter-spacing: 0.02em; color: var(--accent); line-height: 1.05;
+    text-shadow: 3px 3px 0 #8d6e63, 6px 6px 0 rgba(0,0,0,0.45); }
+  #landingTagline { margin: 12px 0 22px; font-size: clamp(15px, 3.2vw, 19px); color: #fff; line-height: 1.4; text-shadow: 0 1px 6px #000; }
+  #landingButtons { display: flex; gap: 10px; justify-content: center; }
+  #landingButtons button { font: inherit; font-size: 17px; font-weight: bold; padding: 13px 20px; border-radius: 8px; cursor: pointer;
+    border: 2px solid var(--accent); background: rgba(30,31,38,0.9); color: var(--accent); min-width: 150px; }
+  #landingButtons button:first-child { background: #4caf50; border-color: #4caf50; color: #fff; }
+  #landingButtons button:hover { filter: brightness(1.15); }
+  #landing button:focus-visible, #landing a:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  #landingNow { margin-top: 18px; font-size: 13px; color: #ddd; text-shadow: 0 1px 4px #000; }
+  #landingNow button { font: inherit; font-size: 13px; background: none; border: 0; color: var(--accent); cursor: pointer; text-decoration: underline; padding: 0 2px; }
+  #landingTrust { margin-top: 14px; font-size: 13px; color: #fff; text-shadow: 0 1px 4px #000; }
+  #landingKeys { margin-top: 8px; font-size: 12px; color: #c8cad6; text-shadow: 0 1px 4px #000; }
+  #landingFoot { margin-top: 22px; font-size: 12px; color: #aaa; text-shadow: 0 1px 4px #000; }
+  #landingFoot a { color: #cfd2e0; margin: 0 8px; }
+  #landingBest { margin-top: 8px; font-size: 11px; color: #9aa0b4; text-shadow: 0 1px 4px #000; }
+  @media (max-width: 700px) { #landingButtons { flex-direction: column; align-items: stretch; } #landingButtons button { min-width: 0; } }
+  #homeBtn { background: transparent; color: var(--accent); border: 1px solid var(--panel-light); border-radius: 6px; padding: 8px 12px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+  #homeBtn:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
 <div id="topBar">
+  <button id="homeBtn" title="Back to the front screen" aria-label="Home">🏠</button>
   <div id="appModeToggle" class="mode-toggle">
     <button id="modeBuildBtn" class="active">🛠 Build</button>
     <button id="modePlayBtn">▶ Play</button>
@@ -326,6 +370,23 @@
   <div id="topBarDivider" aria-hidden="true"></div>
   <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
   <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
+</div>
+
+<div id="landing" role="dialog" aria-label="Welcome">
+  <div id="landingPanel">
+    <div id="landingWordmark">TinyGameMaker</div>
+    <div id="landingTagline">A toy for making games. Drop pieces on the board. They just work.</div>
+    <div id="landingButtons">
+      <button id="landingPlayBtn">Play a game</button>
+      <button id="landingMakeBtn">Make one</button>
+      <button id="landingSurpriseBtn">Surprise me</button>
+    </div>
+    <div id="landingNow">Now playing: <span id="landingNowName"></span> · <button id="landingTakeApartBtn">Take it apart ↗</button></div>
+    <div id="landingTrust">Free. No account. Nothing leaves your browser.</div>
+    <div id="landingKeys">Arrow keys or WASD to move · Space to jump · E to grab and throw</div>
+    <div id="landingFoot"><a id="landingPrivacy" href="#">Privacy</a>·<a id="landingContact" href="#">Contact</a></div>
+    <div id="landingBest">Best on a computer or Chromebook</div>
+  </div>
 </div>
 
 <div id="samplesModalOverlay" style="display:none;">
@@ -342,7 +403,7 @@
 
   <!-- Palette / Authoring panel -->
   <div class="panel" id="paletteWrap">
-    <h1>Toy Game-Maker</h1>
+    <h1 id="appTitle">TinyGameMaker</h1>
     <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
          used to live in this panel — see CAPTION_TEXT/wireCaption/setCaption. Updates on hover
          (desktop) or last tap (touch) of whatever swatch has something worth saying. -->
@@ -1346,6 +1407,10 @@
   // than dropping a kid straight into a moving hazard (e.g. Runner mode's own camera) with zero
   // time to get their bearings. See frame()'s own gating and drawReadyOverlay().
   const READY_DURATION_MS = 1200;
+  // v2.47: true while the landing screen is up (the backdrop is the real engine running a sample with no input).
+  // Mutes sound, blocks game keys and autosave, and (landingFrozen) freezes the backdrop for reduced-motion.
+  let landingActive = false, landingFrozen = false;
+  const APP_NAME = "TinyGameMaker"; // the one name constant (see also the static <head> tags)
   let playReadyUntil = null; // null = not in a Ready pause; otherwise a performance.now() timestamp
   let levelResetPending = false, levelResetTimer = null; // a life was just spent; the level restarts when the timer fires
   let checkpoint = null; // where a death sends you back to: the door you last came in by (or the game start)
@@ -2101,6 +2166,7 @@
     if (el) el.textContent = text;
   }
   function saveAutosave() {
+    if (landingActive) return; // visiting the landing screen never touches the saved project
     const payload = JSON.stringify(wrapProjectSnapshot(captureProjectSnapshot()));
     if (payload === lastAutosaveJSON) return; // nothing's actually changed since the last save
     try {
@@ -3314,8 +3380,8 @@
     return confirm(question + " This clears everything — every room, all custom art and actors, and your saved work — and can't be undone.");
   }
 
-  function loadExampleGame(builderFn, label) {
-    if (!confirmReplaceProject("Load \"" + label + "\"?")) return false;
+  function loadExampleGame(builderFn, label, opts) {
+    if (!(opts && opts.skipConfirm) && !confirmReplaceProject("Load \"" + label + "\"?")) return false;
     // Samples is a top-level entry point independent of the Build/Play toggle — a kid can open it
     // from Play mode too, and loading one always lands back in Build (v2.8's original rule).
     if (appMode === "play") exitToBuildMode();
@@ -3582,6 +3648,7 @@
   }
   // Returns a loudness multiplier for this trigger: 0 = skip it, 1 = normal, less = an overlapping copy.
   function claimVoice(key, durationMs) {
+    if (landingActive) return 0; // the landing backdrop is silent
     const now = performance.now();
     activeVoices = activeVoices.filter(v => v.endAt > now);
     if (activeVoices.length >= SOUND_MAX_TOTAL) return 0;
@@ -3851,7 +3918,7 @@
   // exported game reloads back to its own embedded GAME_DATA — both land somewhere known-good.
   let fatalErrorShown = false;
   function handleFatalError(err) {
-    console.error("Toy Game-Maker hit an unexpected error:", err);
+    console.error(APP_NAME + " hit an unexpected error:", err);
     if (fatalErrorShown) return; // already showing the overlay — no need to re-log every repeat error
     fatalErrorShown = true;
     try { log("😵 Something glitched — use the reset button to pick back up."); } catch (logErr) { /* even logging failed; the overlay below still covers it */ }
@@ -6928,6 +6995,7 @@
   // ============== Per-actor physics step ==============
   const keys = {};
   window.addEventListener("keydown", (e) => {
+    if (landingActive) return; // no input reaches the landing backdrop (and Space/Enter keep working on its buttons)
     const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
     if (map.includes(e.key)) e.preventDefault();
     keys[e.key] = true;
@@ -6945,6 +7013,7 @@
   let grabKeyDownAt = null; // performance.now() timestamp of the current press, or null when not held
   window.addEventListener("keydown", (e) => {
     if (e.key !== "e" && e.key !== "E") return;
+    if (landingActive) return;
     if (e.repeat) return; // only the real first press starts anything
     e.preventDefault();
     const player = actors.find(a => a.isPlayer);
@@ -9472,18 +9541,18 @@
   }
 
   const SAMPLE_GAMES = [
-    { name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
-    { name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
-    { name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
-    { name: "The Monster's Den", builder: buildMonstersDenGame, draw: drawMonstersDenIcon },
-    { name: "The World's Worst Elevator", builder: buildWorstElevatorGame, draw: drawWorstElevatorIcon },
-    { name: "The Ice Cave", builder: buildIceCaveGame, draw: drawIceCaveIcon },
-    { name: "The Bomb Factory", builder: buildBombFactoryGame, draw: drawBombFactoryIcon },
-    { name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
-    { name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
-    { name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
-    { name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
-    { name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
+    { id: "the-cheese-heist", name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
+    { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
+    { id: "dungeon-diving", name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
+    { id: "the-monster-s-den", name: "The Monster's Den", builder: buildMonstersDenGame, draw: drawMonstersDenIcon },
+    { id: "the-world-s-worst-elevator", name: "The World's Worst Elevator", builder: buildWorstElevatorGame, draw: drawWorstElevatorIcon },
+    { id: "the-ice-cave", name: "The Ice Cave", builder: buildIceCaveGame, draw: drawIceCaveIcon },
+    { id: "the-bomb-factory", name: "The Bomb Factory", builder: buildBombFactoryGame, draw: drawBombFactoryIcon },
+    { id: "the-gravity-switcheroo", name: "The Gravity Switcheroo", builder: buildGravitySwitcherooGame, draw: drawGravitySwitcherooIcon },
+    { id: "sushi-train-panic", name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
+    { id: "crossing-guard", name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
+    { id: "rock-bottom", name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
+    { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
@@ -9499,6 +9568,7 @@
       tile.appendChild(canvas);
       tile.appendChild(name);
       tile.addEventListener("click", () => {
+        if (landingActive) { landingPickSample(sample); return; }
         if (loadExampleGame(sample.builder, sample.name)) closeSamplesModal();
       });
       grid.appendChild(tile);
@@ -11030,6 +11100,93 @@
     btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
   })();
 
+  // ============== Landing screen (v2.47) ==============
+  // A full-viewport state of this page, shown on a first visit (no autosave, no URL hash) and from
+  // the Home button. The backdrop is the real engine playing one built-in sample in Play mode with
+  // no input, dimmed. The real project is held aside (landingSaved) and put back on the way out, so
+  // looking at the landing screen never changes the project or the autosave: autosave, game keys
+  // and sound are all off while it is up (landingActive).
+  // Only samples that do something on their own and can't kill the player in the first minute
+  // (see CLAUDE.md for the 20-second no-input runs that chose them).
+  const LANDING_HEROES = ["crossing-guard", "the-gravity-switcheroo", "dungeon-diving"];
+  const PRIVACY_URL = ""; // PLACEHOLDER: set to the privacy page before launch
+  const CONTACT_URL = ""; // PLACEHOLDER: set to a mailto: or contact page before launch
+  let landingSaved = null, landingHadWork = false, landingHero = null;
+  function landingProjectHasWork(snapJSON) {
+    try { return snapJSON !== JSON.stringify(FACTORY_DEFAULT_SNAPSHOT); } catch (e) { return true; }
+  }
+  function showLanding() {
+    if (landingActive) return;
+    if (appMode === "play") exitToBuildMode();
+    snapshotCurrentRoomState();
+    const snap = captureProjectSnapshot();
+    const json = JSON.stringify(snap);
+    landingSaved = { snap: structuredClone(snap), json, undo: undoStack, redo: redoStack };
+    landingHadWork = landingProjectHasWork(json);
+    const pool = SAMPLE_GAMES.filter(g => LANDING_HEROES.includes(g.id));
+    landingHero = pool[Math.floor(Math.random() * pool.length)];
+    landingActive = true;
+    landingFrozen = false;
+    document.body.classList.add("landing");
+    document.getElementById("landingNowName").textContent = landingHero.name;
+    try {
+      loadExampleGame(landingHero.builder, landingHero.name, { skipConfirm: true });
+      enterPlayMode();
+      playReadyUntil = null; // no READY! pause behind a title screen
+    } catch (err) { endLanding(true); throw err; }
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      requestAnimationFrame(() => requestAnimationFrame(() => { landingFrozen = true; }));
+    }
+    const first = document.getElementById("landingPlayBtn");
+    if (first) first.focus();
+  }
+  // restore: put the held-aside project back (Make one, Surprise me, Home round trip); false keeps
+  // whatever is loaded now (Take it apart / picking a sample), which replaces the project.
+  function endLanding(restore) {
+    if (!landingActive) return;
+    if (appMode === "play") exitToBuildMode();
+    if (restore && landingSaved) {
+      suppressHistory = true;
+      restoreProjectSnapshot(structuredClone(landingSaved.snap));
+      suppressHistory = false;
+      undoStack = landingSaved.undo; redoStack = landingSaved.redo;
+      resetScoreAndIntensity();
+    } else {
+      resetHistory();
+    }
+    landingActive = false; landingFrozen = false; landingSaved = null;
+    document.body.classList.remove("landing");
+    document.getElementById("log").textContent = "";
+    updateUndoRedoButtons();
+    fitCanvas();
+  }
+  function landingPickSample(sample) {
+    if (landingHadWork && !confirmReplaceProject("Play \"" + sample.name + "\"?")) return;
+    loadExampleGame(sample.builder, sample.name, { skipConfirm: true });
+    closeSamplesModal();
+    endLanding(false);
+    enterPlayMode();
+  }
+  (function wireLanding() {
+    const $ = id => document.getElementById(id);
+    $("landingWordmark").textContent = APP_NAME;
+    $("appTitle").textContent = APP_NAME;
+    document.title = APP_NAME + " — a toy for making games";
+    $("landingPlayBtn").addEventListener("click", openSamplesModal);
+    $("landingMakeBtn").addEventListener("click", () => endLanding(true));
+    $("landingSurpriseBtn").addEventListener("click", () => { endLanding(true); $("surpriseBtn").click(); });
+    $("landingTakeApartBtn").addEventListener("click", () => {
+      if (landingHadWork && !confirmReplaceProject("Open \"" + landingHero.name + "\" in the editor?")) return;
+      endLanding(false);
+    });
+    [["landingPrivacy", PRIVACY_URL], ["landingContact", CONTACT_URL]].forEach(([id, url]) => {
+      const a = $(id);
+      if (url) a.href = url;
+      else { a.title = "Placeholder: not set yet"; a.addEventListener("click", e => e.preventDefault()); }
+    });
+    $("homeBtn").addEventListener("click", showLanding);
+  })();
+
   // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
   // Captured now — after every built-in actor/background def above has been seeded and the
   // initial empty board is in place, but before any auto-save restore might replace them — so
@@ -11038,6 +11195,7 @@
   const FACTORY_DEFAULT_SNAPSHOT = captureProjectSnapshot();
   if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");
   updateUndoRedoButtons();
+  const bootHash = location.hash;
   // #surprise=4821 in the URL rebuilds that exact arrangement (then clears the hash so a reload
   // doesn't stack another copy on top of the autosave).
   (function surpriseFromHash() {
@@ -11046,6 +11204,9 @@
     surpriseMe(Number(m[1]));
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* file:// may refuse */ }
   })();
+  // First visit (nothing autosaved, no deep-link hash) lands on the front screen; a returning
+  // visitor or any #hash goes straight to the editor exactly as before.
+  if (!lastAutosaveJSON && !bootHash) showLanding();
 
   // ============== Export: standalone playable file ==============
   // The exported file is a second, self-contained HTML document: the current build's data
@@ -11253,7 +11414,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>My Game</title>
+<title>My Game — made with ${APP_NAME}</title>
 <style>
   :root { --bg:#1e1f26; --panel:#2a2c37; --panel-light:#383b4a; --accent:#ffd166; --text:#f2f2f2; }
   * { box-sizing: border-box; }
@@ -11339,6 +11500,7 @@
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let playReadyUntil = null;
+  let landingActive = false, landingFrozen = false; // always false in an export (claimVoice/frame read them)
   let levelResetPending = false, levelResetTimer = null;
   let checkpoint = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
@@ -11472,6 +11634,8 @@
         if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
       } else if (appMode === "play" && playSessionEnded) {
         // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
+      } else if (landingActive && landingFrozen) {
+        // prefers-reduced-motion: the landing backdrop stays on its first frame
       } else if (appMode === "play" && playReadyUntil != null && t < playReadyUntil) {
         // Direct feedback: the action used to start the instant Play was pressed, giving a kid
         // zero time to see where they'd landed before e.g. Runner mode's camera started closing

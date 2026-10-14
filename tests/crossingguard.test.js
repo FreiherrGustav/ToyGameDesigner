@@ -18,7 +18,7 @@ const run = (pg, fn, arg) => pg.evaluate(([s, a]) => window.__ev(s)(a), [fn.toSt
   const page = await browser.newPage();
   const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
   await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__t);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__t);
 
   const load = () => run(page, () => {
     exitToBuildMode && appMode === "play" && exitToBuildMode();

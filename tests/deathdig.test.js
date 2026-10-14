@@ -16,7 +16,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
   await page.addInitScript(() => { window.requestAnimationFrame = () => 0; });
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__ev);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
   const load = () => run(page, () => {
     if (appMode === "play") exitToBuildMode();
     loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;

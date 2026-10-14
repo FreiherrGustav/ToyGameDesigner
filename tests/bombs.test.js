@@ -15,7 +15,7 @@ const fails = []; const fail = m => { fails.push(m); console.log("FAIL:", m); };
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const page = await browser.newPage();
   const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__t);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__t);
   // 1. a pile of bombs sharing one spot doesn't run away off the board, and a resting pile is silent
   const pile = await page.evaluate(() => {
     __t.reset(); __t.grav(true);

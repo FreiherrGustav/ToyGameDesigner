@@ -8,7 +8,7 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const p = await b.newPage(); p.on("dialog", d => d.accept()); const errs = []; p.on("pageerror", e => errs.push(e.message));
-  await p.goto("file://" + tmp);
+  await p.goto("file://" + tmp + "#t");
   const r = await p.evaluate(() => window.__ev(function () {
     loadExampleGame(buildSushiTrainGame, "x"); exitToBuildMode && 0;
     const out = {};

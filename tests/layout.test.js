@@ -15,7 +15,7 @@ const SIZES = [[1280,720],[1366,768],[1180,820],[1440,900],[1920,1080]];
   for (const [w, h] of SIZES) {
     const page = await browser.newPage({ viewport: { width: w, height: h } });
     const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
-    await page.goto("file://" + tmp); await page.waitForFunction(() => window.__ev);
+    await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
     await page.waitForTimeout(300);
     const box = await page.evaluate(() => { const r = document.getElementById("gameCanvas").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, b: r.bottom }; });
     console.log(w + "x" + h, "canvas top", Math.round(box.y), "bottom", Math.round(box.b), "size", Math.round(box.w) + "x" + Math.round(box.h));

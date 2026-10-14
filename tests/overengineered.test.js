@@ -132,7 +132,7 @@ const ROUTE = [
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const page = await browser.newPage(); page.on("dialog", d => d.accept());
   const errs = []; page.on("pageerror", e => errs.push(String(e)));
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__ev);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
   const KIT = TOOLKIT.toString();
   const withKit = (fn, arg) => page.evaluate(([k, s, a]) => { const T = window.__ev(k)(); return window.__ev(s)(T, a); }, [KIT, fn.toString(), arg]);
 

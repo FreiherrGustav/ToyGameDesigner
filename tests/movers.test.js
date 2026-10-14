@@ -33,7 +33,7 @@ const DEFINE_RIVER = `window.__river=()=>{ __t.reset(); __t.grav(false); __t.wra
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
   const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept());
-  await page.goto("file://" + tmp); await page.waitForFunction(() => window.__t);
+  await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__t);
   await page.evaluate(DEFINE_RIVER);
 
   // 1. presets exist with the right shape
@@ -280,7 +280,7 @@ const DEFINE_RIVER = `window.__river=()=>{ __t.reset(); __t.grav(false); __t.wra
   // 17. an exported game runs a crossing: a rider on a log is carried and takes no hit, zero errors
   const p2 = await browser.newPage(); p2.on("dialog", d => d.accept());
   const e2 = []; p2.on("pageerror", e => e2.push(String(e)));
-  await p2.goto("file://" + tmp); await p2.waitForFunction(() => window.__t);
+  await p2.goto("file://" + tmp + "#t"); await p2.waitForFunction(() => window.__t);
   await p2.evaluate(DEFINE_RIVER);
   await run(p2, () => {
     __river();
