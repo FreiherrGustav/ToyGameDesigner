@@ -3044,7 +3044,9 @@ named patch. **`kaboom` deliberately covers both bomb detonation and cannon
 launch** — this looks like it's reintroducing the exact v2.20.1 "cannon and
 bomb sounded identical" bug, but it isn't: the delivered sound design's own
 `use` field says `"bomb explosion, cannon shot"` together, a decision made
-in the design data itself, not by whoever wires up the reaction table. Only
+in the design data itself, not by whoever wires up the reaction table.
+(The shipped `kaboom` data is now the author's own hand-designed chip data, replacing an earlier
+compile of a third-party track; it keeps the same key, `gap`/`max` limits and callers.) Only
 `wind`/`slide`/`warp` changed in the other direction — they're now three
 genuinely distinct rendered sounds (`wind`/`swoosh`/`zip`, three tuned
 variants of one design family) instead of one shared patch pitched three
