@@ -6302,3 +6302,9 @@ nothing should assume they are part of the core toolbox. In practice:
 ## "Pink blob" becomes Derpy (cupcake)
 
 The old pink-blob preset (`PRINCESS_POSES`/`PRINCESS_BODY`/`PRINCESS_LEGEND`, a Kirby-like look) is deleted. In its slot (right after Hero, before ghost) is **Derpy**, a flat single-pose cupcake (`CUPCAKE_ART`, user-supplied `pat()` art used verbatim). Preset names are tooltips only, so no migration; characters that already had the old blob applied keep their stored art.
+
+## Sprite editor: the game's own sprites are preloaded
+
+`prototypes/sprite-editor.html` now opens with the original 24 extracted sprites **plus 109 sprites taken from the game itself** (`GAME_SPRITES`, embedded right after `PAYLOAD`): character presets (poses become frames), collectibles, objects/carried kinds, tile and fixture icons, ground/lethal skins (lava/fire frames included), backgrounds, movers, the remaining named `*_ART`/`*_FRAMES` constants, and the custom art inside the six embedded sample projects. Categories are prefixed "Game ·". Duplicates (identical art) and flat one-colour squares are skipped, so e.g. Hero appears once. A sidebar filter box searches label and category.
+
+They have no reference image ("taken from the game"). Editing, dirty tracking, Reset (`originalFrames(id)`, which replaced direct `ORIGINAL_ART` reads), Save/Load JSON and Export as JS all work the same; Export as JS only emits edited ones, named from the label (the "Other art" labels are the real constant names). The data was extracted once with a throwaway Playwright script against a hooked copy of `index.html` and is a **snapshot**: new art added to the game later is not picked up automatically — re-extract to refresh. The editor's palette is still the sheet's; use "+" for game colours not on it.
