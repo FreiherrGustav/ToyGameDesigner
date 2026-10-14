@@ -2172,17 +2172,6 @@
     air: pat(HERO_BODY.concat(["..BBBB.."]), HERO_LEGEND),
     crouch: pat(HERO_BODY.concat(["BB....BB"]), HERO_LEGEND)
   };
-  const PRINCESS_LEGEND = { P: "#f9a9e0", Q: "#ec7ec9", K: "#000000", N: "#0029a3", D: "#eb0095" };
-  const PRINCESS_BODY = [
-    "........", "..PPPP..", ".PPPPPP.", ".QPKPKPQ",
-    "QPPNPNPQ", "QQDPPPD.", ".DQQPPD."
-  ];
-  const PRINCESS_POSES = {
-    stand: pat(PRINCESS_BODY.concat([".DDD.DD."]), PRINCESS_LEGEND),
-    stride: pat(PRINCESS_BODY.concat([".DD.DDD."]), PRINCESS_LEGEND),
-    air: pat(PRINCESS_BODY.concat(["..DDDD.."]), PRINCESS_LEGEND),
-    crouch: pat(PRINCESS_BODY.concat(["DD....DD"]), PRINCESS_LEGEND)
-  };
   // Ghost floats rather than walks, so its "legs" are really just a small foot-nub that shrinks,
   // shifts, or disappears entirely (mid-air) instead of a walking gait. v2.17: the reference art
   // was drawn facing left, opposite every other character's right-facing convention (see the
@@ -2788,6 +2777,11 @@
     "..BBBB..", ".BTGGTB.", ".BDEDEB.", "BBDDDDBB",
     ".FFHHFF.", "D.FGGF.D", "..GGGG..", ".HHHHHH."
   ], { B: "#f9d941", T: "#badef5", D: "#fef2d2", E: "#000000", F: "#8cc5e8", G: "#3b8bbd", H: "#badef5" });
+  // Derpy the cupcake (replaces the old pink-blob look): single flat pose.
+  const CUPCAKE_ART = pat([
+    "..ABAA..", ".AAACAC.", "ACADDADD", "AAEDFAFD",
+    "GAADDADD", "GGAAEAAG", "HIHIHIHI", ".IHIHIH."
+  ], { A: "#ffc0cb", B: "#e41606", C: "#feb4b4", D: "#ffffff", E: "#f2c0c0", F: "#000000", G: "#ff69b4", H: "#cb7a33", I: "#9c4f26" });
   const HERO_ART = pat([
     "..ABBB..", ".BBBBAA.", ".CDEDE..", ".CDDDD.F",
     "..BBBA.F", ".AGGHGAF", "D.ABBB.D", ".II..II."
@@ -2860,7 +2854,7 @@
     { name: "Gary", poses: HERO_POSES },
     { name: "Princess", art: PRINCESS_ART },
     { name: "Hero", art: HERO_ART },
-    { name: "Pink blob", poses: PRINCESS_POSES },
+    { name: "Derpy", art: CUPCAKE_ART },
     { name: "ghost", poses: GHOST_POSES },
     { name: "monster", art: MONSTER_ART },
     { name: "skeleton", art: SKELETON_ART },
