@@ -68,7 +68,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   // make even two unpaused runs differ
   const runFresh = async (idx, pauses) => { const q = await open(browser); try { await q.page.evaluate(SCHEDULE);
       const r = await q.page.evaluate(`window.__ev(${JSON.stringify(RUN)})(${idx},0,0,${JSON.stringify(pauses)})`); if (q.errors.length) throw new Error(q.errors[0]); return r; } finally { await q.ctx.close(); } };
-  for (const id of ["crossing-guard", "rock-bottom", "sushi-train-panic", "the-gravity-switcheroo"]) {
+  for (const id of (process.env.ONLY ? process.env.ONLY.split(",") : ["crossing-guard", "rock-bottom", "sushi-train-panic", "the-gravity-switcheroo"])) {
     const idx = await sampleIdx(page, id);
     const base = await runFresh(idx, []);
     ok(base === await runFresh(idx, []), `${id}: unpaused run is deterministic (so differences below are the pause)`);
@@ -83,6 +83,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
     ok(bad === 0, `${id}: ${RUNS} runs with 1-3 random pauses (random frame, 1-600 frames long) end identical to the unpaused 10s run (${bad} differ, ${((Date.now() - t0) / 1000).toFixed(0)}s)` + (firstBad ? "\n" + firstBad : ""));
   }
 
+  if (process.env.ONLY) { await browser.close(); console.log(`\n${pass} passed, ${fails.length} failed`); process.exit(fails.length ? 1 : 0); }
   // ---- 2. frozen state identical after 5s (Play and Build) ----
   await page.evaluate(`()=>{ window.__releaseAll(); }`);
   await loadAndPlay(page, await sampleIdx(page, "crossing-guard"));
@@ -164,7 +165,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   // ---- 7. fuses hold remaining time ----
   const FUSE = `(setupSrc, pauseAfter, pauseLen)=>{
     eval(setupSrc); lastT=window.__T; let sim=0, st=0;
-    for(let i=0;i<400+pauseLen+5;i++){
+    const total=400+pauseLen+5; for(let i=0;i<total;i++){
       if(sim===pauseAfter && pauseLen && st===0){ window.dispatchEvent(new KeyboardEvent("keydown",{key:"p"})); st=1; }
       window.__sim(1);
       if(st===1){ pauseLen--; if(pauseLen<=0){ window.dispatchEvent(new KeyboardEvent("keydown",{key:"p"})); st=2; } continue; }
@@ -212,7 +213,8 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
 
   // ---- 9. pause mid door-transition and mid Surprise Me never wedge ----
   await loadAndPlay(page, await sampleIdx(page, "the-gravity-switcheroo")); await page.evaluate(() => window.__sim(100));
-  await ev(page, "()=>{ roomTransition={startedAt:gameNow(),fromRoom:currentRoomId}; }").catch(() => {});
+  const fired = await ev(page, "()=>{ const p=actors.find(a=>a.isPlayer); p.doorCooldown=0; for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(doorLinks[roomCellKey(currentRoomId,x,y)]){ triggerDoor(p,x,y); return !!roomTransition; } return false; }");
+  ok(fired, "a real door transition is in flight when pausing");
   await key(page, "keydown", "p"); await page.evaluate(() => window.__sim(120));
   await key(page, "keydown", "p"); await page.evaluate(() => window.__sim(60));
   ok(await ev(page, "()=>roomTransition==null && !gamePaused"), "pause during a room transition: resumes and the transition completes");
