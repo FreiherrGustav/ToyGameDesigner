@@ -126,6 +126,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
           __st.tick(1);
           const st = __st.state();
           if (Object.values(st.plates).some(v => v)) h.plateSeen = true;
+          (h.seen = h.seen || new Set()); st.actors.forEach(a => { if (a.spawnerKey != null) h.seen.add(a.id); }); // count spawns ever made: black holes now destroy them on the game clock (they used to linger because the removal timer was real time)
           if (check === "chaserHeld") chasers.forEach(c => { const a = st.actors.find(q => q.id === c.id); if (a && Math.sign(a.x - fan.x) !== c.side) h.chaserOk = false; });
           if (f === 179) {
             if (check === "crateTowardMagnet") crateMoved = st.actors.filter(a => a.defId === "pushable").some(a => { const o = crates0.find(q => q.id === a.id); return o && Math.abs(o.x - magnet.x) - Math.abs(a.x - magnet.x) >= 20; });
@@ -135,7 +136,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
         }
         const st = __st.state();
         const ok = ({
-          spawnCount2: () => st.actors.filter(a => a.spawnerKey != null).length >= 2,
+          spawnCount2: () => (h.seen ? h.seen.size : 0) >= 2,
           plateOn: () => h.plateSeen, chaserHeld: () => h.chaserOk && chasers.length > 0 && !!fan,
           crateTowardMagnet: () => crateMoved && !!magnet, crateMovedOrGone: () => crateMoved && !!hole,
           chasersApproach: () => chaseClosed,
