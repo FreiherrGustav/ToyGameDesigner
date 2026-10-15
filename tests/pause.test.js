@@ -8,9 +8,9 @@ const src = fs.readFileSync(path.join(REPO, "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 if (!src.includes(anchor)) throw new Error("anchor missing");
 const hook = `window.__ev=f=>eval("("+f+")");
+window.__seed=v=>{ let s=v>>>0; Math.random=()=>{ s=(s+0x6D2B79F5)>>>0; let t=s; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; };
 window.__sim=(n,inputFn)=>{ let steps=0; for(let i=0;i<n;i++){ if(inputFn) inputFn(i);
-  window.__T+=1000/60; let s=(Math.round(gameClockMs*0.06)*7919+1)>>>0;
-  Math.random=()=>{ s=(s+0x6D2B79F5)>>>0; let t=s; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; };
+  window.__T+=1000/60; window.__seed(Math.round(gameClockMs*0.06)*7919+1);
   const q=window.__q.splice(0); for(const cb of q) cb(window.__T); steps++; } return steps; };
 `;
 const tmp = path.join(os.tmpdir(), "pause_hooked.html");
@@ -43,14 +43,14 @@ const SCHEDULE = `(function(){ window.__held=new Set(); const sets=[["ArrowRight
 
 // run one scenario inside the page: 600 simulation frames, optional pause at sim frame pauseAt for pauseLen real frames
 const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
-  if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; const g=SAMPLE_GAMES[sample]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); enterPlayMode(); lastT=window.__T;
+  if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; window.__seed(12345); const g=SAMPLE_GAMES[sample]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); enterPlayMode(); lastT=window.__T;
   let k=0; const press=c=>window.dispatchEvent(new KeyboardEvent("keydown",{key:c,bubbles:true}));
   const list=pauses; // [{at,len}]
   while(k<600){
     const p=list.find(x=>x.at===k&&!x.done);
     if(p){ p.done=true; press("p"); if(!gamePaused) throw new Error("did not pause");
       const frozen=JSON.stringify(actors.map(a=>[a.x,a.y]))+gameClockMs;
-      for(let i=0;i<p.len;i++){ const sc=["w","a","d","s"," ","e"][i%6]; window.dispatchEvent(new KeyboardEvent("keydown",{key:sc,bubbles:true})); window.__sim(1); window.dispatchEvent(new KeyboardEvent("keyup",{key:sc,bubbles:true})); }
+      for(let i=0;i<p.len;i++){ const sc=["w","a","z","x","q","c"][i%6]; window.dispatchEvent(new KeyboardEvent("keydown",{key:sc,bubbles:true})); window.__sim(1); window.dispatchEvent(new KeyboardEvent("keyup",{key:sc,bubbles:true})); }
       if(JSON.stringify(actors.map(a=>[a.x,a.y]))+gameClockMs!==frozen) throw new Error("state moved while paused");
       press("p"); if(gamePaused) throw new Error("did not resume"); }
     window.__sim(1,()=>window.__inputAt(k)); k++;
@@ -64,17 +64,20 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   await page.evaluate(SCHEDULE);
 
   // ---- 1. invisible to the simulation: 4 samples x RUNS runs ----
+  // each run gets a fresh page: state leaking between Play sessions in one page (not related to pause) would otherwise
+  // make even two unpaused runs differ
+  const runFresh = async (idx, pauses) => { const q = await open(browser); try { await q.page.evaluate(SCHEDULE);
+      const r = await q.page.evaluate(`window.__ev(${JSON.stringify(RUN)})(${idx},0,0,${JSON.stringify(pauses)})`); if (q.errors.length) throw new Error(q.errors[0]); return r; } finally { await q.ctx.close(); } };
   for (const id of ["crossing-guard", "rock-bottom", "sushi-train-panic", "the-gravity-switcheroo"]) {
     const idx = await sampleIdx(page, id);
-    const base = await page.evaluate(`window.__ev(${JSON.stringify(RUN)})(${idx},0,0,[])`);
-    const baseAgain = await page.evaluate(`window.__ev(${JSON.stringify(RUN)})(${idx},0,0,[])`);
-    ok(base === baseAgain, `${id}: unpaused run is deterministic (so differences below are the pause)`);
+    const base = await runFresh(idx, []);
+    ok(base === await runFresh(idx, []), `${id}: unpaused run is deterministic (so differences below are the pause)`);
     let bad = 0, firstBad = null; const t0 = Date.now();
     for (let r = 0; r < RUNS; r++) {
       let s = (r * 2654435761 + idx * 97 + 11) >>> 0; const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
       const n = 1 + Math.floor(rnd() * 3); const pauses = [];
       for (let i = 0; i < n; i++) pauses.push({ at: Math.floor(rnd() * 590), len: 1 + Math.floor(rnd() * 600) });
-      const fp = await page.evaluate(`window.__ev(${JSON.stringify(RUN)})(${idx},0,0,${JSON.stringify(pauses)})`);
+      const fp = await runFresh(idx, pauses);
       if (fp !== base) { bad++; if (!firstBad) firstBad = JSON.stringify(pauses) + "\n" + fp.slice(0, 300) + "\n" + base.slice(0, 300); }
     }
     ok(bad === 0, `${id}: ${RUNS} runs with 1-3 random pauses (random frame, 1-600 frames long) end identical to the unpaused 10s run (${bad} differ, ${((Date.now() - t0) / 1000).toFixed(0)}s)` + (firstBad ? "\n" + firstBad : ""));
@@ -107,16 +110,17 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   // ---- 3. edit while paused (real UI) ----
   await ev(page, "()=>{ selectGeometry('solid'); }");
   const box = await page.locator("#gameCanvas").boundingBox();
-  const cx = box.x + box.width * (10.5 / 24), cy = box.y + box.height * (5.5 / 18);
-  const cellBefore = await ev(page, "()=>board[5][10]");
+  const [pgx, pgy] = await ev(page, "()=>{ for(let y=2;y<10;y++) for(let x=2;x<22;x++) if(!board[y][x]) return [x,y]; return [3,3]; }");
+  const cx = box.x + box.width * ((pgx + 0.5) / 24), cy = box.y + box.height * ((pgy + 0.5) / 18);
+  const cellBefore = await ev(page, `()=>board[${pgy}][${pgx}]`);
   await page.mouse.click(cx, cy); await page.evaluate(() => window.__sim(2));
-  const cellAfter = await ev(page, "()=>board[5][10]");
+  const cellAfter = await ev(page, `()=>board[${pgy}][${pgx}]`);
   ok(cellAfter !== cellBefore && /solid/.test(String(cellAfter)), `paint while paused works (${cellBefore} -> ${cellAfter})`);
   ok(await ev(page, "()=>gamePaused"), "still paused after painting");
   await page.keyboard.press("Control+z"); await page.evaluate(() => window.__sim(2));
-  ok((await ev(page, "()=>board[5][10]")) === cellBefore, "undo while paused reverts the paint");
+  ok((await ev(page, `()=>board[${pgy}][${pgx}]`)) === cellBefore, "undo while paused reverts the paint");
   await page.keyboard.press("Control+y"); await page.evaluate(() => window.__sim(2));
-  ok((await ev(page, "()=>board[5][10]")) === cellAfter, "redo while paused restores it");
+  ok((await ev(page, `()=>board[${pgy}][${pgx}]`)) === cellAfter, "redo while paused restores it");
   await page.mouse.click(cx, cy, { button: "right" }).catch(() => {});
   const pp = await ev(page, "()=>actors.map(a=>[a.x,a.y]).join()");
   await key(page, "keydown", "ArrowRight"); await page.evaluate(() => window.__sim(60)); await key(page, "keyup", "ArrowRight");
@@ -126,12 +130,12 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   await page.screenshot({ path: path.join(SHOTS, "pause_build_edit_1366x635.png") });
 
   // ---- 4. Build pause persists through a Play trip, Play starts running ----
-  await page.click("#playBtn"); await page.evaluate(() => window.__sim(5));
+  await page.click("#modePlayBtn"); await page.evaluate(() => window.__sim(5));
   ok(!(await ev(page, "()=>gamePaused")), "Play always starts running");
   await key(page, "keydown", "p");
   await page.screenshot({ path: path.join(SHOTS, "pause_play_1366x635.png") });
   await key(page, "keydown", "p");
-  await page.click("#buildBtn"); await page.evaluate(() => window.__sim(5));
+  await page.click("#modeBuildBtn"); await page.evaluate(() => window.__sim(5));
   ok(await ev(page, "()=>gamePaused"), "Build pause is remembered after a Play trip");
   // loading a sample / Surprise Me resume
   await ev(page, `()=>{ const g=SAMPLE_GAMES[0]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); }`);
@@ -225,7 +229,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
     await q.page.evaluate(() => window.__sim(30));
     await q.page.screenshot({ path: path.join(SHOTS, `pause_hint_build_${w}x${h}.png`) });
     ok(await ev(q.page, "()=>keyHintText().includes('P pause')"), `${w}x${h}: Build hint mentions P pause (${await ev(q.page, "()=>keyHintText()")})`);
-    await q.page.click("#playBtn").catch(() => {});
+    await q.page.click("#modePlayBtn").catch(() => {});
     const hasPlayer = await ev(q.page, "()=>playerRoomId!=null");
     if (!hasPlayer) { await ev(q.page, `()=>{ const g=SAMPLE_GAMES[0]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); enterPlayMode(); }`); }
     await q.page.evaluate(() => window.__sim(100));
