@@ -191,17 +191,17 @@
     letter-spacing: 0.02em; color: var(--accent); text-shadow: 2px 2px 0 rgba(0,0,0,0.5); }
   #homeLogo .w { color: #fff; }
   #homeLogo:hover { filter: brightness(1.2); }
+  #topBarControls { flex: 1; min-width: 0; display: flex; justify-content: flex-end; align-items: stretch; gap: 48px; padding-right: 8%; }
+  #appModeToggle { flex: 0 1 300px; min-width: 0; flex-wrap: nowrap; }
+  #appModeToggle button { font-size: 18px; padding: 10px 8px; min-width: 100px; }
+  #modePlayBtn.active { background: #4caf50; color: #fff; }
+  #topBarActions { display: flex; align-items: stretch; gap: 10px; }
   @media (max-width: 760px) {
     #topBar { flex-wrap: wrap; gap: 8px; }
     #topBarControls { flex: 1 1 100%; flex-wrap: wrap; justify-content: center; gap: 10px; padding-right: 0; }
     #appModeToggle { flex: 1 1 100%; } #appModeToggle button { font-size: 16px; }
     #appModeToggle button { min-width: 0; }
   }
-  #topBarControls { flex: 1; min-width: 0; display: flex; justify-content: flex-end; align-items: stretch; gap: 48px; padding-right: 8%; }
-  #appModeToggle { flex: 0 1 300px; min-width: 0; flex-wrap: nowrap; }
-  #appModeToggle button { font-size: 18px; padding: 10px 8px; min-width: 100px; }
-  #modePlayBtn.active { background: #4caf50; color: #fff; }
-  #topBarActions { display: flex; align-items: stretch; gap: 10px; }
   #samplesBtn {
     background: transparent;
     color: var(--accent);
