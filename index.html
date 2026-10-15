@@ -4491,7 +4491,7 @@
       const def = actorDefs[id];
       if (!def) return;
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedActorKind === id ? " selected" : "");
+      sw.className = "swatch" + (paintMode === "actor" && selectedActorKind === id ? " selected" : "");
       sw.style.background = "#111";
       sw.title = def.name;
       const c = document.createElement("canvas");
@@ -4516,7 +4516,7 @@
       const def = actorDefs[id];
       if (!def) return;
       const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedActorKind === id ? " selected" : "");
+      sw.className = "swatch" + (paintMode === "actor" && selectedActorKind === id ? " selected" : "");
       sw.style.background = "#111";
       sw.title = def.name;
       const c = document.createElement("canvas");
@@ -10961,7 +10961,22 @@
     });
   }
   // Paints a finished spec into the HOT room using the editor's own placement code.
-  function surpriseApplySpec(spec, resetCamera) {
+  // A surprise that has to place the project's first player also gives it a look (seeded, so the same
+  // seed gives the same player). Only when the player def is still the untouched factory one: a kid's own
+  // repaint is never replaced.
+  const SURPRISE_PLAYER_LOOKS = ["Gary", "Princess", "Hero", "Derpy", "ghost", "monster", "skeleton", "slime"];
+  function surpriseRandomizePlayerLook(seed) {
+    const def = actorDefs[playerDefId], factory = FACTORY_DEFAULT_SNAPSHOT.actorDefs[playerDefId];
+    if (!def || !factory || !artEquals(def.art, factory.art)) return;
+    const name = SURPRISE_PLAYER_LOOKS[Math.floor(mulberry32(surpriseHash(seed, 77))() * SURPRISE_PLAYER_LOOKS.length)];
+    const preset = CHARACTER_PRESETS.find(p => p.name === name);
+    if (!preset) return;
+    if (preset.poses) {
+      def.poses = { stand: preset.poses.stand.slice(), stride: preset.poses.stride.slice(), air: preset.poses.air.slice(), crouch: preset.poses.crouch.slice() };
+      def.art = def.poses.stand.slice();
+    } else { def.poses = null; def.art = preset.art.slice(); }
+  }
+  function surpriseApplySpec(spec, resetCamera, seed) {
     gravityEnabled = spec.gravity;
     wrapVEnabled = spec.wrapV;
     wrapHEnabled = spec.wrapH && cameraMode !== "runner";
@@ -10976,7 +10991,7 @@
     spec.actors.forEach(a => place(a.defId, a.x, a.y));
     spec.spawners.forEach(s => { if (s.content) spawnerContents[roomCellKey(currentRoomId, s.x, s.y)] = s.content; });
     let playerPlaced = false;
-    if (spec.player && playerRoomId == null) { place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
+    if (spec.player && playerRoomId == null) { surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
     selectedActorDefId = savedSel;
     return playerPlaced;
   }
@@ -11008,7 +11023,7 @@
     const wasGravity = gravityEnabled;
     const roomWasEmpty = surpriseRoomIsEmpty({ actors, board, backgroundBoard });
     if (spec.clearRect) surpriseClearRect(spec.clearRect);
-    const playerPlaced = surpriseApplySpec(spec, roomWasEmpty);
+    const playerPlaced = surpriseApplySpec(spec, roomWasEmpty, seed);
     snapshotCurrentRoomState();
     const room = rooms.find(r => r.id === currentRoomId);
     const rect = { x: spec.ox, y: spec.oy, w: spec.w, h: spec.h };
