@@ -84,7 +84,7 @@ const open = async (b, vp, hash, init) => {
     ok(await page.evaluate(() => !document.body.classList.contains("landing")), "returning visitor goes straight to the editor");
     const snapA = await ev(page, "()=>JSON.stringify(captureProjectSnapshot())");
     ok(await page.evaluate(() => localStorage.getItem("toyGameDesigner.autosave.v1")) === raw, "autosave unchanged on load");
-    await page.click("#homeBtn");
+    await page.click("#homeLogo");
     ok(await page.evaluate(() => document.body.classList.contains("landing")), "Home shows the landing screen");
     // sound / keys / autosave inert while up
     ok(await ev(page, "()=>claimVoice('boing',100)===0"), "backdrop is silent (no audio voices)");
@@ -143,7 +143,7 @@ const open = async (b, vp, hash, init) => {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const page = await ctx.newPage(); const reqs = []; page.on("request", r => reqs.push(r.url())); page.on("dialog", d => d.accept());
     await page.goto("file://" + tmp); await page.waitForTimeout(3000);
-    await page.click("#landingMakeBtn"); await page.click("#homeBtn"); await page.waitForTimeout(1500);
+    await page.click("#landingMakeBtn"); await page.click("#homeLogo"); await page.waitForTimeout(1500);
     const external = reqs.filter(u => !u.startsWith("data:") && u !== "file://" + tmp);
     ok(external.length === 0, `no requests other than the page itself (${reqs.length} total, extra: ${JSON.stringify(external)})`);
     await ctx.close();
