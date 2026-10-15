@@ -120,7 +120,7 @@ const open = async (b, vp, hash) => {
     ok(oe.includes("Space jump") && oe.includes("E grab"), "Over-Engineered Escape: jump + grab");
     // gravity, nothing carryable: hand-built room
     await ev(page, "()=>{exitToBuildMode();initBoard();for(let x=0;x<24;x++)board[17][x]='solid:none';gravityEnabled=true;selectedActorDefId=playerDefId;placeNewActor(64,17*32-11);enterPlayMode();playReadyUntil=null;}");
-    ok(await hint() === "← ↑ ↓ → or WASD move · Space jump", "gravity room, nothing carryable: arrows + jump only");
+    ok(await hint() === "← ↑ ↓ → or WASD move · Space jump · P pause", "gravity room, nothing carryable: arrows + jump only");
     // fade after the first key
     await page.screenshot({ path: path.join(SHOTS, "s1_hint_play.png") });
     ok(await ev(page, "()=>keyHintFirstKeyAt===null"), "hint timer not started before a key");

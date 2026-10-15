@@ -228,6 +228,9 @@
     white-space: nowrap;
   }
   #samplesBtn:hover { border-color: var(--accent); }
+  #pauseBtn { background: transparent; color: var(--accent); border: 1px solid var(--panel-light); border-radius: 6px; padding: 8px 14px; font-size: 16px; cursor: pointer; white-space: nowrap; }
+  #pauseBtn:hover { border-color: var(--accent); }
+  #pauseBtn.on { background: var(--accent); color: #222; font-weight: bold; }
   #surpriseBtn {
     background: transparent;
     border: 1px solid var(--panel-light);
@@ -409,6 +412,7 @@
       <button id="modePlayBtn">▶ Play</button>
     </div>
     <div id="topBarActions">
+      <button id="pauseBtn" title="Pause or resume the game (P)">⏸ Pause</button>
       <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
       <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
     </div>
@@ -1455,8 +1459,69 @@
   // Mutes sound, blocks game keys and autosave, and (landingFrozen) freezes the backdrop for reduced-motion.
   let landingActive = false, landingFrozen = false;
   const APP_NAME = "TinyGameMaker"; // the one name constant (see also the static <head> tags)
-  let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = ""; // Play key-hint pill (drawKeyHint): fades a few seconds after the first key, stays out for the session
-  let playReadyUntil = null; // null = not in a Ready pause; otherwise a performance.now() timestamp
+  let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false; // Play key-hint pill (drawKeyHint): fades a few seconds after the first key, stays out for the session
+  let playReadyUntil = null; // null = not in a Ready pause; otherwise a gameNow() timestamp
+  // v2.48 Stage 3: the game clock. Everything that decides what the simulation does next (fuses, the
+  // READY! beat, room transitions, crush immunity, wander headings, death resets, delayed removals) is
+  // timed against gameNow(), a counter that only moves when the game runs. Pause simply stops the counter
+  // (and tick()), so nothing can drift while paused and nothing needs a pause-aware special case.
+  // gameSetTimeout/gameClearTimeout replace setTimeout for those delays: callbacks fire from
+  // advanceGameClock, in due order, never while paused. Real setTimeout stays only for UI plumbing.
+  let gameClockMs = 0, gameTimers = [], gameTimerMap = new Map(), gameTimerSeq = 1;
+  let gamePaused = false, buildPausedMemory = false; // Build's own pause survives a Play trip (buildPausedMemory); never saved
+  function gameNow() { return gameClockMs; }
+  function gameSetTimeout(fn, ms) {
+    const t = { id: gameTimerSeq++, at: gameClockMs + ms, fn, dead: false };
+    gameTimers.push(t); gameTimerMap.set(t.id, t);
+    return t.id;
+  }
+  function gameClearTimeout(id) {
+    const t = gameTimerMap.get(id);
+    if (!t) return;
+    t.dead = true; gameTimerMap.delete(id);
+    const i = gameTimers.indexOf(t); if (i >= 0) gameTimers.splice(i, 1);
+  }
+  function advanceGameClock(dtSec) {
+    gameClockMs += dtSec * 1000;
+    if (!gameTimers.length) return;
+    const due = gameTimers.filter(t => t.at <= gameClockMs).sort((a, b) => a.at - b.at || a.id - b.id);
+    if (!due.length) return;
+    gameTimers = gameTimers.filter(t => t.at > gameClockMs);
+    for (const t of due) {
+      if (t.dead) continue; // an earlier callback in this batch cancelled it
+      gameTimerMap.delete(t.id);
+      try { t.fn(); } catch (err) { handleFatalError(err); }
+    }
+  }
+  function clearGameTimers() { for (const t of gameTimerMap.values()) t.dead = true; gameTimers = []; gameTimerMap = new Map(); }
+  // Pause is one more frozen state for frame() (like the win screen / READY!): tick() doesn't run, the clock
+  // stands still, audio is suspended. Editing (place, erase, drag, paint, undo) still works and still draws.
+  function setGamePaused(p) {
+    p = !!p;
+    if (p === gamePaused) return;
+    gamePaused = p;
+    if (typeof audioCtx !== "undefined" && audioCtx) { try { if (p) audioCtx.suspend(); else audioCtx.resume(); } catch (e) { /* audio is optional */ } }
+    if (typeof updatePauseButton === "function") updatePauseButton();
+  }
+  function togglePause() { setGamePaused(!gamePaused); }
+  function drawPausedOverlay() {
+    gctx.save();
+    if (appMode === "play") { gctx.fillStyle = "rgba(10,10,14,0.28)"; gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height); }
+    const text = appMode === "play" ? "⏸ Paused · P to resume" : "⏸ Paused";
+    gctx.font = "bold 20px ui-monospace, Menlo, Consolas, monospace";
+    const w = Math.ceil(gctx.measureText(text).width) + 28, h = 36;
+    const x = (gameCanvas.width - w) / 2, y = 14;
+    gctx.fillStyle = "rgba(20,21,30,0.88)";
+    gctx.strokeStyle = "#ffd54f";
+    gctx.lineWidth = 2;
+    gctx.beginPath();
+    if (gctx.roundRect) gctx.roundRect(x, y, w, h, 10); else gctx.rect(x, y, w, h);
+    gctx.fill(); gctx.stroke();
+    gctx.fillStyle = "#ffd54f";
+    gctx.textBaseline = "middle";
+    gctx.fillText(text, x + 14, y + h / 2 + 1);
+    gctx.restore();
+  }
   let levelResetPending = false, levelResetTimer = null; // a life was just spent; the level restarts when the timer fires
   let checkpoint = null; // where a death sends you back to: the door you last came in by (or the game start)
 
@@ -1665,7 +1730,7 @@
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
     playReadyUntil = null;
-    if (levelResetTimer) clearTimeout(levelResetTimer);
+    clearGameTimers(); // every pending delayed reaction belongs to the session that just ended
     levelResetTimer = null; levelResetPending = false; // a restart/exit cancels any death-reset still counting down
     checkpoint = null;
     spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {}; collectedPowerups = [];
@@ -1687,8 +1752,10 @@
       switchChannels: structuredClone(switchChannels),
       currentRoomId, playerRoomId
     };
+    if (appMode === "build") buildPausedMemory = gamePaused; // Build's own pause comes back when Play ends
+    setGamePaused(false); // Play always starts running
     appMode = "play";
-    keyHintFirstKeyAt = null; // a fresh Play session shows the key hint again
+    keyHintFirstKeyAt = null; keyHintAnyKey = false; // a fresh Play session shows the key hint again
     restartPlaySessionFromSnapshot();
     document.body.classList.add("play-mode");
     updateModeButtons();
@@ -1716,7 +1783,7 @@
     // Direct feedback: the action used to start the instant Play was pressed, giving a kid zero
     // time to get their bearings before e.g. Runner mode's camera starts closing in — the genre-
     // standard "READY!" beat (frame()'s own gating skips tick() entirely until this elapses).
-    playReadyUntil = performance.now() + READY_DURATION_MS;
+    playReadyUntil = gameNow() + READY_DURATION_MS;
     syncChannelsToHotRoom();
     setCheckpoint();
     renderAll();
@@ -1776,7 +1843,7 @@
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {}; switchTouchedCells = {};
     activateRoom(cp.roomId);
-    playReadyUntil = performance.now() + READY_DURATION_MS;
+    playReadyUntil = gameNow() + READY_DURATION_MS;
     syncChannelsToHotRoom();
     log("Back to the start of this room.");
     return true;
@@ -1793,6 +1860,8 @@
     appMode = "build";
     playSessionEnded = null;
     clearTransientRuntimeState();
+    setGamePaused(buildPausedMemory);
+    keyHintFirstKeyAt = null; keyHintAnyKey = false;
     document.body.classList.remove("play-mode");
     updateModeButtons();
     renderAll();
@@ -3438,6 +3507,7 @@
     // Samples is a top-level entry point independent of the Build/Play toggle — a kid can open it
     // from Play mode too, and loading one always lands back in Build (v2.8's original rule).
     if (appMode === "play") exitToBuildMode();
+    setGamePaused(false); buildPausedMemory = false; // loading a sample starts it running
     rooms = [];
     nextRoomId = 1;
     doorLinks = {};
@@ -3701,7 +3771,7 @@
   }
   // Returns a loudness multiplier for this trigger: 0 = skip it, 1 = normal, less = an overlapping copy.
   function claimVoice(key, durationMs) {
-    if (landingActive) return 0; // the landing backdrop is silent
+    if (landingActive || gamePaused) return 0; // the landing backdrop is silent; a paused game makes no sound
     const now = performance.now();
     activeVoices = activeVoices.filter(v => v.endAt > now);
     if (activeVoices.length >= SOUND_MAX_TOTAL) return 0;
@@ -4139,7 +4209,7 @@
   // v2.27: optional 3rd `art` param — an art-override sprite to draw instead of the entity's own
   // (see renderActors' own animState-consuming block) — omitted by every pre-existing call site,
   // so this is additive, not a behavior change for anything already using playRecipe.
-  function playRecipe(entity, name, art) { animState[entity.id] = { recipe: name, t: performance.now(), art }; }
+  function playRecipe(entity, name, art) { animState[entity.id] = { recipe: name, t: gameNow(), art }; }
   function sampleRecipe(name, elapsedMs) {
     const recipe = RECIPES[name];
     if (!recipe) return null;
@@ -5622,7 +5692,7 @@
           if (progress >= DIG_DURATION_MS) {
             delete digProgress[key];
             sounds.crumble();
-            tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: performance.now(), geometry, modifier };
+            tileAnimState[cx + "," + cy] = { recipe: "crumbleFade", t: gameNow(), geometry, modifier };
             board[cy][cx] = null;
             log("Dug through!");
             // Side dig: you were leaning on the wall holding a direction, so the moment it opens you'd
@@ -6019,7 +6089,7 @@
       sounds.celebrate();
       playRecipe(player, "celebrationBurst");
       const resetPos = { x: startPos.x, y: startPos.y }; // snapshot now — a room switch before this fires shouldn't retarget it
-      setTimeout(() => {
+      gameSetTimeout(() => {
         player.x = resetPos.x; player.y = resetPos.y;
         player.vx = 0; player.vy = 0;
       }, RECIPES.celebrationBurst.duration);
@@ -6055,7 +6125,7 @@
     // conditions (not just the player), keeping only the reduced life count. Only one reset can be
     // pending, and any manual restart/exit cancels it (clearTransientRuntimeState).
     levelResetPending = true;
-    levelResetTimer = setTimeout(() => {
+    levelResetTimer = gameSetTimeout(() => {
       levelResetTimer = null; levelResetPending = false;
       if (appMode === "play" && !playSessionEnded) restartLevelKeepingLives();
     }, LEVEL_RESET_DELAY_MS);
@@ -6160,7 +6230,7 @@
       const causedGameOver = consumeLifeIfPlaying();
       log(causedGameOver ? "Caught! Game over." : "Caught! Off you go...");
       const resetPos = { x: startPos.x, y: startPos.y };
-      setTimeout(() => {
+      gameSetTimeout(() => {
         if (causedGameOver || appMode === "play") return; // Play: the whole level resets instead (consumeLifeIfPlaying)
         playerActor.x = resetPos.x; playerActor.y = resetPos.y;
         playerActor.vx = 0; playerActor.vy = 0;
@@ -6170,7 +6240,7 @@
       playActorSound(npcActor, "pop");
       playRecipe(npcActor, "popVanish");
       log("Pop!");
-      setTimeout(() => { removeActorObject(npcActor); }, RECIPES.popVanish.duration);
+      gameSetTimeout(() => { removeActorObject(npcActor); }, RECIPES.popVanish.duration);
     } else if (temperament === "collectible" && POWERUP_DEF_IDS.includes(npcActor.defId)) {
       collectPowerup(playerActor, npcActor); // never calls maybeRoundCompleteFromCollectibles
     } else if (temperament === "collectible") {
@@ -6178,7 +6248,7 @@
       playRecipe(npcActor, "popVanish");
       addScore(1);
       log("Got it! +1");
-      setTimeout(() => {
+      gameSetTimeout(() => {
         removeActorById(npcActor.id);
         maybeRoundCompleteFromCollectibles();
       }, RECIPES.popVanish.duration);
@@ -6197,7 +6267,7 @@
       const freshSpawn = (npcActor.spawnerKey && npcActor.bouncyCooldown > 0) || isCarryBombKind(temperament);
       // An object the player just dropped/threw never crushes them (throwing at a wall drops it on your head),
       // and a fall has to be real: ~2 tiles, not a crate settling half a tile in a stack you just disturbed.
-      const playerHandled = npcActor.safeUntil > performance.now();
+      const playerHandled = npcActor.safeUntil > gameNow() && npcActor.safeUntil - gameNow() <= SAFE_AFTER_HANDLING_MS; // (a stale value saved by an older session never counts)
       if (!freshSpawn && !playerHandled && npcActor.vy > CRUSH_MIN_VY && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
         triggerHazard(playerActor);
       }
@@ -6234,7 +6304,7 @@
     npcActor.collected = true;
     if (appMode !== "play") collectedPowerups.push({ roomId: currentRoomId, actor: npcActor });
     playRecipe(npcActor, "popVanish");
-    setTimeout(() => { if (npcActor.collected) removeActorObject(npcActor); }, RECIPES.popVanish.duration);
+    gameSetTimeout(() => { if (npcActor.collected) removeActorObject(npcActor); }, RECIPES.popVanish.duration);
     renderPlayHUD();
   }
   // Build's "Reset to start": bring back every power-up picked up since (and re-lock keys, end the star).
@@ -6348,7 +6418,7 @@
     if (inPlay) {
       lives = Math.max(lives, 1); // consumeLifeIfPlaying decrements; never start from <=0
       const gameOver = consumeLifeIfPlaying(true);
-      if (gameOver) setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+      if (gameOver) gameSetTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
       log(gameOver ? "Splat! Game over." : "Splat! Lost a life (" + lives + " left).");
     } else {
       log("Splat!");
@@ -6375,7 +6445,7 @@
     if (causedGameOver) {
       lives = 0;
       triggerGameOver(true);
-      setTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+      gameSetTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
       log("Pulled into the black hole — instant game over!");
     } else {
       player.x = startPos.x; player.y = startPos.y;
@@ -6416,7 +6486,7 @@
     const tile = GAMEPLAY_TILE_DEFS[key];
     sounds.pop(); // v2.18: "Pop — collectible gathered, trap tile" — distinct from a dug-through wall's crumble()
 
-    tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier };
+    tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: gameNow(), geometry: tile.geometry, modifier: tile.modifier };
     board[gy][gx] = null;
     log("Crumble!");
   }
@@ -6489,7 +6559,7 @@
     actor.vx = 0; actor.vy = 0;
     actor.x = anchorX - actor.w / 2; actor.y = anchorY - actor.h / 2;
     sounds.thud(0.6);
-    if (cx != null && cy != null) tileAnimState[cx + "," + cy] = { recipe: "boopPulse", t: performance.now(), geometry, modifier: "none" };
+    if (cx != null && cy != null) tileAnimState[cx + "," + cy] = { recipe: "boopPulse", t: gameNow(), geometry, modifier: "none" };
     log("Loaded!");
   }
   function tickCannonLoad(actor, dt) {
@@ -6516,7 +6586,7 @@
     actor.impactMag = 0.7;
     actor.impactWobbleT = 0;
     actor.impactAxis = "y";
-    if (L.cx != null) tileAnimState[L.cx + "," + L.cy] = { recipe: "muzzleFlash", t: performance.now(), geometry: L.geometry, modifier: "none", art: PARTICLE_ART };
+    if (L.cx != null) tileAnimState[L.cx + "," + L.cy] = { recipe: "muzzleFlash", t: gameNow(), geometry: L.geometry, modifier: "none", art: PARTICLE_ART };
     log("Shot!");
   }
 
@@ -6534,8 +6604,8 @@
     const key = roomCellKey(currentRoomId, gx, gy);
     if (bombArmed[key]) return;
     const roomId = currentRoomId;
-    const timerId = setTimeout(() => detonateBombAt(roomId, gx, gy), BOMB_FUSE_MS);
-    bombArmed[key] = { armedAt: performance.now(), timerId };
+    const timerId = gameSetTimeout(() => detonateBombAt(roomId, gx, gy), BOMB_FUSE_MS);
+    bombArmed[key] = { armedAt: gameNow(), timerId };
     sounds.fuse();
     log("Fuse lit — run!");
   }
@@ -6545,7 +6615,7 @@
   function cancelBombArm(key) {
     const entry = bombArmed[key];
     if (!entry) return;
-    clearTimeout(entry.timerId);
+    gameClearTimeout(entry.timerId);
     delete bombArmed[key];
   }
 
@@ -6587,7 +6657,7 @@
       // v2.27: the bomb's OWN cell shows EXPLOSION_ART instead of scaling up its own icon (see the
       // tile-anim render loop's art-override); a cleared solid NEIGHBOR keeps its old look (the
       // wall itself deforming), since that's a wall being destroyed, not the explosion itself.
-      if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: performance.now(), geometry: tile.geometry, modifier: tile.modifier, art: isBombItself ? EXPLOSION_ART : undefined };
+      if (isHot) tileAnimState[x + "," + y] = { recipe: "bombBlast", t: gameNow(), geometry: tile.geometry, modifier: tile.modifier, art: isBombItself ? EXPLOSION_ART : undefined };
       if (appMode === "build" && !isBombItself) {
         const tRoom = rooms.find(r => r.id === roomId);
         buildBlastLog.push({ type: "tile", roomId, x, y, key: cellKey, color: (isHot ? colorBoard : tRoom.colorBoard)[y][x] || null, skin: (isHot ? groundSkinBoard : tRoom.groundSkinBoard)[y][x] || null });
@@ -6713,7 +6783,7 @@
     setCheckpoint(); // doors are checkpoints
 
     roomTransition = {
-      startedAt: performance.now(),
+      startedAt: gameNow(),
       fromBoard: fromBoardSnapshot, fromBackgroundBoard: fromBackgroundSnapshot, fromActors: fromActorsSnapshot
     };
     renderRoomTabs();
@@ -6894,7 +6964,7 @@
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
     log("Destroyed by lethal!");
-    setTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
+    gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
   }
   // Object-to-object interaction matrix: a NEW reaction — the matrix's own Lethal row marked
   // NPC "✓" but no such reaction existed anywhere in the code before this patch (confirmed by
@@ -6922,7 +6992,7 @@
       playActorSound(actor, "splat");
       playRecipe(actor, "popVanish");
       log("Caught in lethal!");
-      setTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
+      gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
       return;
     }
     actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
@@ -6986,7 +7056,7 @@
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
     log("Pulled into the black hole — destroyed!");
-    setTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
+    gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
   }
 
   // Every actor-actor/player-actor touch reacts once, then goes quiet for a beat — without
@@ -7029,7 +7099,7 @@
     const loseTrack = starTimer > 0 && (def.temperament === "chaser" || def.temperament === "fleer");
     if (def.temperament === "wanderer" || loseTrack) {
       let h = wanderHeadings[actor.id];
-      const now = performance.now();
+      const now = gameNow();
       if (!h || now > h.until) {
         h = { angle: Math.random() * Math.PI * 2, until: now + 800 + Math.random() * 900 };
         wanderHeadings[actor.id] = h;
@@ -7049,6 +7119,12 @@
   const keys = {};
   window.addEventListener("keydown", (e) => {
     if (landingActive) return; // no input reaches the landing backdrop (and Space/Enter keep working on its buttons)
+    keyHintAnyKey = true; // any first key press starts the hint pill's fade (Build and Play)
+    if ((e.key === "p" || e.key === "P") && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
+      e.preventDefault();
+      if (!e.repeat && !(appMode === "play" && playSessionEnded)) togglePause();
+      return;
+    }
     const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
     if (map.includes(e.key)) e.preventDefault();
     keys[e.key] = true;
@@ -7063,26 +7139,29 @@
   // past THROW_TAP_MS then released -> throw it, strength scaled by how long it was held (capped at
   // THROW_CHARGE_MAX_MS). "E" is the key, matching the validated prototype (grab-carry-test.html)
   // as-is — no reason found to pick a different one.
-  let grabKeyDownAt = null; // performance.now() timestamp of the current press, or null when not held
+  let grabKeyDownAt = null; // gameNow() timestamp of the current press, or null when not held
   window.addEventListener("keydown", (e) => {
     if (e.key !== "e" && e.key !== "E") return;
-    if (landingActive) return;
+    if (landingActive || gamePaused) return; // paused: grab/throw is ignored like movement
     if (e.repeat) return; // only the real first press starts anything
     e.preventDefault();
     const player = actors.find(a => a.isPlayer);
     if (!player) return;
     if (player.carrying == null) tryGrabNearestCarryable(player);
-    else grabKeyDownAt = performance.now(); // start charging toward a throw
+    else grabKeyDownAt = gameNow(); // start charging toward a throw
   });
   window.addEventListener("keyup", (e) => {
     if (e.key !== "e" && e.key !== "E") return;
     const player = actors.find(a => a.isPlayer);
-    if (!player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
-    const heldMs = performance.now() - grabKeyDownAt;
+    if (gamePaused || !player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
+    const heldMs = gameNow() - grabKeyDownAt;
     grabKeyDownAt = null;
     if (heldMs < THROW_TAP_MS) dropCarriedObject(player);
     else throwCarriedObject(player, heldMs);
   });
+
+  // Play only: a hidden tab pauses the game (a kid switching tabs must not come back to a dead character).
+  document.addEventListener("visibilitychange", () => { if (document.hidden && appMode === "play" && !landingActive && !playSessionEnded) setGamePaused(true); });
 
   // Every carryable geometry a kid can paint — grabbing one picks up that ONE cell, converting it
   // into a live actor (see convertGrabbedTileToActor). Cannon keeps its own orientation.
@@ -7148,7 +7227,7 @@
       const armKey = roomCellKey(currentRoomId, gx, gy);
       const armed = bombArmed[armKey];
       if (armed) {
-        transferredFuseMs = Math.max(0, BOMB_FUSE_MS - (performance.now() - armed.armedAt));
+        transferredFuseMs = Math.max(0, BOMB_FUSE_MS - Math.max(0, gameNow() - armed.armedAt));
         cancelBombArm(armKey);
       }
     }
@@ -7216,8 +7295,8 @@
   // from one that's merely paused mid-fuse.
   function pauseBombFuseIfTicking(obj) {
     if (obj.fuseTimerId == null) return; // not currently ticking — nothing to pause
-    clearTimeout(obj.fuseTimerId);
-    obj.fuseRemainingMs = Math.max(0, obj.fuseRemainingMs - (performance.now() - obj.fuseStartedAt));
+    gameClearTimeout(obj.fuseTimerId);
+    obj.fuseRemainingMs = Math.max(0, obj.fuseRemainingMs - Math.max(0, gameNow() - obj.fuseStartedAt));
     obj.fuseTimerId = null;
   }
   function startOrResumeBombFuse(obj) {
@@ -7225,9 +7304,9 @@
     obj.fuseArmed = true;
     sounds.fuse();
     log("Fuse lit — run!");
-    obj.fuseStartedAt = performance.now();
+    obj.fuseStartedAt = gameNow();
     const roomId = currentRoomId, actorId = obj.id, remaining = obj.fuseRemainingMs;
-    obj.fuseTimerId = setTimeout(() => detonateCarriedBombAt(roomId, actorId), remaining);
+    obj.fuseTimerId = gameSetTimeout(() => detonateCarriedBombAt(roomId, actorId), remaining);
   }
 
   // Attaches whatever was found to the player: no physics of its own, glued just above the
@@ -7280,7 +7359,7 @@
       return;
     }
     obj.vx = 0; obj.vy = 0;
-    obj.safeUntil = performance.now() + SAFE_AFTER_HANDLING_MS;
+    obj.safeUntil = gameNow() + SAFE_AFTER_HANDLING_MS;
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     log("Dropped it.");
@@ -7314,14 +7393,14 @@
     // v2.20.1 tunneling risk that field's own comment warns about only exists when something
     // holds a direction key during the exemption window, which nothing here ever does.
     obj.bouncyCooldown = 500;
-    obj.safeUntil = performance.now() + SAFE_AFTER_HANDLING_MS;
+    obj.safeUntil = gameNow() + SAFE_AFTER_HANDLING_MS;
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
     sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
     log("Threw it!");
   }
 
-  // A carried bomb's fuse is real wall-clock time (setTimeout), exactly like the tile version's
+  // A carried bomb's fuse runs on the game clock (gameSetTimeout), exactly like the tile version's
   // own triggerBombArm/detonateBombAt — captured by id/room at grab time so it still resolves
   // correctly even if the bomb's been dropped, thrown, or the player's switched rooms since (in
   // which case it's simply abandoned in its own room and detonates there, unseen, same as the tile
@@ -7362,7 +7441,7 @@
     detonateBombAt(roomId, gx, gy);
     if (isHot) {
       playRecipe(bombActor, "bombBlast", EXPLOSION_ART);
-      setTimeout(() => removeActorObject(bombActor), RECIPES.bombBlast.duration);
+      gameSetTimeout(() => removeActorObject(bombActor), RECIPES.bombBlast.duration);
     } else {
       targetActors.splice(targetActors.indexOf(bombActor), 1); // off-screen room — no one's watching it pop
     }
@@ -7419,7 +7498,7 @@
     const vyBefore = actor.vy; // frozen while the editor is dragging it
     // v2.21: "no physics of its own while held, follows the player" — its x/y are driven directly
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
-    // attachCarryable's setTimeout) since that's a real-time timer, not part of this per-frame step.
+    // attachCarryable's setTimeout) since that's a game-clock timer, not part of this per-frame step.
     if (actor.carried) return;
     if (actor.cannonLoad) { tickCannonLoad(actor, dt); return; }
     const def = actorDefs[actor.defId];
@@ -7794,7 +7873,7 @@
     CHANNEL_COLORS.forEach(color => { channelStateSince[color] = { on: isChannelOn(color), since: -1e9 }; });
   }
   function updateChannelTransitions() {
-    const now = performance.now();
+    const now = gameNow();
     CHANNEL_COLORS.forEach(color => {
       const on = isChannelOn(color);
       const prev = channelStateSince[color];
@@ -7990,7 +8069,7 @@
     actor.ttlPopped = true;
     sounds.pop();
     playRecipe(actor, "popVanish");
-    setTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
+    gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
   }
 
   // ============== Movers (traffic and floaters) ==============
@@ -8117,6 +8196,7 @@
   }
 
   function tick(dt) {
+    advanceGameClock(dt);
     if (starTimer > 0) {
       starTimer -= dt * 1000;
       if (starTimer <= 0) { starTimer = 0; sounds.starEnd(); }
@@ -9649,6 +9729,14 @@
     document.getElementById("samplesModalOverlay").style.display = "none";
   }
   document.getElementById("samplesBtn").addEventListener("click", openSamplesModal);
+  function updatePauseButton() {
+    const b = document.getElementById("pauseBtn");
+    if (!b) return;
+    b.classList.toggle("on", gamePaused);
+    b.textContent = gamePaused ? "▶ Resume" : "⏸ Pause";
+    b.title = (gamePaused ? "Resume the game" : "Pause the game") + " (P)";
+  }
+  document.getElementById("pauseBtn").addEventListener("click", () => { if (landingActive || (appMode === "play" && playSessionEnded)) return; togglePause(); });
   document.getElementById("samplesModalCloseBtn").addEventListener("click", closeSamplesModal);
   document.getElementById("samplesModalOverlay").addEventListener("click", (e) => {
     if (e.target.id === "samplesModalOverlay") closeSamplesModal();
@@ -9694,7 +9782,7 @@
   function currentSkinFrame(skinDef) {
     const frames = skinDef.frames;
     if (frames.length <= 1 || !skinDef.frameMs) return frames[0];
-    return frames[Math.floor(performance.now() / skinDef.frameMs) % frames.length];
+    return frames[Math.floor(gameNow() / skinDef.frameMs) % frames.length];
   }
 
   // Same as drawArtScaled, but spun around the tile's own center first (v2.19.4) — the purely
@@ -9768,14 +9856,14 @@
       ctx.restore();
     } else if (isBombGeometry(tile.geometry) && extra && extra.armed) {
       ctx.save();
-      ctx.globalAlpha = (Math.floor(performance.now() / 120) % 2 === 0) ? 1 : 0.35;
+      ctx.globalAlpha = (Math.floor(gameNow() / 120) % 2 === 0) ? 1 : 0.35;
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
     } else if (SPAWNER_ORDER.includes(tile.geometry) && extra && extra.windingUp) {
       // a brief physical pulse right before it fires — a structural tell standing in for a
       // numeric countdown this toy never shows anywhere (see tickSpawners).
       ctx.save();
-      ctx.globalAlpha = 0.55 + 0.45 * Math.sin(performance.now() * 0.02);
+      ctx.globalAlpha = 0.55 + 0.45 * Math.sin(gameNow() * 0.02);
       drawArtScaled(ctx, icon, x, y, TILE, cell);
       ctx.restore();
     } else if (tile.geometry === "plate" && extra && extra.color) {
@@ -9819,7 +9907,7 @@
     } else if (tile.geometry === "gravitywell") {
       // Black Hole: cycles its six swirl frames on a wall-clock timer, same approach (and same
       // "no per-tile animation state to store") as animated Ground skins' currentSkinFrame.
-      drawArtScaled(ctx, BLACK_HOLE_FRAMES[Math.floor(performance.now() / BLACK_HOLE_FRAME_MS) % BLACK_HOLE_FRAMES.length], x, y, TILE, cell);
+      drawArtScaled(ctx, BLACK_HOLE_FRAMES[Math.floor(gameNow() / BLACK_HOLE_FRAME_MS) % BLACK_HOLE_FRAMES.length], x, y, TILE, cell);
     } else {
       drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
     }
@@ -9904,7 +9992,7 @@
   // inside that single tile's bounds and animated by phase so they shimmer in place.
   function drawFanStream(ctx, boardArg, viewOffsetPx, isLive) {
     if (!isLive) return;
-    const now = performance.now();
+    const now = gameNow();
     const firstCol = Math.floor(viewOffsetPx / TILE);
     const lastCol = firstCol + COLS; // one extra edge column, matching renderRoomContents' own range
     for (let y = 0; y < ROWS; y++) {
@@ -9951,7 +10039,7 @@
   function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
-    const now = performance.now();
+    const now = gameNow();
     const isLive = boardArg === board; // crumble anim only applies to the currently-active room
     // v2.40: bx now ranges over real board columns at their exact continuous screen position
     // (screenX = bx*TILE - viewOffsetPx), not a pre-floored "viewStartCol + sx" whole-tile mapping
@@ -10016,7 +10104,7 @@
               // timestamp — purely a render input, see drawGameplayTile's own barrier branch.
               if (BARRIER_ORDER.includes(tile.geometry)) {
                 const state = channelStateSince[color];
-                const elapsed = state ? performance.now() - state.since : BARRIER_SLIDE_MS;
+                const elapsed = state ? gameNow() - state.since : BARRIER_SLIDE_MS;
                 const target = state ? (state.on ? 1 : 0) : 0;
                 const start = 1 - target;
                 extra.slideFrac = start + (target - start) * Math.min(1, elapsed / BARRIER_SLIDE_MS);
@@ -10079,7 +10167,7 @@
   function renderActors(ctx, actorsArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
-    const now = performance.now();
+    const now = gameNow();
     // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
@@ -10205,7 +10293,7 @@
     if (roomTransition) {
       // A true cross-fade: the swap already happened instantly (see beginRoomTransition), so
       // both snapshots are stable for the whole window — just dissolve from one to the other.
-      const frac = Math.min(1, (performance.now() - roomTransition.startedAt) / ROOM_TRANSITION_MS);
+      const frac = Math.min(1, (gameNow() - roomTransition.startedAt) / ROOM_TRANSITION_MS);
       gctx.save();
       gctx.globalAlpha = 1 - frac;
       renderRoomContents(gctx, roomTransition.fromBoard, roomTransition.fromBackgroundBoard, viewOffsetPx);
@@ -10224,7 +10312,7 @@
     // The empty-socket cue and the start-position outline are Build-only editing affordances —
     // Play just shows the game itself.
     if (appMode === "build") {
-      if (isCanvasEmpty()) drawEmptySocketCue(performance.now());
+      if (isCanvasEmpty()) drawEmptySocketCue(gameNow());
       if (actors.some(a => a.isPlayer)) {
         gctx.strokeStyle = "rgba(255,209,102,0.7)";
         gctx.lineWidth = 1.5;
@@ -10264,6 +10352,8 @@
     if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
     else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
     if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
+    else if (appMode === "build" && !landingActive) drawKeyHint();
+    if (gamePaused && !landingActive && !(appMode === "play" && playSessionEnded)) drawPausedOverlay();
   }
 
   // Direct feedback: Play used to drop a kid straight into a running simulation with zero time to
@@ -10278,7 +10368,8 @@
   // seconds after the first key press and then stays out for the Play session. Drawn on the canvas so the
   // editor and the standalone export share it.
   function keyHintText() {
-    const now = performance.now();
+    if (appMode === "build") return "Ctrl+Z undo · Ctrl+Y redo · P pause";
+    const now = performance.now(); // UI timing, not game time: the hint fades even while paused
     if (now - keyHintCacheAt < 400) return keyHintCacheText;
     keyHintCacheAt = now;
     let carry = actors.some(a => { const d = actorDefs[a.defId]; return d && !a.isPlayer && CARRYABLE_KINDS.includes(d.temperament); });
@@ -10286,12 +10377,12 @@
       const v = board[y][x];
       if (v && isCarryableTileGeometry(v.split(":")[0])) { carry = true; break; }
     }
-    keyHintCacheText = "← ↑ ↓ → or WASD move" + (gravityOn() ? " · Space jump" : "") + (carry ? " · E grab" : "");
+    keyHintCacheText = "← ↑ ↓ → or WASD move" + (gravityOn() ? " · Space jump" : "") + (carry ? " · E grab" : "") + " · P pause";
     return keyHintCacheText;
   }
   function drawKeyHint() {
     const now = performance.now();
-    if (keyHintFirstKeyAt == null && Object.keys(keys).some(k => keys[k])) keyHintFirstKeyAt = now;
+    if (keyHintFirstKeyAt == null && (keyHintAnyKey || Object.keys(keys).some(k => keys[k]))) keyHintFirstKeyAt = now;
     let alpha = 1;
     if (keyHintFirstKeyAt != null) {
       const t = now - keyHintFirstKeyAt - 3000;
@@ -10316,7 +10407,7 @@
     gctx.restore();
   }
   function drawReadyOverlay() {
-    const remaining = playReadyUntil - performance.now();
+    const remaining = playReadyUntil - gameNow();
     const frac = 1 - Math.max(0, Math.min(1, remaining / READY_DURATION_MS)); // 0 at start, 1 at end
     const fadeOutFrac = 1 / 3;
     const alpha = frac > 1 - fadeOutFrac ? Math.max(0, (1 - frac) / fadeOutFrac) : 1;
@@ -11083,6 +11174,7 @@
   // the overwrite choice (Try-this never overwrites). opts.templateId / opts.chaos are for tests.
   function surpriseMe(seed, opts) {
     if (appMode !== "build") return null;
+    setGamePaused(false); buildPausedMemory = false; // Surprise Me starts things running
     opts = opts || {};
     if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
     const newRoomMode = opts.full === "new";
@@ -11405,6 +11497,7 @@
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
+      gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
@@ -11651,7 +11744,8 @@
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let playReadyUntil = null;
-  let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "";
+  let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false;
+  let gameClockMs = 0, gameTimers = [], gameTimerMap = new Map(), gameTimerSeq = 1, gamePaused = false, buildPausedMemory = false; // the game clock + pause (see the editor's matching block)
   let landingActive = false, landingFrozen = false; // always false in an export (claimVoice/frame read them)
   let levelResetPending = false, levelResetTimer = null;
   let checkpoint = null;
@@ -11677,7 +11771,7 @@
   activateRoom(playerRoomId);
   syncChannelsToHotRoom();
   setCheckpoint();
-  playReadyUntil = performance.now() + READY_DURATION_MS;
+  playReadyUntil = gameNow() + READY_DURATION_MS;
   renderPlayHUD();
 
   // No Build/Play toggle exists in this standalone export, so the win/game-over overlay's
@@ -11707,9 +11801,10 @@
     lives = DEFAULT_LIVES;
     spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {};
     playSessionEnded = null;
-    if (levelResetTimer) clearTimeout(levelResetTimer);
+    clearGameTimers();
     levelResetTimer = null; levelResetPending = false;
-    playReadyUntil = performance.now() + READY_DURATION_MS;
+    setGamePaused(false);
+    playReadyUntil = gameNow() + READY_DURATION_MS;
     currentRoomId = null;
     grabKeyDownAt = null;
     activateRoom(playerRoomId);
@@ -11721,6 +11816,8 @@
   const keys = {};
   window.addEventListener("keydown", (e) => {
     if (playSessionEnded) { restartStandaloneGame(); return; }
+    keyHintAnyKey = true;
+    if ((e.key === "p" || e.key === "P") && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); if (!e.repeat) togglePause(); return; }
     const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
     if (map.includes(e.key)) e.preventDefault();
     keys[e.key] = true;
@@ -11732,22 +11829,24 @@
   let grabKeyDownAt = null;
   window.addEventListener("keydown", (e) => {
     if (e.key !== "e" && e.key !== "E") return;
-    if (e.repeat || playSessionEnded) return;
+    if (e.repeat || playSessionEnded || gamePaused) return;
     e.preventDefault();
     const player = actors.find(a => a.isPlayer);
     if (!player) return;
     if (player.carrying == null) tryGrabNearestCarryable(player);
-    else grabKeyDownAt = performance.now();
+    else grabKeyDownAt = gameNow();
   });
   window.addEventListener("keyup", (e) => {
     if (e.key !== "e" && e.key !== "E") return;
     const player = actors.find(a => a.isPlayer);
-    if (!player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
-    const heldMs = performance.now() - grabKeyDownAt;
+    if (gamePaused || !player || player.carrying == null || grabKeyDownAt == null) { grabKeyDownAt = null; return; }
+    const heldMs = gameNow() - grabKeyDownAt;
     grabKeyDownAt = null;
     if (heldMs < THROW_TAP_MS) dropCarriedObject(player);
     else throwCarriedObject(player, heldMs);
   });
+  // a hidden tab pauses the game (a kid switching tabs must not come back to a dead character)
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !playSessionEnded) setGamePaused(true); });
   gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded) restartStandaloneGame(); });
   gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
 
@@ -11780,15 +11879,19 @@
   function frame(t) {
     let dt = (t - lastT) / 1000;
     lastT = t;
-    dt = Math.min(dt, 0.033);
+    dt = Math.max(0, Math.min(dt, 0.033)); // never negative: rAF timestamps can trail performance.now() on the first frame, and the game clock must not run backwards
     try {
-      if (roomTransition) {
-        if (t - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
+      if (gamePaused) {
+        // paused: nothing simulates and the game clock stands still; renderGame below still draws (and edits still show)
+      } else if (roomTransition) {
+        advanceGameClock(dt);
+        if (gameNow() - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
       } else if (appMode === "play" && playSessionEnded) {
-        // frozen — the win/game-over screen is showing; nothing simulates until Play restarts
+        advanceGameClock(dt); // frozen simulation, but delayed reactions (a game-over stinger, a pop) still finish
       } else if (landingActive && landingFrozen) {
         // prefers-reduced-motion: the landing backdrop stays on its first frame
-      } else if (appMode === "play" && playReadyUntil != null && t < playReadyUntil) {
+      } else if (appMode === "play" && playReadyUntil != null && gameNow() < playReadyUntil) {
+        advanceGameClock(dt); // the READY! window is game time, so pausing during it holds it
         // Direct feedback: the action used to start the instant Play was pressed, giving a kid
         // zero time to see where they'd landed before e.g. Runner mode's camera started closing
         // in. Frozen exactly like the win/game-over screen above — tick() never runs, so nothing
