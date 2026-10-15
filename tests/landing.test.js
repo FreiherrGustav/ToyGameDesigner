@@ -46,9 +46,9 @@ const open = async (b, vp, hash, init) => {
     await page.keyboard.press("Escape");
     ok(await page.evaluate(() => document.body.classList.contains("landing")), "Escape does nothing destructive");
     const order = [];
-    ok(await page.evaluate(() => document.activeElement.id) === "landingPlayBtn", "Play a game is focused first");
+    ok(await page.evaluate(() => document.activeElement.id) === "landingMakeBtn", "Make one is focused first");
     for (let i = 0; i < 5; i++) { await page.keyboard.press("Tab"); order.push(await page.evaluate(() => document.activeElement.id)); }
-    ok(JSON.stringify(order) === JSON.stringify(["landingMakeBtn","landingSurpriseBtn","landingTakeApartBtn","landingPrivacy","landingContact"]), "keyboard order " + order);
+    ok(JSON.stringify(order) === JSON.stringify(["landingSurpriseBtn","landingPlayBtn","landingTakeApartBtn","landingPrivacy","landingContact"]), "keyboard order " + order);
     await page.evaluate(() => document.getElementById("landingPlayBtn").focus());
     await page.keyboard.press("Enter");
     ok(await page.evaluate(() => document.getElementById("samplesModalOverlay").style.display) === "flex", "Play a game (Enter) opens the Samples gallery");
@@ -58,7 +58,7 @@ const open = async (b, vp, hash, init) => {
     ({ ctx, page } = await open(browser, { width: 1280, height: 720 }, ""));
     await page.click("#landingMakeBtn");
     ok(await page.evaluate(() => !document.body.classList.contains("landing") && !document.body.classList.contains("play-mode")), "Make one: editor");
-    ok(await ev(page, "()=>JSON.stringify(captureProjectSnapshot())===JSON.stringify(FACTORY_DEFAULT_SNAPSHOT)"), "Make one: the empty project");
+    ok(await ev(page, "()=>actors.filter(a=>a.isPlayer).length===1&&board[ROWS-1][0]==='solid:none'&&board[ROWS-2][roomCols()-3]==='goal:none'&&gravityEnabled"), "Make one: the starter board (floor, player, goal, gravity)");
     await ctx.close();
     ({ ctx, page } = await open(browser, { width: 1280, height: 720 }, ""));
     await page.click("#landingSurpriseBtn");
