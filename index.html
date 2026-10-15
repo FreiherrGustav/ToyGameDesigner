@@ -7499,7 +7499,13 @@
         const up = keys["ArrowUp"] || keys["w"] || keys["W"];
         const down = keys["ArrowDown"] || keys["s"] || keys["S"];
         if (actor.digLock && !left && !right) actor.digLock = false; // released: control is back
-        if (!stuck && !(actor.cannonCooldown > 0) && !actor.ballistic) { // no steering mid-shot: the arc is fixed
+        // The arc is fixed while the shot is in flight (`ballistic`). In a gravity room control returns the
+        // moment the shot lands: `cannonCooldown` (800ms, there to stop an instant re-trigger) used to also
+        // lock input, which left ~0.45s of dead controls after landing, long enough for a conveyor to carry
+        // a player off the platform they had just reached. Without gravity `ballistic` ends at once, so the
+        // cooldown still has to hold the line there.
+        const shotLocksInput = inGravity ? !!actor.ballistic : actor.cannonCooldown > 0;
+        if (!stuck && !shotLocksInput) {
           if (actor.digLock) { /* just dug through a side wall: held direction ignored until released */ }
           else if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
           if (inGravity) {
@@ -7541,7 +7547,9 @@
       // blast) already track "how recently was this actor hit", so reusing them here costs
       // nothing new and just lets friction bring the speed back down naturally instead of an
       // instant hard clamp.
-      const recentlyLaunched = actor.cannonCooldown > 0 || actor.bouncyCooldown > 0 || actor.flashTimer > 0 || !!actor.ballistic;
+      // In a gravity room a cannon shot is covered by `ballistic` (the flight); the cooldown must not keep the speed cap
+      // off after landing, or a player who regains control (see shotLocksInput) runs away under a held key.
+      const recentlyLaunched = (actor.cannonCooldown > 0 && !inGravity) || actor.bouncyCooldown > 0 || actor.flashTimer > 0 || !!actor.ballistic;
 
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
