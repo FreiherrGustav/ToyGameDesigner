@@ -41,7 +41,7 @@
     display: flex;
     flex-wrap: nowrap;
     gap: 12px;
-    padding: 8px 12px 12px;
+    padding: 4px 12px 8px;
     align-items: stretch;
     justify-content: center;
     flex: 1 1 auto;
@@ -63,8 +63,20 @@
     padding: 12px;
   }
   /* ---------- Game canvas ---------- */
-  #gameWrap { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 8px; }
+  #gameWrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 4px 8px; }
   #gameWrap .toolbar { justify-content: center; }
+  /* v2.48 Stage 2: one row for room tabs, pan controls and the score/lives line (it used to be three) */
+  #gameWrap { align-items: stretch; }
+  #gameWrap #gameCanvas { align-self: center; }
+  #gameWrap button.tbtn { padding: 4px 10px; }
+  #statusRow { flex-wrap: nowrap; justify-content: flex-start !important; gap: 10px; min-width: 0; }
+  /* tabs scroll sideways inside their strip (wheel / drag) instead of wrapping to a second row; the scrollbar is hidden so it adds no height */
+  #statusRow #roomTabRow { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  #statusRow #roomTabRow::-webkit-scrollbar { display: none; }
+  #statusRow #roomTabRow > * { flex: 0 0 auto; }
+  #statusRow #cameraPanRow { flex: 0 0 auto; }
+  #statusRow #hud { flex: 0 0 auto; white-space: nowrap; margin-left: 0; }
+  #statusRow #autosaveHint { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
   #gameCanvas {
     background: #000;
     image-rendering: pixelated;
@@ -185,7 +197,7 @@
     box-sizing: border-box;
     width: 100%;
     max-width: 1280px;
-    margin: 10px auto 0;
+    margin: 6px auto 0;
     padding: 0 16px;
   }
   /* site name = logo, top left, links back to the front screen */
@@ -314,13 +326,19 @@
     max-width: 260px;
     line-height: 1.4;
   }
+  /* the message line: only the newest message shows, in the status row, so a message never resizes the canvas */
   #log {
     font-size: 12px;
     color: #bbb;
-    max-height: 60px;
-    overflow-y: auto;
-    width: 100%;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 18px;
+    overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center;
+    text-align: right;
   }
+  #log > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: none; }
+  #log > div:last-child { display: block; }
 
   .hudHeart { color: #ff4d6d; }
   .heartPop { display: inline-block; position: absolute; animation: heartPop .45s ease-out forwards; pointer-events: none; }
@@ -403,7 +421,7 @@
     <div id="landingWordmark">TinyGameMaker</div>
     <div id="landingTagline">A toy for making games. Drop pieces on the board. They just work.</div>
     <div id="landingButtons">
-      <button id="landingMakeBtn"><span class="ic" aria-hidden="true">✎</span>Make one</button>
+      <button id="landingMakeBtn"><span class="ic" aria-hidden="true">✎</span>Make a game</button>
       <button id="landingSurpriseBtn"><span class="ic" aria-hidden="true">🎲</span>Surprise me</button>
       <button id="landingPlayBtn"><span class="ic" aria-hidden="true">▶</span>Play a game</button>
     </div>
@@ -550,18 +568,18 @@
       <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
       <button class="tbtn" id="exportBtn">⬇ Export game</button>
     </div>
-    <div class="toolbar">
+    <div class="toolbar" id="statusRow">
+      <div class="toolbar" id="roomTabRow"></div>
+      <div class="toolbar" id="cameraPanRow" style="display:none;">
+        <button class="tbtn" id="panLeftBtn">◀ Pan</button>
+        <span class="hint" id="panPositionLabel" style="margin:0;"></span>
+        <button class="tbtn" id="panRightBtn">Pan ▶</button>
+      </div>
+      <div id="log"></div>
       <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
       <div id="autosaveHint" class="hint" style="margin:0;"></div>
     </div>
-    <div class="toolbar" id="roomTabRow"></div>
-    <div class="toolbar" id="cameraPanRow" style="display:none;">
-      <button class="tbtn" id="panLeftBtn">◀ Pan</button>
-      <span class="hint" id="panPositionLabel" style="margin:0;"></span>
-      <button class="tbtn" id="panRightBtn">Pan ▶</button>
-    </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
-    <div id="log"></div>
   </div>
 
 </div>
@@ -3939,7 +3957,7 @@
     const line = document.createElement("div");
     line.textContent = msg;
     el.appendChild(line);
-    el.scrollTop = el.scrollHeight;
+    el.title = msg;
     while (el.children.length > 20) el.removeChild(el.firstChild);
   }
 
@@ -3999,7 +4017,7 @@
         if (el.id === "gameCanvas" || el.offsetParent === null) continue;
         others += el.offsetHeight; kids++;
       }
-      const availH = app.clientHeight - 20 - padY - others - (kids - 1) * 6;
+      const availH = app.clientHeight - 20 - padY - others - (kids - 1) * 4;
       w = Math.min(w, (availH - BORDER) * 4 / 3 + BORDER);
     }
     w = Math.max(320, Math.floor(w));
@@ -4012,7 +4030,7 @@
     let fitQueued = false;
     const ro = new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; setTimeout(() => { fitQueued = false; fitCanvas(); }, 0); });
     ro.observe(document.getElementById("app"));
-    ["buildToolbar", "roomTabRow", "cameraPanRow", "log"].forEach(id => { const e = document.getElementById(id); if (e) ro.observe(e); });
+    ["buildToolbar", "statusRow"].forEach(id => { const e = document.getElementById(id); if (e) ro.observe(e); });
   }
   fitCanvas();
   gameCanvas.width = COLS * TILE;
@@ -10476,6 +10494,10 @@
   // simulated as part of whichever room's actor list is currently active (see activateRoom()).
   // The dot marks whichever room the player is actually standing in right now, so hopping
   // tabs to edit elsewhere doesn't leave a kid wondering where their player went.
+  (function () { // vertical wheel scrolls the (scrollbar-less) tab strip sideways
+    const strip = document.getElementById("roomTabRow");
+    strip.addEventListener("wheel", e => { if (strip.scrollWidth > strip.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+  })();
   function renderRoomTabs() {
     const container = document.getElementById("roomTabRow");
     container.innerHTML = "";
@@ -10510,6 +10532,7 @@
     const dup = document.createElement("button");
     dup.className = "tbtn";
     dup.textContent = "⧉ Duplicate Room";
+    setTimeout(() => { const a = container.querySelector(".tbtn.active"); if (a) a.scrollIntoView({ block: "nearest", inline: "nearest" }); }, 0);
     const current = rooms.find(r => r.id === currentRoomId);
     dup.title = "Copy \"" + (current ? current.name : "this room") + "\" exactly, as a new room";
     dup.addEventListener("click", duplicateRoom);
@@ -11247,7 +11270,7 @@
     const first = document.getElementById("landingMakeBtn");
     if (first) first.focus();
   }
-  // restore: put the held-aside project back (Make one, Surprise me, Home round trip); false keeps
+  // restore: put the held-aside project back (Make a game, Surprise me, Home round trip); false keeps
   // whatever is loaded now (Take it apart / picking a sample), which replaces the project.
   function endLanding(restore) {
     if (!landingActive) return;
@@ -11267,7 +11290,7 @@
     updateUndoRedoButtons();
     fitCanvas();
   }
-  // "Make one" on a project with nothing in it opens a tiny starter instead of a dark empty grid: a floor,
+  // "Make a game" on a project with nothing in it opens a tiny starter instead of a dark empty grid: a floor,
   // the player standing on it near the left, a goal near the right, gravity on. Ordinary content (one undo
   // step, erasable, autosaved); Clear board / New project and every other entry point stay empty.
   function loadStarterBoard() {

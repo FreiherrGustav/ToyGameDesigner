@@ -6462,3 +6462,27 @@ Collectible and mover swatches (Objects tab) now only show as selected while `pa
 5. **Key-hint pill** (`keyHintText`/`drawKeyHint`, drawn on the canvas, so it is shared with the standalone export): arrows/WASD always; Space jump only if the room has gravity; E grab only if the room has something carryable; follows room changes; fades a few seconds after the first key press and stays hidden for the session (reset on Play start via `keyHintFirstKeyAt`). Level resets after a death do not re-show it. Export: functions in `runtimeFunctions`, globals declared in the template.
 
 Tests: `tests/stage1.test.js` (36 checks), `landing.test.js` (43), `layout.test.js` (35), `surprise.test.js` pass; `toyDebug` count 0. Stages 2 to 4 (vertical space, Pause, art cache) are not started.
+
+## v2.48 Stage 2: vertical space (editor layout only)
+
+Landing button text is now "Make a game" (id `landingMakeBtn` unchanged).
+
+**What changed.** The Score line, room tabs, camera pan controls and the message line used to be four rows above/below the canvas; they are now ONE strip, `#statusRow` (left to right: room tabs + Duplicate Room, pan controls when the camera isn't Fixed, `#log`, `#hud`, `#autosaveHint`). The build toolbar stays one row of 8 buttons. In Play the tabs/toolbar are hidden, so the strip shows just the message and "Lives n ♥ Score: n" on one line. Paddings were tightened (`#app` 4/12/8, `#gameWrap` 4/8, gap 4, top bar margin 6) and `#gameWrap .tbtn` padding is 4px 10px (rows are 25px, were 29). No gameplay, no export change (the export has its own template).
+- **`#log` is now one line** (newest message only, ellipsized, full text in its `title`) inside the status row. It used to be a block under the canvas that grew to 60px as messages arrived, which resized the canvas; the up-to-20-line history is no longer visible.
+- **Room tabs scroll sideways** inside their strip (hidden scrollbar so it adds no height; the vertical wheel is mapped to horizontal; the active tab is scrolled into view) instead of wrapping to a second row. With very many rooms the extra tabs are reached by wheel/drag, not by a scrollbar.
+
+**Canvas scale (CSS width incl. 6px border; scale = (w-6)/768; 1.0 = native), before -> after, Build mode:**
+
+| viewport | before | after |
+|---|---|---|
+| 1280x590 | 0.689 | 0.779 |
+| 1366x635 | 0.767 | 0.857 |
+| 1440x680 | 0.845 | 0.935 |
+| 1536x735 | 0.940 | 1.000 |
+| 1366x768 | 0.997 | 1.000 |
+
+Larger viewports (1920x1080) stay at 1.0. Play is never smaller than Build. No page scroll at any of these.
+
+**Snapped vs free scale: free scale kept.** Snapping to 1.0/0.75/0.5 would give 0.75 at 1366x635 (misses the 0.85 target) and 0.75 at 1280x590. Compared screenshots of Dungeon Diving at 0.857 free vs 0.75 snapped (`/tmp/claude-0/shots4`): 0.75 is crisper (art pixels are exactly 3px) but 12% smaller; the free scale shows slightly uneven brick lines (3px/4px art pixels) that are not distracting at this size. `fitCanvas()` is unchanged (it already sized freely); a snap would be one `Math.floor(w/ (768*0.25))` style line if the uneven pixels bother anyone.
+
+Test: `node tests/stage2.test.js [shotDir]` (104 checks over 6 viewports: toolbar one row, tabs+Score one row (also with 6 rooms and in Follow with pan controls), canvas thresholds and no-regression, 5 click-accuracy checks per viewport (4 corners + centre), Play HUD one line, no scroll, no errors). `layout`, `stage1`, `landing`, `surprise` suites still pass; `toyDebug` count 0. Stages 3 (Pause) and 4 (art cache) are not started.
