@@ -7547,9 +7547,10 @@
       // blast) already track "how recently was this actor hit", so reusing them here costs
       // nothing new and just lets friction bring the speed back down naturally instead of an
       // instant hard clamp.
-      // In a gravity room a cannon shot is covered by `ballistic` (the flight); the cooldown must not keep the speed cap
-      // off after landing, or a player who regains control (see shotLocksInput) runs away under a held key.
-      const recentlyLaunched = (actor.cannonCooldown > 0 && !inGravity) || actor.bouncyCooldown > 0 || actor.flashTimer > 0 || !!actor.ballistic;
+      // For the player in a gravity room a cannon shot is covered by `ballistic` (the flight); the cooldown must not keep the
+      // speed cap off after landing, or a player who regains control (see shotLocksInput) runs away under a held key.
+      // Everything else (crates, bombs) keeps the old exemption so existing contraptions time exactly as before.
+      const recentlyLaunched = (actor.cannonCooldown > 0 && !(inGravity && actor.isPlayer)) || actor.bouncyCooldown > 0 || actor.flashTimer > 0 || !!actor.ballistic;
 
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
