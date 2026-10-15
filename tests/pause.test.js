@@ -10,7 +10,7 @@ if (!src.includes(anchor)) throw new Error("anchor missing");
 const hook = `window.__ev=f=>eval("("+f+")");
 window.__seed=v=>{ let s=v>>>0; Math.random=()=>{ s=(s+0x6D2B79F5)>>>0; let t=s; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; };
 window.__sim=(n,inputFn)=>{ let steps=0; for(let i=0;i<n;i++){ if(inputFn) inputFn(i);
-  window.__T+=1000/60; window.__seed(Math.round(gameClockMs*0.06)*7919+1);
+  window.__T+=16; window.__seed(Math.round(gameClockMs/16)*7919+1);
   const q=window.__q.splice(0); for(const cb of q) cb(window.__T); steps++; } return steps; };
 `;
 const tmp = path.join(os.tmpdir(), "pause_hooked.html");
@@ -46,7 +46,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; window.__seed(12345); const g=SAMPLE_GAMES[sample]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); enterPlayMode(); lastT=window.__T;
   let k=0; const press=c=>window.dispatchEvent(new KeyboardEvent("keydown",{key:c,bubbles:true}));
   const list=pauses; // [{at,len}]
-  while(k<600){
+  while(k<625){
     const p=list.find(x=>x.at===k&&!x.done);
     if(p){ p.done=true; press("p"); if(!gamePaused) throw new Error("did not pause");
       const frozen=JSON.stringify(actors.map(a=>[a.x,a.y]))+gameClockMs;
@@ -76,7 +76,7 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
     for (let r = 0; r < RUNS; r++) {
       let s = (r * 2654435761 + idx * 97 + 11) >>> 0; const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
       const n = 1 + Math.floor(rnd() * 3); const pauses = [];
-      for (let i = 0; i < n; i++) pauses.push({ at: Math.floor(rnd() * 590), len: 1 + Math.floor(rnd() * 600) });
+      for (let i = 0; i < n; i++) pauses.push({ at: Math.floor(rnd() * 610), len: 1 + Math.floor(rnd() * 600) });
       const fp = await runFresh(idx, pauses);
       if (fp !== base) { bad++; if (!firstBad) firstBad = JSON.stringify(pauses) + "\n" + fp.slice(0, 300) + "\n" + base.slice(0, 300); }
     }
