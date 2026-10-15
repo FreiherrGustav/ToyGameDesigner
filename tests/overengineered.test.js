@@ -294,7 +294,7 @@ const ROUTE = [
   const out = path.join(os.tmpdir(), "oe_export.html");
   await (await dl).saveAs(out);
   let html = fs.readFileSync(out, "utf8");
-  const hookAnchor = "playReadyUntil = performance.now() + READY_DURATION_MS;\n  renderPlayHUD();";
+  const hookAnchor = "playReadyUntil = gameNow() + READY_DURATION_MS;\n  renderPlayHUD();";
   ok(html.includes(hookAnchor), "export boot anchor present");
   ok(html.includes("magnetHoldsActor") && html.includes("magnetActiveAt"), "export carries the magnet hold code");
   html = html.replace(hookAnchor, hookAnchor + " window.__x={on:c=>isChannelOn(c),bombs:()=>actors.filter(a=>a.defId==='carrybomb2').map(a=>({x:a.x,y:a.y,vy:a.vy})),roof:()=>board[13][22]==null&&board[13][23]==null,lives:()=>lives,ended:()=>playSessionEnded};");

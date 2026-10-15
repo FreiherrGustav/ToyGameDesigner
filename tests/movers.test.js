@@ -295,7 +295,7 @@ const DEFINE_RIVER = `window.__river=()=>{ __t.reset(); __t.grav(false); __t.wra
   await (await dl).saveAs(out);
   let html = fs.readFileSync(out, "utf8");
   ok(html.includes("tickMovers") && html.includes("MOVER_SPEEDS") && html.includes("honk"), "export has mover code");
-  const hookAnchor = "playReadyUntil = performance.now() + READY_DURATION_MS;\n  renderPlayHUD();";
+  const hookAnchor = "playReadyUntil = gameNow() + READY_DURATION_MS;\n  renderPlayHUD();";
   ok(html.includes(hookAnchor), "export boot anchor present");
   html = html.replace(hookAnchor, hookAnchor + " window.__x={a:()=>actors,lives:()=>lives};");
   fs.writeFileSync(out, html);

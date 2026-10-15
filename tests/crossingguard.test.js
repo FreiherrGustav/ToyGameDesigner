@@ -153,7 +153,7 @@ const run = (pg, fn, arg) => pg.evaluate(([s, a]) => window.__ev(s)(a), [fn.toSt
     const t = actors.find(a => moverDefOf(a)).moverT;
     return { hz: window.__hz, lives, moverT: t };
   });
-  await page.waitForTimeout(1000);
+  await run(page, () => { advanceGameClock(1.0); }); // the level-reset delay is game time now
   const hit1 = await run(page, () => { const p = actors.find(a => a.isPlayer); return { lives, x: Math.round(p.x), t: actors.find(a => moverDefOf(a)).moverT, ready: playReadyUntil != null }; });
   console.log("restart loop:", JSON.stringify({ hit0, hit1 }));
   ok(hit0.hz >= 1 && hit1.lives === 2 && hit1.x === Math.round(info.px) && hit1.t < 0.1, "car hit should cost a life and restart the level " + JSON.stringify({ hit0, hit1 }));
@@ -229,7 +229,7 @@ const run = (pg, fn, arg) => pg.evaluate(([s, a]) => window.__ev(s)(a), [fn.toSt
   await (await dl).saveAs(out);
   let html = fs.readFileSync(out, "utf8");
   ok(!html.includes("__toyDebug") && html.includes("tickMovers") && html.includes("cgWater") && html.includes("mvLog"), "export has the sample");
-  const bootAnchor = "playReadyUntil = performance.now() + READY_DURATION_MS;\n  renderPlayHUD();";
+  const bootAnchor = "playReadyUntil = gameNow() + READY_DURATION_MS;\n  renderPlayHUD();";
   ok(html.includes(bootAnchor), "export boot anchor present");
   html = html.replace(bootAnchor, bootAnchor + " window.__ev = f => eval('(' + f + ')'); window.__t = { tick: n => { for (let i = 0; i < n; i++) tick(1/60); }, keys: () => keys }; Object.defineProperty(window, '__hz', { get: () => 3 - lives });");
   fs.writeFileSync(out, html);

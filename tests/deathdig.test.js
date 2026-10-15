@@ -133,7 +133,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     triggerHazard(p); // lose a life
     return { startRoom, room2, arrive, crateSpawn, wasCell, lives, startMarked, hasCrate: !!crate };
   });
-  await sleep(1000);
+  await run(page, () => { advanceGameClock(1.0); }); // death resets run on the game clock now, not real time
   const r8 = await run(page, () => {
     const p = actors.find(a => a.isPlayer);
     const crate = actors.find(a => a.defId === PUSHABLE_DEF_ID);
@@ -154,7 +154,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // death in the very first room goes back to the game start, not further
   await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi"); enterPlayMode(); playReadyUntil = null; });
   const r10 = await run(page, () => { const p = actors.find(a => a.isPlayer); window.__p0 = [Math.round(p.x), Math.round(p.y)]; p.x += 120; triggerHazard(p); return { lives }; });
-  await sleep(900);
+  await run(page, () => { advanceGameClock(0.9); });
   const r11 = await run(page, () => { const p = actors.find(a => a.isPlayer); return { pos: [Math.round(p.x), Math.round(p.y)], p0: window.__p0, lives }; });
   ok(Math.abs(r11.pos[0] - r11.p0[0]) <= 1, "death in the first room returns to the start " + JSON.stringify(r11));
 

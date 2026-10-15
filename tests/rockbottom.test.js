@@ -424,7 +424,7 @@ const LIB = `()=>{
   await (await dl).saveAs(out);
   let html = fs.readFileSync(out, "utf8");
   ok(!html.includes("__toyDebug") && html.includes("rbBeast") && html.includes("rbDirtA") && html.includes("rbCave1"), "export carries the sample's art and beast");
-  const bootAnchor = "playReadyUntil = performance.now() + READY_DURATION_MS;\n  renderPlayHUD();";
+  const bootAnchor = "playReadyUntil = gameNow() + READY_DURATION_MS;\n  renderPlayHUD();";
   ok(html.includes(bootAnchor), "export boot anchor present");
   html = html.replace(bootAnchor, bootAnchor + " window.__ev = f => eval('(' + f + ')');");
   fs.writeFileSync(out, html);
