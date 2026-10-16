@@ -10964,6 +10964,26 @@
       expect: { fact: "balls keep dropping into the machine and bouncing", check: "spawnCount2", needsInput: false, selfStart: true },
       legend: { B: "bounce", s: "spawner:e", t: "tramp", P: "player", "=": "wall", u: "button0", w: "pet", L: "lava", c: "crate" },
       rows: ["BBBBBBBB....", "Bs..c..B....", "B..w...B....", "B...t..B....", "B.t....B....", "B......B.uP.", "BBLLBBBB===="] },
+    { id: "lemmings", category: "loop", closed: false, stooge: "w", names: ["Lemming Parade", "Off The Edge, Again", "Everybody Walk The Plank", "Tuesday Cliff Day"],
+      room: { gravity: "on", wrapH: true, wrapV: true }, requires: [], discover: "o",
+      expect: { fact: "the little walkers step off the ledge, fall through the floorless room and wrap back to the top", check: "wrap", needsInput: false, selfStart: true },
+      legend: {"=": "wall", "P": "player", "w": "walker", "o": "reward"},
+      rows: ["............", "............", ".P.w.w.w.o..", ".==========.", "............"] },
+    { id: "plinko", category: "loop", closed: false, stooge: "P", names: ["Plinko Forever", "The Never Ending Drop", "Peg Board Panic", "Tuesday Marble Run"],
+      room: { gravity: "on", wrapH: false, wrapV: true }, requires: ["spawner", "bouncy"], discover: "u",
+      expect: { fact: "balls rain onto the pegs and bounce, and keep coming around", check: "bounce", needsInput: false, selfStart: true },
+      legend: {"B": "bounce", "s": "spawner:s", "c": "crate", "P": "player", "=": "wall", "u": "reward"},
+      rows: ["...s.......", ".c.........", "...........", "...B...B...", ".B...B.....", "...B...B...", ".B...B..===", "........P.u", "........==="] },
+    { id: "fallforever", category: "loop", closed: false, stooge: "w", names: ["Falling Forever", "The Bottomless Room", "Are We There Yet", "Elevator Without Floors"],
+      room: { gravity: "on", wrapH: false, wrapV: true }, requires: ["trampoline"], discover: "o",
+      expect: { fact: "everyone falls out the bottom and drops back in from the top", check: "wrap", needsInput: false, selfStart: true },
+      legend: {"P": "player", "w": "pet", "c": "crate", "t": "tramp", "o": "reward"},
+      rows: ["..P....w....", "............", "...c......t.", "............", ".t.......c..", "...w....o...", "............"] },
+    { id: "rink", category: "loop", closed: false, stooge: "w", names: ["Skating Rink", "Zamboni Day", "Slip And Slide Society", "Curling Without The Curlers"],
+      room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["slippery", "cannon"], discover: "c",
+      expect: { fact: "a crate drops into the cannon, lands on the ice and everyone slides around", check: "cannon", needsInput: false, selfStart: true },
+      legend: {"i": "slick", "k": "cannon:ne", "c": "crate", "w": "pet", "P": "player"},
+      rows: ["........................", "...c....................", "........................", "...k.....w....c..w..P...", "iiiiiiiiiiiiiiiiiiiiiiii"] },
     { id: "fanclub", category: "vignette", closed: true, stooge: "P", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
       room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["fan", "plate", "gate"], discover: "o",
       expect: { fact: "the fan blows the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false, selfStart: true },
@@ -11105,10 +11125,25 @@
     // pets always move (wanderers/fleers) so no arrangement is ever a frozen still life
     const pets = [defaultDefIdForKind("wanderer")].filter(Boolean)
       .concat(customActorSlotIds.filter(id => actorDefs[id] && id !== playerDefId && ["wanderer", "fleer"].includes(actorDefs[id].temperament)));
-    const chasers = Object.keys(actorDefs).filter(id => actorDefs[id].temperament === "chaser" && id !== playerDefId);
+    const chasers = Object.keys(actorDefs).filter(id => actorDefs[id].temperament === "chaser" && id !== playerDefId && !id.startsWith("sp~"));
+    // variety: a chaser can also be cast as a pet (it follows you around; harmless, see surpriseDefFor)
+    chasers.forEach(id => { if (!pets.includes(id)) pets.push(id); });
     const rewards = collectibleSlotIds.filter(id => actorDefs[id] && !POWERUP_DEF_IDS.includes(id));
     const balls = [HAZARD_BALL_DEF_ID, HAZARD_BALL_DEF_ID, PUSHABLE_DEF_ID].concat(pets.filter(id => actorDefs[id].temperament === "wanderer"));
-    return { skins, pets, chasers, rewards: rewards.length ? rewards : [EXAMPLE_CHEESE_DEF_ID], balls };
+    const walkers = pets.filter(id => actorDefs[id].temperament === "wanderer");
+    return { skins, pets, walkers, chasers, rewards: rewards.length ? rewards : [EXAMPLE_CHEESE_DEF_ID], balls };
+  }
+  // A pet is always harmless and a chaser always lethal in a surprise. The kid's own character defs are
+  // never edited: a surprise uses its own copy ("sp~pet~<id>" / "sp~chaser~<id>") with only `lethal` set.
+  const SURPRISE_NPC_TEMPERAMENTS = ["stationary", "wanderer", "chaser", "fleer"];
+  function surpriseDefFor(defId, role) {
+    const base = actorDefs[defId];
+    if (!base || !SURPRISE_NPC_TEMPERAMENTS.includes(base.temperament)) return defId;
+    const want = role === "chaser";
+    if (npcIsLethal(base) === want) return defId;
+    const id = "sp~" + role + "~" + defId;
+    if (!actorDefs[id]) { actorDefs[id] = structuredClone(base); actorDefs[id].lethal = want; }
+    return id;
   }
   const SURPRISE_MIRROR = { e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se", n: "n", s: "s" };
   function surpriseMirrorPiece(name) {
@@ -11145,9 +11180,10 @@
       case "door": return { tile: { key: gameplayKey("door", "none"), color: fills.doorColor(dir) }, doorId: dir };
       case "crate": return { actor: PUSHABLE_DEF_ID };
       case "stone": return { actor: LARGE_STONE_DEF_ID };
-      case "pet": return { actor: fills.pet };
-      case "pet*": return { actor: surprisePick(rng, kit.pets) };
-      case "chaser": return { actor: fills.chaser };
+      case "pet": return { actor: fills.pet, role: "pet" };
+      case "pet*": return { actor: surprisePick(rng, kit.pets), role: "pet" };
+      case "walker": return { actor: surprisePick(rng, kit.walkers), role: "pet" }; // a pet that really walks around (a wanderer)
+      case "chaser": return { actor: fills.chaser, role: "chaser" };
       case "reward": return { actor: fills.reward };
       case "reward*": return { actor: surprisePick(rng, kit.rewards) };
     }
@@ -11277,7 +11313,7 @@
       fills.ball = HAZARD_BALL_DEF_ID;
       fills.pet = kit.pets[0]; fills.reward = kit.rewards[0];
       fills.chaser = defaultDefIdForKind("chaser") || kit.chasers[0];
-      kit.pets = [kit.pets[0]]; kit.rewards = [kit.rewards[0]];
+      kit.pets = [kit.pets[0]]; kit.walkers = [kit.walkers[0]]; kit.rewards = [kit.rewards[0]];
     }
     const chaos = opts.chaos !== false;
     const mirror = rng() < 0.5;
@@ -11306,7 +11342,7 @@
           }
           if (piece.doorId != null) target.doors.push({ id: piece.doorId, x, y });
           if (piece.spawnerContent) target.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
-          if (piece.actor) target.actors.push({ x, y, defId: piece.actor });
+          if (piece.actor) target.actors.push({ x, y, defId: piece.actor, role: piece.role || null });
           if (piece.player) target.player = { x, y };
           if (ch === template.discover && target === spec) spec.discoverCells = (spec.discoverCells || []).concat([{ x, y }]);
         }
@@ -11366,7 +11402,9 @@
       }
     }
     for (const a of spec.actors) {
-      const risky = actorDefs[a.defId] && (actorDefs[a.defId].temperament === "chaser" || actorDefs[a.defId].temperament === HAZARD_BALL_KIND);
+      const rd = actorDefs[a.defId]; // a pet is harmless even when it looks like a chaser
+      const lethalNpc = rd && (a.role === "chaser" ? true : a.role === "pet" ? false : npcIsLethal(rd));
+      const risky = rd && ((rd.temperament === "chaser" && lethalNpc) || rd.temperament === HAZARD_BALL_KIND);
       if (risky) for (const q of watched) if (Math.max(Math.abs(a.x - q.x), Math.abs(a.y - q.y)) <= 3) return "chaser within 3 tiles of the player";
     }
     if (blocking(p.x - 1, p.y) && blocking(p.x + 1, p.y) && blocking(p.x, p.y - 1) && blocking(p.x, p.y + 1)) return "player cannot move";
@@ -11473,8 +11511,8 @@
     });
     const savedSel = selectedActorDefId;
     const place = (defId, x, y) => { selectedActorDefId = defId; return placeNewActor(x * TILE + TILE / 2, y * TILE + TILE / 2); };
-    spec.actors.forEach(a => place(a.defId, a.x, a.y));
-    spec.spawners.forEach(s => { if (s.content) spawnerContents[roomCellKey(currentRoomId, s.x, s.y)] = s.content; });
+    spec.actors.forEach(a => place(a.role ? surpriseDefFor(a.defId, a.role) : a.defId, a.x, a.y));
+    spec.spawners.forEach(s => { if (s.content) spawnerContents[roomCellKey(currentRoomId, s.x, s.y)] = surpriseDefFor(s.content, "pet"); });
     let playerPlaced = false;
     if (spec.player && playerRoomId == null) { surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
     selectedActorDefId = savedSel;
@@ -11604,7 +11642,7 @@
     button: n => n === "button" || n === "button0", plate: n => n === "plate", gate: n => n === "gate",
     stone: n => n === "stone", crate: n => n === "crate" || n.startsWith("spawnerc"), lava: n => n === "lava",
     spike: n => n === "spike", bounce: n => n === "bounce", sticky: n => n === "sticky", slick: n => n === "slick",
-    belt: n => n.startsWith("belt:"), chaser: n => n === "chaser", pet: n => n === "pet" || n === "pet*",
+    belt: n => n.startsWith("belt:"), chaser: n => n === "chaser", pet: n => n === "pet" || n === "pet*" || n === "walker",
     reward: n => n === "reward" || n === "reward*"
   };
   function surpriseTemplatesFor(pieceKey) {

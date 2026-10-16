@@ -102,7 +102,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
 
   // ---- 2. Expectations (canonical: native gravity, no wrap) ----
   for (const t of tmpls) {
-    if (t.expect.needsInput) { results.notes.push(t.id + ": needsInput"); continue; }
+    if (t.expect.needsInput || ["wrap", "bounce", "cannon"].includes(t.expect.check)) { results.notes.push(t.id + ": needsInput"); continue; }
     let okCount = 0, total = 0;
     for (let k = 0; k < 8; k++) {
       const seed = 5000 + k * 37;

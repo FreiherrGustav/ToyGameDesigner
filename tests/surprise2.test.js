@@ -54,7 +54,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
     }
     if (t.category !== "toy") { // the stooge rule
       const chars = (t.stooge || "").split("");
-      const has = chars.some(c => { const n = t.legend && t.legend[c]; return n && /^(player|playerplate|pet|pet\*|chaser)$/.test(n) && t.rows.some(r => r.includes(c)); });
+      const has = chars.some(c => { const n = t.legend && t.legend[c]; return n && /^(player|playerplate|pet|pet\*|walker|chaser)$/.test(n) && t.rows.some(r => r.includes(c)); });
       ok(has, t.id + ": a character is in the way (stooge " + t.stooge + ")");
     }
     if (t.category === "loop" || t.category === "vignette") ok(t.expect && t.expect.selfStart === true, t.id + ": expect.selfStart declared");
@@ -167,6 +167,57 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   ok(JSON.stringify(mr.grav) === "[true,false]" && JSON.stringify(mr.wrapV) === "[false,true]", "each part has its own room rules");
   ok(mr.players === 1 && mr.current, "one player, and the editor stays on the first part");
   ok(mr.newRooms === 3 && mr.oldKept, "into a non-empty room: new tabs, existing room untouched");
+
+  // ---- E. Stage 2: pets are harmless, chasers lethal, the kid's own defs untouched ----
+  {
+    const r = await page.evaluate(() => {
+      const out = { petsHarmless: true, chasersLethal: true, pets: 0, chasers: 0, ownUntouched: true, castChaserPets: 0 };
+      __st.reset();
+      const defs = __st.defs(); const before = JSON.stringify([defs.wanderer && defs.wanderer.lethal, Object.keys(defs).filter(k => !k.startsWith("sp~")).length]);
+      const kidWanderer = Object.keys(defs).find(k => defs[k].temperament === "wanderer");
+      for (let i = 0; i < 160; i++) {
+        __st.reset(); const rep = __st.press(9000 + i, { chaos: i % 2 === 0, recent: [] });
+        if (!rep || !rep.templateId) continue;
+        const st = __st.state(); const d = __st.defs();
+        st.actors.forEach(a => {
+          const def = d[a.defId]; if (a.isPlayer || !def || !["wanderer", "fleer", "chaser", "stationary"].includes(def.temperament)) return;
+          const lethal = def.lethal !== undefined ? !!def.lethal : def.temperament === "chaser";
+          if (a.defId.startsWith("sp~pet~") || (!a.defId.startsWith("sp~chaser~") && !lethal)) { out.pets++; if (lethal) out.petsHarmless = false; if (def.temperament === "chaser") out.castChaserPets++; }
+          if (a.defId.startsWith("sp~chaser~") || (def.temperament === "chaser" && lethal)) { out.chasers++; if (!lethal) out.chasersLethal = false; }
+        });
+      }
+      const d = __st.defs();
+      out.ownUntouched = kidWanderer ? d[kidWanderer].lethal === true || d[kidWanderer].lethal === undefined : true;
+      return out;
+    });
+    console.log("pet/chaser lethality:", JSON.stringify(r));
+    ok(r.pets > 20 && r.petsHarmless, "every surprise pet is harmless (" + r.pets + " pets seen)");
+    ok(r.chasers > 5 && r.chasersLethal, "every surprise chaser is lethal (" + r.chasers + " chasers seen)");
+    ok(r.ownUntouched, "the project's own character defs keep their lethal setting");
+  }
+
+  // ---- F. Stage 2 templates: expectation within 10 simulated seconds, canonical and chaotic, fresh page per run ----
+  const STAGE2 = { lemmings: ["wrap", 1], plinko: ["bounce", 3], fallforever: ["wrap", 1], rink: ["cannon", 1] };
+  for (const [id, [type, min]] of Object.entries(STAGE2)) {
+    ok(T.some(t => t.id === id), id + ": template exists and is eligible");
+    for (const mode of ["canonical", "chaos"]) {
+      let okN = 0, n = 0, lifeLost = 0;
+      for (let k = 0; k < 6; k++) {
+        await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__st);
+        const r = await page.evaluate(({ id, seed, canon, type }) => {
+          __st.reset();
+          const rep = __st.press(seed, canon ? { templateId: id, chaos: false, canonical: true } : { templateId: id });
+          if (!rep || !rep.templateId) return { built: false };
+          __st.play(); __iaStart(); __iaTick(600); const ia = __iaStop(); __st.stop();
+          return { built: true, c: ia.counts[type] || 0, hits: ia.counts.hit || 0 };
+        }, { id, seed: 4000 + k * 71, canon: mode === "canonical", type });
+        n++; if (r.built && r.c >= min) okN++; else console.log("   expect miss:", id, mode, JSON.stringify(r));
+        if (r.built && r.hits) lifeLost++;
+      }
+      ok(okN === n, "expect " + id + " (" + type + " >= " + min + " in 10 s, " + mode + ") " + okN + "/" + n);
+      ok(lifeLost === 0, id + " (" + mode + "): the pets never hurt the player in 10 s idle");
+    }
+  }
 
   ok(errors.length === 0, "no page errors " + errors.slice(0, 3).join(" | "));
   await browser.close();
