@@ -2127,6 +2127,19 @@
     rooms.forEach(r => migrateLegacyFacingObjects(r.board));
     rooms.forEach(r => migrateLegacySwitchToButton(r.board));
     doorLinks = structuredClone(snap.doorLinks);
+    // Half-severed pairs: a door that leads somewhere but whose partner has lost its own link (an
+    // earlier delete/duplicate left it) is a door that silently does nothing. Door links are always
+    // meant to be two-way, so give the orphan the reverse link. Only fills an EMPTY slot on a tile
+    // that is still a door; an existing link is never overwritten.
+    Object.keys(doorLinks).forEach(key => {
+      const l = doorLinks[key], back = roomCellKey(l.toRoomId, l.toX, l.toY);
+      if (doorLinks[back]) return;
+      const dest = rooms.find(r => r.id === l.toRoomId);
+      const cell = dest && dest.board[l.toY] && dest.board[l.toY][l.toX];
+      if (!cell || cell.split(":")[0] !== "door") return;
+      const m = /^(-?\d+):(\d+),(\d+)$/.exec(key);
+      if (m) doorLinks[back] = { toRoomId: +m[1], toX: +m[2], toY: +m[3] };
+    });
     spawnerContents = snap.spawnerContents ? structuredClone(snap.spawnerContents) : {}; // older saves predate spawners
     // v2.35: a pre-v2.35 save can still have an old-shape ARRAY here (the v2.19-v2.34 "random
     // pool" format, e.g. ["wanderer1","wanderer2"]) — spawnerContents is a single defId per key
