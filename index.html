@@ -291,6 +291,45 @@
   body.play-mode #buildToolbar { display: none; }
   body.play-mode #cameraPanRow { display: none; }
 
+  /* ---------- v2.49: let it breathe on larger screens ---------- */
+  /* Three-zone top bar (logo | Build/Play | actions) on anything wide enough, in Build AND Play, so the
+     Build/Play toggle sits on the page centre — which is also where the canvas sits in Play. */
+  @media (min-width: 1000px) {
+    #topBar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); column-gap: 24px; align-items: stretch; }
+    #topBar #homeLogo { grid-column: 1; justify-self: start; align-self: center; }
+    #topBarControls { display: contents; }
+    #appModeToggle { grid-column: 2; flex: none; width: 300px; }
+    #topBarActions { grid-column: 3; justify-self: end; }
+  }
+  /* The comfortable tier: only when the window is big in BOTH directions (height is what binds the canvas) */
+  @media (min-width: 1500px) and (min-height: 820px) {
+    #topBar { max-width: 1760px; margin-top: 14px; padding: 0 28px; column-gap: 32px; }
+    #homeLogo { font-size: 24px; }
+    #appModeToggle button { font-size: 20px; padding: 12px 8px; }
+    #topBarActions { gap: 14px; }
+    #samplesBtn, #pauseBtn { font-size: 17px; padding: 10px 20px; }
+    #surpriseBtn { padding: 6px 18px; font-size: 34px; }
+    #app { gap: 20px; padding: 10px 28px 12px; }
+    #paletteWrap { width: 320px; flex: 0 0 320px; gap: 14px; padding: 16px; }
+    #paletteWrap .section-title { font-size: 13px; margin-bottom: 8px; }
+    #placeTabs button { font-size: 12px; padding: 10px 2px; }
+    .swatch { width: 52px; height: 52px; }
+    .swatch canvas { width: 40px; height: 40px; }
+    .swatch .lbl { font-size: 10px; }
+    .swatch.big { width: 66px; height: 66px; }
+    .presetSwatch { width: 44px; height: 44px; }
+    .presetSwatch canvas { width: 40px; height: 40px; }
+    .swatch-row { gap: 8px; }
+    #captionBar { font-size: 13px; }
+    #gameWrap { gap: 10px; padding: 8px 16px; }
+    #gameWrap .toolbar { gap: 12px; }
+    #gameWrap button.tbtn { padding: 8px 16px; font-size: 14px; min-height: 36px; }
+    /* the toolbar is no wider than the canvas, so it wraps into two relaxed rows instead of one crowded one */
+    #buildToolbar { max-width: var(--stageW, none); justify-content: center; }
+    #statusRow { max-width: var(--stageW, none); width: 100%; align-self: center; font-size: 14px; }
+    #statusRow #autosaveHint { max-width: 220px; }
+  }
+
   /* ---------- Pixel editor ---------- */
   #pixelEditor { display: flex; flex-direction: column; gap: 6px; align-items: center; }
   #pixelCanvas {
@@ -4067,32 +4106,71 @@
   // v2.47: fit the canvas into the space the editor layout leaves it. Uniform scale only (4:3 kept,
   // never stretched), CSS-only so the 768x576 backing store and all pointer math (which scales by
   // getBoundingClientRect) are untouched. Presentation only.
+  // v2.49: the canvas grows to fill the stage in crisp steps. The art is 8x8 per 32px tile, so every 0.25 of
+  // scale is a whole number of screen pixels per art pixel (0.75 = 3px, 1.0 = 4px, 1.25 = 5px ... 2.0 = 8px).
+  // From native size (1.0) up we snap down to the nearest step unless that would waste more than
+  // FIT_SNAP_WASTE of the available size; BELOW native size the free fit is kept (v2.48 Stage 2's numbers, and a
+  // 0.75 snap there would shrink 1366x635 from 0.857 to 0.75). `--stageW` (the canvas width) also bounds the
+  // toolbar rows in the comfortable tier, so they wrap into two relaxed rows instead of one crowded one.
+  const FIT_SCALE_STEP = 0.25, FIT_SNAP_WASTE = 0.12, FIT_MAX_SCALE = 2.0, FIT_MAX_SCALE_WIDE = 1.75, FIT_WIDE_PX = 2200;
   function fitCanvas() {
     const wrap = document.getElementById("gameWrap");
     if (!wrap) return;
-    const BORDER = 6, NATURAL = 768 + BORDER;
-    let w = NATURAL;
+    const BORDER = 6, NATIVE_W = 768;
     const cs = getComputedStyle(wrap);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const wrapGap = parseFloat(cs.rowGap) || 0;
     const app = document.getElementById("app");
     const palette = document.getElementById("paletteWrap");
     const stacked = window.matchMedia("(max-width: 760px)").matches;
-    const palW = palette && palette.offsetParent ? palette.offsetWidth + 12 : 0;
-    const availW = (stacked ? window.innerWidth - 32 : (app ? app.clientWidth - 24 : window.innerWidth) - palW) - padX;
-    w = Math.min(w, availW);
-    if (!stacked && app) {
-      let others = 0, kids = 1;
-      for (const el of wrap.children) {
-        if (el.id === "gameCanvas" || el.offsetParent === null) continue;
-        others += el.offsetHeight; kids++;
+    const maxScale = window.innerWidth >= FIT_WIDE_PX ? FIT_MAX_SCALE_WIDE : FIT_MAX_SCALE;
+    const apply = (w) => {
+      gameCanvas.style.width = w + "px";
+      gameCanvas.style.height = Math.round((w - BORDER) * 0.75 + BORDER) + "px";
+      wrap.style.setProperty("--stageW", w + "px");
+    };
+    // the largest canvas width the stage can hold right now (it depends on the toolbar heights, which depend on --stageW)
+    const freeFitW = () => {
+      let w = NATIVE_W * maxScale + BORDER;
+      if (app) {
+        const ac = getComputedStyle(app);
+        const appPadX = parseFloat(ac.paddingLeft) + parseFloat(ac.paddingRight);
+        const appPadY = parseFloat(ac.paddingTop) + parseFloat(ac.paddingBottom);
+        const appGap = parseFloat(ac.columnGap) || 0;
+        const palW = palette && palette.offsetParent ? palette.offsetWidth + appGap : 0;
+        const availW = (stacked ? window.innerWidth - 32 : app.clientWidth - appPadX - palW) - padX;
+        w = Math.min(w, availW);
+        if (!stacked) {
+          let others = 0, kids = 1;
+          for (const el of wrap.children) {
+            if (el.id === "gameCanvas" || el.offsetParent === null) continue;
+            others += el.offsetHeight; kids++;
+          }
+          const availH = app.clientHeight - appPadY - 8 - padY - others - (kids - 1) * wrapGap;
+          w = Math.min(w, (availH - BORDER) * 4 / 3 + BORDER);
+        }
       }
-      const availH = app.clientHeight - 20 - padY - others - (kids - 1) * 4;
-      w = Math.min(w, (availH - BORDER) * 4 / 3 + BORDER);
+      return Math.max(320, w);
+    };
+    const choose = (freeW) => {
+      const s = (freeW - BORDER) / NATIVE_W;
+      const snapped = Math.floor(s / FIT_SCALE_STEP + 1e-6) * FIT_SCALE_STEP;
+      if (snapped >= 1 && snapped >= s * (1 - FIT_SNAP_WASTE)) return Math.round(snapped * NATIVE_W + BORDER);
+      return Math.floor(freeW);
+    };
+    let w = choose(freeFitW());
+    apply(w);
+    for (let i = 0; i < 4; i++) {          // the toolbar may have re-wrapped at the new width: re-measure until stable
+      const w2 = choose(freeFitW());
+      if (Math.abs(w2 - w) < 1) break;
+      w = w2; apply(w);
     }
-    w = Math.max(320, Math.floor(w));
-    gameCanvas.style.width = w + "px";
-    gameCanvas.style.height = Math.round((w - BORDER) * 0.75 + BORDER) + "px";
+    if (!stacked && app && w > 320) {      // safety net: never leave the stage overflowing
+      for (let i = 0; i < 8 && wrap.scrollHeight > wrap.clientHeight + 1; i++) {
+        w = Math.max(320, choose(w - FIT_SCALE_STEP * NATIVE_W)); apply(w);
+      }
+    }
   }
   window.addEventListener("resize", fitCanvas);
   if (window.ResizeObserver) {
