@@ -10943,103 +10943,118 @@
   const SURPRISE_MAX_ATTEMPTS = 20;
   const SURPRISE_GRAVITY_CHAOS = 0.15; // chance a surprise sets the room's gravity opposite to what it was built for
   const SURPRISE_WRAP_V_CHANCE = 0.08;
+  // ---- v2.50 Stage 1: every template declares what kind of surprise it is and what room rules it needs ----
+  // category: loop (self-running and cycling), vignette (small, self-running, one cause and effect), room (a whole
+  //   room, Stage 3), toy (the player has to do something), nonsense.
+  // room: { gravity: "on"|"off"|"either" (+ native when "either"), wrapH/wrapV: true|false|"maybe" }. "on"/"off" and
+  //   true/false are REQUIRED (never rolled, never flipped by chaos); "either" keeps the small chaos flip; "maybe" keeps
+  //   the old wrap chance (wrapHChance, default 0.08; wrapV SURPRISE_WRAP_V_CHANCE) and only when chaos is on.
+  // closed: the footprint is sealed on every side (the harness checks the layout agrees); at most about a third are.
+  // stooge: legend chars of a character (player/pet/chaser) standing in the consequence's way (every non-toy has one).
+  // expect.selfStart: an idle player standing where the template put them sees an interaction within 3 seconds.
+  // rooms: [...] (optional) a multi-room template; each part has its own rows/legend/room, joined by "door:<n>" pieces
+  //   (two cells with the same n in different parts are linked both ways).
+  const SURPRISE_CATEGORY_WEIGHTS = { loop: 35, vignette: 30, room: 15, toy: 10, nonsense: 10 };
+  const SURPRISE_RECENT_MAX = 5; // never repeat any of the last 5 templates (kept for the editor session, not in saves)
+  let surpriseRecent = [];
   const SURPRISE_TEMPLATES = [
-    { id: "pinball", names: ["Pinball Parlor", "The Bouncy Machine", "Ball Pit Disaster", "Tuesday Pinball Situation"],
-      gravity: "on", wrapH: 0.08, requires: ["spawner", "bouncy", "trampoline", "button"], discover: "u",
-      expect: { fact: "the spawner has fired at least twice (two or more live spawns)", check: "spawnCount2", needsInput: false },
-      legend: { B: "bounce", s: "spawner:e", t: "tramp", P: "player", "=": "wall", u: "button0" },
-      rows: ["BBBBBBBB....", "Bs.....B....", "B......B....", "B...t..B....", "B.t....B....", "B......B.uP.", "BBBBBBBB===="] },
-    { id: "fanclub", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
-      gravity: "on", wrapH: 0.08, requires: ["fan", "plate", "gate"], discover: "o",
-      expect: { fact: "the fan blows the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false },
+    { id: "pinball", category: "loop", closed: false, stooge: "w", names: ["Pinball Parlor", "The Bouncy Machine", "Ball Pit Disaster", "Tuesday Pinball Situation"],
+      room: { gravity: "on", wrapH: "maybe", wrapV: false },
+      requires: ["spawner", "bouncy", "trampoline", "button", "lava"], discover: "u",
+      expect: { fact: "balls keep dropping into the machine and bouncing", check: "spawnCount2", needsInput: false, selfStart: true },
+      legend: { B: "bounce", s: "spawner:e", t: "tramp", P: "player", "=": "wall", u: "button0", w: "pet", L: "lava", c: "crate" },
+      rows: ["BBBBBBBB....", "Bs..c..B....", "B..w...B....", "B...t..B....", "B.t....B....", "B......B.uP.", "BBLLBBBB===="] },
+    { id: "fanclub", category: "vignette", closed: true, stooge: "P", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
+      room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["fan", "plate", "gate"], discover: "o",
+      expect: { fact: "the fan blows the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false, selfStart: true },
       legend: { "#": "wall", f: "fan:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward" },
       rows: ["##########", "#......#.#", "#......#.#", "#......#.#", "#......#.#", "#fPc..pGo#", "##########"] },
-    { id: "moat", names: ["Moat Problem", "The Floor Is Lava", "Stone Cold Bridge", "Lava Lamp Lunch"],
-      gravity: "on", wrapH: 0.3, requires: ["lava", "largestone"], discover: "o",
+    { id: "moat", category: "toy", closed: false, names: ["Moat Problem", "The Floor Is Lava", "Stone Cold Bridge", "Lava Lamp Lunch"],
+      room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["lava", "largestone"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", L: "lava", P: "player", S: "stone", c: "crate", w: "pet", o: "reward" },
       rows: ["............", "............", "............", "............", ".P.Sc....w.o", "#####LLL####", "############"] },
-    { id: "sticky", names: ["Sticky Situation", "Bounce Then Stick", "Velcro Tuesday", "The Gummy Wall"],
-      gravity: "on", wrapH: 0.3, requires: ["sticky", "bouncy"], discover: "o",
+    { id: "sticky", category: "toy", closed: false, names: ["Sticky Situation", "Bounce Then Stick", "Velcro Tuesday", "The Gummy Wall"],
+      room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["sticky", "bouncy"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { Y: "sticky", b: "bounce", "=": "wall", P: "player", o: "reward", w: "pet" },
       rows: ["............", "........Y.o.", "........Y...", "........Y...", "...P....Y.w.", "........Y...", "bbbbbbbb===="] },
-    { id: "slippery", names: ["Slippery Kitchen", "Soapy Launch Pad", "Ice Skating To Nowhere", "Wet Floor Sign Missing"],
-      gravity: "on", wrapH: 0.3, requires: ["slippery", "trampoline", "lethal"], discover: "o",
+    { id: "slippery", category: "toy", closed: false, names: ["Slippery Kitchen", "Soapy Launch Pad", "Ice Skating To Nowhere", "Wet Floor Sign Missing"],
+      room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["slippery", "trampoline", "lethal"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { i: "slick", "=": "wall", P: "player", t: "tramp", "^": "spike", o: "reward", w: "pet" },
       rows: ["............", ".........o..", "............", "............", "............", ".P..w....t^.", "iiiiiiiii==="] },
-    { id: "zeropinata", names: ["Zero-G Pinata", "Candy Cannon", "Crates Everywhere", "Floaty Party"],
-      gravity: "off", wrapH: 0.08, requires: ["cannon"], discover: "o",
+    { id: "zeropinata", category: "toy", closed: false, names: ["Zero-G Pinata", "Candy Cannon", "Crates Everywhere", "Floaty Party"],
+      room: { gravity: "either", native: "off", wrapH: "maybe", wrapV: "maybe" }, requires: ["cannon"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", c: "crate", n: "cannon:ne", P: "player", w: "pet", o: "reward" },
-      rows: ["############", "#.....cc...#", "#.....c.o..#", "#..........#", "#P.n.......#", "#.........w#", "############"] },
-    { id: "conveyor", names: ["Conveyor Commute", "Rush Hour Crate", "Belt Up", "The Slow Escalator"],
-      gravity: "on", wrapH: 0.08, requires: ["conveyor", "plate", "gate"], discover: "o",
-      expect: { fact: "the belt carries the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false },
+      rows: ["############", "#.....cc...#", "#.....c.o..#", "#...........", "#P.n.......#", "#.........w#", "############"] },
+    { id: "conveyor", category: "vignette", closed: true, stooge: "P", names: ["Conveyor Commute", "Rush Hour Crate", "Belt Up", "The Slow Escalator"],
+      room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["conveyor", "plate", "gate"], discover: "o",
+      expect: { fact: "the belt carries the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false, selfStart: true },
       legend: { "#": "wall", ">": "belt:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward", w: "pet" },
       rows: ["##########", "#......#.#", "#......#.#", "#..w...#.#", "#......#.#", "#P.c..pGo#", "#>>>>>>###"] },
-    { id: "orchestra", names: ["Button Orchestra", "Too Many Buttons", "Push Everything", "The Clicky Room"],
-      gravity: "on", wrapH: 0.08, requires: ["button", "gate"], discover: "o",
+    { id: "orchestra", category: "toy", closed: true, names: ["Button Orchestra", "Too Many Buttons", "Push Everything", "The Clicky Room"],
+      room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["button", "gate"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", G: "gate", b: "button", P: "player", o: "reward", w: "pet" },
       rows: ["#############", "#..#.....#..#", "#..#.....#..#", "#..#..w..#..#", "#..#.....#..#", "#o.G.bPbbGo.#", "#############"] },
-    { id: "chaserparade", names: ["Chaser Parade", "Fan Versus Monster", "Blow It Back", "The Windy Corridor"],
-      gravity: "off", wrapH: 0.08, requires: ["fan", "npcWind"], discover: "o",
-      expect: { fact: "the fan holds the chaser back: it stays on its own side of the fan for five seconds", check: "chaserHeld", needsInput: false },
+    { id: "chaserparade", category: "vignette", closed: false, stooge: "CP", names: ["Chaser Parade", "Fan Versus Monster", "Blow It Back", "The Windy Corridor"],
+      room: { gravity: "off", wrapH: "maybe", wrapV: "maybe" }, requires: ["fan", "npcWind"], discover: "o",
+      expect: { fact: "the fan holds the chaser back: it stays on its own side of the fan for five seconds", check: "chaserHeld", needsInput: false, selfStart: true },
       legend: { "#": "wall", C: "chaser", f: "fan:w", P: "player", o: "reward" },
-      rows: ["############", "#.........o#", "#..........#", "#.C..f...P.#", "#..........#", "#..........#", "############"] },
-    { id: "holesoup", names: ["Gravity Well Soup", "Black Hole Buffet", "Down The Drain", "Orbit Practice"],
-      gravity: "off", wrapH: 0.08, requires: ["spawner", "blackhole"], discover: "o",
-      expect: { fact: "the spawner keeps lobbing balls into the room (two or more live spawns)", check: "spawnCount2", needsInput: false },
-      legend: { "#": "wall", s: "spawner:e", h: "hole", P: "player", o: "reward" },
-      rows: ["############", "#s.........#", "#......o.h.#", "#..........#", "#..........#", "#P.........#", "############"] },
-    { id: "magnet", names: ["Magnet Mischief", "Crate Attraction", "Stuck On You", "The Clingy Magnet"],
-      gravity: "on", wrapH: 0.08, requires: ["magnet"], discover: "o",
-      expect: { fact: "the magnet drags a crate toward it (at least 20px closer in three seconds)", check: "crateTowardMagnet", needsInput: false },
+      rows: ["............", "#.........o#", "#..........#", "#.C..f...P.#", "#..........#", "#..........#", "############"] },
+    { id: "holesoup", category: "loop", closed: false, stooge: "w", names: ["Gravity Well Soup", "Black Hole Buffet", "Down The Drain", "Orbit Practice"],
+      room: { gravity: "off", wrapH: false, wrapV: false }, requires: ["spawner", "blackhole"], discover: "o",
+      expect: { fact: "the spawner keeps lobbing balls into the black hole, and the pet keeps getting pulled in", check: "spawnCount2", needsInput: false, selfStart: true },
+      legend: { "#": "wall", s: "spawner:e", h: "hole", P: "player", o: "reward", w: "pet" },
+      rows: ["##########..", "#..s.......#", "#......o.h.#", "#.....w....#", "#..........#", "#P.........#", "############"] },
+    { id: "magnet", category: "vignette", closed: false, stooge: "w", names: ["Magnet Mischief", "Crate Attraction", "Stuck On You", "The Clingy Magnet"],
+      room: { gravity: "either", native: "on", wrapH: "maybe", wrapV: "maybe" }, requires: ["magnet"], discover: "o",
+      expect: { fact: "the magnet drags a crate toward it (at least 20px closer in three seconds)", check: "crateTowardMagnet", needsInput: false, selfStart: true },
       legend: { "=": "wall", P: "player", c: "crate", m: "magnet", w: "pet", o: "reward" },
       rows: ["............", "............", "............", "............", ".....c......", ".P..cc..m.wo", "============"] },
-    { id: "bombstairs", names: ["Tuesday Bomb Situation", "Staircase Of Regret", "Bomb Staircase", "Explosive Stairs"],
-      gravity: "on", wrapH: 0.3, requires: ["bombActors"], discover: "o",
-      expect: { fact: "the bomb tiles turn into real bomb actors and settle", check: "bombActors", needsInput: false },
-      legend: { "=": "wall", "#": "wall", P: "player", c: "crate", b: "bomb", w: "pet", o: "reward" },
-      rows: ["............", "...........#", "..........o#", "..........c#", ".........bb#", ".P.w....bcc#", "============"] },
-    { id: "roulette", names: ["Gravity Roulette", "Which Way Is Down", "Button Of Regret", "Spin The Floor"],
-      gravity: "on", wrapH: 0.08, requires: ["button", "trampoline"], discover: "u",
+    { id: "bombdrop", category: "vignette", closed: false, stooge: "wp", names: ["Tuesday Bomb Situation", "Bomb Drop", "Gate Expectations", "Look Out Below"],
+      room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["bombActors", "plate", "gate"], discover: "o",
+      expect: { fact: "the player's plate opens the gate under the bombs, they fall, and go off", check: "bombFall", needsInput: false, selfStart: true },
+      legend: { "=": "wall", p: "playerplate", c: "crate", b: "bomb", G: "gate", w: "pet", o: "reward" },
+      rows: ["............", "..bb........", "..GG........", "............", "............", "............", "............", "............", "..w.o.p.....", "============"] },
+    { id: "roulette", category: "toy", closed: true, names: ["Gravity Roulette", "Which Way Is Down", "Button Of Regret", "Spin The Floor"],
+      room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["button", "trampoline"], discover: "u",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", P: "player", c: "crate", t: "tramp", u: "button0", o: "reward", w: "pet" },
       rows: ["############", "#..........#", "#.....o....#", "#.....w....#", "#.c..t..c..#", "#P..u......#", "############"] },
     // ---- absolute nonsense ----
-    { id: "blackholewall", nonsense: true, names: ["Oops, All Black Holes", "The Great Plughole", "Hole Lot Of Trouble", "Wall Of Nope"],
-      gravity: "off", wrapH: 0.08, requires: ["blackhole"], discover: "o",
+    { id: "blackholewall", category: "nonsense", nonsense: true, closed: false, stooge: "wP", names: ["Oops, All Black Holes", "The Great Plughole", "Hole Lot Of Trouble", "Wall Of Nope"],
+      room: { gravity: "off", wrapH: "maybe", wrapV: "maybe" }, requires: ["blackhole"], discover: "o",
       expect: { fact: "the holes pull the crate (it moves at least 20px or is swallowed)", check: "crateMovedOrGone", needsInput: false },
       legend: { "#": "wall", h: "hole", c: "crate", P: "player", w: "pet", o: "reward" },
-      rows: ["#############", "#hh...o.....#", "#hh.........#", "#hh...c.....#", "#hh.....w...#", "#hh........P#", "#############"] },
-    { id: "allsprites", nonsense: true, names: ["Oops, All Sprites", "Everybody Came", "The Cast Party", "Sprite Soup"],
-      gravity: "off", wrapH: 0.08, requires: [], discover: "o",
+      rows: ["#############", "#hh...o.....#", "#hh..........", "#hh...c.....#", "#hh.....w...#", "#hh........P#", "#############"] },
+    { id: "allsprites", category: "nonsense", nonsense: true, closed: true, stooge: "*P", names: ["Oops, All Sprites", "Everybody Came", "The Cast Party", "Sprite Soup"],
+      room: { gravity: "off", wrapH: false, wrapV: false }, requires: [], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", "*": "pet*", o: "reward*", P: "player" },
       rows: ["############", "#*.*..*.*..#", "#..*.*...*.#", "#.*...**...#", "#*..*..*.*P#", "#o.o.o.o.o.#", "############"] },
-    { id: "allbuttons", nonsense: true, names: ["Oops, All Buttons", "Don't Step On Anything", "Button Carpet", "Gravity Hopscotch"],
-      gravity: "on", wrapH: 0.3, requires: ["button"], discover: "u",
+    { id: "allbuttons", category: "nonsense", nonsense: true, closed: false, stooge: "wP", names: ["Oops, All Buttons", "Don't Step On Anything", "Button Carpet", "Gravity Hopscotch"],
+      room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["button"], discover: "u",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "=": "wall", u: "button0", P: "player", w: "pet", o: "reward" },
       rows: ["............", "............", "............", "....w.......", "............", "Puuuuuuuuuuo", "============"] },
-    { id: "alltramps", nonsense: true, names: ["Oops, All Trampolines", "The Bounce Box", "Springy Prison", "Boing Boing Boing"],
-      gravity: "on", wrapH: 0.08, requires: ["trampoline"], discover: "o",
+    { id: "alltramps", category: "nonsense", nonsense: true, closed: true, stooge: "wP", names: ["Oops, All Trampolines", "The Bounce Box", "Springy Prison", "Boing Boing Boing"],
+      room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["trampoline"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { t: "tramp", P: "player", c: "crate", w: "pet", o: "reward" },
       rows: ["tttttttttttt", "t..........t", "t.....c.w..t", "t....o.....t", "t..........t", "t.P......c.t", "tttttttttttt"] },
-    { id: "spawnerwar", nonsense: true, names: ["Crate Fountain War", "Spawner Standoff", "Two Crate Cannons", "Cold War Of Boxes"],
-      gravity: "on", wrapH: 0.3, requires: ["spawner"], discover: "o",
+    { id: "spawnerwar", category: "nonsense", nonsense: true, closed: false, stooge: "w", names: ["Crate Fountain War", "Spawner Standoff", "Two Crate Cannons", "Cold War Of Boxes"],
+      room: { gravity: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: false }, requires: ["spawner", "lava"], discover: "o",
       expect: { fact: "both spawners keep firing crates at each other (two or more live spawns)", check: "spawnCount2", needsInput: false },
-      legend: { "=": "wall", s: "spawnerc:e", S: "spawnerc:w", P: "player", o: "reward" },
-      rows: ["............", "............", "............", ".....o......", "............", "s....P.....S", "============"] },
-    { id: "conga", nonsense: true, names: ["Chaser Conga", "Follow The Leader", "Everybody Wants You", "A Very Long Line"],
-      gravity: "off", wrapH: 0.08, requires: ["button"], discover: "u",
+      legend: { "=": "wall", s: "spawnerc:e", S: "spawnerc:w", P: "player", o: "reward", L: "lava", w: "pet" },
+      rows: ["............", "............", "............", ".....o......", "............", "s.w..P...w.S", "=L========L="] },
+    { id: "conga", category: "nonsense", nonsense: true, closed: false, stooge: "CP", names: ["Chaser Conga", "Follow The Leader", "Everybody Wants You", "A Very Long Line"],
+      room: { gravity: "off", wrapH: "maybe", wrapV: "maybe" }, requires: ["button"], discover: "u",
       expect: { fact: "the whole line of chasers heads for the player (the nearest closes at least 20px in three seconds)", check: "chasersApproach", needsInput: false },
       legend: { "#": "wall", C: "chaser", u: "button0", P: "player" },
-      rows: ["############", "#CCCC......#", "#..........#", "#..........#", "#..........#", "#....u....P#", "############"] }
+      rows: ["####....####", "#CCCC......#", "#..........#", "#..........#", "#..........#", "#....u....P#", "############"] }
   ];
   // Does each interaction a template relies on exist in this build? A missing one silently skips
   // the template (surpriseEligibleTemplates reports why). Behavior itself is asserted by the tests.
@@ -11098,7 +11113,9 @@
   const SURPRISE_MIRROR = { e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se", n: "n", s: "s" };
   function surpriseMirrorPiece(name) {
     const i = name.indexOf(":");
-    return i < 0 ? name : name.slice(0, i + 1) + SURPRISE_MIRROR[name.slice(i + 1)];
+    if (i < 0) return name;
+    const d = name.slice(i + 1);
+    return SURPRISE_MIRROR[d] ? name.slice(0, i + 1) + SURPRISE_MIRROR[d] : name;
   }
   function surpriseResolvePiece(name, fills, rng, kit) {
     const g = (geometry, modifier, extra) => Object.assign({ tile: { key: gameplayKey(geometry, modifier || "none") } }, extra || {});
@@ -11124,6 +11141,8 @@
       case "lava": return { tile: { key: gameplayKey("none", "lethal"), skin: groundTileDefs.lthLava ? "lthLava" : null } };
       case "spike": return { tile: { key: gameplayKey("solid", "lethal"), skin: groundTileDefs.lthSpike ? "lthSpike" : null } };
       case "player": return { player: true };
+      case "playerplate": return { player: true, tile: { key: gameplayKey("plate", "none"), color: fills.color } }; // the player starts standing on a pressure plate
+      case "door": return { tile: { key: gameplayKey("door", "none"), color: fills.doorColor(dir) }, doorId: dir };
       case "crate": return { actor: PUSHABLE_DEF_ID };
       case "stone": return { actor: LARGE_STONE_DEF_ID };
       case "pet": return { actor: fills.pet };
@@ -11227,14 +11246,30 @@
   }
 
   // One attempt at building a template into a plain description (nothing in the editor is touched).
+  // A template is one part (rows/legend/room) or several (template.rooms); part 0 goes where the generator finds
+  // room for it, every later part gets its own new room tab, and "door:<n>" pieces pair up across parts.
+  function surpriseTemplateParts(template) {
+    return template.rooms || [{ rows: template.rows, legend: template.legend, room: template.room }];
+  }
+  function surpriseRollRoom(R, rng, chaos) {
+    const nativeOn = R.gravity === "on" || (R.gravity === "either" && R.native === "on");
+    const gravity = chaos && R.gravity === "either" && rng() < SURPRISE_GRAVITY_CHAOS ? !nativeOn : nativeOn;
+    const roll = (v, chance) => v === true ? true : v === false ? false : (chaos ? rng() < chance : false);
+    const wrapH = roll(R.wrapH, R.wrapHChance == null ? 0.08 : R.wrapHChance);
+    const wrapV = roll(R.wrapV, SURPRISE_WRAP_V_CHANCE);
+    return { gravity, nativeGravity: nativeOn, gravityFlipped: gravity !== nativeOn, wrapH, wrapV };
+  }
   function surpriseBuildSpec(seed, attempt, template, name, ctx, opts) {
     const rng = mulberry32(surpriseHash(seed, attempt + 1));
     const kit = surpriseKit();
+    const doorColors = {};
+    const freeColors = () => { const free = CHANNEL_COLORS.filter(c => !(ctx.usedColors || []).includes(c)); return free.length ? free : CHANNEL_COLORS; };
     const fills = {
       wallSkin: rng() < 0.5 ? null : surprisePick(rng, kit.skins.length ? kit.skins : [null]),
-      color: surprisePick(rng, (() => { const free = CHANNEL_COLORS.filter(c => !(ctx.usedColors || []).includes(c)); return free.length ? free : CHANNEL_COLORS; })()),
+      color: surprisePick(rng, freeColors()),
       ball: surprisePick(rng, kit.balls), pet: surprisePick(rng, kit.pets), chaser: surprisePick(rng, kit.chasers),
-      reward: surprisePick(rng, kit.rewards)
+      reward: surprisePick(rng, kit.rewards),
+      doorColor: id => doorColors[id] || (doorColors[id] = CHANNEL_COLORS[(Object.keys(doorColors).length + Math.floor(rng() * CHANNEL_COLORS.length)) % CHANNEL_COLORS.length])
     };
     if (opts.canonical) {
       // Try-this: the plain, expected version of the template (no random skins, no random pet/reward/ball)
@@ -11245,40 +11280,62 @@
       kit.pets = [kit.pets[0]]; kit.rewards = [kit.rewards[0]];
     }
     const chaos = opts.chaos !== false;
-    const native = template.gravity === "on";
-    const gravity = chaos && rng() < SURPRISE_GRAVITY_CHAOS ? !native : native;
-    const wrapH = chaos ? rng() < template.wrapH : false;
-    const wrapV = chaos ? rng() < SURPRISE_WRAP_V_CHANCE : false;
     const mirror = rng() < 0.5;
-    const w = template.rows[0].length, h = template.rows.length;
+    const parts = surpriseTemplateParts(template);
+    const mainRoll = surpriseRollRoom(parts[0].room, rng, chaos);
+    const w = parts[0].rows[0].length, h = parts[0].rows.length;
     const cands = surpriseCandidates(ctx, w, h, opts.place === "overwrite" ? "overwrite" : "free");
     if (!cands.length) return { noRoom: true };
     const at = cands[Math.floor(rng() * cands.length) % cands.length];
-    const spec = { seed, attempt, templateId: template.id, name, gravity, nativeGravity: native, gravityFlipped: gravity !== native, wrapH, wrapV, mirror,
-      ox: at.ox, oy: at.oy, w, h, color: fills.color, cost: at.cost, tiles: [], actors: [], spawners: [], player: null,
+    const spec = { seed, attempt, templateId: template.id, category: template.category, name, gravity: mainRoll.gravity, nativeGravity: mainRoll.nativeGravity,
+      gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror,
+      ox: at.ox, oy: at.oy, w, h, color: fills.color, cost: at.cost, tiles: [], actors: [], spawners: [], player: null, doors: [], extra: [],
       clearRect: opts.place === "overwrite" ? { x: at.ox, y: at.oy, w, h } : null };
-    template.rows.forEach((row, ry) => {
-      for (let rx = 0; rx < w; rx++) {
-        const ch = mirror ? row[w - 1 - rx] : row[rx];
-        if (ch === ".") continue;
-        let pieceName = template.legend[ch];
-        if (mirror) pieceName = surpriseMirrorPiece(pieceName);
-        const piece = surpriseResolvePiece(pieceName, fills, rng, kit);
-        const x = at.ox + rx, y = at.oy + ry;
-        if (piece.tile) {
-          if (!GAMEPLAY_TILE_DEFS[piece.tile.key]) throw new Error("Surprise Me: no tile " + piece.tile.key);
-          spec.tiles.push({ x, y, key: piece.tile.key, color: piece.tile.color || null, skin: piece.tile.skin || null });
+    const fillPart = (part, target, pw, ph, bx, by) => {
+      part.rows.forEach((row, ry) => {
+        for (let rx = 0; rx < pw; rx++) {
+          const ch = mirror ? row[pw - 1 - rx] : row[rx];
+          if (ch === ".") continue;
+          let pieceName = part.legend[ch];
+          if (mirror) pieceName = surpriseMirrorPiece(pieceName);
+          const piece = surpriseResolvePiece(pieceName, fills, rng, kit);
+          const x = bx + rx, y = by + ry;
+          if (piece.tile) {
+            if (!GAMEPLAY_TILE_DEFS[piece.tile.key]) throw new Error("Surprise Me: no tile " + piece.tile.key);
+            target.tiles.push({ x, y, key: piece.tile.key, color: piece.tile.color || null, skin: piece.tile.skin || null });
+          }
+          if (piece.doorId != null) target.doors.push({ id: piece.doorId, x, y });
+          if (piece.spawnerContent) target.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
+          if (piece.actor) target.actors.push({ x, y, defId: piece.actor });
+          if (piece.player) target.player = { x, y };
+          if (ch === template.discover && target === spec) spec.discoverCells = (spec.discoverCells || []).concat([{ x, y }]);
         }
-        if (piece.spawnerContent) spec.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
-        if (piece.actor) spec.actors.push({ x, y, defId: piece.actor });
-        if (piece.player) spec.player = { x, y };
-        if (ch === template.discover) spec.discoverCells = (spec.discoverCells || []).concat([{ x, y }]);
-      }
-    });
+      });
+    };
+    fillPart(parts[0], spec, w, h, at.ox, at.oy);
+    for (let i = 1; i < parts.length; i++) {
+      const p = parts[i], pw = p.rows[0].length, ph = p.rows.length, roll = surpriseRollRoom(p.room, rng, chaos);
+      const part = Object.assign({ w: pw, h: ph, ox: Math.floor((COLS - pw) / 2), oy: Math.floor((ROWS - ph) / 2), tiles: [], actors: [], spawners: [], player: null, doors: [] }, roll);
+      fillPart(p, part, pw, ph, part.ox, part.oy);
+      spec.extra.push(part);
+    }
+    // doors pair up across parts by id
+    spec.links = [];
+    const all = [spec].concat(spec.extra).map((p, pi) => p.doors.map(d => Object.assign({ part: pi }, d))).flat();
+    const byId = {};
+    all.forEach(d => (byId[d.id] = byId[d.id] || []).push(d));
+    Object.keys(byId).forEach(id => { if (byId[id].length === 2) spec.links.push(byId[id]); else throw new Error("Surprise Me: door " + id + " needs exactly two cells"); });
+    spec.hasPlayerAnywhere = !!(spec.player || spec.extra.some(p => p.player));
     return spec;
   }
   // The floors: reject a layout that would hand the kid a dead, stuck, or unbounded start.
   function surpriseValidate(spec, ctx) {
+    const why = surpriseValidatePart(spec, ctx, !(spec.extra || []).some(e => e.player));
+    if (why) return why;
+    for (const e of spec.extra || []) { const w2 = surpriseValidatePart(e, surpriseEmptyContext(), false); if (w2) return w2; }
+    return null;
+  }
+  function surpriseValidatePart(spec, ctx, needPlayer) {
     const tileAt = new Map(spec.tiles.map(t => [t.x + "," + t.y, t]));
     const blocking = (x, y) => {
       const t = tileAt.get(x + "," + y);
@@ -11287,7 +11344,14 @@
       return isBlockingGeometry(def.geometry, { isPlayer: true }, def.modifier);
     };
     if (spec.tiles.length + spec.actors.length > 160) return "too many pieces";
-    if (!spec.player) return "no player cell";
+    if (!spec.player) {
+      if (needPlayer) return "no player cell";
+      for (const sp of spec.spawners) { // a part without the player still needs working spawners
+        const t = tileAt.get(sp.x + "," + sp.y), dir = SPAWNER_DIRECTIONS[GAMEPLAY_TILE_DEFS[t.key].geometry];
+        if (!dir || blocking(sp.x + dir.x, sp.y + dir.y)) return "spawner has no open target";
+      }
+      return null;
+    }
     const p = spec.player;
     const watched = [p].concat(ctx.playerCell ? [ctx.playerCell] : []);
     if (blocking(p.x, p.y)) return "player inside a solid";
@@ -11326,6 +11390,20 @@
     }
     return null;
   }
+  // Category first (weights), then a template in it. Anything used in the last SURPRISE_RECENT_MAX presses is
+  // skipped; if nothing else is eligible, only the OLDEST of the recent ones repeats. Categories with no eligible
+  // template are left out and the weights renormalize over the rest.
+  function surprisePickTemplate(rng, pool, recent) {
+    let cands = pool.filter(t => !recent.includes(t.id));
+    if (!cands.length) cands = [pool.slice().sort((a, b) => recent.lastIndexOf(a.id) - recent.lastIndexOf(b.id))[0]]; // least recently used
+    const byCat = {};
+    cands.forEach(t => (byCat[t.category] = byCat[t.category] || []).push(t));
+    const cats = Object.keys(byCat);
+    const total = cats.reduce((n, c) => n + (SURPRISE_CATEGORY_WEIGHTS[c] || 1), 0);
+    let r = rng() * total, cat = cats[cats.length - 1];
+    for (const c of cats) { r -= (SURPRISE_CATEGORY_WEIGHTS[c] || 1); if (r < 0) { cat = c; break; } }
+    return byCat[cat][Math.floor(rng() * byCat[cat].length) % byCat[cat].length];
+  }
   // seed -> template -> name; re-rolls (same seed, attempt counter) when a floor rejects an attempt.
   // opts: templateId (force one), chaos:false (canonical: native gravity, no wrap), place "free"|"overwrite", ctx.
   function generateSurprise(seed, opts) {
@@ -11336,12 +11414,12 @@
       : opts.templateIds ? eligible.filter(t => opts.templateIds.includes(t.id)) : eligible;
     if (!pool.length) return null;
     const trng = mulberry32(surpriseHash(seed, 0));
-    const template = pool[Math.floor(trng() * pool.length) % pool.length];
+    const template = surprisePickTemplate(trng, pool, opts.avoid || []);
     const name = template.names[Math.floor(trng() * template.names.length) % template.names.length];
     const failures = [];
     for (let attempt = 0; attempt < SURPRISE_MAX_ATTEMPTS; attempt++) {
       const spec = surpriseBuildSpec(seed, attempt, template, name, ctx, opts);
-      if (spec.noRoom) return { noRoom: true, templateId: template.id, name, w: template.rows[0].length, h: template.rows.length };
+      if (spec.noRoom) return { noRoom: true, templateId: template.id, category: template.category, name, w: surpriseTemplateParts(template)[0].rows[0].length, h: surpriseTemplateParts(template)[0].rows.length };
       const why = surpriseValidate(spec, ctx);
       if (!why) { spec.attempts = attempt + 1; return spec; }
       failures.push(why);
@@ -11411,13 +11489,17 @@
     if (appMode !== "build") return null;
     setGamePaused(false); buildPausedMemory = false; // Surprise Me starts things running
     opts = opts || {};
+    // a dice press (no seed given) avoids the last few templates; replaying a given seed never does, so it rebuilds exactly
+    const useRecent = opts.recent != null ? opts.recent : seed == null;
     if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
     const newRoomMode = opts.full === "new";
     const ctx = newRoomMode ? surpriseEmptyContext() : surpriseHotContext();
-    const spec = generateSurprise(seed, Object.assign({}, opts, { ctx, place: opts.full === "overwrite" ? "overwrite" : "free" }));
+    const spec = generateSurprise(seed, Object.assign({}, opts, { ctx, place: opts.full === "overwrite" ? "overwrite" : "free", avoid: useRecent ? surpriseRecent : [] }));
     if (!spec) { log("Surprise me has nothing to build."); return null; }
     if (spec.noRoom) {
-      if (opts.full == null) { surpriseAskFull(seed, opts); return { pending: true }; }
+      // a whole-room event never goes over anything: into a new room tab without asking
+      if (spec.category === "room" && opts.full == null) return surpriseMe(seed, Object.assign({}, opts, { full: "new", recent: useRecent }));
+      if (opts.full == null) { surpriseAskFull(seed, Object.assign({}, opts, { recent: useRecent })); return { pending: true }; }
       log("Surprise me: no room for that one.");
       return { skipped: "no room" };
     }
@@ -11430,10 +11512,37 @@
     }
     const wasGravity = gravityEnabled;
     const roomWasEmpty = surpriseRoomIsEmpty({ actors, board, backgroundBoard });
-    if (spec.clearRect) surpriseClearRect(spec.clearRect);
-    const playerPlaced = surpriseApplySpec(spec, roomWasEmpty, seed);
+    if (spec.clearRect) {
+      // an untouched earlier surprise that this overwrites only partly would leave a half-built remnant that then
+      // counts as the kid's stuff: clear it whole (never when the player stands in it)
+      const cr = spec.clearRect, hot = rooms.find(r => r.id === currentRoomId);
+      (hot.surprises || []).forEach(sv => {
+        const touches = !(sv.rect.x + sv.rect.w <= cr.x || cr.x + cr.w <= sv.rect.x || sv.rect.y + sv.rect.h <= cr.y || cr.y + cr.h <= sv.rect.y);
+        const pc = ctx.playerCell, hasPlayer = pc && pc.x >= sv.rect.x && pc.x < sv.rect.x + sv.rect.w && pc.y >= sv.rect.y && pc.y < sv.rect.y + sv.rect.h;
+        if (touches && !hasPlayer && sv.sig === surpriseRectSignature(sv.rect)) surpriseClearRect(sv.rect);
+      });
+      surpriseClearRect(cr);
+    }
+    let playerPlaced = surpriseApplySpec(spec, roomWasEmpty, seed);
     snapshotCurrentRoomState();
     const room = rooms.find(r => r.id === currentRoomId);
+    // later parts of a multi-room template: one new room tab each, joined to the first by door pairs
+    const partRooms = [room.id];
+    (spec.extra || []).forEach((part, i) => {
+      const nr = createEmptyRoom("surprise #" + seed + " (" + (i + 2) + ")");
+      rooms.push(nr);
+      activateRoom(nr.id);
+      if (surpriseApplySpec(part, true, seed)) playerPlaced = true;
+      snapshotCurrentRoomState();
+      partRooms.push(nr.id);
+    });
+    (spec.links || []).forEach(([a, b]) => {
+      doorLinks[roomCellKey(partRooms[a.part], a.x, a.y)] = { toRoomId: partRooms[b.part], toX: b.x, toY: b.y };
+      doorLinks[roomCellKey(partRooms[b.part], b.x, b.y)] = { toRoomId: partRooms[a.part], toX: a.x, toY: a.y };
+    });
+    if (partRooms.length > 1) activateRoom(room.id);
+    surpriseRecent.push(spec.templateId);
+    if (surpriseRecent.length > SURPRISE_RECENT_MAX) surpriseRecent.shift();
     const rect = { x: spec.ox, y: spec.oy, w: spec.w, h: spec.h };
     const overlaps = s => !(s.rect.x + s.rect.w <= rect.x || rect.x + rect.w <= s.rect.x || s.rect.y + s.rect.h <= rect.y || rect.y + rect.h <= s.rect.y);
     room.surprises = (room.surprises || []).filter(s => !(spec.clearRect && overlaps(s))).concat([{ seed, templateId: spec.templateId, rect, sig: surpriseRectSignature(rect) }]);
@@ -11447,7 +11556,7 @@
     if (gravityEnabled !== wasGravity) extra += " — gravity is now " + (gravityEnabled ? "on" : "off");
     log(caption + extra);
     try { playChip("pop"); } catch (e) { /* audio can be unavailable */ }
-    return { seed, templateId: spec.templateId, name: spec.name, attempts: spec.attempts, playerPlaced, roomId: room.id, rect,
+    return { seed, templateId: spec.templateId, category: spec.category, name: spec.name, attempts: spec.attempts, playerPlaced, roomId: room.id, roomIds: partRooms, rect,
       gravity: spec.gravity, gravityFlipped: spec.gravityFlipped, wrapH: spec.wrapH, wrapV: spec.wrapV,
       mode: newRoomMode ? "new" : spec.clearRect ? "overwrite" : "free", overwroteKidStuff: spec.clearRect ? spec.cost : 0 };
   }
@@ -11536,11 +11645,12 @@
   }
   function surpriseTry(seed) {
     if (appMode !== "build") return null;
+    const fresh = seed == null;
     if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
     const piece = surpriseSelectedPiece();
     const ids = piece ? surpriseTemplatesFor(piece) : [];
-    if (!ids.length) return Object.assign({ fallback: true }, surpriseMe(seed, { noOverwrite: true }));
-    return surpriseMe(seed, { templateIds: ids, canonical: true, chaos: false, noOverwrite: true });
+    if (!ids.length) return Object.assign({ fallback: true }, surpriseMe(seed, { noOverwrite: true, recent: fresh }));
+    return surpriseMe(seed, { templateIds: ids, canonical: true, chaos: false, noOverwrite: true, recent: fresh });
   }
   window.surpriseTry = surpriseTry;
   (function wireTryThisButton() {

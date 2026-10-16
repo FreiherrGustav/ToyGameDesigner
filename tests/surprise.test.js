@@ -106,12 +106,14 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
     let okCount = 0, total = 0;
     for (let k = 0; k < 8; k++) {
       const seed = 5000 + k * 37;
+      // some Play sessions leak transient state into the next one on the same page (the falling-bomb template shows it), so give it a fresh page
+      if (t.expect.check === "bombFall") { await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__st); }
       const ok = await page.evaluate(({ id, seed, check }) => {
         __st.reset();
         const rep = __st.press(seed, { templateId: id, chaos: false, canonical: true });
         if (!rep || !rep.templateId) return false;
         __st.play();
-        const h = { plateSeen: false, side0: null, chaserOk: true };
+        const h = { plateSeen: false, side0: null, chaserOk: true, boom: false };
         const st0 = __st.state();
         const defs = __st.defs();
         const crates0 = st0.actors.filter(a => a.defId === "pushable").map(a => ({ id: a.id, x: a.x, y: a.y }));
@@ -120,12 +122,14 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
         const chasers = st0.actors.filter(a => !a.isPlayer && defs[a.defId].temperament === "chaser").map(a => ({ id: a.id, side: Math.sign(a.x - (fan ? fan.x : 0)) }));
         const player = st0.actors.find(a => a.isPlayer);
         const chaseDist0 = chasers.length ? Math.min(...chasers.map(c => { const a = st0.actors.find(q => q.id === c.id); return Math.hypot(a.x - player.x, a.y - player.y); })) : 0;
+        const bombs0 = st0.actors.filter(a => a.defId === "carrybomb2").length;
         let crateMoved = false, crateGone = false, chaseClosed = false;
         const frames = check === "chaserHeld" ? 300 : 600;
         for (let f = 0; f < frames; f++) {
           __st.tick(1);
           const st = __st.state();
           if (Object.values(st.plates).some(v => v)) h.plateSeen = true;
+          { const bs = st.actors.filter(a => a.defId === "carrybomb2"); if (bs.some(a => a.detonating) || bs.length < bombs0) h.boom = true; }
           (h.seen = h.seen || new Set()); st.actors.forEach(a => { if (a.spawnerKey != null) h.seen.add(a.id); }); // count spawns ever made: black holes now destroy them on the game clock (they used to linger because the removal timer was real time)
           if (check === "chaserHeld") chasers.forEach(c => { const a = st.actors.find(q => q.id === c.id); if (a && Math.sign(a.x - fan.x) !== c.side) h.chaserOk = false; });
           if (f === 179) {
@@ -140,6 +144,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
           plateOn: () => h.plateSeen, chaserHeld: () => h.chaserOk && chasers.length > 0 && !!fan,
           crateTowardMagnet: () => crateMoved && !!magnet, crateMovedOrGone: () => crateMoved && !!hole,
           chasersApproach: () => chaseClosed,
+          bombFall: () => h.boom,
           bombActors: () => st.actors.filter(a => a.defId === "carrybomb2").length === 3
         })[check]();
         __st.stop();
