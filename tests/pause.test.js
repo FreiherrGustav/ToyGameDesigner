@@ -251,7 +251,8 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
     const f = path.join(os.tmpdir(), "pause_export.html"); await d.saveAs(f);
     const q = await ctx.newPage(); const errs = []; q.on("pageerror", x => errs.push(String(x)));
     await q.goto("file://" + f); await q.waitForTimeout(2500);
-    const shot = async () => (await q.screenshot()).toString("base64");
+    // the key-hint pill at the bottom of the canvas fades on real time by design (even while paused), so it is cropped out
+    const shot = async () => (await q.screenshot({ clip: { x: 0, y: 0, width: 1366, height: 560 } })).toString("base64");
     const a1 = await shot(); await q.waitForTimeout(500); const a2 = await shot();
     ok(a1 !== a2, "export: game animates while running");
     await q.keyboard.press("p"); await q.waitForTimeout(200);

@@ -9911,7 +9911,55 @@
   updateModeButtons();
 
   // ============== Rendering ==============
+  // v2.48 Stage 4: the static pixel art of a tile/sprite is rendered once into an offscreen canvas per
+  // (art, cell size) and blitted with drawImage; this is exactly what the per-pixel loop below would draw
+  // (it IS that loop, run once on a transparent canvas, including the +0.5px overlap), so it is only used
+  // where a blit is identical: whole-pixel position, no alpha, no rotate/scale (artCacheOff > 0 inside those).
+  // Anything else (fractional scroll positions, animated transforms, fades) takes the live loop.
+  // Validity: an entry keeps a copy of the pixels it was built from and is compared on every use (64 cheap
+  // compares), so an edit in place to an art array can never show stale art; no invalidation hooks needed.
+  const ART_CACHE_MAX = 6000;
+  let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0;
+  function artCacheStats() { return { entries: artCacheEntries, bytes: artCacheBytes }; }
+  function artCacheCanvas(art, cell) {
+    if (art.length !== ART * ART) return null;
+    let e = artCache.get(art);
+    if (e) {
+      const sn = e.snap;
+      let same = true;
+      for (let i = 0; i < sn.length; i++) if (sn[i] !== art[i]) { same = false; break; }
+      if (!same) e = null;
+    }
+    if (!e) {
+      const key = art.join("|");
+      e = artContentCache.get(key);
+      if (!e) {
+        if (artCacheEntries >= ART_CACHE_MAX) { artCache = new WeakMap(); artContentCache = new Map(); artCacheEntries = 0; artCacheBytes = 0; }
+        e = { snap: art.slice(), cells: {} };
+        artContentCache.set(key, e);
+        artCacheEntries++;
+      }
+      artCache.set(art, { snap: e.snap, cells: e.cells, shared: e });
+      e = artCache.get(art);
+    }
+    let c = e.cells[cell];
+    if (!c) {
+      const px = Math.ceil(ART * cell + 0.5);
+      c = document.createElement("canvas"); c.width = px; c.height = px;
+      drawArtScaledLive(c.getContext("2d"), e.snap, 0, 0, 0, cell);
+      e.cells[cell] = c;
+      artCacheBytes += px * px * 4;
+    }
+    return c;
+  }
   function drawArtScaled(ctx, art, dx, dy, size, cellSize) {
+    if (artCacheOff === 0 && ctx.globalAlpha === 1 && Number.isInteger(dx) && Number.isInteger(dy) && Number.isInteger(cellSize)) {
+      const c = artCacheCanvas(art, cellSize);
+      if (c) { ctx.drawImage(c, dx, dy); return; }
+    }
+    drawArtScaledLive(ctx, art, dx, dy, size, cellSize);
+  }
+  function drawArtScaledLive(ctx, art, dx, dy, size, cellSize) {
     for (let y = 0; y < ART; y++) {
       for (let x = 0; x < ART; x++) {
         const color = art[y * ART + x];
@@ -9967,7 +10015,9 @@
     ctx.save();
     ctx.translate(x + size / 2, y + size / 2);
     ctx.rotate(rotationDeg * Math.PI / 180);
+    artCacheOff++;
     drawArtScaled(ctx, art, -size / 2, -size / 2, size, cellSize);
+    artCacheOff--;
     ctx.restore();
   }
 
@@ -10184,7 +10234,7 @@
         const stopKey = boardArg[fy] && boardArg[fy][fx];
         const stopGeometry = stopKey && GAMEPLAY_TILE_DEFS[stopKey] ? GAMEPLAY_TILE_DEFS[stopKey].geometry : null;
         if (stopGeometry === "solid") continue; // a wall right against the fan blocks the airflow entirely
-        const screenX = fx * TILE - viewOffsetPx;
+        const screenX = fx * TILE - Math.round(viewOffsetPx);
         if (screenX < -TILE || screenX > COLS * TILE) continue; // fully off-screen
         const tileCx = screenX + TILE / 2, tileCy = fy * TILE + TILE / 2;
         for (let li = 0; li < 3; li++) {
@@ -10225,12 +10275,15 @@
     // crosses 0 — harmless when it lands off-canvas.
     const firstCol = Math.max(0, Math.floor(viewOffsetPx / TILE));
     const lastCol = firstCol + COLS;
+    // v2.48 Stage 4: tiles are placed on whole screen pixels (actors keep their smooth position) so the cached
+    // art can be blitted; a fractional Runner/Follow camera used to defeat the cache for the whole board.
+    const tileOffPx = Math.round(viewOffsetPx);
     const rowLen = boardArg[0] ? boardArg[0].length : 0;
 
     for (let y = 0; y < ROWS; y++) {
       for (let bx = firstCol; bx <= lastCol; bx++) {
         if (bx >= rowLen) continue;
-        const screenX = bx * TILE - viewOffsetPx;
+        const screenX = bx * TILE - tileOffPx;
         const bgId = backgroundBoardArg[y][bx];
         if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), screenX, y * TILE, TILE, cell);
 
@@ -10249,8 +10302,10 @@
             // geometry, for a recipe that's showing a distinct FX sprite rather than deforming
             // the tile that triggered it. Every existing tileAnimState entry omits `art`, so this
             // is a no-op for all of them.
+            artCacheOff++;
             if (tanim.art) drawArtScaled(ctx, tanim.art, -TILE / 2, -TILE / 2, TILE, cell);
             else drawGameplayTile(ctx, -TILE / 2, -TILE / 2, { geometry: tanim.geometry, modifier: tanim.modifier });
+            artCacheOff--;
             ctx.restore();
             if (sample.done) delete tileAnimState[key];
             continue;
@@ -10305,7 +10360,7 @@
     ctx.strokeStyle = "rgba(255,255,255,0.06)";
     ctx.lineWidth = 1;
     for (let bx = firstCol; bx <= lastCol; bx++) {
-      const sx = bx * TILE - viewOffsetPx;
+      const sx = bx * TILE - Math.round(viewOffsetPx);
       ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, ROWS * TILE); ctx.stroke();
     }
     for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
@@ -10333,7 +10388,9 @@
       for (let j = 0; j < along; j++) {
         const arts = (j === along - 1 && def.moverHeadArts) ? def.moverHeadArts : def.moverArts;
         for (let i = 0; i < across; i++) {
+          artCacheOff++;
           drawArtScaled(ctx, arts[i % arts.length], -across * TILE / 2 + i * TILE, -along * TILE / 2 + j * TILE, TILE, cell);
+          artCacheOff--;
         }
       }
       ctx.restore();
@@ -10451,7 +10508,9 @@
       ctx.translate(centerX, centerY);
       if (t.rot) ctx.rotate(t.rot);
       ctx.scale(t.sx, t.sy);
+      artCacheOff++;
       drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
+      artCacheOff--;
       ctx.restore();
     });
   }
@@ -11689,7 +11748,7 @@
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, despawnSpawnedActor,
       stepActor, tick,
-      drawArtScaled, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
+      drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe,
       getAudioCtx, getMasterBus, claimVoice, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
@@ -11893,6 +11952,8 @@
   let rooms = GAME_DATA.rooms;
   let doorLinks = GAME_DATA.doorLinks;
   let spawnerContents = GAME_DATA.spawnerContents;
+  const ART_CACHE_MAX = 6000;
+  let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0;
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
