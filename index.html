@@ -528,6 +528,10 @@
         <div class="section-title" style="margin-top:10px;">Voice (optional)</div>
         <div class="swatch-row" id="voicePickerSwatches"></div>
       </div>
+      <div id="lethalPickerBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">If it touches you — <span id="lethalPickerName"></span></div>
+        <div class="swatch-row" id="lethalPickerSwatches"></div>
+      </div>
     </div>
 
     <div id="objectPropertiesBlock" style="display:none;">
@@ -1120,6 +1124,13 @@
   // latter already can't move (stepActor's own early-return skips it long before any of this).
   function isSteeringCharacter(temperament) {
     return temperament === "wanderer" || temperament === "chaser" || temperament === "fleer";
+  }
+  // Every NPC character (stationary/wanderer/chaser/fleer) can be lethal (touching it costs a life, like a
+  // chaser's catch) or harmless (its own old bump/boop/pop). `def.lethal` is the kid's choice, and NEW characters
+  // start lethal. A def that predates the choice has no field and keeps exactly what it did before: only a
+  // chaser was ever dangerous, so it reads lethal and everything else reads harmless.
+  function npcIsLethal(def) {
+    return !!def && (def.lethal !== undefined ? !!def.lethal : def.temperament === "chaser");
   }
   // How long steering stays suppressed after a bounce/cannon launch, and (via a fresh reset every
   // frame the continuous force stays strong — see stepActor) how long it keeps NOT resuming while
@@ -2794,7 +2805,7 @@
 
   TEMPERAMENTS.forEach(temp => {
     const id = "a" + (nextActorDefId++);
-    actorDefs[id] = { temperament: temp, art: TEMPERAMENT_ART[temp].slice(), poses: null, name: temp };
+    actorDefs[id] = { temperament: temp, art: TEMPERAMENT_ART[temp].slice(), poses: null, name: temp, lethal: true };
   });
   // The player's default look is already posed, so placing it with zero setup already
   // demonstrates real per-pose art, not a flat-color block. v2.16: "hero" (a real reference
@@ -4895,7 +4906,7 @@
       const letter = String.fromCharCode(65 + nextCustomActorLetter++);
       const id = "custom" + letter;
       const name = "Actor " + letter;
-      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name, voice: "" };
+      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name, voice: "", lethal: true };
       customActorSlotIds.push(id);
       selectCustomActor(id);
       log("New custom actor \"" + name + "\" added — draw it below and pick its temperament.");
@@ -4952,6 +4963,35 @@
       container.appendChild(sw);
     });
     renderVoicePicker();
+  }
+
+  // Every NPC character (not the player) picks what touching it does: lethal (costs a life, the chaser's "caught") or
+  // harmless (its own bump/boop/pop). Shown for the four built-in characters and every custom one.
+  function renderLethalPicker() {
+    const block = document.getElementById("lethalPickerBlock");
+    const def = actorDefs[selectedActorDefId];
+    const show = paintMode === "actor" && activeTab === "character" && selectedActorKind !== "player" && selectedActorDefId !== playerDefId
+      && def && TEMPERAMENTS.includes(def.temperament);
+    block.style.display = show ? "block" : "none";
+    if (!show) return;
+    document.getElementById("lethalPickerName").textContent = def.name;
+    const container = document.getElementById("lethalPickerSwatches");
+    container.innerHTML = "";
+    const current = npcIsLethal(def);
+    [{ lethal: true, label: "lethal", color: "#8e2a2a", tip: "Touching it costs a life." },
+     { lethal: false, label: "harmless", color: "#2e6b4a", tip: "Touching it is safe." }].forEach(opt => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (current === opt.lethal ? " selected" : "");
+      sw.style.background = opt.color;
+      sw.title = opt.label;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = opt.label;
+      sw.appendChild(label);
+      wireCaption(sw, opt.tip);
+      sw.addEventListener("click", () => { def.lethal = opt.lethal; renderLethalPicker(); log(def.name + " is now " + opt.label + "."); });
+      container.appendChild(sw);
+    });
   }
 
   // v2.18 section 3: an optional voice for a custom actor, picked from the small set of
@@ -6244,6 +6284,36 @@
   // Resolves contact between two actors, regardless of which one physically moved into the
   // other (player input, editor drag, or AI steering) — reaction is keyed by whichever actor
   // isn't the player. Two NPCs colliding just reflect off each other.
+  // A lethal NPC reaches the player: the chaser's "caught" reaction, shared by every NPC kind now.
+  function triggerNpcCatch(playerActor, npcActor) {
+    if (starTimer > 0 || playerActor.invulnT > 0 || levelResetPending) return; // ghost mode / flicker window / already dying: can't be caught
+    playActorSound(npcActor, "gotcha");
+    playRecipe(playerActor, "caughtPunt");
+    if (appMode === "play" && !playSessionEnded && spareHearts > 0) {
+      // A spare heart takes the catch: the same punt plays but there's no reset to start and no
+      // life lost — just a shove apart and the flicker window so it can't re-catch next frame.
+      takePlayerHit("chaser");
+      const away = Math.sign((playerActor.x + playerActor.w / 2) - (npcActor.x + npcActor.w / 2)) || 1;
+      playerActor.vx = away * HAZARD_KNOCKBACK_SPEED; playerActor.flashTimer = 1;
+      pushApart(playerActor, npcActor);
+      log("A heart took that hit!");
+      return;
+    }
+    // Build mode: consumeLifeIfPlaying() is a no-op (returns false) and this plays out exactly
+    // as it always has. Play mode: this is one of the two events that cost a life; at zero
+    // lives the punt still plays (it's still a satisfying hit), but the respawn below is
+    // skipped in favor of the game-over screen taking over instead.
+    const causedGameOver = consumeLifeIfPlaying();
+    log(causedGameOver ? "Caught! Game over." : "Caught! Off you go...");
+    const resetPos = { x: startPos.x, y: startPos.y };
+    gameSetTimeout(() => {
+      if (causedGameOver || appMode === "play") return; // Play: the whole level resets instead (consumeLifeIfPlaying)
+      playerActor.x = resetPos.x; playerActor.y = resetPos.y;
+      playerActor.vx = 0; playerActor.vy = 0;
+      playRecipe(playerActor, "caughtBounceIn");
+    }, RECIPES.caughtPunt.duration);
+  }
+
   function resolveActorContact(moverActor, otherActor) {
     const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
     if (!playerActor) {
@@ -6268,7 +6338,9 @@
     const def = actorDefs[npcActor.defId];
     const temperament = def ? def.temperament : null;
 
-    if (temperament === HAZARD_BALL_KIND) {
+    if ((temperament === "stationary" || temperament === "wanderer" || temperament === "chaser" || temperament === "fleer") && npcIsLethal(def)) {
+      triggerNpcCatch(playerActor, npcActor);
+    } else if (temperament === HAZARD_BALL_KIND) {
       // the spawner's default content — hurts like any other hazard, then despawns itself: the
       // validated prototype's "player can pop one by touching it", now a real reaction instead of
       // a plain vanish, since this ball is genuinely dangerous, not just decorative.
@@ -6288,32 +6360,10 @@
       log("Oof!");
       if (npcActor.spawnerKey && !npcActor.ttlPopped) despawnSpawnedActor(npcActor);
     } else if (temperament === "chaser") {
-      if (starTimer > 0 || playerActor.invulnT > 0 || levelResetPending) return; // ghost mode / flicker window / already dying: can't be caught
-      playActorSound(npcActor, "gotcha");
-      playRecipe(playerActor, "caughtPunt");
-      if (appMode === "play" && !playSessionEnded && spareHearts > 0) {
-        // A spare heart takes the catch: the same punt plays but there's no reset to start and no
-        // life lost — just a shove apart and the flicker window so it can't re-catch next frame.
-        takePlayerHit("chaser");
-        const away = Math.sign((playerActor.x + playerActor.w / 2) - (npcActor.x + npcActor.w / 2)) || 1;
-        playerActor.vx = away * HAZARD_KNOCKBACK_SPEED; playerActor.flashTimer = 1;
-        pushApart(playerActor, npcActor);
-        log("A heart took that hit!");
-        return;
-      }
-      // Build mode: consumeLifeIfPlaying() is a no-op (returns false) and this plays out exactly
-      // as it always has. Play mode: this is one of the two events that cost a life; at zero
-      // lives the punt still plays (it's still a satisfying hit), but the respawn below is
-      // skipped in favor of the game-over screen taking over instead.
-      const causedGameOver = consumeLifeIfPlaying();
-      log(causedGameOver ? "Caught! Game over." : "Caught! Off you go...");
-      const resetPos = { x: startPos.x, y: startPos.y };
-      gameSetTimeout(() => {
-        if (causedGameOver || appMode === "play") return; // Play: the whole level resets instead (consumeLifeIfPlaying)
-        playerActor.x = resetPos.x; playerActor.y = resetPos.y;
-        playerActor.vx = 0; playerActor.vy = 0;
-        playRecipe(playerActor, "caughtBounceIn");
-      }, RECIPES.caughtPunt.duration);
+      // a chaser the kid made harmless: a plain bump, same as a wanderer (a lethal one never gets here, see above)
+      playActorSound(npcActor, "oof");
+      reflectActorsApart(playerActor, npcActor);
+      log("Oof!");
     } else if (temperament === "fleer") {
       playActorSound(npcActor, "pop");
       playRecipe(npcActor, "popVanish");
@@ -10750,6 +10800,7 @@
     renderPlayerSwatch();
     renderCustomActorSwatches();
     renderTemperamentPicker();
+    renderLethalPicker();
     renderGameRuleSwatches();
     renderCameraSwatches();
     renderCameraPanRow();
@@ -11573,7 +11624,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
