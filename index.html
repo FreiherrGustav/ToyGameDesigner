@@ -5355,6 +5355,9 @@
       }
     } else if (paintMode === "background") {
       backgroundTileDefs[selectedBackgroundId].art = currentArt.slice();
+      // redrawing an animated Paint tile collapses it to the single picture just drawn (same
+      // "customizing simplifies it" rule animated ground skins follow)
+      delete backgroundTileDefs[selectedBackgroundId].frames; delete backgroundTileDefs[selectedBackgroundId].frameMs;
     } else if (paintMode === "tile" && selectedGroundSkinId) {
       // drawing on it collapses an animated built-in (lava/fire) to the single frame just drawn —
       // the same "customizing simplifies it" precedent a posed actor's art already follows above
@@ -9920,6 +9923,15 @@
 
   // The frame a named Ground/Lethal skin should show right now — the last frame for a static
   // (length-1) skin, or a wall-clock cycle through all of them for an animated one like lava/fire.
+  // A Paint (background) tile is normally one still picture; one that also carries `frames` +
+  // `frameMs` twinkles through them, picked off the game clock like an animated ground skin.
+  // `art` always holds frame 1, so the swatch, the pixel editor and old code keep working.
+  function currentBackgroundArt(def) {
+    const f = def.frames;
+    if (!f || f.length < 2 || !def.frameMs) return def.art;
+    return f[Math.floor(gameNow() / def.frameMs) % f.length];
+  }
+
   function currentSkinFrame(skinDef) {
     const frames = skinDef.frames;
     if (frames.length <= 1 || !skinDef.frameMs) return frames[0];
@@ -10198,7 +10210,7 @@
         if (bx >= rowLen) continue;
         const screenX = bx * TILE - viewOffsetPx;
         const bgId = backgroundBoardArg[y][bx];
-        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, backgroundTileDefs[bgId].art, screenX, y * TILE, TILE, cell);
+        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), screenX, y * TILE, TILE, cell);
 
         const key = bx + "," + y;
         const tanim = isLive ? tileAnimState[key] : null;
@@ -11644,7 +11656,7 @@
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
-      currentSkinFrame,
+      currentSkinFrame, currentBackgroundArt,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
