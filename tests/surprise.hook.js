@@ -18,6 +18,7 @@ module.exports = function hook() { return `
   { const o = fireLoadedCannon; fireLoadedCannon = function () { __ev("cannon"); return o.apply(this, arguments); }; }
   { const o = destroyPhysicsObjectInLethal; destroyPhysicsObjectInLethal = function () { __ev("lava"); return o.apply(this, arguments); }; }
   { const o = triggerBombArm; triggerBombArm = function () { __ev("bombArm"); return o.apply(this, arguments); }; }
+  { const o = triggerWarp; triggerWarp = function () { __ev("warp"); return o.apply(this, arguments); }; }
   { const o = spawnActorAt; spawnActorAt = function () { __ev("spawn"); return o.apply(this, arguments); }; }
   { const o = applyWorldWrap; applyWorldWrap = function (a) { const x = a.x, y = a.y; const r = o.apply(this, arguments); if (a.x !== x || a.y !== y) __ev("wrap"); return r; }; }
   { const o = fanAccelFor; fanAccelFor = function (actor) { const r = o.apply(this, arguments); if (actor && !actor.isPlayer && r && (Math.abs(r.ax) + Math.abs(r.ay)) > 1) __ev("fanPush"); return r; }; }

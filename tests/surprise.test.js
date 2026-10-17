@@ -12,7 +12,7 @@ const HOOK = `
     reset: () => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; },
     snapshot: () => captureProjectSnapshot(), restore: s => restoreProjectSnapshot(s),
     undo: () => performUndo(),
-    templatesFull: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, expect: t.expect, nonsense: !!t.nonsense, discover: t.discover, rows: t.rows, legend: t.legend })),
+    templatesFull: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, expect: t.expect, nonsense: !!t.nonsense, discover: t.discover, rows: t.rows, legend: t.legend, rooms: t.rooms || null })),
     eligible: () => surpriseEligibleTemplates(),
     gen: (seed, o) => generateSurprise(seed, o),
     press: (seed, o) => surpriseMe(seed, o),
@@ -49,7 +49,8 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
 
   // ---- 0. Every template has something to discover ----
   tmpls.forEach(t => {
-    const has = t.rows.some(r => r.includes(t.discover)) && t.legend[t.discover];
+    const rows0 = t.rows || t.rooms[0].rows, leg0 = t.legend || t.rooms[0].legend;
+    const has = rows0.some(r => r.includes(t.discover)) && leg0[t.discover];
     if (!has) fail("discover missing in template " + t.id);
   });
 
@@ -102,7 +103,8 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
 
   // ---- 2. Expectations (canonical: native gravity, no wrap) ----
   for (const t of tmpls) {
-    if (t.expect.needsInput || ["wrap", "bounce", "cannon"].includes(t.expect.check)) { results.notes.push(t.id + ": needsInput"); continue; }
+    if (t.expect.needsInput || !["spawnCount2", "plateOn", "chaserHeld", "crateTowardMagnet", "crateMovedOrGone", "chasersApproach", "bombFall", "bombActors"].includes(t.expect.check)) { // newer checks live in surprise2.test.js
+      results.notes.push(t.id + ": needsInput"); continue; }
     let okCount = 0, total = 0;
     for (let k = 0; k < 8; k++) {
       const seed = 5000 + k * 37;
@@ -208,7 +210,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
     return out;
   });
   console.log("multi:", JSON.stringify(multi));
-  if (multi.problems.length || multi.count < 2 || multi.players !== 1 || !multi.overlay || JSON.stringify(multi.buttons) !== JSON.stringify(["Create a new room", "Overwrite part of this room", "Cancel"])) fail("multi " + JSON.stringify(multi));
+  if (multi.problems.length || multi.count < 2 || multi.players !== 1 || !multi.overlay || ![JSON.stringify(["Create a new room", "Overwrite part of this room", "Cancel"]), JSON.stringify(["Create a new room", "Cancel"])].includes(JSON.stringify(multi.buttons))) fail("multi " /* a template too big to overwrite offers only new room / cancel */ + JSON.stringify(multi));
 
   // ---- 4b. Crowded-room fuzz: 3-4 chaotic surprises in one room, then 10 seconds of play ----
   const crowd = await page.evaluate(() => {

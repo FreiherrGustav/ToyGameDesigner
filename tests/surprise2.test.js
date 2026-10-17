@@ -15,11 +15,27 @@ const HOOK = require("./surprise.hook.js")() + `
     state: () => ({ actors, board, rooms, currentRoomId, playerRoomId, gravity: gravityEnabled, wrapH: wrapHEnabled, wrapV: wrapVEnabled, doorLinks }),
     snapshot: () => captureProjectSnapshot(), room: () => { snapshotCurrentRoomState(); return rooms.find(r => r.id === currentRoomId); },
     recent: () => surpriseRecent.slice(), pushTemplate: t => SURPRISE_TEMPLATES.push(t), popTemplate: () => SURPRISE_TEMPLATES.pop(),
-    weights: () => SURPRISE_CATEGORY_WEIGHTS, defs: () => actorDefs
+    weights: () => SURPRISE_CATEGORY_WEIGHTS, defs: () => actorDefs,
+    serialize: (m, n) => surpriseSerialize(m, n), key: (k, v) => { keys[k] = v; },
+    loadSample: fn => loadExampleGame(fn, "t", { skipConfirm: true }),
+    builders: () => ({ tunnel: buildTunnelTroubleGame }),
+    // write a hand-built room into the hot room: tiles [[x,y,key,color]], actors [[defId,x,y]]
+    build: spec => {
+      gravityEnabled = !!spec.gravity; wrapHEnabled = !!spec.wrapH; wrapVEnabled = !!spec.wrapV;
+      (spec.tiles || []).forEach(([x, y, key, color]) => { board[y][x] = key; if (color) colorBoard[y][x] = color; });
+      const sel = selectedActorDefId;
+      (spec.actors || []).forEach(([defId, x, y]) => { selectedActorDefId = defId; placeNewActor(x * TILE + TILE / 2, y * TILE + TILE / 2); });
+      selectedActorDefId = sel;
+      (spec.spawnerContents || []).forEach(([x, y, def]) => { spawnerContents[roomCellKey(currentRoomId, x, y)] = def; });
+    },
+    ids: () => ({ PUSHABLE: PUSHABLE_DEF_ID, player: playerDefId, wanderer: defaultDefIdForKind("wanderer"), chaser: defaultDefIdForKind("chaser") }),
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise2_hooked.html");
 fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+// a second copy with no function wrappers (an export serializes engine functions by source text, so the counting wrappers would break it)
+const tmpMini = path.join(os.tmpdir(), "surprise2_mini.html");
+fs.writeFileSync(tmpMini, src.replace(anchor, anchor + "\n  window.__mini = { make: (id) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; return surpriseMe(77, { templateId: id, chaos: false, canonical: true }); } };\n"));
 let pass = 0; const fails = [];
 const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.push(m); console.log("FAIL", m); } };
 (async () => {
@@ -54,7 +70,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
     }
     if (t.category !== "toy") { // the stooge rule
       const chars = (t.stooge || "").split("");
-      const has = chars.some(c => { const n = t.legend && t.legend[c]; return n && /^(player|playerplate|pet|pet\*|walker|chaser)$/.test(n) && t.rows.some(r => r.includes(c)); });
+      const has = chars.some(c => { const n = t.legend && t.legend[c]; return n && n.split("&").some(q => /^(player|playerplate|pet|pet\*|walker|chaser)$/.test(q)) && t.rows.some(r => r.includes(c)); });
       ok(has, t.id + ": a character is in the way (stooge " + t.stooge + ")");
     }
     if (t.category === "loop" || t.category === "vignette") ok(t.expect && t.expect.selfStart === true, t.id + ": expect.selfStart declared");
@@ -102,7 +118,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   ok(dice.bad === 0 && dice.n >= 6, "real dice presses never repeat within 5 " + JSON.stringify(dice));
 
   // ---- C. self-start: an idle player sees an interaction within 3 s ----
-  const SELF = T.filter(t => t.category === "loop" || t.category === "vignette");
+  const SELF = T.filter(t => t.expect && t.expect.selfStart);
   for (const t of SELF) {
     for (const mode of ["canonical", "chaos"]) {
       let okN = 0, n = 0; const firsts = [];
@@ -197,9 +213,11 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   }
 
   // ---- F. Stage 2 templates: expectation within 10 simulated seconds, canonical and chaotic, fresh page per run ----
-  const STAGE2 = { lemmings: ["wrap", 1], plinko: ["bounce", 3], fallforever: ["wrap", 1], rink: ["cannon", 1] };
+  const STAGE2 = { lemmings: ["wrap", 1], plinko: ["bounce", 3], fallforever: ["wrap", 1], rink: ["cannon", 1], treadmill: ["wrap", 1], tornado: ["wrap", 1],
+    pinballroom: ["wrap", 1], catcannon: ["cannon", 1], trampit: ["bounce", 3], bigrink: ["cannon", 1], roulette2: ["buttonPress", 1],
+    bombcarousel: ["explosion", 1], slipgauntlet: ["cannon", 1], elevator: ["wrap", 1], warploop: ["warp", 1] };
   for (const [id, [type, min]] of Object.entries(STAGE2)) {
-    ok(T.some(t => t.id === id), id + ": template exists and is eligible");
+    ok(T.some(t => t.id === id) && !elig.skipped.some(k => k.id === id), id + ": template exists and is eligible");
     for (const mode of ["canonical", "chaos"]) {
       let okN = 0, n = 0, lifeLost = 0;
       for (let k = 0; k < 6; k++) {
@@ -212,11 +230,78 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
           return { built: true, c: ia.counts[type] || 0, hits: ia.counts.hit || 0 };
         }, { id, seed: 4000 + k * 71, canon: mode === "canonical", type });
         n++; if (r.built && r.c >= min) okN++; else console.log("   expect miss:", id, mode, JSON.stringify(r));
-        if (r.built && r.hits) lifeLost++;
+        if (r.built && r.hits && !/^(catcannon|tunneltrouble)$/.test(id)) lifeLost++;
       }
       ok(okN === n, "expect " + id + " (" + type + " >= " + min + " in 10 s, " + mode + ") " + okN + "/" + n);
       ok(lifeLost === 0, id + " (" + mode + "): the pets never hurt the player in 10 s idle");
     }
+  }
+
+  // ---- G. Stage 3: room events, the authoring helper, Tunnel Trouble ----
+  {
+    const ROOM_IDS = ["pinballroom", "catcannon", "dominodig", "elevator", "trampit", "bigrink", "roulette2", "bombcarousel", "slipgauntlet", "popcorn", "minefield", "warploop", "tunneltrouble"];
+    ok(ROOM_IDS.every(id => T.some(t => t.id === id)), "all 13 room events are in the table");
+    // placement: an empty room takes the event in place, a room with anything in it gets a new tab and is left alone
+    const pl = await page.evaluate(() => {
+      __st.reset(); const r1 = __st.press(1234, { templateId: "bigrink", chaos: false });
+      const st1 = __st.state(); const n1 = st1.rooms.length;
+      __st.reset(); __st.state().board[17][0] = "solid:none"; const before = JSON.stringify(__st.state().board);
+      const r2 = __st.press(1234, { templateId: "bigrink", chaos: false }); const st2 = __st.state();
+      const first = st2.rooms[0];
+      return { inPlace: n1 === 1 && r1 && r1.templateId === "bigrink", newTab: st2.rooms.length === 2, kept: JSON.stringify(first.board) === before };
+    });
+    ok(pl.inPlace, "an empty room takes a room event in place");
+    ok(pl.newTab && pl.kept, "a room that holds anything gets a new tab and is left untouched");
+    // the round trip: build a room by hand, serialize it, load the entry as a Surprise, compare
+    const rt = await page.evaluate(() => {
+      __st.reset(); const id = __st.ids();
+      const tiles = [];
+      for (let x = 0; x < 24; x++) tiles.push([x, 17, "solid:none"]);
+      tiles.push([5, 16, "solid:bouncy"], [6, 16, "solid:slippery"], [8, 16, "fan-n:none"], [9, 16, "cannon2-ne:none"], [10, 16, "trampoline:none"],
+        [12, 16, "plate:none", "red"], [14, 16, "barrier-n:none", "red"], [15, 16, "solid:wind-e"], [16, 12, "none:wind-n"], [18, 16, "solid:diggable"],
+        [20, 16, "pushbutton:none", "blue"], [21, 16, "pushbutton:none"], [22, 16, "goal:none"], [3, 8, "spawner-e:none"], [2, 3, "warp:none"]);
+      __st.build({ gravity: true, wrapH: false, wrapV: true, tiles,
+        actors: [[id.player, 2, 16], [id.PUSHABLE, 7, 16], [id.wanderer, 11, 16], [id.chaser, 19, 16]] });
+      const dump = () => { const r = __st.room(); return JSON.stringify({ b: r.board, c: r.colorBoard, g: r.gravityEnabled, h: r.wrapHEnabled, v: r.wrapVEnabled,
+        a: r.actors.filter(a => !a.spawnerKey).map(a => { const d = __st.defs()[a.defId]; return [Math.floor((a.spawnX + a.w / 2) / 32), Math.floor((a.spawnY + a.h / 2) / 32), a.isPlayer ? "player" : d.temperament]; }).sort() }); };
+      const original = dump(); const entry = __st.serialize("room", "Round Trip");
+      entry.id = "roundtrip"; entry.requires = []; __st.pushTemplate(entry);
+      __st.reset(); const rep = __st.press(1, { templateId: "roundtrip", chaos: false, canonical: true, mirror: false });
+      const copy = dump(); __st.popTemplate();
+      return { same: copy === original, built: !!(rep && rep.templateId), notes: entry.notes, rules: entry.room, rows: entry.rows.length };
+    });
+    console.log("round trip:", JSON.stringify(rt));
+    ok(rt.built && rt.same, "serialize -> load as a Surprise reproduces the room (tiles, colours, actors, rules)");
+    // multi-room set: Tunnel Trouble (two rooms joined by a door pair) round-trips through the helper too
+    const tt = await page.evaluate(() => {
+      __st.reset(); __st.loadSample(__st.builders().tunnel);
+      const dumpAll = () => { const s = __st.snapshot(); return JSON.stringify(s.rooms.map(r => [r.board, r.gravityEnabled, r.wrapVEnabled, r.actors.map(a => [Math.floor((a.spawnX + a.w / 2) / 32), Math.floor((a.spawnY + a.h / 2) / 32), a.isPlayer ? "p" : __st.defs()[a.defId].temperament]).sort()])); };
+      const original = dumpAll(); const entry = __st.serialize("all", "TT");
+      entry.id = "ttcopy"; entry.requires = []; __st.pushTemplate(entry);
+      __st.reset(); const rep = __st.press(2, { templateId: "ttcopy", chaos: false, canonical: true, mirror: false, full: "new" });
+      const s2 = __st.snapshot();
+      const copy = JSON.stringify(s2.rooms.map(r => [r.board, r.gravityEnabled, r.wrapVEnabled, r.actors.map(a => [Math.floor((a.spawnX + a.w / 2) / 32), Math.floor((a.spawnY + a.h / 2) / 32), a.isPlayer ? "p" : __st.defs()[a.defId].temperament]).sort()]));
+      __st.popTemplate();
+      const links = Object.keys(s2.doorLinks).length;
+      return { built: !!(rep && rep.templateId), rooms: s2.rooms.length, links, notes: entry.notes, sameBoards: JSON.stringify(JSON.parse(copy).slice(-2).map(x => x[0])) === JSON.stringify(JSON.parse(original).slice(0, 2).map(x => x[0])) };
+    });
+    console.log("tunnel trouble round trip:", JSON.stringify(tt));
+    ok(tt.built && tt.links === 2 && tt.sameBoards, "Tunnel Trouble (two rooms, one door pair) serializes and loads back identically");
+  }
+
+  // ---- H. an exported game that contains a Surprise room plays ----
+  for (const id of ["treadmill", "tornado", "catcannon", "warploop", "tunneltrouble"]) {
+    const rp = await ctx.newPage(); rp.on("dialog", d => d.accept());
+    await rp.goto("file://" + tmpMini + "#t"); await rp.waitForFunction(() => window.__mini);
+    await rp.evaluate(id => window.__mini.make(id), id);
+    const [d] = await Promise.all([rp.waitForEvent("download"), rp.click("#exportBtn")]);
+    const f = path.join(os.tmpdir(), "surprise_export_" + id + ".html"); await d.saveAs(f);
+    const q = await ctx.newPage(); const qerrs = []; q.on("pageerror", e => qerrs.push(String(e)));
+    await q.goto("file://" + f); await q.waitForTimeout(600);
+    const shot = async () => (await q.locator("canvas").first().screenshot()).toString("base64");
+    const a1 = await shot(); await q.keyboard.down("ArrowRight"); await q.waitForTimeout(3200); await q.keyboard.up("ArrowRight"); const a2 = await shot();
+    ok(a1 !== a2 && qerrs.length === 0, "exported " + id + " plays (screen changes over 3 s, no errors" + (qerrs.length ? ": " + qerrs[0] : "") + ")");
+    await q.close(); await rp.close();
   }
 
   ok(errors.length === 0, "no page errors " + errors.slice(0, 3).join(" | "));
