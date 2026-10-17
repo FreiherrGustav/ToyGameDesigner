@@ -28,8 +28,8 @@ const metrics = () => ({ b: (() => { const r = document.getElementById("gameCanv
     ok(await rowsOf("#buildToolbar") === 1, `${tag}: toolbar is one row (8 buttons)`);
     ok(await page.evaluate(() => { const bs = [...document.querySelectorAll("#buildToolbar button")]; return bs.length === 8 && bs.every(b => b.getBoundingClientRect().right <= innerWidth); }), `${tag}: all 8 toolbar buttons on screen`);
     // status row: tabs, pan, score on ONE line
-    const oneLine = () => page.evaluate(() => { const r = document.getElementById("statusRow"); const items = [document.querySelector("#roomTabRow button"), document.getElementById("hud")].concat([...document.querySelectorAll("#cameraPanRow button")].filter(b => b.offsetParent)); const mids = items.map(e => { const q = e.getBoundingClientRect(); return Math.round(q.top + q.height / 2); }); return Math.max(...mids) - Math.min(...mids) <= 4 && r.getBoundingClientRect().height < 40; });
-    ok(await oneLine(), `${tag}: room tabs + Score on one row`);
+    const oneLine = () => page.evaluate(() => { const ks = [...document.querySelectorAll("#roomTabRow > *")].filter(k => k.offsetParent); const cs = ks.map(k => { const r = k.getBoundingClientRect(); return (r.top + r.bottom) / 2; }); return Math.max(...cs) - Math.min(...cs) <= 3; }); // v2.51: Score is Play-only; pan controls sit below the board
+    ok(await oneLine(), `${tag}: room tabs on one row`);
     let c = await canvas();
     const scale = (c.w - 6) / 768;
     table.push([tag, BEFORE[tag], +scale.toFixed(3)]);
@@ -64,7 +64,7 @@ const metrics = () => ({ b: (() => { const r = document.getElementById("gameCanv
     await page.evaluate(() => window.__ev("()=>{cameraMode='follow';renderCameraPanRow();renderAll();}")());
     await page.waitForTimeout(150);
     ok(await page.evaluate(() => document.getElementById("cameraPanRow").offsetParent !== null), `${tag}: pan controls visible in Follow`);
-    ok(await oneLine(), `${tag}: tabs + pan + Score on one row in Follow`);
+    ok(await oneLine(), `${tag}: tabs on one row in Follow (pan row is below the board)`);
     ok(await noScroll() && (await canvas()).b <= h, `${tag}: Follow: no page scroll, canvas fits`);
     // Play
     await page.evaluate(() => window.__ev("()=>{cameraMode='fixed';while(rooms.length>1)rooms.pop();currentRoomId=rooms[0].id;renderRoomTabs();loadStarterBoard();}")()).catch(() => {});

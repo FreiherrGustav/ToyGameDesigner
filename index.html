@@ -440,6 +440,84 @@
     #landingKeys { display: none; }
     #landingFoot { left: 20px; } #landingBest { right: 20px; }
   }
+
+  /* ---------- v2.51: tidy editor layout (alignment, grouped toolbar, one room strip, one message line) ---------- */
+  /* top bar: right side = pause (attached to the Build/Play toggle) + Samples + dice */
+  #topBarRight { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #topBarRight #pauseBtn { margin-right: auto; padding: 6px 10px; font-size: 14px; }
+  #topBar.aligned { display: grid; grid-template-columns: var(--palCol, 0px) var(--boardCol, 1fr); column-gap: 0; align-items: center;
+    width: calc(var(--palCol, 0px) + var(--boardCol, 0px)); max-width: none; margin: 6px 0 0 var(--topLeft, 0px); padding: 0; }
+  #topBar.aligned #homeLogo { grid-column: 1 / 3; grid-row: 1; justify-self: start; }
+  #topBar.aligned #topBarControls { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 0; padding: 0; min-width: 0; }
+  #topBar.aligned #appModeToggle { grid-column: 2; width: 240px; flex: none; }
+  #topBar.aligned #topBarRight { grid-column: 3; padding-left: 8px; }
+  #topBar.aligned #topBarRight #topBarActions { gap: 6px; }
+  #topBar.aligned #appModeToggle button { padding: 8px 6px; font-size: 17px; min-width: 0; }
+  #topBar.aligned #samplesBtn { padding: 6px 10px; font-size: 14px; }
+  #topBar.aligned #surpriseBtn { padding: 2px 8px; font-size: 24px; }
+  @media (max-width: 1399px) { #topBarRight .pl { display: none; } }
+  @media (min-width: 1500px) and (min-height: 820px) {
+    #topBar.aligned { margin-top: 14px; }
+    #topBar.aligned #appModeToggle { width: 300px; }
+    #topBar.aligned #appModeToggle button { font-size: 20px; padding: 10px 8px; }
+    #topBar.aligned #samplesBtn, #topBarRight #pauseBtn { font-size: 16px; padding: 9px 16px; }
+    #topBar.aligned #surpriseBtn { padding: 4px 14px; font-size: 30px; }
+  }
+  /* build toolbar: three purpose groups, centred over the board, never split across rows */
+  #gameWrap #buildToolbar { flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px; width: 100%; max-width: var(--stageW, none); align-self: center; }
+  #buildToolbar .tgroup { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; flex: none; }
+  #buildToolbar .tgroup + .tgroup { border-left: 1px solid var(--panel-light); padding-left: 10px; }
+  #buildToolbar .tgroup.rowStart { border-left-color: transparent; padding-left: 0; }
+  #gameWrap #buildToolbar button.tbtn { box-sizing: border-box; border: 1px solid transparent; min-height: 28px; white-space: nowrap; }
+  #gameWrap #buildToolbar button.tbtn:hover { border-color: var(--accent); }
+  #gameWrap #buildToolbar button.tbtn.quiet { background: transparent; color: #aab; border-color: var(--panel-light); }
+  #gameWrap #buildToolbar button.tbtn.quiet:hover { background: #b3261e; color: #fff; border-color: #b3261e; }
+  #gameWrap #buildToolbar #exportBtn { background: transparent; color: var(--accent); border-color: var(--accent); }
+  #gameWrap #buildToolbar #exportBtn:hover { background: var(--accent); color: #222; }
+  #buildToolbar .ls { display: none; }
+  #buildToolbar.short .ic { display: none; }
+  #buildToolbar.short .lf { display: none; } #buildToolbar.short .ls { display: inline; } #gameWrap #buildToolbar.short button.tbtn { padding: 4px 8px; }
+  /* room strip: tabs centred over the board; a tab and its close mark are one piece; Duplicate is a ghost button */
+  #gameWrap #statusRow { justify-content: center !important; width: 100%; max-width: var(--stageW, none); align-self: center; min-height: 28px; font-size: 14px; }
+  #statusRow #roomTabRow { justify-content: safe center; gap: 6px; }
+  .roomTab { display: inline-flex; border-radius: 6px; overflow: hidden; background: var(--panel-light); }
+  .roomTab.current { background: var(--accent); }
+  #gameWrap .roomTab button.tbtn { border-radius: 0; border: 0; background: transparent; }
+  #gameWrap .roomTab button.tbtn.active { background: var(--accent); }
+  #gameWrap .roomTab button.tbtn:not(.active):not(:first-child) { padding: 4px 7px; opacity: 0.55; }
+  .roomTab.current button.tbtn:not(.active) { color: #222; }
+  #gameWrap .roomTab button.tbtn:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+  #gameWrap #roomTabRow button.tbtn.ghost { background: transparent; border: 1px dashed var(--panel-light); color: #aab; }
+  #gameWrap #roomTabRow button.tbtn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  body:not(.play-mode) #hud { display: none; }
+  body.play-mode #statusRow { justify-content: flex-start !important; }
+  /* pan controls: a slim row under the board (Follow/Runner rooms, Build only) */
+  #gameWrap #cameraPanRow { justify-content: center; gap: 10px; flex: none; }
+  #gameWrap #cameraPanRow button.tbtn { padding: 1px 10px; font-size: 12px; }
+  body.play-mode #cameraPanRow { display: none !important; }
+  /* one message line under the board: message left, key hint right; its height is always reserved */
+  #msgRow { display: flex; align-items: center; gap: 10px; width: 100%; max-width: var(--stageW, none); align-self: center; height: 24px; flex: none; box-sizing: border-box; }
+  #msgRow #log { flex: 1 1 0; text-align: left; align-items: flex-start; transition: opacity 0.6s; }
+  #msgRow #log.faded { opacity: 0; }
+  #msgRow #autosaveHint { flex: 0 1 auto; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #keyHint { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  #keyHint.muted { color: #888; }
+  #keyHint.pill { color: #e4e6f0; font-weight: bold; background: rgba(20,21,30,0.78); border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 2px 10px; }
+  /* compact tier: claw back the height the extra message line costs, so the board is no smaller than before */
+  @media not all and (min-width: 1500px) and (min-height: 820px) {
+    #topBar.aligned { margin-top: 3px; }
+    #topBar.aligned #appModeToggle button { padding: 4px 6px; font-size: 16px; }
+    #topBarRight #pauseBtn { padding: 3px 9px; font-size: 16px; }
+    #topBar.aligned #samplesBtn { padding: 4px 9px; }
+    #topBar.aligned #surpriseBtn { padding: 0 7px; font-size: 22px; }
+    #app { padding-bottom: 3px; }
+    #gameWrap { gap: 2px; padding: 2px 8px; }
+    #gameWrap #buildToolbar button.tbtn { min-height: 26px; padding-top: 3px; padding-bottom: 3px; }
+    #gameWrap #buildToolbar { gap: 4px 8px; }
+    #gameWrap #statusRow { min-height: 26px; }
+    #gameWrap .roomTab button.tbtn, #gameWrap #roomTabRow button.tbtn.ghost { padding-top: 3px; padding-bottom: 3px; }
+    #msgRow { height: 20px; }
+  }
 </style>
 </head>
 <body>
@@ -450,10 +528,12 @@
       <button id="modeBuildBtn" class="active">🛠 Build</button>
       <button id="modePlayBtn">▶ Play</button>
     </div>
-    <div id="topBarActions">
-      <button id="pauseBtn" title="Pause or resume the game (P)">⏸ Pause</button>
-      <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
-      <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
+    <div id="topBarRight">
+      <button id="pauseBtn" title="Pause or resume the game (P)">⏸<span class="pl"> Pause</span></button>
+      <div id="topBarActions">
+        <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
+        <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
+      </div>
     </div>
   </div>
 </div>
@@ -605,28 +685,37 @@
   <!-- Game / Editor canvas -->
   <div class="panel" id="gameWrap">
     <div class="toolbar" id="buildToolbar">
-      <button class="tbtn" id="undoBtn" title="Undo" disabled>↩ Undo</button>
-      <button class="tbtn" id="redoBtn" title="Redo" disabled>↪ Redo</button>
-      <button class="tbtn" id="resetBtn">↺ Reset to start</button>
-      <button class="tbtn" id="clearAllBtn">🗑 Clear board</button>
-      <button class="tbtn" id="newProjectBtn">🆕 New project</button>
-      <button class="tbtn" id="saveProjectBtn">💾 Save project</button>
-      <button class="tbtn" id="loadProjectBtn">📂 Load project</button>
-      <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
-      <button class="tbtn" id="exportBtn">⬇ Export game</button>
+      <div class="tgroup" id="grpHistory">
+        <button class="tbtn" id="undoBtn" title="Undo" disabled><span class="ic">↩ </span>Undo</button>
+        <button class="tbtn" id="redoBtn" title="Redo" disabled><span class="ic">↪ </span>Redo</button>
+      </div>
+      <div class="tgroup" id="grpBoard">
+        <button class="tbtn" id="resetBtn" title="Reset to start"><span class="ic">↺ </span><span class="lf">Reset to start</span><span class="ls">Reset</span></button>
+        <button class="tbtn quiet" id="clearAllBtn" title="Clear board"><span class="ic">🗑 </span><span class="lf">Clear board</span><span class="ls">Clear</span></button>
+      </div>
+      <div class="tgroup" id="grpProject">
+        <button class="tbtn quiet" id="newProjectBtn" title="New project"><span class="ic">🆕 </span><span class="lf">New project</span><span class="ls">New</span></button>
+        <button class="tbtn" id="saveProjectBtn" title="Save project"><span class="ic">💾 </span><span class="lf">Save project</span><span class="ls">Save</span></button>
+        <button class="tbtn" id="loadProjectBtn" title="Load project"><span class="ic">📂 </span><span class="lf">Load project</span><span class="ls">Load</span></button>
+        <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
+        <button class="tbtn" id="exportBtn" title="Export game"><span class="ic">⬇ </span><span class="lf">Export game</span><span class="ls">Export</span></button>
+      </div>
     </div>
     <div class="toolbar" id="statusRow">
       <div class="toolbar" id="roomTabRow"></div>
-      <div class="toolbar" id="cameraPanRow" style="display:none;">
-        <button class="tbtn" id="panLeftBtn">◀ Pan</button>
-        <span class="hint" id="panPositionLabel" style="margin:0;"></span>
-        <button class="tbtn" id="panRightBtn">Pan ▶</button>
-      </div>
-      <div id="log"></div>
       <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
-      <div id="autosaveHint" class="hint" style="margin:0;"></div>
     </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
+    <div class="toolbar" id="cameraPanRow" style="display:none;">
+      <button class="tbtn" id="panLeftBtn">◀ Pan</button>
+      <span class="hint" id="panPositionLabel" style="margin:0;"></span>
+      <button class="tbtn" id="panRightBtn">Pan ▶</button>
+    </div>
+    <div id="msgRow">
+      <div id="log"></div>
+      <div id="autosaveHint" class="hint" style="margin:0;"></div>
+      <div id="keyHint"></div>
+    </div>
   </div>
 
 </div>
@@ -1806,6 +1895,7 @@
     setGamePaused(false); // Play always starts running
     appMode = "play";
     keyHintFirstKeyAt = null; keyHintAnyKey = false; // a fresh Play session shows the key hint again
+    clearLogLine();
     restartPlaySessionFromSnapshot();
     document.body.classList.add("play-mode");
     updateModeButtons();
@@ -1913,6 +2003,7 @@
     setGamePaused(buildPausedMemory);
     keyHintFirstKeyAt = null; keyHintAnyKey = false;
     document.body.classList.remove("play-mode");
+    clearLogLine();
     updateModeButtons();
     renderAll();
   }
@@ -4110,6 +4201,16 @@
     el.appendChild(line);
     el.title = msg;
     while (el.children.length > 20) el.removeChild(el.firstChild);
+    // v2.51: the message fades after ~5s (real time; it is UI, not game time)
+    el.classList.remove("faded");
+    clearTimeout(log.fadeTimer);
+    log.fadeTimer = setTimeout(() => el.classList.add("faded"), 5000);
+  }
+  function clearLogLine() {
+    const el = document.getElementById("log");
+    if (!el) return;
+    clearTimeout(log.fadeTimer);
+    el.textContent = ""; el.title = ""; el.classList.remove("faded");
   }
 
   // v2.10: the project's founding rule ("weird choices should be funny or recoverable, never a
@@ -4214,15 +4315,43 @@
       }
     }
   }
-  window.addEventListener("resize", fitCanvas);
+  // v2.51: line the top bar up with the editor (palette + board), and keep toolbar dividers off wrapped row starts
+  function alignTopBar() {
+    const bar = document.getElementById("topBar");
+    if (!bar) return;
+    if (window.innerWidth < 1000) { bar.classList.remove("aligned"); return; }
+    const pal = document.getElementById("paletteWrap");
+    const cr = gameCanvas.getBoundingClientRect();
+    if (!cr.width) return;
+    const left = pal && pal.offsetParent ? pal.getBoundingClientRect().left : cr.left;
+    bar.style.setProperty("--topLeft", left + "px");
+    bar.style.setProperty("--palCol", (cr.left - left) + "px");
+    bar.style.setProperty("--boardCol", cr.width + "px");
+    bar.classList.add("aligned");
+  }
+  function markToolbarRows() {
+    const groups = Array.from(document.querySelectorAll("#buildToolbar .tgroup"));
+    let prev = null;
+    groups.forEach(g => { g.classList.toggle("rowStart", !prev || g.offsetTop > prev.offsetTop + 2); prev = g; });
+  }
+  // short toolbar labels (Reset, Clear, New, Save, Load, Export; full names stay as tooltips) whenever the board is
+  // too narrow for the full ones, which in practice means windows under ~1400px wide
+  function fitCanvasAndAlign() {
+    const tb = document.getElementById("buildToolbar");
+    fitCanvas();
+    const want = window.innerWidth < 1400 || (parseFloat(getComputedStyle(document.getElementById("gameWrap")).getPropertyValue("--stageW")) || 0) < 900;
+    if (tb && tb.classList.contains("short") !== want) { tb.classList.toggle("short", want); fitCanvas(); }
+    markToolbarRows(); alignTopBar();
+  }
+  window.addEventListener("resize", fitCanvasAndAlign);
   if (window.ResizeObserver) {
     // deferred to the next frame so resizing the canvas never re-triggers the observer mid-callback
     let fitQueued = false;
-    const ro = new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; setTimeout(() => { fitQueued = false; fitCanvas(); }, 0); });
+    const ro = new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; setTimeout(() => { fitQueued = false; fitCanvasAndAlign(); }, 0); });
     ro.observe(document.getElementById("app"));
-    ["buildToolbar", "statusRow"].forEach(id => { const e = document.getElementById(id); if (e) ro.observe(e); });
+    ["buildToolbar", "statusRow", "cameraPanRow", "msgRow", "gameWrap"].forEach(id => { const e = document.getElementById(id); if (e) ro.observe(e); });
   }
-  fitCanvas();
+  fitCanvasAndAlign();
   gameCanvas.width = COLS * TILE;
   gameCanvas.height = ROWS * TILE;
   const DISPLAY_SCALE = 1; // board is already 768x576 native at the new 32px tile size
@@ -9902,7 +10031,7 @@
     const b = document.getElementById("pauseBtn");
     if (!b) return;
     b.classList.toggle("on", gamePaused);
-    b.textContent = gamePaused ? "▶ Resume" : "⏸ Pause";
+    b.innerHTML = gamePaused ? "▶<span class=\"pl\"> Resume</span>" : "⏸<span class=\"pl\"> Pause</span>";
     b.title = (gamePaused ? "Resume the game" : "Pause the game") + " (P)";
   }
   document.getElementById("pauseBtn").addEventListener("click", () => { if (landingActive || (appMode === "play" && playSessionEnded)) return; togglePause(); });
@@ -10617,7 +10746,24 @@
     keyHintCacheText = "← ↑ ↓ → or WASD move" + (gravityOn() ? " · Space jump" : "") + (carry ? " · E grab" : "") + " · P pause";
     return keyHintCacheText;
   }
+  // v2.51: in the editor the hint is a DOM element (#keyHint, fixed font size, in the message line under the board);
+  // the standalone export has no such element and keeps the canvas pill below.
   function drawKeyHint() {
+    const dom = document.getElementById("keyHint");
+    if (dom) {
+      const nowD = performance.now();
+      if (appMode === "build") {
+        if (dom.textContent !== keyHintText()) dom.textContent = keyHintText();
+        dom.className = "muted"; dom.style.opacity = "1"; return;
+      }
+      if (keyHintFirstKeyAt == null && (keyHintAnyKey || Object.keys(keys).some(k => keys[k]))) keyHintFirstKeyAt = nowD;
+      let a = 1;
+      if (keyHintFirstKeyAt != null) { const t = nowD - keyHintFirstKeyAt - 3000; a = t >= 500 ? 0 : t > 0 ? 1 - t / 500 : 1; }
+      const txt = keyHintText();
+      if (dom.textContent !== txt) dom.textContent = txt;
+      dom.className = "pill"; dom.style.opacity = String(a);
+      return;
+    }
     const now = performance.now();
     if (keyHintFirstKeyAt == null && (keyHintAnyKey || Object.keys(keys).some(k => keys[k]))) keyHintFirstKeyAt = now;
     let alpha = 1;
@@ -10831,8 +10977,7 @@
     container.innerHTML = "";
     rooms.forEach(room => {
       const wrap = document.createElement("span");
-      wrap.style.display = "inline-flex";
-      wrap.style.gap = "2px";
+      wrap.className = "roomTab" + (room.id === currentRoomId ? " current" : "");
       const btn = document.createElement("button");
       btn.className = "tbtn" + (room.id === currentRoomId ? " active" : "");
       btn.textContent = room.name + (room.id === playerRoomId ? " •" : "");
@@ -10858,7 +11003,7 @@
     // of how many rooms exist — acts on whichever room is currently open, same as painting/Game
     // Rules/Camera already do, rather than needing its own per-tab target.
     const dup = document.createElement("button");
-    dup.className = "tbtn";
+    dup.className = "tbtn ghost";
     dup.textContent = "⧉ Duplicate Room";
     setTimeout(() => { const a = container.querySelector(".tbtn.active"); if (a) a.scrollIntoView({ block: "nearest", inline: "nearest" }); }, 0);
     const current = rooms.find(r => r.id === currentRoomId);
@@ -11977,7 +12122,7 @@
     document.body.classList.remove("landing");
     document.getElementById("log").textContent = "";
     updateUndoRedoButtons();
-    fitCanvas();
+    fitCanvasAndAlign();
   }
   // "Make a game" on a project with nothing in it opens a tiny starter instead of a dark empty grid: a floor,
   // the player standing on it near the left, a goal near the right, gravity on. Ordinary content (one undo

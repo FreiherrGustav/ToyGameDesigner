@@ -57,8 +57,8 @@ const overlapsOf = (boxes) => {
       const m = await page.evaluate(() => { const g = id => document.getElementById(id).getBoundingClientRect(); const t = g("appModeToggle"), l = g("homeLogo"), a = g("topBarActions"), c = g("gameCanvas");
         return { togMid: (t.left + t.right) / 2, logoL: l.left, actR: a.right, canvasMid: (c.left + c.right) / 2 }; });
       if (w >= 1000) {
-        ok(Math.abs(m.togMid - w / 2) <= 1.5, `${tag} ${label}: Build/Play centred on the page (${m.togMid.toFixed(1)} vs ${w / 2})`);
-        ok(Math.abs(m.logoL - (w - m.actR)) <= 6, `${tag} ${label}: logo and actions mirror each other (${m.logoL.toFixed(0)} from left, ${(w - m.actR).toFixed(0)} from right)`);
+        ok(Math.abs(m.togMid - m.canvasMid) <= 2, `${tag} ${label}: Build/Play centred on the board (v2.51) (${m.togMid.toFixed(1)} vs ${m.canvasMid.toFixed(1)})`);
+        // v2.51: the logo sits over the palette edge and the actions at the board edge (no longer mirrored on the page)
       }
       return m;
     };
@@ -125,7 +125,7 @@ const overlapsOf = (boxes) => {
     await checkChrome("play");
     const mP = await symmetric("play");
     ok(Math.abs(mP.canvasMid - w / 2) <= 1.5, `${tag} play: canvas centred (${mP.canvasMid.toFixed(1)})`);
-    if (w >= 1000) ok(Math.abs(mP.togMid - mB.togMid) <= 1, `${tag}: Build/Play toggle stays put between Build and Play`);
+    
     if (SHOTS && ["1440x900", "1920x1080", "2560x1300"].includes(tag)) await page.screenshot({ path: path.join(SHOTS, `b49_play_${tag}.png`) });
     table.push([tag, Math.round(BEFORE_W[tag]), Math.round(c.w), +(((Math.round(sBuild * 100)) / 100).toFixed(2)), +sPlay.toFixed(3)]);
     await ev(page, "()=>exitToBuildMode && exitToBuildMode()").catch(() => {});
