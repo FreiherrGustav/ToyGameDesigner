@@ -78,6 +78,7 @@
   #statusRow #hud { flex: 0 0 auto; white-space: nowrap; margin-left: 0; }
   #statusRow #autosaveHint { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
   #gameCanvas {
+    position: relative;
     background: #000;
     image-rendering: pixelated;
     border: 3px solid var(--panel-light);
@@ -491,6 +492,12 @@
   #gameWrap #roomTabRow button.tbtn.ghost:hover { border-color: var(--accent); color: var(--accent); }
   body:not(.play-mode) #hud { display: none; }
   body.play-mode #statusRow { justify-content: flex-start !important; }
+  #gameWrap #statusRow { position: relative; }
+  #statusRow.hasStepper #roomTabRow { margin: 0 100px; }
+  #sizeStepper { position: absolute; right: 0; top: 50%; transform: translateY(-50%); align-items: center; gap: 4px; font-size: 12px; color: #aab; }
+  #sizeStepper #sizeLabel { min-width: 34px; text-align: center; }
+  #gameWrap #sizeStepper button.tbtn { padding: 0 8px; min-height: 22px; font-size: 14px; line-height: 1; }
+  body.play-mode #statusRow.hasStepper #roomTabRow { margin: 0; }
   /* pan controls: a slim row under the board (Follow/Runner rooms, Build only) */
   #gameWrap #cameraPanRow { justify-content: center; gap: 10px; flex: none; }
   #gameWrap #cameraPanRow button.tbtn { padding: 1px 10px; font-size: 12px; }
@@ -703,6 +710,7 @@
     </div>
     <div class="toolbar" id="statusRow">
       <div class="toolbar" id="roomTabRow"></div>
+      <span id="sizeStepper" title="Board size" style="display:none;"><button class="tbtn" id="sizeDownBtn" aria-label="Smaller board" title="Smaller board">−</button><span id="sizeLabel"></span><button class="tbtn" id="sizeUpBtn" aria-label="Bigger board" title="Bigger board">+</button></span>
       <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
     </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
@@ -1899,6 +1907,7 @@
     restartPlaySessionFromSnapshot();
     document.body.classList.add("play-mode");
     updateModeButtons();
+    fitCanvasAndAlign();
   }
   function restartPlaySessionFromSnapshot() {
     currentRoomId = null; // so activateRoom() below doesn't try to save stale live state into the freshly-cloned rooms
@@ -2005,6 +2014,7 @@
     document.body.classList.remove("play-mode");
     clearLogLine();
     updateModeButtons();
+    fitCanvasAndAlign();
     renderAll();
   }
 
@@ -4255,11 +4265,40 @@
   // FIT_SNAP_WASTE of the available size; BELOW native size the free fit is kept (v2.48 Stage 2's numbers, and a
   // 0.75 snap there would shrink 1366x635 from 0.857 to 0.75). `--stageW` (the canvas width) also bounds the
   // toolbar rows in the comfortable tier, so they wrap into two relaxed rows instead of one crowded one.
-  const FIT_SCALE_STEP = 0.25, FIT_SNAP_WASTE = 0.12, FIT_MAX_SCALE = 2.0, FIT_MAX_SCALE_WIDE = 1.75, FIT_WIDE_PX = 2200;
+  // v2.51 Stage 2: crisp pixel art. Every art pixel must be a WHOLE number of device pixels, so the allowed board
+  // scales are the multiples of 0.25 where 4 * scale * devicePixelRatio is an integer (DPR 1 or 2: every 0.25 step;
+  // DPR 1.5: only 0.5 steps; DPR 1.25 or 1.75: whole numbers only). The border is rounded to whole device pixels
+  // too. Below 1.0 the free fit is kept (v2.48 Stage 2's numbers). The default is the largest allowed scale that
+  // fits, up to FIT_MAX_SCALE (one constant); the size stepper (#sizeStepper) can go bigger, up to FIT_HARD_MAX,
+  // or smaller, and is remembered per browser in localStorage ("auto" = the default). `--stageW` (the canvas
+  // width) also bounds the toolbar rows in the comfortable tier.
+  const FIT_SCALE_STEP = 0.25, FIT_MAX_SCALE = 1.25, FIT_HARD_MAX = 2.0, FIT_MIN_STEP = 0.5;
+  const SIZE_PREF_KEY = "toyGameDesigner.boardScale";
+  function allowedScales(maxScale, dpr) {
+    const out = [];
+    for (let k = Math.round(FIT_MIN_STEP / FIT_SCALE_STEP); k * FIT_SCALE_STEP <= maxScale + 1e-9; k++) {
+      const sc = k * FIT_SCALE_STEP, dev = 4 * sc * dpr;
+      if (Math.abs(dev - Math.round(dev)) < 1e-6) out.push(sc);
+    }
+    return out;
+  }
+  function readSizePref() {
+    try { const v = localStorage.getItem(SIZE_PREF_KEY); if (v && v !== "auto" && isFinite(+v)) return +v; } catch (e) {}
+    return "auto";
+  }
+  function writeSizePref(v) { try { localStorage.setItem(SIZE_PREF_KEY, String(v)); } catch (e) {} }
+  let canvasBorderPx = 3;   // the canvas border in CSS px (whole device pixels), kept for pointer maths
+  const fitState = { sizes: [], chosen: 1, auto: 1, free: true };
   function fitCanvas() {
     const wrap = document.getElementById("gameWrap");
     if (!wrap) return;
-    const BORDER = 6, NATIVE_W = 768;
+    const dpr = window.devicePixelRatio || 1;
+    // a border that is a whole number of CSS px AND of device px (the browser floors anything else, which would
+    // shift the board's edge off the pixel grid): 3px normally, 4px at DPR 1.25/1.5/1.75
+    let borderCss = 3;
+    for (let b = 3; b <= 8; b++) if (Math.abs(b * dpr - Math.round(b * dpr)) < 1e-6) { borderCss = b; break; }
+    const BORDER = 2 * borderCss, NATIVE_W = 768;
+    gameCanvas.style.borderWidth = borderCss + "px"; canvasBorderPx = borderCss;
     const cs = getComputedStyle(wrap);
     const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
     const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
@@ -4267,15 +4306,14 @@
     const app = document.getElementById("app");
     const palette = document.getElementById("paletteWrap");
     const stacked = window.matchMedia("(max-width: 760px)").matches;
-    const maxScale = window.innerWidth >= FIT_WIDE_PX ? FIT_MAX_SCALE_WIDE : FIT_MAX_SCALE;
     const apply = (w) => {
       gameCanvas.style.width = w + "px";
-      gameCanvas.style.height = Math.round((w - BORDER) * 0.75 + BORDER) + "px";
+      gameCanvas.style.height = ((w - BORDER) * 0.75 + BORDER) + "px";
       wrap.style.setProperty("--stageW", w + "px");
     };
     // the largest canvas width the stage can hold right now (it depends on the toolbar heights, which depend on --stageW)
     const freeFitW = () => {
-      let w = NATIVE_W * maxScale + BORDER;
+      let w = NATIVE_W * FIT_HARD_MAX + BORDER;
       if (app) {
         const ac = getComputedStyle(app);
         const appPadX = parseFloat(ac.paddingLeft) + parseFloat(ac.paddingRight);
@@ -4297,10 +4335,16 @@
       return Math.max(320, w);
     };
     const choose = (freeW) => {
-      const s = (freeW - BORDER) / NATIVE_W;
-      const snapped = Math.floor(s / FIT_SCALE_STEP + 1e-6) * FIT_SCALE_STEP;
-      if (snapped >= 1 && snapped >= s * (1 - FIT_SNAP_WASTE)) return Math.round(snapped * NATIVE_W + BORDER);
-      return Math.floor(freeW);
+      const fit = (freeW - BORDER) / NATIVE_W;
+      const sizes = allowedScales(Math.min(fit, FIT_HARD_MAX), dpr).filter(sc => sc >= 0.5);
+      const big = sizes.filter(sc => sc >= 1);
+      fitState.sizes = sizes; fitState.free = fit < 1 || !big.length;
+      if (fitState.free) { fitState.sizes = []; fitState.chosen = fit; fitState.auto = fit; return Math.floor(freeW); }
+      const auto = big.filter(sc => sc <= FIT_MAX_SCALE + 1e-9).pop() || big[0];
+      const pref = readSizePref();
+      const want = pref === "auto" ? auto : (sizes.filter(sc => sc <= pref + 1e-9).pop() || sizes[0]);
+      fitState.auto = auto; fitState.chosen = want;
+      return want * NATIVE_W + BORDER;
     };
     let w = choose(freeFitW());
     apply(w);
@@ -4314,7 +4358,34 @@
         w = Math.max(320, choose(w - FIT_SCALE_STEP * NATIVE_W)); apply(w);
       }
     }
+    updateSizeStepper();
   }
+  function updateSizeStepper() {
+    const box = document.getElementById("sizeStepper");
+    if (!box) return;
+    const many = fitState.sizes.length > 1;
+    box.style.display = many ? "inline-flex" : "none";
+    document.getElementById("statusRow").classList.toggle("hasStepper", many);
+    if (!many) return;
+    const idx = fitState.sizes.findIndex(sc => Math.abs(sc - fitState.chosen) < 1e-6);
+    document.getElementById("sizeLabel").textContent = Math.round(fitState.chosen * 100) + "%";
+    document.getElementById("sizeDownBtn").disabled = idx <= 0;
+    document.getElementById("sizeUpBtn").disabled = idx < 0 || idx >= fitState.sizes.length - 1;
+  }
+  function stepBoardSize(dir) {
+    const idx = fitState.sizes.findIndex(sc => Math.abs(sc - fitState.chosen) < 1e-6);
+    const next = fitState.sizes[Math.max(0, Math.min(fitState.sizes.length - 1, idx + dir))];
+    if (next == null) return;
+    writeSizePref(Math.abs(next - fitState.auto) < 1e-6 ? "auto" : next);
+    fitCanvasAndAlign();
+  }
+  // a display-density change (moving the window to another monitor, browser zoom) re-runs the fit too
+  (function watchDpr() {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia("(resolution: " + (window.devicePixelRatio || 1) + "dppx)");
+    const onChange = () => { fitCanvasAndAlign(); watchDpr(); };
+    if (mq.addEventListener) mq.addEventListener("change", onChange, { once: true });
+  })();
   // v2.51: line the top bar up with the editor (palette + board), and keep toolbar dividers off wrapped row starts
   function alignTopBar() {
     const bar = document.getElementById("topBar");
@@ -4336,12 +4407,30 @@
   }
   // short toolbar labels (Reset, Clear, New, Save, Load, Export; full names stay as tooltips) whenever the board is
   // too narrow for the full ones, which in practice means windows under ~1400px wide
+  document.getElementById("sizeDownBtn").addEventListener("click", () => stepBoardSize(-1));
+  document.getElementById("sizeUpBtn").addEventListener("click", () => stepBoardSize(1));
   function fitCanvasAndAlign() {
     const tb = document.getElementById("buildToolbar");
     fitCanvas();
-    const want = window.innerWidth < 1400 || (parseFloat(getComputedStyle(document.getElementById("gameWrap")).getPropertyValue("--stageW")) || 0) < 900;
+    let want = window.innerWidth < 1400;
+    if (!want && tb) {          // wide window: full labels, unless they would not fit on the board's width in one row
+      tb.classList.remove("short");
+      const tops = new Set([...tb.querySelectorAll(".tgroup")].map(g => Math.round(g.getBoundingClientRect().top)));
+      want = tops.size > 1;
+    }
     if (tb && tb.classList.contains("short") !== want) { tb.classList.toggle("short", want); fitCanvas(); }
-    markToolbarRows(); alignTopBar();
+    markToolbarRows();
+    snapCanvasToDevicePixels();
+    alignTopBar();
+  }
+  // the board's outer edge must sit on a whole device pixel, or the nearest-neighbour scaling gives some art pixels
+  // one device pixel more than others; layout centres it on fractions, so nudge the painted box (not the layout)
+  function snapCanvasToDevicePixels() {
+    const dpr = window.devicePixelRatio || 1;
+    gameCanvas.style.transform = "none";
+    const r = gameCanvas.getBoundingClientRect();
+    const dx = Math.round(r.left * dpr) / dpr - r.left, dy = Math.round(r.top * dpr) / dpr - r.top;
+    gameCanvas.style.transform = (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) ? "none" : "translate(" + dx + "px, " + dy + "px)";
   }
   window.addEventListener("resize", fitCanvasAndAlign);
   if (window.ResizeObserver) {
@@ -8586,16 +8675,16 @@
   // drawn, exactly matching renderGame()'s Build-mode view (see selectCameraMode(), which keeps
   // the two from ever disagreeing by zeroing editorPanCol the instant a room goes back to Fixed).
   function cellFromEvent(e) {
-    const rect = gameCanvas.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    return { gx: Math.floor(cx / (rect.width / COLS)) + editorPanCol, gy: Math.floor(cy / (rect.height / ROWS)) };
+    const rect = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx, bh = canvasBorderPx; // the border is not board
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left - bw;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top - bh;
+    return { gx: Math.floor(cx / ((rect.width - 2 * bw) / COLS)) + editorPanCol, gy: Math.floor(cy / ((rect.height - 2 * bh) / ROWS)) };
   }
   function pxFromEvent(e) {
-    const rect = gameCanvas.getBoundingClientRect();
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-    return { px: cx / (rect.width / (COLS * TILE)) + editorPanCol * TILE, py: cy / (rect.height / (ROWS * TILE)) };
+    const rect = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx, bh = canvasBorderPx;
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left - bw;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top - bh;
+    return { px: cx / ((rect.width - 2 * bw) / (COLS * TILE)) + editorPanCol * TILE, py: cy / ((rect.height - 2 * bh) / (ROWS * TILE)) };
   }
 
   function actorAABBAt(px, py) {
@@ -11873,7 +11962,10 @@
     spec.actors.forEach(a => place(a.role ? surpriseDefFor(a.defId, a.role) : a.defId, a.x, a.y));
     spec.spawners.forEach(s => { if (s.content) spawnerContents[roomCellKey(currentRoomId, s.x, s.y)] = surpriseDefFor(s.content, "pet"); });
     let playerPlaced = false;
-    if (spec.player && playerRoomId == null) { surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
+    // "no player yet" is judged by whether a player actor really exists, not by playerRoomId alone: erasing the
+    // player, Clear board or undo can leave playerRoomId stale, which used to make Surprise Me skip placing one.
+    const playerExists = actors.some(x => x.isPlayer) || rooms.some(r => r.id !== currentRoomId && r.actors.some(x => x.isPlayer));
+    if (spec.player && !playerExists) { playerRoomId = null; surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
     selectedActorDefId = savedSel;
     return playerPlaced;
   }
