@@ -250,7 +250,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   });
   console.log("full:", JSON.stringify(full));
   if (!full.overwrite || full.overwrite.mode !== "overwrite" || full.overwrite.kid !== 0) fail("overwrite should only replace untouched surprises first " + JSON.stringify(full));
-  if (!full.newRoom || full.newRoom.rooms !== full.newRoom.before + 1 || full.newRoom.players !== 1 || full.newRoom.placed) fail("new room option " + JSON.stringify(full.newRoom));
+  if (!full.newRoom || full.newRoom.rooms !== full.newRoom.before + 1 || full.newRoom.players !== 1 || !full.newRoom.placed) fail("new room option " + JSON.stringify(full.newRoom));
   // a room packed with the kid's own stuff: overwrite must say it hits their stuff, and nothing happens without a choice
   const packed = await page.evaluate(() => {
     __st.reset();

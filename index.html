@@ -12073,8 +12073,10 @@
     let playerPlaced = false;
     // "no player yet" is judged by whether a player actor really exists, not by playerRoomId alone: erasing the
     // player, Clear board or undo can leave playerRoomId stale, which used to make Surprise Me skip placing one.
-    const playerExists = actors.some(x => x.isPlayer) || rooms.some(r => r.id !== currentRoomId && r.actors.some(x => x.isPlayer));
-    if (spec.player && !playerExists) { playerRoomId = null; surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
+    // A surprise whose room has no player gets one: if the project's player lives in another room it is moved here
+    // (there is only ever one player; one undo puts it back), so every surprise can be played at once.
+    const playerExists = actors.some(x => x.isPlayer);
+    if (spec.player && !playerExists) { removeAllPlayerInstances(); playerRoomId = null; surpriseRandomizePlayerLook(seed == null ? 1 : seed); place(playerDefId, spec.player.x, spec.player.y); playerPlaced = true; }
     selectedActorDefId = savedSel;
     return playerPlaced;
   }

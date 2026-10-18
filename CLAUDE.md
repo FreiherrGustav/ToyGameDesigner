@@ -6680,3 +6680,5 @@ Presentation only. A swallowed thing is drawn as a **ghost** (`fxGhosts`, `spawn
 - Export: functions in `runtimeFunctions`, `TELEPORTER_*` constants line, `fxGhosts` declared in the template. Test: `node tests/vortex.test.js [shotDir]` (13 checks). Not listened to or reviewed in motion; only still frames were looked at.
 
 **Black hole sound**: `CHIP_DESIGNS.blackHole` (user-supplied per-frame data, 44 frames, ~0.7s; `sounds.blackHole`, limit 200ms/1 copy) replaces the splat for every black-hole capture (player, NPC, object). Never listened to by me; retune in the sound designer if needed.
+
+**Surprise Me always gives its room a player (fix)**: a surprise built into a room with no player (a new room tab from a whole-room event or "Create a new room", or any room while the project's player lives elsewhere) used to leave that room player-less ("your player lives in another room"). `surpriseApplySpec` now moves the project's one player into the surprise's room (`removeAllPlayerInstances()` then place, one undo puts it back). A room that already has a player is untouched. `tests/surprise.test.js` "new room option" now expects the player to be placed.
