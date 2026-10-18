@@ -633,6 +633,10 @@
       <div class="swatch-row" id="collectibleSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Traffic and floaters</div>
       <div class="swatch-row" id="moverSwatches"></div>
+      <div id="buttonOptBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Switch: when touched</div>
+        <div class="swatch-row" id="buttonOptSwatches"></div>
+      </div>
       <div id="objectColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="objectColorSwatches"></div>
@@ -1369,6 +1373,12 @@
   // (gravity/jump/accel/friction/max-fall come straight from that prototype); everything
   // else here is the same 2x scale-up from the previous 16px-tile pass.
   const GRAVITY_DIRS = ["down", "up", "left", "right"]; // which way gravity can pull (a room rule, only meaningful while gravity is on)
+  // An uncolored Button's "when touched" option: "toggle" (the original, and what any Button without a
+  // stored option does), one of the four directions (turns gravity on and points it that way), or
+  // "random" (a direction different from the current one). Stored per room in room.gravButtons
+  // ("x,y" -> option; absent = toggle), so old saves, rooms and exports need no migration.
+  const GRAV_BUTTON_OPTS = ["toggle", "down", "up", "left", "right", "random"];
+  const GRAV_RANDOM_SEED = 0x6d2b79f5; // random presses are a fixed stream per Play session: same presses, same directions
   const GRAVITY = 1450;           // px/s^2, on globally once any gravity piece is placed —
                                    // slowed slightly from the prototype's own 1800 on playtest feedback
   const JUMP_VELOCITY = -620;    // px/s upward impulse, only while grounded and gravity is on
@@ -1743,6 +1753,7 @@
   // for as long as something just stands on it). Transient, never persisted, same lifecycle as
   // plateChannelsActive above.
   let switchTouchedCells = {};
+  let gravRandomCount = 0; // how many random gravity presses this session (the stream position)
   // v2.23: color -> { on, since } — when each channel's own isChannelOn() reading last flipped,
   // recomputed once a tick by updateChannelTransitions(). Purely a render-timing aid for Barrier's
   // slide animation (see "Barrier: a moveable wall/door" below) — nothing physics-facing reads
@@ -1774,6 +1785,8 @@
   let lastObjectAxis = "actor"; // "actor" | "tile" — which axis Objects last showed
   let selectedGeometry = "none";
   let selectedModifier = "none";
+  let selectedButtonOpt = "toggle"; // the "when touched" option a newly painted uncolored Button gets
+  const BUTTON_OPT_LABELS = { toggle: "gravity on/off", down: "gravity down", up: "gravity up", left: "gravity left", right: "gravity right", random: "random gravity" };
   let selectedChannelColor = null; // one of CHANNEL_COLORS, or null ("none") — see CHANNEL_COLORS
   let selectedBackgroundId = null;
   let selectedActorKind = "player"; // one of TEMPERAMENTS, "player", "pushable", or a custom actor slot id
@@ -1880,6 +1893,7 @@
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
+    gravRandomCount = 0;
     playReadyUntil = null;
     clearGameTimers(); // every pending delayed reaction belongs to the session that just ended
     levelResetTimer = null; levelResetPending = false; // a restart/exit cancels any death-reset still counting down
@@ -5123,7 +5137,30 @@
       container.appendChild(sw);
     });
   }
+  const BUTTON_OPT_GLYPHS = { toggle: "⇅", down: "↓", up: "↑", left: "←", right: "→", random: "🎲" };
+  function renderButtonOptSwatches() {
+    const block = document.getElementById("buttonOptBlock"), row = document.getElementById("buttonOptSwatches");
+    if (!block || !row) return;
+    const show = paintMode === "tile" && selectedGeometry === PUSH_BUTTON_GEOMETRY && !selectedChannelColor;
+    block.style.display = show ? "" : "none";
+    row.innerHTML = "";
+    if (!show) return;
+    GRAV_BUTTON_OPTS.forEach(opt => {
+      const on = selectedButtonOpt === opt;
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (on ? " selected" : "");
+      sw.dataset.opt = opt;
+      sw.style.background = on ? PLAYER_COLOR : "#2f3140";
+      sw.title = BUTTON_OPT_LABELS[opt];
+      const g = document.createElement("div");
+      g.style.fontSize = "20px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = BUTTON_OPT_GLYPHS[opt];
+      sw.appendChild(g);
+      sw.addEventListener("click", () => { selectedButtonOpt = opt; renderButtonOptSwatches(); });
+      row.appendChild(sw);
+    });
+  }
   function renderColorSwatches() {
+    renderButtonOptSwatches();
     const isTile = paintMode === "tile";
     renderColorSwatchesInto("groundColorSwatches", "groundColorBlock", isTile && selectedGeometry === "solid");
     const keyMode = (paintMode === "actor" && selectedActorDefId === "colKey") || (isTile && selectedGeometry === LOCKED_DOOR_GEOMETRY);
@@ -7074,6 +7111,31 @@
   // a same-colored pressure plate's momentary version of the same channel (see
   // updatePressurePlates). Placement is what makes either version meaningful: a kid puts one at
   // a deliberate spot, and touching it there is a real level-design choice.
+  // The uncolored Button's stored option for a cell of the hot room ("toggle" when none).
+  function gravButtonOptAt(gx, gy) {
+    const room = rooms.find(r => r.id === currentRoomId);
+    const o = room && room.gravButtons && room.gravButtons[gx + "," + gy];
+    return GRAV_BUTTON_OPTS.includes(o) ? o : "toggle";
+  }
+  // Seeded and stateless: press number n always gives the same value. Never the current direction.
+  function gravRandomDir(n) {
+    let t = (GRAV_RANDOM_SEED + Math.imul(n + 1, 0x9e3779b9)) | 0;
+    t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const others = GRAVITY_DIRS.filter(d => d !== gravityDir);
+    return others[Math.floor(r * others.length)];
+  }
+  // Point gravity a set way (turning it on if it was off). The same way again changes nothing; the
+  // flip sound and animation already played in triggerFlip, which is the feedback.
+  function applyGravButtonOption(opt) {
+    const target = opt === "random" ? gravRandomDir(gravRandomCount++) : opt;
+    if (gravityEnabled && gravityDir === target) { log("Gravity already pulls " + target + "."); return; }
+    gravityEnabled = true;
+    gravityDir = target;
+    actors.forEach(a => { a.fallStartY = null; a.lastY = null; }); // a bomb's fall is measured along gravity
+    log("Flip! Gravity pulls " + target + ".");
+    renderGameRuleSwatches();
+  }
   function triggerFlip(player, gx, gy) {
     if (player.flipCooldown > 0) return;
     player.flipCooldown = 500;
@@ -7083,6 +7145,8 @@
     if (color) {
       switchChannels[color] = !switchChannels[color];
       log((switchChannels[color] ? "Flip! " : "Flip back! ") + color + " channel " + (switchChannels[color] ? "on." : "off."));
+    } else if (gx != null && gravButtonOptAt(gx, gy) !== "toggle") {
+      applyGravButtonOption(gravButtonOptAt(gx, gy));
     } else {
       const gsPrev = gravSign(), gaPrev = gravAxis(); // which way "up" was, for the weightless pop below
       gravityEnabled = !gravityEnabled;
@@ -9032,14 +9096,29 @@
         if (cannonRotateStrokeCells.has(strokeKey)) return;
         cannonRotateStrokeCells.add(strokeKey);
         const color = colorBoard[gy][gx];
-        if (color) {
+        const have = color ? "toggle" : gravButtonOptAt(gx, gy);
+        if (!color && have !== selectedButtonOpt) {
+          // a different option picked in the palette: re-set this Button to it
+          const hot = rooms.find(r => r.id === currentRoomId);
+          hot.gravButtons = hot.gravButtons || {};
+          if (selectedButtonOpt === "toggle") delete hot.gravButtons[gx + "," + gy]; else hot.gravButtons[gx + "," + gy] = selectedButtonOpt;
+          log("Switch set to: " + BUTTON_OPT_LABELS[selectedButtonOpt] + ".");
+        } else if (color) {
           switchChannels[color] = !switchChannels[color];
-        } else {
+        } else if (have === "toggle") {
           gravityEnabled = !gravityEnabled;
           renderGameRuleSwatches();
+        } else {
+          applyGravButtonOption(have); // same option again: set its starting state
         }
         sounds.flip();
         return;
+      }
+      if (!selectedChannelColor) {
+        // a fresh uncolored Button: remember the picked option for this cell (none stored = toggle)
+        const hot = rooms.find(r => r.id === currentRoomId);
+        hot.gravButtons = hot.gravButtons || {};
+        if (selectedButtonOpt === "toggle") delete hot.gravButtons[gx + "," + gy]; else hot.gravButtons[gx + "," + gy] = selectedButtonOpt;
       }
     }
     if (BARRIER_ORDER.includes(selectedGeometry)) {
@@ -9306,7 +9385,8 @@
       groundSkinBoard: cloned.groundSkinBoard, groundSkinRotationBoard: cloned.groundSkinRotationBoard,
       actors: cloned.actors, startPos: cloned.startPos,
       gravityEnabled: source.gravityEnabled, gravityDir: source.gravityDir || "down", wrapHEnabled: source.wrapHEnabled, wrapVEnabled: source.wrapVEnabled,
-      cameraMode: source.cameraMode, editorPanCol: source.editorPanCol
+      cameraMode: source.cameraMode, editorPanCol: source.editorPanCol,
+      gravButtons: structuredClone(source.gravButtons || {})
     };
     rooms.push(newRoom);
     activateRoom(newRoom.id);
@@ -10547,8 +10627,10 @@
       // its own channel; an UNCOLORED one has no channel of its own to read (it flips the room's
       // shared gravity toggle instead — see triggerFlip), so it shows whichever way THAT boolean
       // currently reads — the exact "the tile shows the state it drives" idea "switch" used to.
-      const on = (extra && extra.color) ? extra.channelOn : gravityOn();
+      const gopt = extra && !extra.color && extra.gravOpt;
+      const on = (extra && extra.color) ? extra.channelOn : (gopt && GRAVITY_DIRS.includes(gopt) ? gravityOn() && gravityDir === gopt : gravityOn());
       drawArtScaled(ctx, on ? SWITCH_ON_ART : icon, x, y, TILE, cell);
+      if (gopt && gopt !== "toggle") drawGravOptBadge(ctx, x, y, gopt);
     } else if (BARRIER_ORDER.includes(tile.geometry)) {
       // A moveable wall/door: slides straight out of the tile in its own facing direction as it
       // opens, straight back as it closes, instead of solid's own instant ghost-outline —
@@ -10653,6 +10735,26 @@
   // wind effect sitting right at the fan's mouth, per direct feedback. 2-3 short wavy white lines,
   // side by side (spaced along the perpendicular axis), each a small sine ripple confined well
   // inside that single tile's bounds and animated by phase so they shimmer in place.
+  // The option an uncolored Button is set to, shown on the tile: an arrow for a direction, dice dots for random.
+  function drawGravOptBadge(ctx, x, y, opt) {
+    const r = 7, cx = x + TILE - r - 1, cy = y + r + 1;
+    ctx.save();
+    ctx.fillStyle = "rgba(17,17,17,0.85)"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff";
+    if (opt === "random") {
+      [[-2.5, -2.5], [2.5, -2.5], [0, 0], [-2.5, 2.5], [2.5, 2.5]].forEach(([dx, dy]) => { ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 1.2, 0, Math.PI * 2); ctx.fill(); });
+    } else {
+      const d = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] }[opt] || [0, 1];
+      const px = -d[1], py = d[0];
+      ctx.beginPath();
+      ctx.moveTo(cx + d[0] * 4.5, cy + d[1] * 4.5);
+      ctx.lineTo(cx - d[0] * 1 + px * 3.5, cy - d[1] * 1 + py * 3.5);
+      ctx.lineTo(cx - d[0] * 1 - px * 3.5, cy - d[1] * 1 - py * 3.5);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
   function drawFanStream(ctx, boardArg, viewOffsetPx, isLive) {
     if (!isLive) return;
     const now = gameNow();
@@ -10763,6 +10865,7 @@
             const state = spawnerRuntime[spawnerKey];
             extra = { windingUp: !!(state && state.windUp), loaded: !!spawnerContents[spawnerKey] };
           }
+          if (isLive && tile.geometry === PUSH_BUTTON_GEOMETRY && !colorBoard[y][bx]) extra = { gravOpt: gravButtonOptAt(bx, y) };
           if (isLive && isColorTaggable(tile.geometry)) {
             const isLockedDoor = tile.geometry === LOCKED_DOOR_GEOMETRY;
             const color = colorBoard[y][bx] || (isLockedDoor ? CHANNEL_COLORS[0] : null);
@@ -12578,7 +12681,7 @@
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
-      gravityOn, gravSign, gravAxis, rightSign, updateGravIndicator, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
+      gravityOn, gravSign, gravAxis, rightSign, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
@@ -12679,6 +12782,7 @@
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
       `const GRAVITY_DIRS = ${JSON.stringify(GRAVITY_DIRS)};`,
+      `const GRAV_BUTTON_OPTS = ${JSON.stringify(GRAV_BUTTON_OPTS)}; const GRAV_RANDOM_SEED = ${GRAV_RANDOM_SEED};`,
       `const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];`,
       `const APP_NAME = ${JSON.stringify(APP_NAME)};`,
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
@@ -12807,6 +12911,7 @@
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
   let switchTouchedCells = {}; // v2.31.2, edge-trigger bookkeeping — see checkPlayerTileContacts
+  let gravRandomCount = 0;
   let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
   let playerRoomId = GAME_DATA.playerRoomId;
   let actorDefs = GAME_DATA.actorDefs;
@@ -12879,7 +12984,7 @@
     spawnerRuntime = {};
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
     plateChannelsActive = {}; channelStateSince = {};
-    switchTouchedCells = {};
+    switchTouchedCells = {}; gravRandomCount = 0;
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {}; fxGhosts = [];
     actorContactCooldown = {}; dragContactCooldown = {};
