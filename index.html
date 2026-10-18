@@ -1872,7 +1872,7 @@
   // snapshot rather than the just-played (and possibly mid-game-over) live state, so repeated
   // "try again" clicks always restart from the true original build, not accumulated play state.
   function clearTransientRuntimeState() {
-    animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
+    animState = {}; tileAnimState = {}; fxGhosts = []; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
@@ -1988,7 +1988,7 @@
     spareHearts = cp.spareHearts; starTimer = 0;
     score = cp.score; intensity = 0;
     const scoreEl = document.getElementById("scoreVal"); if (scoreEl) scoreEl.textContent = score;
-    animState = {}; tileAnimState = {}; actorContactCooldown = {}; dragContactCooldown = {};
+    animState = {}; tileAnimState = {}; fxGhosts = []; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {}; switchTouchedCells = {};
     activateRoom(cp.roomId);
@@ -2664,6 +2664,37 @@
   ], { A: "#2c0e6c", B: "#a641f9", C: "#33039b", D: "#000000" });
   const BLACK_HOLE_FRAMES = [BLACK_HOLE_FRAME1_ART, BLACK_HOLE_FRAME2_ART, BLACK_HOLE_FRAME3_ART, BLACK_HOLE_FRAME4_ART, BLACK_HOLE_FRAME5_ART, BLACK_HOLE_FRAME6_ART];
   const BLACK_HOLE_FRAME_MS = 130;
+  // Warp tile art: the user's 7-frame Teleporter (sprite editor), cycled on the game clock like the Black Hole.
+  const TELEPORTER_FRAME1_ART = pat([
+    ".ABBBBB.", "BBCCCDBA", "BDBBBBCB", "BCBDCBCB",
+    "BCBCDBCB", "BCBBBBDB", "ABDCCCBB", ".BBBBBA."
+  ], { A: "#410bb2", B: "#590fe1", C: "#ca5efd", D: "#a641f9" });
+  const TELEPORTER_FRAME2_ART = pat([
+    ".AAAAAB.", "BACDDDAA", "ADAAAACA", "ADADCADA",
+    "ADACDADA", "ACAAAADA", "AADDDCAB", ".BAAAAA."
+  ], { A: "#590fe1", B: "#410bb2", C: "#a641f9", D: "#ca5efd" });
+  const TELEPORTER_FRAME3_ART = pat([
+    ".ABBBBB.", "BBCCCDBA", "BDBBBBCB", "BCBDCBCB",
+    "BCBCDBCB", "BCBBBBDB", "ABDCCCBB", ".BBBBBA."
+  ], { A: "#a641f9", B: "#ca5efd", C: "#590fe1", D: "#410bb2" });
+  const TELEPORTER_FRAME4_ART = pat([
+    ".ABBBBB.", "BBCCCDBA", "BDABBBCB", "BCBEEBCB",
+    "BCBEEBCB", "BCBBBADB", "ABDCCCBB", ".BBBBBA."
+  ], { A: "#a641f9", B: "#ca5efd", C: "#590fe1", D: "#410bb2", E: "#000000" });
+  const TELEPORTER_FRAME5_ART = pat([
+    ".ABBBBB.", "BBCCCDBA", "BDEEEECB", "BCEBAECB",
+    "BCEABECB", "BCEEEEDB", "ABDCCCBB", ".BBBBBA."
+  ], { A: "#a641f9", B: "#ca5efd", C: "#590fe1", D: "#410bb2", E: "#000000" });
+  const TELEPORTER_FRAME6_ART = pat([
+    ".ABBBBB.", "BCCCCCCA", "BCDDDECB", "BCDABDCB",
+    "BCDBADCB", "BCEDDDCB", "ACCCCCCB", ".BBBBBA."
+  ], { A: "#a641f9", B: "#ca5efd", C: "#000000", D: "#590fe1", E: "#410bb2" });
+  const TELEPORTER_FRAME7_ART = pat([
+    ".AAAAAA.", "ABCCCCCA", "ACDDDECA", "ACDBCDCA",
+    "ACDCBDCA", "ACEDDDCA", "ACCCCCBA", ".AAAAAA."
+  ], { A: "#000000", B: "#a641f9", C: "#ca5efd", D: "#590fe1", E: "#410bb2" });
+  const TELEPORTER_FRAMES = [TELEPORTER_FRAME1_ART, TELEPORTER_FRAME2_ART, TELEPORTER_FRAME3_ART, TELEPORTER_FRAME4_ART, TELEPORTER_FRAME5_ART, TELEPORTER_FRAME6_ART, TELEPORTER_FRAME7_ART];
+  const TELEPORTER_FRAME_MS = 110;
   // Locked Door — user-supplied art, used as given.
   const LOCKED_DOOR_ART = pat([
     "..AAAA..", ".ABBBBA.", "CDBDDBDC", "ABBBBBBA",
@@ -2734,10 +2765,7 @@
     // crate/Gate/button: only GEOMETRY_LABELS changes what a kid reads.
     gravitywell: BLACK_HOLE_FRAME1_ART,
     "spawner-n": SPAWNER_ICON_N, "spawner-e": SPAWNER_ICON_E, "spawner-s": SPAWNER_ICON_S, "spawner-w": SPAWNER_ICON_W,
-    warp: pat([
-      "..MMMM..", ".M....M.", "M.MM...M", "M.M.M..M",
-      "M..M.M.M", "M...MM.M", ".M....M.", "..MMMM.."
-    ], { M: GEOMETRY_SWATCH_COLORS.warp }),
+    warp: TELEPORTER_FRAME1_ART,
     // v2.20: a real object with a real sprite (per the "Objects get sprites, Ground stays abstract"
     // rule) — a side-view springboard: dark frame ring, a pale bounce mat across the top, splayed
     // legs. Distinct from the plain "bouncy" ground modifier's abstract colored square on purpose.
@@ -4534,6 +4562,30 @@
       { t: 0.6, sx: 0.3, sy: 0.3, rot: -0.3, ox: 0, oy: 0, alpha: 0.3 },
       { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
     ]},
+    // Black hole: spun and shrunk along a path into the hole's centre (`pull` 0->1 slides the sprite by
+    // the vector stored with the ghost), then a tiny sparkle poof (the ghost's art2) as it vanishes.
+    blackHoleSuck: { duration: 560, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1, pull: 0 },
+      { t: 0.35, sx: 0.7, sy: 0.7, rot: 5, ox: 0, oy: 0, alpha: 1, pull: 0.55 },
+      { t: 0.68, sx: 0.08, sy: 0.08, rot: 14, ox: 0, oy: 0, alpha: 1, pull: 1 },
+      { t: 0.7, sx: 0.3, sy: 0.3, rot: 0, ox: 0, oy: 0, alpha: 1, pull: 1 },
+      { t: 1, sx: 0.8, sy: 0.8, rot: 0.4, ox: 0, oy: 0, alpha: 0, pull: 1 }
+    ]},
+    // Warp tile: a different read from the black hole on purpose — no spin, no path: the sprite is
+    // stretched into a thin bright streak and zipped straight up and out. Arrival is a sparkle burst
+    // that pops into the real sprite with an overshoot.
+    warpOut: { duration: 280, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.45, sx: 0.45, sy: 1.5, rot: 0, ox: 0, oy: -0.25, alpha: 1 },
+      { t: 1, sx: 0.04, sy: 2.8, rot: 0, ox: 0, oy: -1.1, alpha: 0 }
+    ]},
+    warpIn: { duration: 400, keyframes: [
+      { t: 0, sx: 0.1, sy: 0.1, rot: 0, ox: 0, oy: 0, alpha: 0 },
+      { t: 0.22, sx: 1.4, sy: 1.4, rot: 0.2, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.5, sx: 0.8, sy: 1.25, rot: 0, ox: 0, oy: -0.05, alpha: 1 },
+      { t: 0.75, sx: 1.12, sy: 0.9, rot: 0, ox: 0, oy: 0.03, alpha: 1 },
+      { t: 1, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 }
+    ]},
     // v2.18: an instant KO needs to read as funny, not punishing (see triggerLethalHazard) — a
     // hard flatten-to-a-pancake beat, then the flattened bits spin and shrink off into nothing,
     // rather than the plain hazard flash or a somber death.
@@ -4547,7 +4599,45 @@
   // v2.27: optional 3rd `art` param — an art-override sprite to draw instead of the entity's own
   // (see renderActors' own animState-consuming block) — omitted by every pre-existing call site,
   // so this is additive, not a behavior change for anything already using playRecipe.
-  function playRecipe(entity, name, art) { animState[entity.id] = { recipe: name, t: gameNow(), art }; }
+  function playRecipe(entity, name, art, opts) { animState[entity.id] = Object.assign({ recipe: name, t: gameNow(), art }, opts); }
+  // Ghost sprites: a copy of an actor's picture that plays a recipe on its own at a fixed spot (the
+  // actor itself has already moved on, or is hidden). art2 replaces art from fraction art2From on.
+  let fxGhosts = [];
+  function actorArtNow(actor) {
+    const def = actorDefs[actor.defId];
+    if (!def) return null;
+    let art = def.poses ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
+    if (actor.defId === "colKey") art = tintedKeyArt(art, actor.channel);
+    return art;
+  }
+  function spawnFxGhost(actor, recipe, opts) {
+    const art = actorArtNow(actor);
+    if (!art) return;
+    fxGhosts.push(Object.assign({
+      art, recipe, t: gameNow(), x: actor.x + actor.w / 2, y: actor.y + actor.h / 2,
+      facing: actor.facingDir || 1, dx: 0, dy: 0
+    }, opts));
+  }
+  function renderFxGhosts(ctx, viewOffsetPx) {
+    if (!fxGhosts.length) return;
+    const cell = TILE / ART;
+    const now = gameNow();
+    fxGhosts = fxGhosts.filter(g => now - g.t < RECIPES[g.recipe].duration && now >= g.t);
+    fxGhosts.forEach(g => {
+      const s = sampleRecipe(g.recipe, now - g.t);
+      if (!s) return;
+      const art = (g.art2 && s.f >= g.art2From) ? g.art2 : g.art;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, s.alpha));
+      ctx.translate(g.x - viewOffsetPx + (g.dx * s.pull + s.ox) * TILE, g.y + (g.dy * s.pull + s.oy) * TILE);
+      if (s.rot) ctx.rotate(s.rot);
+      ctx.scale(s.sx * g.facing, s.sy);
+      artCacheOff++;
+      drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
+      artCacheOff--;
+      ctx.restore();
+    });
+  }
   function sampleRecipe(name, elapsedMs) {
     const recipe = RECIPES[name];
     if (!recipe) return null;
@@ -4560,7 +4650,8 @@
     const span = b.t - a.t;
     const lf = span > 0 ? (f - a.t) / span : 0;
     const lerp = (k) => a[k] + (b[k] - a[k]) * lf;
-    return { sx: lerp("sx"), sy: lerp("sy"), rot: lerp("rot"), ox: lerp("ox"), oy: lerp("oy"), alpha: lerp("alpha"), done: f >= 1 };
+    const pull = (a.pull || 0) + ((b.pull || 0) - (a.pull || 0)) * lf;
+    return { sx: lerp("sx"), sy: lerp("sy"), rot: lerp("rot"), ox: lerp("ox"), oy: lerp("oy"), alpha: lerp("alpha"), pull, f, done: f >= 1 };
   }
 
   // ============== Palette UI ==============
@@ -6818,20 +6909,33 @@
   // triggerLethalHazard never had — repositioning to startPos, the same field resetActorsToSpawn
   // already uses for "the player's own reset-to-start point." hazardCooldown is reused as the
   // re-trigger guard, same field triggerHazard/triggerLethalHazard already gate on.
-  function triggerPlayerGravityWellCapture(player) {
+  // The swallowed thing is drawn as a ghost that spins and shrinks into the hole's centre and ends
+  // in a tiny poof (see RECIPES.blackHoleSuck); the actor itself is already gone/moved on.
+  function swallowIntoBlackHole(actor, cx, cy, holdOverlay) {
+    const hx = cx != null ? (cx + 0.5) * TILE : actor.x + actor.w / 2;
+    const hy = cy != null ? (cy + 0.5) * TILE : actor.y + actor.h / 2;
+    spawnFxGhost(actor, "blackHoleSuck", {
+      dx: (hx - (actor.x + actor.w / 2)) / TILE, dy: (hy - (actor.y + actor.h / 2)) / TILE,
+      art2: PARTICLE_ART, art2From: 0.69, holdOverlay: !!holdOverlay
+    });
+  }
+
+  function triggerPlayerGravityWellCapture(player, cx, cy) {
     if (player.hazardCooldown > 0) return;
     player.hazardCooldown = HAZARD_COOLDOWN_MS;
     playActorSound(player, "splat");
-    playRecipe(player, "splatDisintegrate");
+    swallowIntoBlackHole(player, cx, cy, true);
     player.vx = 0; player.vy = 0;
     const causedGameOver = appMode === "play" && !playSessionEnded;
     if (causedGameOver) {
       lives = 0;
+      player.vortexHidden = true;
       triggerGameOver(true);
-      gameSetTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.splatDisintegrate.duration);
+      gameSetTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.blackHoleSuck.duration);
       log("Pulled into the black hole — instant game over!");
     } else {
       player.x = startPos.x; player.y = startPos.y;
+      playRecipe(player, "warpIn", PARTICLE_ART, { artTo: 0.2 });
       log("Pulled into the black hole — sent back to the start!");
     }
   }
@@ -7101,10 +7205,11 @@
     }
     const pool = candidates.length > 0 ? candidates : [{ x: gx, y: gy }];
     const dest = pool[Math.floor(Math.random() * pool.length)];
+    spawnFxGhost(player, "warpOut");
     player.x = dest.x * TILE + TILE / 2 - player.w / 2;
     player.y = dest.y * TILE + TILE / 2 - player.h / 2;
     sounds.warp();
-    playRecipe(player, "warpPop");
+    playRecipe(player, "warpIn", PARTICLE_ART, { artTo: 0.2 });
     log("Warped!");
   }
 
@@ -7210,7 +7315,7 @@
       // returns on capture (it may relocate/end the session, same reason door/warp return below).
       else if (geometry === "gravitywell" && Math.hypot(player.vx, player.vy) < GRAVITY_WELL_CAPTURE_SPEED) {
         switchTouchedCells[player.id] = touchedSwitchKeys;
-        triggerPlayerGravityWellCapture(player);
+        triggerPlayerGravityWellCapture(player, cx, cy);
         return;
       }
       // bomb-arm and cannon-fire moved to resolveAxis (v2.21) — both are now blocking geometry
@@ -7409,7 +7514,7 @@
       // see GRAVITY_WELL_CAPTURE_SPEED's own comment: below this speed while actually inside the
       // well's own cell counts as "walking speed" (captured); at or above it (a hard fall, a bounce,
       // a throw, a cannon shot) it's just passing through and only gets the ambient redirect.
-      if (Math.hypot(actor.vx, actor.vy) < GRAVITY_WELL_CAPTURE_SPEED) { triggerGravityWellCapture(actor, temperament); return; }
+      if (Math.hypot(actor.vx, actor.vy) < GRAVITY_WELL_CAPTURE_SPEED) { triggerGravityWellCapture(actor, temperament, cx, cy); return; }
     }
   }
   // NPCs (wanderer/chaser/fleer) go back to their own spawn point — the same spawnX/spawnY field
@@ -7424,22 +7529,22 @@
   // crushing even the "heavy" piece reads as consistent with its own premise, not a contradiction of
   // Large Stone's established identity elsewhere; flag this plainly since it's a judgment call, not
   // something the user confirmed directly.
-  function triggerGravityWellCapture(actor, temperament) {
+  function triggerGravityWellCapture(actor, temperament, cx, cy) {
     // same reasoning as triggerNpcLethalReset: spawner-made characters are destroyed, not "sent home"
     // to the spawner's launch cell, so they don't read as the spawner firing over and over.
+    playActorSound(actor, "splat");
+    swallowIntoBlackHole(actor, cx, cy, false);
     if (isSteeringCharacter(temperament) && !actor.spawnerKey) {
       actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
       actor.displacedCooldown = 0;
-      playActorSound(actor, "splat");
-      playRecipe(actor, "popVanish");
+      playRecipe(actor, "warpIn", PARTICLE_ART, { artTo: 0.2 });
       log("Pulled into the black hole — sent back to its spawn point!");
       return;
     }
     actor.destroyed = true;
-    playActorSound(actor, "splat");
-    playRecipe(actor, "popVanish");
+    actor.vortexHidden = true;
     log("Pulled into the black hole — destroyed!");
-    gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
+    gameSetTimeout(() => removeActorObject(actor), RECIPES.blackHoleSuck.duration);
   }
 
   // Every actor-actor/player-actor touch reacts once, then goes quiet for a beat — without
@@ -10354,6 +10459,8 @@
       // Black Hole: cycles its six swirl frames on a wall-clock timer, same approach (and same
       // "no per-tile animation state to store") as animated Ground skins' currentSkinFrame.
       drawArtScaled(ctx, BLACK_HOLE_FRAMES[Math.floor(gameNow() / BLACK_HOLE_FRAME_MS) % BLACK_HOLE_FRAMES.length], x, y, TILE, cell);
+    } else if (tile.geometry === "warp") {
+      drawArtScaled(ctx, TELEPORTER_FRAMES[Math.floor(gameNow() / TELEPORTER_FRAME_MS) % TELEPORTER_FRAMES.length], x, y, TILE, cell);
     } else {
       drawRotatedArt(ctx, icon, x, y, TILE, cell, extra && extra.skinDef ? extra.skinRotation : 0);
     }
@@ -10632,7 +10739,7 @@
       const def = actorDefs[actor.defId];
       if (!def) return;
       if (def.temperament === MOVER_KIND) return; // drawn above
-      if (actor.cannonLoad) return; // inside the barrel
+      if (actor.cannonLoad || actor.vortexHidden) return; // inside the barrel / already swallowed by a black hole
       const posed = !!def.poses;
       let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
       if (actor.defId === "colKey") art = tintedKeyArt(art, actor.channel);
@@ -10704,7 +10811,7 @@
           // v2.27: same optional art override as the tile-anim loop above — a carried bomb's own
           // blast (detonateCarriedBombAt) shows EXPLOSION_ART instead of the bomb sprite scaling
           // up, so it actually reads as an explosion rather than a bomb ballooning.
-          if (anim.art) art = anim.art;
+          if (anim.art && sample.f >= (anim.artFrom || 0) && sample.f <= (anim.artTo == null ? 1 : anim.artTo)) art = anim.art;
           if (sample.done) delete animState[actor.id];
         } else delete animState[actor.id];
       }
@@ -10734,6 +10841,7 @@
       artCacheOff--;
       ctx.restore();
     });
+    renderFxGhosts(ctx, viewOffsetPx);
   }
 
   function renderGame() {
@@ -10803,7 +10911,8 @@
     // the instant it starts (see triggerLethalHazard). Every other game-over path is untouched:
     // nothing else ever plays this recipe, so midSplat is always false for them.
     const scPlayer = actors.find(a => a.isPlayer);
-    const midSplat = scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate";
+    const midSplat = (scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate") ||
+      fxGhosts.some(g => g.recipe === "blackHoleSuck" && g.holdOverlay);
     if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
     else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
     if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
@@ -12349,7 +12458,7 @@
       stepActor, tick,
       drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
-      playRecipe, sampleRecipe,
+      playRecipe, sampleRecipe, actorArtNow, spawnFxGhost, renderFxGhosts, swallowIntoBlackHole,
       getAudioCtx, getMasterBus, claimVoice, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
       playPatch, playActorSound,
       chipClamp, chipFreq, chipPeriodF, makeChipSynth, chipJoinChunks, chipFinishSamples,
@@ -12407,6 +12516,7 @@
       `const MAGNET_FORCE = ${MAGNET_FORCE}, GRAVITY_WELL_FORCE = ${GRAVITY_WELL_FORCE};`,
       `const GRAVITY_WELL_RADIUS_TILES = ${GRAVITY_WELL_RADIUS_TILES}, GRAVITY_WELL_CAPTURE_SPEED = ${GRAVITY_WELL_CAPTURE_SPEED};`,
       `const BLACK_HOLE_FRAMES = ${JSON.stringify(BLACK_HOLE_FRAMES)}, BLACK_HOLE_FRAME_MS = ${BLACK_HOLE_FRAME_MS};`,
+      `const TELEPORTER_FRAMES = ${JSON.stringify(TELEPORTER_FRAMES)}, TELEPORTER_FRAME_MS = ${TELEPORTER_FRAME_MS};`,
       `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
@@ -12572,7 +12682,7 @@
   let cameraX = 0;
   let cameraFollowSnapNeeded = true;
   let cameraShiftSide = null;
-  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {};
+  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {}, fxGhosts = [];
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
   let score = 0, intensity = 0;
@@ -12630,7 +12740,7 @@
     plateChannelsActive = {}; channelStateSince = {};
     switchTouchedCells = {};
     playerRoomId = initialGameData.playerRoomId;
-    digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {};
+    digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {}; fxGhosts = [];
     actorContactCooldown = {}; dragContactCooldown = {};
     roomTransition = null;
     score = 0; intensity = 0;
