@@ -99,7 +99,8 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   console.log("fuzz seconds:", ((Date.now() - t0) / 1000).toFixed(1), " gravity-flipped:", flips + "/" + total);
   console.table(per);
   Object.entries(per).forEach(([id, p]) => { if (p.exception || p.nan || p.dead || p.frozen || p.unsatisfied) fail("fuzz " + id + " " + JSON.stringify(p)); });
-  if (flips === 0 || flips / total > 0.3) fail("gravity chaos rate looks wrong: " + flips + "/" + total);
+  // since v2.50 only "either"-gravity templates can flip (required gravity never does), so the rate is a few percent; a tiny run can legitimately see none
+  if ((FUZZ >= 200 && flips === 0) || flips / Math.max(1, total) > 0.3) fail("gravity chaos rate looks wrong: " + flips + "/" + total);
 
   // ---- 2. Expectations (canonical: native gravity, no wrap) ----
   for (const t of tmpls) {
