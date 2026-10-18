@@ -6729,3 +6729,38 @@ crate+stone stack, conveyors, falling bomb with chain blast, dropped trampoline,
 the SAME key presses mirrors the upright one to ~1e-12 px for 330 frames, with the boards mirrored at the end). `node tests/gravdir_ui.test.js` (buttons,
 real Play, indicator, controls, save/load/old save/unknown value, rooms, duplicate, Play round trip, exported game played with up gravity, flipped
 sprite cell by cell and pointer accuracy at DPR 1, 1.5, 2).
+
+## v2.52 Stage 2: gravity left and right (Stages 3-4 not done)
+
+`GRAVITY_DIRS` is now `down, up, left, right` and all four palette buttons work. "Left" = feet on the LEFT wall (gravity pulls toward -x), "right" = feet on the right wall.
+Several statements in the Stage 1 section are superseded: gravity is no longer only a sign.
+
+**From a sign to an axis.** Three tiny helpers are the only definition of "which way is down": `gravAxis()` ("y" for down/up and for every gravity-off room, "x" for left/right),
+`gravSign()` (+1 toward +x/+y, -1 toward -x/-y) and `rightSign()` (which way the character's own right points along the axis it walks on, in screen terms: down +1, up -1, right -1, left +1).
+Every Stage 1 site that multiplied by the sign now reads an axis too: `stepActor` has `gAx`/`cAx` (along / across gravity) and `aV`/`cV` (their velocity keys): input and steering go
+to the across axis, friction and the run-speed cap act on the across axis, gravity/MAX_FALL/jump/wind-along act on the along axis, and the axes move across-first-then-along
+(`AXES_XY`/`AXES_YX`; down is still x then y, bit-identical). `resolveAxis` branches on `axis !== gravAxis()` (a wall, with the bouncy wall kick) vs along (land / ceiling / bounce / trampoline
+minimum launch), `shovePushables` and `bounceOffTrampolineObjects` work on any axis through position/size/velocity keys, `cellsUnderneath` and `isStuckToSticky` pick the column/row for the axis,
+and the riding step, carry-follow, drop spots, throw arc, crush rule, hazard default knockback, bomb fall rule (`fallStartY` is distance along gravity), fell-off-the-world check and the
+gravity-off pop all read the axis. `triggerImpact` thuds only for hits along gravity.
+
+**Controls.** Character-relative, from the table in the brief: Left key pushes along `-rightSign()` on the walk axis. Down: Left=screen left. Up: Left=screen right. Right (wall on the right): Left=screen down, Right=screen up, Jump=screen left.
+Left: Left=screen up, Right=screen down, Jump=screen right. `facingDir` is the screen sign of motion along the walk axis (so throw and drop go where the character is visibly heading);
+the drawn facing is converted with `rightSign()`.
+
+**Sprites.** Quarter turns are done in DATA like the half-turn: the art is mirrored for facing if needed, then rotated (`rotateArt90CCW` for right gravity, `rotateArt90CW` for left) and drawn upright, so the pixel grid is exact
+and the engine's +0.5px seam overlap is the ordinary one. Only characters turn (player, wanderer/chaser/fleer, stationary NPCs). Lean and the along-gravity squash use the character's own axes.
+
+**One more orientation-dependent thing fixed: the cell scan order.** `resolveAxis` used to visit cells row-major from the top-left. When a box spans two different blocking cells (a crate sliding off a belt into a gap next to a wall) the first visited wins, so a turned world
+could resolve against the other cell and end a whole tile off. The cells are now visited in the character's own order (from the side away from gravity toward it, left to right in its own terms); at down it is exactly the old order. After this the Stage 1
+trampoline-order quirk is gone too for turned worlds (down itself is unchanged).
+
+**Export.** `AXES_XY/AXES_YX` and `APP_NAME` are in `constantsSource` (the exported game had thrown on the first frame because `stepActor` read `AXES_*`; and the fatal-error handler itself read `APP_NAME`, which did not exist in an export, so the real error was hidden behind a second one);
+`gravAxis`, `rightSign`, `mirrorArtH`, `rotateArt90CW`, `rotateArt90CCW` are in `runtimeFunctions`.
+
+**What was checked and what behaves how** (`tests/gravdir.test.js` section B2, `tests/gravdir2.test.js`, `tests/gravdir_ui.test.js`): every sample at down still identical to v2.51 over 625 frames; eight scenarios
+(platform run/jump, bouncy floor, crate+stone stack, conveyors, falling bomb with blast, dropped trampoline, sticky wall, ice) inside the central 18x18 region, turned a quarter turn each way with the same key presses, mirror the upright run to ~1e-12 px
+over 330 frames, with the boards turned. The control table is verified in all four directions, a flip in mid-air with a key held (the held Right follows the new direction), chasers and wanderers walk along the wall, carry/drop/throw on a wall, a spawner's content falls to the wall,
+a fan blowing away from the wall holds a crate off it, h-wrap with left gravity keeps a crate coming round, and a Follow camera follows a player on the far wall. Quarter-turned sprites are the upright sprite turned, cell by cell, at DPR 1, 1.5 and 2.
+**Not turned (by design):** cannon shot angles are fixed absolute directions (steep, `CANNON_DIR_X/Y`), so a cannon scenario is not rotation-invariant and was not in the quarter-turn set; wind and fans push in absolute directions, so a belt on a wall carries the character up or down the wall.
+Runner camera with left gravity pins the player to the left edge, which is the Runner fail line (expected, untouched). Movers were not looked at.

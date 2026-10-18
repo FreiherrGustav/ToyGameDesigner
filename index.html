@@ -1368,7 +1368,7 @@
   // Tuned to match continuous-motion-test.html's own validated numbers for a 32px tile
   // (gravity/jump/accel/friction/max-fall come straight from that prototype); everything
   // else here is the same 2x scale-up from the previous 16px-tile pass.
-  const GRAVITY_DIRS = ["down", "up"]; // which way gravity can pull (a room rule, only meaningful while gravity is on)
+  const GRAVITY_DIRS = ["down", "up", "left", "right"]; // which way gravity can pull (a room rule, only meaningful while gravity is on)
   const GRAVITY = 1450;           // px/s^2, on globally once any gravity piece is placed —
                                    // slowed slightly from the prototype's own 1800 on playtest feedback
   const JUMP_VELOCITY = -620;    // px/s upward impulse, only while grounded and gravity is on
@@ -1700,7 +1700,7 @@
   // keeps reading/writing these same globals exactly as before — activateRoom() is what hot-swaps
   // them to a different room's own values, the same pattern board/actors/startPos already use.
   let gravityEnabled = false;
-  let gravityDir = "down"; // per room: which way gravity pulls while gravityEnabled ("down" or "up"; see GRAVITY_DIRS)
+  let gravityDir = "down"; // per room: which way gravity pulls while gravityEnabled (see GRAVITY_DIRS)
   let wrapHEnabled = false;
   let wrapVEnabled = false;
   // v2.17: "fixed" | "follow" | "runner" — see CAMERA_MODES/selectCameraMode(). Also per-room,
@@ -5407,7 +5407,7 @@
     renderGravityDirSwatches();
   }
   // Which way gravity pulls (a per-room rule like the switches above). Only shown while gravity is on;
-  // a click applies instantly to everything in the room. Left and right come with the next stage.
+  // a click applies instantly to everything in the room.
   const GRAVITY_DIR_BUTTONS = [
     { dir: "down", glyph: "↓", label: "down" }, { dir: "up", glyph: "↑", label: "up" },
     { dir: "left", glyph: "←", label: "left" }, { dir: "right", glyph: "→", label: "right" }
@@ -5426,7 +5426,7 @@
       sw.style.background = on ? PLAYER_COLOR : "#2f3140";
       sw.style.opacity = usable ? "1" : "0.35";
       sw.style.cursor = usable ? "pointer" : "not-allowed";
-      sw.title = usable ? "Gravity pulls " + b.label : "Gravity pulls " + b.label + " (coming soon)";
+      sw.title = "Gravity pulls " + b.label;
       const g = document.createElement("div");
       g.style.fontSize = "22px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = b.glyph;
       sw.appendChild(g);
@@ -5888,7 +5888,13 @@
   // +1 when "down" is +y on screen (the default and every room without a direction), -1 when gravity pulls up.
   // Free-roam rooms always read +1. Every place that used to assume "falling = +y" multiplies by this, so at
   // "down" the arithmetic is unchanged (x * 1 is exact).
-  function gravSign() { return gravityEnabled && gravityDir === "up" ? -1 : 1; }
+  function gravSign() { return gravityEnabled && (gravityDir === "up" || gravityDir === "left") ? -1 : 1; }
+  // The axis gravity runs along: "y" for down/up (and always while gravity is off), "x" for left/right. The other
+  // axis is the one characters walk along. Every place that used to assume "falling is +y" reads these two.
+  function gravAxis() { return gravityEnabled && (gravityDir === "left" || gravityDir === "right") ? "x" : "y"; }
+  // Which way the character's own "right" points along the axis it walks on, in screen terms (+1 = toward +x/+y).
+  // Down: right is screen right. Up: screen left. Feet on the right wall: screen up. Feet on the left wall: screen down.
+  function rightSign() { return gravityEnabled ? (gravityDir === "up" || gravityDir === "right" ? -1 : 1) : 1; }
 
   // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
   // relevant once wrap is switched on for that axis — otherwise that edge is just solid and
@@ -5923,9 +5929,15 @@
   // which never includes a solid tile the actor is resting ON TOP of (they don't overlap it,
   // they're flush against it). Needed for "standing on a slippery/hazard floor" checks.
   function cellsUnderneath(actor) {
+    const cells = [];
+    if (gravAxis() === "x") { // gravity along x: the column gravity pulls toward, spanning the actor's rows
+      const gx = gravSign() > 0 ? Math.floor((actor.x + actor.w + 1) / TILE) : Math.floor((actor.x - 1) / TILE);
+      const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
+      for (let cy = r0; cy <= r1; cy++) cells.push({ cx: gx, cy });
+      return cells;
+    }
     const gy = gravSign() > 0 ? Math.floor((actor.y + actor.h + 1) / TILE) : Math.floor((actor.y - 1) / TILE); // the row gravity pulls toward
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
-    const cells = [];
     for (let cx = c0; cx <= c1; cx++) cells.push({ cx, cy: gy });
     return cells;
   }
@@ -6150,6 +6162,13 @@
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     const leftCol = Math.floor((actor.x - 1) / TILE), rightCol = Math.floor((actor.x + actor.w + 1) / TILE);
+    if (gravAxis() === "x") { // gravity along x: the two sides along the walk axis (above, below) plus the side away from gravity
+      const upRow = Math.floor((actor.y - 1) / TILE), downRow = Math.floor((actor.y + actor.h + 1) / TILE);
+      const awayCol = gravSign() > 0 ? Math.floor((actor.x - 1) / TILE) : Math.floor((actor.x + actor.w + 1) / TILE);
+      for (let cx = c0; cx <= c1; cx++) { if (isSticky(cx, upRow) || isSticky(cx, downRow)) return true; }
+      for (let cy = r0; cy <= r1; cy++) { if (isSticky(awayCol, cy)) return true; }
+      return false;
+    }
     const topRow = gravSign() > 0 ? Math.floor((actor.y - 1) / TILE) : Math.floor((actor.y + actor.h + 1) / TILE); // the side AWAY from gravity
     for (let cy = r0; cy <= r1; cy++) { if (isSticky(leftCol, cy) || isSticky(rightCol, cy)) return true; }
     for (let cx = c0; cx <= c1; cx++) { if (isSticky(cx, topRow)) return true; }
@@ -6185,10 +6204,11 @@
   // same way triggerBouncyLaunch's own real launch does — a kick above MAX_SPEED would otherwise
   // get silently flattened by stepActor's ordinary horizontal speed-cap clamp the very next frame.
   function applyBouncyWallKick(actor, dir, jumpHeld) {
-    if (Math.abs(actor.vx) < BOUNCY_WALL_KICK) actor.vx = dir * BOUNCY_WALL_KICK;
+    const ck = gravAxis() === "y" ? "vx" : "vy", ak = gravAxis() === "y" ? "vy" : "vx"; // across / along gravity
+    if (Math.abs(actor[ck]) < BOUNCY_WALL_KICK) actor[ck] = dir * BOUNCY_WALL_KICK;
     actor.bouncyCooldown = 350;
-    actor.vy -= BOUNCY_WALL_LIFT * gravSign();
-    if (jumpHeld) { actor.vy += JUMP_VELOCITY * gravSign(); sounds.jump(); }
+    actor[ak] -= BOUNCY_WALL_LIFT * gravSign();
+    if (jumpHeld) { actor[ak] += JUMP_VELOCITY * gravSign(); sounds.jump(); }
   }
 
   function resolveAxis(actor, axis, dt) {
@@ -6199,8 +6219,15 @@
                      actor.y + actor.h <= exitCell.cy * TILE || actor.y >= (exitCell.cy + 1) * TILE)) actor.cannonExit = null;
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
-    for (let cy = r0; cy <= r1; cy++) {
-      for (let cx = c0; cx <= c1; cx++) {
+    // The cells are visited in the CHARACTER's own order — from the side away from gravity toward it, and left to right in its
+    // own terms — so that when the box spans two different blocking cells the same one wins in every orientation. At ordinary
+    // gravity that is exactly the old order (rows top to bottom, columns left to right).
+    const scanGs = gravSign(), scanRs = rightSign(), scanX = gravAxis() === "x";
+    const nOuter = scanX ? c1 - c0 + 1 : r1 - r0 + 1, nInner = scanX ? r1 - r0 + 1 : c1 - c0 + 1;
+    for (let io = 0; io < nOuter; io++) {
+      for (let ii = 0; ii < nInner; ii++) {
+        const oo = scanGs > 0 ? io : nOuter - 1 - io, nn = scanRs > 0 ? ii : nInner - 1 - ii;
+        const cx = scanX ? c0 + oo : c0 + nn, cy = scanX ? r0 + nn : r0 + oo;
         let geometry = geometryAt(cx, cy);
         let modifier = modifierAt(cx, cy);
         // v2.22: diggable moved onto the modifier axis (see MODIFIERS) — isBlockingGeometry
@@ -6276,7 +6303,7 @@
         // it from above — bumping its side while just walking up next to it, or bonking its
         // underside, stops you like any other solid wall and nothing more. Captured before the
         // y-branch below resets vy, since that's the only place the original direction survives.
-        const steppedOnTop = axis === "y" && actor.vy * gravSign() > 0;
+        const steppedOnTop = axis === gravAxis() && actor[axis === "x" ? "vx" : "vy"] * gravSign() > 0;
         // Captured BEFORE either axis branch below mutates vx/vy (zeroing or reflecting them) —
         // the one snapshot of "how fast was this actor actually moving at the moment of this
         // collision," reused below to gate the new impact-detonates-a-bomb reaction on real speed
@@ -6292,50 +6319,52 @@
         // wall-caroming behavior is unaffected either way.
         const isPlainBouncyHit = bouncy && modifier === "bouncy" && actor.isPlayer && gravityOn();
         const jumpHeldForBounce = keys[" "] || keys["ArrowUp"] || keys["w"] || keys["W"];
-        if (axis === "x") {
-          if (actor.vx > 0) {
-            actor.x = cx * TILE - actor.w;
-            triggerImpact(actor, "x", actor.vx, bouncy);
-            actor.vx = bouncy ? -actor.vx * restitution : 0;
+        const gs = gravSign();
+        const vk = axis === "x" ? "vx" : "vy", sk = axis === "x" ? "w" : "h", cc = axis === "x" ? cx : cy;
+        if (axis !== gravAxis()) {
+          // across gravity (or any axis in a gravity-free room's x): a plain wall, or a bouncy one with its wall kick
+          if (actor[vk] > 0) {
+            actor[axis] = cc * TILE - actor[sk];
+            triggerImpact(actor, axis, actor[vk], bouncy);
+            actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
             if (bouncy && boingHeard) bounceSound();
-          } else if (actor.vx < 0) {
-            actor.x = (cx + 1) * TILE;
-            triggerImpact(actor, "x", actor.vx, bouncy);
-            actor.vx = bouncy ? -actor.vx * restitution : 0;
+          } else if (actor[vk] < 0) {
+            actor[axis] = (cc + 1) * TILE;
+            triggerImpact(actor, axis, actor[vk], bouncy);
+            actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
             if (bouncy && boingHeard) bounceSound();
           }
         } else {
-          const gs = gravSign();
-          const fall = actor.vy * gs; // > 0: moving toward the surface gravity pulls it to
+          const fall = actor[vk] * gs; // > 0: moving toward the surface gravity pulls it to
           if (fall > 0) {
-            actor.y = gs > 0 ? cy * TILE - actor.h : (cy + 1) * TILE;
+            actor[axis] = gs > 0 ? cc * TILE - actor[sk] : (cc + 1) * TILE;
             // A resting object on a bouncy floor used to be re-bounced every single frame (gravity adds
-            // a sliver of vy, the reflection flips it, repeat), which looked still but sounded like an
+            // a sliver of velocity, the reflection flips it, repeat), which looked still but sounded like an
             // endless boing — reflect only real impacts, anything slower just lands. The player on a
             // Trampoline keeps its guaranteed launch, so it is exempt.
             const settles = bouncy && !(isTrampolineGeom && actor.isPlayer) && fall < BOUNCE_REST_SPEED;
-            triggerImpact(actor, "y", fall, bouncy && !settles);
+            triggerImpact(actor, axis, fall, bouncy && !settles);
             if (bouncy && !settles) {
-              actor.vy = -actor.vy * restitution;
+              actor[vk] = -actor[vk] * restitution;
               // The Trampoline object's whole "extra jumping power" pitch: reflection alone still
               // scales with impact speed (a gentle step barely bounces, same as plain bouncy), so
               // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
               // Only the player gets the guaranteed minimum launch: for a crate/bomb/ball it handed back
               // MORE energy than it landed with, so objects on a trampoline bounced forever.
-              if (isTrampolineGeom && actor.isPlayer) actor.vy = -gs * Math.max(-actor.vy * gs, TRAMPOLINE_LAUNCH_SPEED);
+              if (isTrampolineGeom && actor.isPlayer) actor[vk] = -gs * Math.max(-actor[vk] * gs, TRAMPOLINE_LAUNCH_SPEED);
               // Same "jump off it for more lift" assist as a wall bounce, plain-bouncy-floor only —
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
-              if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY * gs; sounds.jump(); }
+              if (isPlainBouncyHit && jumpHeldForBounce) { actor[vk] += JUMP_VELOCITY * gs; sounds.jump(); }
               if (boingHeard) bounceSound();
             }
-            else { actor.vy = 0; actor.grounded = true; }
+            else { actor[vk] = 0; actor.grounded = true; }
           } else if (fall < 0) {
-            actor.y = gs > 0 ? (cy + 1) * TILE : cy * TILE - actor.h;
-            triggerImpact(actor, "y", fall, bouncy);
-            actor.vy = bouncy ? -actor.vy * restitution : 0;
+            actor[axis] = gs > 0 ? (cc + 1) * TILE : cc * TILE - actor[sk];
+            triggerImpact(actor, axis, fall, bouncy);
+            actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (bouncy && boingHeard) bounceSound();
           }
         }
@@ -6442,9 +6471,11 @@
     // crate, which could be inside the floor; two such frames in a row ping-ponged the player in and
     // out of the ground and let a held key slide them through walls. If the flush spot is solid, the
     // mover just stays put (velocity cancelled) instead.
-    const seatX = (nx) => { const ox = actor.x; actor.x = nx; if (actorBlockedByTiles(actor)) actor.x = ox; };
-    const seatY = (ny) => { const oy = actor.y; actor.y = ny; if (actorBlockedByTiles(actor)) actor.y = oy; };
-    const gs = gravSign();
+    // Works on whichever axis is asked for (pk = position key, sk = size key, vk = velocity key); the mover
+    // counts as grounded only when it comes to rest against the side gravity pulls it toward.
+    const gs = gravSign(), ga = gravAxis();
+    const pk = axis, sk = axis === "x" ? "w" : "h", vk = axis === "x" ? "vx" : "vy";
+    const seat = (nv) => { const o = actor[pk]; actor[pk] = nv; if (actorBlockedByTiles(actor)) actor[pk] = o; };
     for (const other of actors) {
       if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
@@ -6458,13 +6489,9 @@
       // resting pushable), so a mover is simply clamped flush against whichever edge it hit instead
       // of trying to displace the platform first and revert on failure.
       if (def.temperament === MOVING_PLATFORM_KIND) {
-        if (axis === "x") {
-          if (actor.vx > 0) { seatX(other.x - actor.w); actor.vx = 0; }
-          else if (actor.vx < 0) { seatX(other.x + other.w); actor.vx = 0; }
-        } else {
-          if (actor.vy * gs > 0) { seatY(gs > 0 ? other.y - actor.h : other.y + other.h); actor.vy = 0; actor.grounded = true; }
-          else if (actor.vy * gs < 0) { seatY(gs > 0 ? other.y + other.h : other.y - actor.h); actor.vy = 0; }
-        }
+        const v = actor[vk];
+        if (v > 0) { seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
+        else if (v < 0) { seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
         continue;
       }
       const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
@@ -6472,29 +6499,17 @@
       // cell, old saves, Reset onto the same spawn) didn't just collide this frame — shoving/re-seating
       // them every frame made each hop up onto its neighbour forever (a runaway tower, bombs ending up
       // thousands of pixels off the board). Only a genuine, shallow contact is resolved here.
-      const depth = axis === "x" ? Math.min(actor.x + actor.w, other.x + other.w) - Math.max(actor.x, other.x)
-        : Math.min(actor.y + actor.h, other.y + other.h) - Math.max(actor.y, other.y);
-      if (depth > (axis === "x" ? actor.w : actor.h) * 0.75) continue;
-      if (axis === "x") {
-        if (actor.vx > 0) {
-          const delta = (actor.x + actor.w) - other.x;
-          other.x += delta;
-          if (blocked()) { other.x -= delta; seatX(other.x - actor.w); actor.vx = 0; }
-        } else if (actor.vx < 0) {
-          const delta = (other.x + other.w) - actor.x;
-          other.x -= delta;
-          if (blocked()) { other.x += delta; seatX(other.x + other.w); actor.vx = 0; }
-        }
-      } else {
-        if (actor.vy * gs > 0) {
-          const delta = gs > 0 ? (actor.y + actor.h) - other.y : (other.y + other.h) - actor.y;
-          other.y += gs * delta;
-          if (blocked()) { other.y -= gs * delta; seatY(gs > 0 ? other.y - actor.h : other.y + other.h); actor.vy = 0; actor.grounded = true; }
-        } else if (actor.vy * gs < 0) {
-          const delta = gs > 0 ? (other.y + other.h) - actor.y : (actor.y + actor.h) - other.y;
-          other.y -= gs * delta;
-          if (blocked()) { other.y += gs * delta; seatY(gs > 0 ? other.y + other.h : other.y - actor.h); actor.vy = 0; }
-        }
+      const depth = Math.min(actor[pk] + actor[sk], other[pk] + other[sk]) - Math.max(actor[pk], other[pk]);
+      if (depth > actor[sk] * 0.75) continue;
+      const v = actor[vk];
+      if (v > 0) {
+        const delta = (actor[pk] + actor[sk]) - other[pk];
+        other[pk] += delta;
+        if (blocked()) { other[pk] -= delta; seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
+      } else if (v < 0) {
+        const delta = (other[pk] + other[sk]) - actor[pk];
+        other[pk] -= delta;
+        if (blocked()) { other[pk] += delta; seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
       }
     }
   }
@@ -6510,19 +6525,22 @@
   // trampoline" case is what this is for; flag it to the user before trying to make every side
   // bouncy too, since that needs a genuinely new actor-vs-actor collision model, not this one).
   function bounceOffTrampolineObjects(actor, axis) {
+    const gs = gravSign(), ga = gravAxis();
+    const pk = axis, sk = axis === "x" ? "w" : "h", vk = axis === "x" ? "vx" : "vy";
     for (const other of actors) {
       if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
       if (!def || def.temperament !== CARRY_TRAMPOLINE_KIND) continue;
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
-      if (axis === "x") {
-        if (actor.vx > 0) { actor.x = other.x - actor.w; actor.vx = 0; }
-        else if (actor.vx < 0) { actor.x = other.x + other.w; actor.vx = 0; }
+      const v = actor[vk];
+      if (axis !== ga) {
+        if (v > 0) { actor[pk] = other[pk] - actor[sk]; actor[vk] = 0; }
+        else if (v < 0) { actor[pk] = other[pk] + other[sk]; actor[vk] = 0; }
       } else {
-        const gs = gravSign(), fall = actor.vy * gs;
+        const fall = v * gs;
         if (fall > 0) {
-          actor.y = gs > 0 ? other.y - actor.h : other.y + other.h;
+          actor[pk] = gs > 0 ? other[pk] - actor[sk] : other[pk] + other[sk];
           const actorDef = actorDefs[actor.defId];
           // v2.28: same widening as resolveAxis's tile-Trampoline branch — a thrown/dropped
           // physics object landing on a Trampoline OBJECT bounces too, not just the player/hazard
@@ -6533,15 +6551,15 @@
           const actorIsSteeringNPC = actorDef && isSteeringCharacter(actorDef.temperament);
           const bouncy = actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
           const settles = bouncy && !actor.isPlayer && fall < BOUNCE_REST_SPEED;
-          triggerImpact(actor, "y", fall, bouncy && !settles);
+          triggerImpact(actor, axis, fall, bouncy && !settles);
           if (bouncy && !settles) {
-            actor.vy = -actor.vy * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION);
-            if (actor.isPlayer) actor.vy = -gs * Math.max(-actor.vy * gs, TRAMPOLINE_LAUNCH_SPEED);
+            actor[vk] = -actor[vk] * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION);
+            if (actor.isPlayer) actor[vk] = -gs * Math.max(-actor[vk] * gs, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
             if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
-          } else { actor.vy = 0; actor.grounded = true; }
-        } else if (fall < 0) { actor.y = gs > 0 ? other.y + other.h : other.y - actor.h; actor.vy = 0; }
+          } else { actor[vk] = 0; actor.grounded = true; }
+        } else if (fall < 0) { actor[pk] = gs > 0 ? other[pk] + other[sk] : other[pk] - actor[sk]; actor[vk] = 0; }
       }
     }
   }
@@ -6583,7 +6601,7 @@
     if (idef && idef.temperament === "collectible") return; // collectibles never make impact sounds
     // enemies/characters walking around (and balls rolling) never thud on landing — crowds made a constant clutter
     if (!actor.isPlayer && idef && (isSteeringCharacter(idef.temperament) || idef.temperament === "stationary" || idef.temperament === HAZARD_BALL_KIND)) return;
-    if (axis === "y" && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
+    if (axis === gravAxis() && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
   }
 
   // ============== Reaction table (physics terms) ==============
@@ -6803,8 +6821,9 @@
       // An object the player just dropped/threw never crushes them (throwing at a wall drops it on your head),
       // and a fall has to be real: ~2 tiles, not a crate settling half a tile in a stack you just disturbed.
       const playerHandled = npcActor.safeUntil > gameNow() && npcActor.safeUntil - gameNow() <= SAFE_AFTER_HANDLING_MS; // (a stale value saved by an older session never counts)
-      const gsCrush = gravSign();
-      if (!freshSpawn && !playerHandled && npcActor.vy * gsCrush > CRUSH_MIN_VY && (gsCrush > 0 ? npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2 : npcActor.y + npcActor.h / 2 > playerActor.y + playerActor.h / 2)) {
+      const gsCrush = gravSign(), crushX = gravAxis() === "x";
+      const npcAlong = crushX ? npcActor.x + npcActor.w / 2 : npcActor.y + npcActor.h / 2, playerAlong = crushX ? playerActor.x + playerActor.w / 2 : playerActor.y + playerActor.h / 2;
+      if (!freshSpawn && !playerHandled && (crushX ? npcActor.vx : npcActor.vy) * gsCrush > CRUSH_MIN_VY && (gsCrush > 0 ? npcAlong < playerAlong : npcAlong > playerAlong)) {
         triggerHazard(playerActor);
       }
     } else if (temperament === CARRY_CANNON2_KIND) {
@@ -6913,8 +6932,9 @@
     if (sfx && sounds[sfx]) sounds[sfx](); else playActorSound(actor, "yelp");
     actor.flashTimer = 1;
     const speed = Math.hypot(actor.vx, actor.vy) || 1;
-    const kx = away ? away.x : (speed > 1 ? -actor.vx / speed : 0);
-    const ky = away ? away.y : (speed > 1 ? -actor.vy / speed : -gravSign());
+    const gX = gravAxis() === "x"; // with nothing to push against, knock the actor away from the surface gravity pulls it to
+    const kx = away ? away.x : (speed > 1 ? -actor.vx / speed : (gX ? -gravSign() : 0));
+    const ky = away ? away.y : (speed > 1 ? -actor.vy / speed : (gX ? 0 : -gravSign()));
     actor.vx = kx * HAZARD_KNOCKBACK_SPEED;
     actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
@@ -7010,7 +7030,7 @@
     if (actor.isPlayer) sounds.boing();
     const launchSpeed = BOUNCY_LAUNCH_SPEED;
     if (gravityOn()) {
-      actor.vy = -launchSpeed * gravSign();
+      actor[gravAxis() === "x" ? "vx" : "vy"] = -launchSpeed * gravSign();
     } else {
       const speed = Math.hypot(actor.vx, actor.vy);
       if (speed > 10) {
@@ -7064,7 +7084,7 @@
       switchChannels[color] = !switchChannels[color];
       log((switchChannels[color] ? "Flip! " : "Flip back! ") + color + " channel " + (switchChannels[color] ? "on." : "off."));
     } else {
-      const gsPrev = gravSign(); // which way "up" was, for the weightless pop below
+      const gsPrev = gravSign(), gaPrev = gravAxis(); // which way "up" was, for the weightless pop below
       gravityEnabled = !gravityEnabled;
       log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
       renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
@@ -7085,7 +7105,7 @@
       // very next frame instead caps the magnitude while preserving the diagonal ANGLE (it scales
       // vx/vy by the same factor), which is all "a real diagonal kick" actually needs.
       if (!gravityEnabled) {
-        actors.forEach(a => { a.vy -= GRAVITY_OFF_POP_SPEED * gsPrev; });
+        actors.forEach(a => { a[gaPrev === "x" ? "vx" : "vy"] -= GRAVITY_OFF_POP_SPEED * gsPrev; });
       }
     }
   }
@@ -7895,10 +7915,13 @@
     // spot" fallback put a crate exactly on top of the player, which made the two ping-pong against
     // each other and could squeeze the player through a wall. No candidate fits -> keep carrying.
     const dropDir = player.facingDir || 1;
-    const feetY = gravSign() > 0 ? player.y + player.h - obj.h : player.y;
-    const cx = player.x + player.w / 2 - obj.w / 2;
+    const gsD = gravSign(), xGrav = gravAxis() === "x";
+    const feetY = xGrav ? (gsD > 0 ? player.x + player.w - obj.w : player.x) : (gsD > 0 ? player.y + player.h - obj.h : player.y);
+    const cx = xGrav ? player.y + player.h / 2 - obj.h / 2 : player.x + player.w / 2 - obj.w / 2;
     const reach = player.w / 2 + obj.w / 2 + 1;
-    const spots = [[cx + dropDir * reach, feetY], [cx - dropDir * reach, feetY], [cx, gravSign() > 0 ? player.y - obj.h - 1 : player.y + player.h + 1]];
+    const spots = xGrav
+      ? [[feetY, cx + dropDir * reach], [feetY, cx - dropDir * reach], [gsD > 0 ? player.x - obj.w - 1 : player.x + player.w + 1, cx]]
+      : [[cx + dropDir * reach, feetY], [cx - dropDir * reach, feetY], [cx, gsD > 0 ? player.y - obj.h - 1 : player.y + player.h + 1]];
     const clear = ([sx, sy]) => {
       obj.x = sx; obj.y = sy;
       return !actorBlockedByTiles(obj)
@@ -7933,8 +7956,8 @@
     const dir = player.facingDir || 1;
     obj.x = player.x + player.w / 2 - obj.w / 2;
     obj.y = player.y + player.h / 2 - obj.h / 2;
-    obj.vx = dir * speed;
-    obj.vy = -THROW_UPWARD_SPEED * gravSign();
+    if (gravAxis() === "x") { obj.vy = dir * speed; obj.vx = -THROW_UPWARD_SPEED * gravSign(); } // walking along y, arcing away from the wall
+    else { obj.vx = dir * speed; obj.vy = -THROW_UPWARD_SPEED * gravSign(); }
     // A thrown object's speed is deliberately stronger than the ordinary NPC_MAX_SPEED cap
     // stepActor's non-player branch clamps to every frame — without an exemption, that clamp
     // would flatten a real throw back down to a slow drift within the very next frame. Reusing
@@ -8044,9 +8067,10 @@
     log("Back on the board!");
   }
 
+  const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];
   function stepActor(actor, dt, player) {
     if (actor.dragging) return;
-    const vyBefore = actor.vy; // frozen while the editor is dragging it
+    const vAlongBefore = gravAxis() === "x" ? actor.vx : actor.vy; // frozen while the editor is dragging it
     // v2.21: "no physics of its own while held, follows the player" — its x/y are driven directly
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
     // attachCarryable's setTimeout) since that's a game-clock timer, not part of this per-frame step.
@@ -8096,6 +8120,9 @@
       if (Math.abs(actor.vy) < 1) actor.vy = 0;
     } else {
       const inGravity = gravityOn();
+      // the axis gravity runs along (gAx) and the one characters walk along (cAx); free-roam rooms read y / x as always
+      const gAx = inGravity ? gravAxis() : "y", cAx = gAx === "y" ? "x" : "y";
+      const aV = gAx === "y" ? "vy" : "vx", cV = cAx === "x" ? "vx" : "vy";
       // Large Stone is too heavy for any optional force to budge — wind/fan already had this
       // exemption (just below), and the object-to-object interaction-matrix pass found sticky was
       // the one force that had been left out of the same "heavy" boundary purely because it never
@@ -8188,11 +8215,14 @@
         // a player off the platform they had just reached. Without gravity `ballistic` ends at once, so the
         // cooldown still has to hold the line there.
         const shotLocksInput = inGravity ? !!actor.ballistic : actor.cannonCooldown > 0;
-        // Upside-down gravity: the character's left is the screen's right (Up/Space still means "away from the surface").
-        const mirrorLR = inGravity && gravSign() < 0 ? -1 : 1;
+        // Keys are the character's own: Left/Right walk along whichever axis is across gravity, mirrored when the
+        // character is upside-down or on a wall (see rightSign); Up/Space still means "away from the surface".
+        const rs = inGravity ? rightSign() : 1;
         if (!stuck && !shotLocksInput) {
+          let walk = 0;
           if (actor.digLock) { /* just dug through a side wall: held direction ignored until released */ }
-          else if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult * mirrorLR; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult * mirrorLR;
+          else if (left && !right) walk = -MOVE_ACCEL * stickyMoveMult * rs; else if (right && !left) walk = MOVE_ACCEL * stickyMoveMult * rs;
+          if (walk !== 0) { if (cAx === "x") ax += walk; else ay += walk; }
           if (inGravity) {
             wantsJump = keys[" "] || up;
           } else {
@@ -8204,7 +8234,7 @@
         // control, and for how long" after a bounce/wind/cannon/magnet event, not a partial blend
         // with the AI still fighting the physics underneath it. See isSteeringCharacter's comment.
         const steer = steeringAccelFor(actor, player);
-        ax += steer.ax * stickyMoveMult;
+        if (cAx === "x") ax += steer.ax * stickyMoveMult; else ay += steer.ay * stickyMoveMult;
         if (!inGravity) ay += steer.ay * stickyMoveMult;
       }
 
@@ -8215,7 +8245,7 @@
         actor.ballisticT = (actor.ballisticT || 0) + dt * 1000;
         if (!inGravity || (actor.grounded && actor.ballisticT > 150)) actor.ballistic = false;
       }
-      if (!(actor.ballistic && inGravity)) applyAxisFriction(actor, "x", dt, ax);
+      if (!(actor.ballistic && inGravity)) applyAxisFriction(actor, cAx, dt, cAx === "x" ? ax : ay);
       const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
       // v2.20: sticky ground caps top speed too, not just acceleration — MOVE_ACCEL is high enough
       // that a kid reaches MAX_SPEED well within a second even at STICKY_MOVE_MULT's damped
@@ -8240,9 +8270,9 @@
       if (inGravity) {
         // horizontal run-speed and vertical fall-speed are different caps in a platformer,
         // so each axis clamps independently here
-        if (!recentlyLaunched) actor.vx = Math.max(-effectiveCap, Math.min(effectiveCap, actor.vx));
+        if (!recentlyLaunched) actor[cV] = Math.max(-effectiveCap, Math.min(effectiveCap, actor[cV]));
         if (wantsJump && actor.grounded) {
-          actor.vy = JUMP_VELOCITY * gravSign();
+          actor[aV] = JUMP_VELOCITY * gravSign();
           actor.jumpCrouch = 1;
           sounds.jump();
         }
@@ -8268,13 +8298,13 @@
           const releaseScale = Math.min(1, actor.stickyReleaseT / STICKY_RELEASE_MS);
           actor.stickyReleaseT = Math.min(STICKY_RELEASE_MS, actor.stickyReleaseT + dt * 1000);
           const gsG = gravSign();
-          actor.vy += GRAVITY * releaseScale * dt * gsG;
+          actor[aV] += GRAVITY * releaseScale * dt * gsG;
           // vertical wind/fan/radial force still applies under gravity (e.g. a rising air current)
           // — gravity's own integration is a direct velocity add rather than accelInput/friction,
           // so this joins it the same way rather than through ay, which this branch never hands to
           // applyAxisFriction.
-          actor.vy += ay * dt;
-          actor.vy = gsG > 0 ? Math.min(actor.vy, MAX_FALL) : Math.max(actor.vy, -MAX_FALL);
+          actor[aV] += (gAx === "y" ? ay : ax) * dt;
+          actor[aV] = gsG > 0 ? Math.min(actor[aV], MAX_FALL) : Math.max(actor[aV], -MAX_FALL);
         }
       } else {
         applyAxisFriction(actor, "y", dt, ay);
@@ -8291,8 +8321,9 @@
     // v2.16: face whichever way actually moving — a small deadzone so idling near-zero drift
     // (residual bounce, friction settling) doesn't flicker the facing back and forth; holds the
     // last real direction the rest of the time, including while standing still.
-    if (actor.vx > 8) actor.facingDir = 1;
-    else if (actor.vx < -8) actor.facingDir = -1;
+    const vFace = gravAxis() === "x" ? actor.vy : actor.vx; // along the axis it walks on (screen sign)
+    if (vFace > 8) actor.facingDir = 1;
+    else if (vFace < -8) actor.facingDir = -1;
 
     if (actor.hazardCooldown > 0) actor.hazardCooldown -= dt * 1000;
     if (actor.invulnT > 0) actor.invulnT -= dt * 1000;
@@ -8305,14 +8336,13 @@
     if (actor.fanKickCooldown > 0) actor.fanKickCooldown -= dt * 1000;
     if (actor.displacedCooldown > 0) actor.displacedCooldown -= dt * 1000;
 
-    actor.x += actor.vx * dt;
-    resolveAxis(actor, "x", dt);
-    shovePushables(actor, "x");
-    bounceOffTrampolineObjects(actor, "x");
-    actor.y += actor.vy * dt;
-    resolveAxis(actor, "y", dt);
-    shovePushables(actor, "y");
-    bounceOffTrampolineObjects(actor, "y");
+    // across gravity first, then along it (x then y for ordinary gravity, as always)
+    for (const mv of (gravAxis() === "x" ? AXES_YX : AXES_XY)) {
+      actor[mv] += actor[mv === "x" ? "vx" : "vy"] * dt;
+      resolveAxis(actor, mv, dt);
+      shovePushables(actor, mv);
+      bounceOffTrampolineObjects(actor, mv);
+    }
     applyWorldWrap(actor);
 
     // "Resume once settled" — a steering character gets its AI back the instant it visibly lands
@@ -8377,22 +8407,25 @@
       if (isCarryBombKind(temperament) && gravityOn() && !actor.detonating && !actor.carried) {
         // A teleport (Reset to start, Play restart, a drag, a door) is not a fall: forget the old
         // fall origin whenever the actor jumped more than two tiles between ticks.
-        // fallStartY is kept in "distance along gravity" terms (y when gravity points down, -y when up)
-        const gsB = gravSign(), along = gsB > 0 ? actor.y : -actor.y;
-        if (actor.lastY != null && Math.abs(actor.y - actor.lastY) > TILE * 2) actor.fallStartY = along;
-        actor.lastY = actor.y;
-        const landed = vyBefore * gsB > 0 && (actor.grounded || actor.vy * gsB <= 0);
+        // fallStartY is kept in "distance along gravity" terms (the position along the gravity axis, negated when it points -x/-y)
+        const gsB = gravSign(), pAlong = gravAxis() === "x" ? actor.x : actor.y, vAlong = gravAxis() === "x" ? actor.vx : actor.vy;
+        const along = gsB > 0 ? pAlong : -pAlong;
+        if (actor.lastY != null && Math.abs(pAlong - actor.lastY) > TILE * 2) actor.fallStartY = along;
+        actor.lastY = pAlong;
+        const landed = vAlongBefore * gsB > 0 && (actor.grounded || vAlong * gsB <= 0);
         if (landed && actor.fallStartY != null && along - actor.fallStartY > BOMB_FALL_DETONATE_TILES * TILE) {
           detonateCarriedBombAt(currentRoomId, actor.id);
         }
-        if (actor.vy * gsB < 0 || actor.grounded || actor.fallStartY == null) actor.fallStartY = along;
+        if (vAlong * gsB < 0 || actor.grounded || actor.fallStartY == null) actor.fallStartY = along;
       }
     }
     checkActorContacts(actor, actors);
 
     // fell off the world (only meaningful once gravity/holes exist) — recycle to start, no
     // fail-state semantics, matching the throwaway prototype this folds in
-    if (actor.isPlayer && (actor.y > ROWS * TILE + 200 || (gravityOn() && gravSign() < 0 && actor.y + actor.h < -200))) {
+    if (actor.isPlayer && (actor.y > ROWS * TILE + 200 || (gravityOn() && (gravAxis() === "x"
+        ? (gravSign() > 0 ? actor.x > roomCols() * TILE + 200 : actor.x + actor.w < -200)
+        : (gravSign() < 0 && actor.y + actor.h < -200))))) {
       actor.x = startPos.x; actor.y = startPos.y; actor.vx = 0; actor.vy = 0;
     }
   }
@@ -8768,8 +8801,13 @@
     if (player && player.carrying != null) {
       const carried = actors.find(a => a.id === player.carrying);
       if (carried) {
-        carried.x = player.x + player.w / 2 - carried.w / 2;
-        carried.y = gravSign() > 0 ? player.y - carried.h - 4 : player.y + player.h + 4; // glued to the side away from gravity
+        if (gravAxis() === "x") { // glued to the side away from gravity, centred along the walk axis
+          carried.x = gravSign() > 0 ? player.x - carried.w - 4 : player.x + player.w + 4;
+          carried.y = player.y + player.h / 2 - carried.h / 2;
+        } else {
+          carried.x = player.x + player.w / 2 - carried.w / 2;
+          carried.y = gravSign() > 0 ? player.y - carried.h - 4 : player.y + player.h + 4;
+        }
         carried.vx = 0; carried.vy = 0;
       } else {
         player.carrying = null;
@@ -8804,8 +8842,12 @@
       const riderIds = [];
       for (const rider of snapshot) {
         if (rider.id === platform.id || rider.carried) continue;
-        if (Math.abs(gravSign() > 0 ? (rider.y + rider.h) - platform.y : rider.y - (platform.y + platform.h)) < RIDE_CONTACT_EPSILON &&
-            rider.x < platform.x + platform.w && rider.x + rider.w > platform.x) {
+        const rideX = gravAxis() === "x";
+        const gap = rideX ? (gravSign() > 0 ? (rider.x + rider.w) - platform.x : rider.x - (platform.x + platform.w))
+                          : (gravSign() > 0 ? (rider.y + rider.h) - platform.y : rider.y - (platform.y + platform.h));
+        const overlapAcross = rideX ? (rider.y < platform.y + platform.h && rider.y + rider.h > platform.y)
+                                    : (rider.x < platform.x + platform.w && rider.x + rider.w > platform.x);
+        if (Math.abs(gap) < RIDE_CONTACT_EPSILON && overlapAcross) {
           riderIds.push(rider.id);
         }
       }
@@ -10792,6 +10834,11 @@
       ctx.restore();
     }
   }
+  function rotateArt90CCW(art) {
+    const out = new Array(ART * ART).fill(null);
+    for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) out[(ART - 1 - x) * ART + y] = art[y * ART + x];
+    return out;
+  }
   function flipArtRows(art) {
     const out = new Array(ART * ART);
     for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) out[y * ART + x] = art[(ART - 1 - y) * ART + x];
@@ -10801,7 +10848,7 @@
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = gameNow();
-    const gsR = gravSign(); // upside-down gravity turns characters over (objects keep their art)
+    const gsR = gravSign(), gaR = gravAxis(), rsR = rightSign(); // gravity turns characters over / onto their side (objects keep their art)
     // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
@@ -10829,18 +10876,19 @@
         // fixed sequence, sampled straight from the actor's current physical state every
         // frame. This is what reads well on a blocky/blob-shaped sprite specifically.
         const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
-        const lean = Math.max(-1, Math.min(1, actor.vx / cap)) * 0.18;
+        const qturn0 = gaR === "x" && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
+        const lean = Math.max(-1, Math.min(1, (qturn0 ? rsR * actor.vy : actor.vx) / cap)) * 0.18;
         let sx = 1, sy = 1;
         // impactWobble oscillates (positive = compress, negative = overshoot/stretch) and
         // decays toward zero — a real follow-through, not a single compress-and-release.
         const wobble = impactWobbleValue(actor);
         if (wobble !== 0) {
-          if (actor.impactAxis === "y") { sy *= 1 - wobble * 0.5; sx *= 1 + wobble * 0.3; }
+          if (actor.impactAxis === (qturn0 ? "x" : "y")) { sy *= 1 - wobble * 0.5; sx *= 1 + wobble * 0.3; }
           else { sx *= 1 - wobble * 0.5; sy *= 1 + wobble * 0.3; }
         }
         if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
         if (!actor.grounded) {
-          const fall = Math.max(0, Math.min(1, actor.vy * gsR / MAX_FALL));
+          const fall = Math.max(0, Math.min(1, (qturn0 ? actor.vx : actor.vy) * gsR / MAX_FALL));
           sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
         }
         // v2.15: an idle "spin" for defs that opt in (see COIN_ART) — reuses this same continuous
@@ -10852,7 +10900,8 @@
       // v2.16: art is authored facing right by default — mirror it when the actor's last real
       // movement was leftward, so a side-facing character (hero/princess/ghost, but harmless for
       // the roughly-symmetric blob archetypes too) always faces the way it's actually going.
-      t.sx *= (actor.facingDir || 1);
+      const qturn = gaR === "x" && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
+      if (!qturn) t.sx *= (actor.facingDir || 1); // (a character on a wall bakes its facing into the art below)
       // v2.20: a purely visual "floating" cue while genuinely lifted by a fan at close range (see
       // fanAccelFor's own near-force falloff/near flag) — a gentle sine bob, phase-offset per actor
       // so several floating things don't all bob in lockstep. Never touches actual physics.
@@ -10911,10 +10960,16 @@
       // Half-turn for a character whose feet are on the ceiling: its rows reversed (drawn upright, so the
       // pixel grid and seams are exactly the ordinary ones) plus a mirrored lean is the same picture as
       // rotating 180 degrees once its left/right controls are swapped.
-      const turned = gsR < 0 && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
+      const turned = gaR === "y" && gsR < 0 && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
       if (turned) art = flipArtRows(art);
+      if (qturn) {
+        // Feet on a wall: mirror for the facing (in the character's own terms), then turn the art a quarter turn in data
+        // (rotated arrays drawn upright, like the half-turn) so the pixel grid stays exact.
+        if (rsR * (actor.facingDir || 1) < 0) art = mirrorArtH(art);
+        art = gsR > 0 ? rotateArt90CCW(art) : rotateArt90CW(art);
+      }
       if (t.rot) ctx.rotate(turned ? -t.rot : t.rot);
-      ctx.scale(t.sx, t.sy);
+      if (qturn) ctx.scale(t.sy, t.sx); else ctx.scale(t.sx, t.sy);
       artCacheOff++;
       drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
       artCacheOff--;
@@ -12523,7 +12578,7 @@
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
-      gravityOn, gravSign, updateGravIndicator, flipArtRows, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
+      gravityOn, gravSign, gravAxis, rightSign, updateGravIndicator, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
@@ -12624,6 +12679,8 @@
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
       `const GRAVITY_DIRS = ${JSON.stringify(GRAVITY_DIRS)};`,
+      `const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];`,
+      `const APP_NAME = ${JSON.stringify(APP_NAME)};`,
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
       `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,

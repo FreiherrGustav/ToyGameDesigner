@@ -32,12 +32,15 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
   ok(await ev(page, "()=>gravityEnabled===true && document.getElementById('gravityDirRow').style.display!=='none'"), "turning gravity on shows the four direction buttons");
   const btns = await ev(page, "()=>[...document.querySelectorAll('#gravityDirRow .swatch')].map(s=>[s.dataset.dir,s.title,s.style.opacity])");
   ok(btns.length === 4 && btns.map(b => b[0]).join() === "down,up,left,right", "four buttons: down, up, left, right");
-  ok(btns[0][2] === "1" && btns[1][2] === "1" && +btns[2][2] < 1 && +btns[3][2] < 1, "left and right are shown dimmed (next stage)");
+  ok(btns.every(b => b[2] === "1"), "all four buttons are usable");
   ok(await ev(page, "()=>gravityDir==='down'"), "default direction is down");
   await page.click("#gravityDirRow .swatch[data-dir=up]");
   ok(await ev(page, "()=>gravityDir==='up'"), "clicking the up button applies instantly");
   await page.click("#gravityDirRow .swatch[data-dir=left]");
-  ok(await ev(page, "()=>gravityDir==='up'"), "a dimmed (not yet available) button does nothing");
+  ok(await ev(page, "()=>gravityDir==='left'"), "the left button applies instantly");
+  await page.click("#gravityDirRow .swatch[data-dir=right]");
+  ok(await ev(page, "()=>gravityDir==='right'"), "the right button applies instantly");
+  await page.click("#gravityDirRow .swatch[data-dir=up]");
   // ---- 2. a real scene: build, then Play, with the indicator ----
   await ev(page, `()=>{ for(let x=0;x<24;x++) board[0][x]='solid:none'; for(let x=0;x<24;x++) board[17][x]='solid:none'; for(let x=6;x<12;x++) board[5][x]='solid:none';
     selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(4*TILE+16, 15*TILE+16);
@@ -118,6 +121,21 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
         return Array.from(ctx.getImageData(100 - 5, 100 - 5 - 0, 32, 32).data);
       };
       const a = draw("down"), b = draw("up");
+      // quarter turns: facing chosen so no mirroring is needed (local facing = right); down's cell (r,c) must land at the rotated cell
+      const drawQ = (dir) => { const f = dir === "right" ? -1 : 1; const r = (() => { return null; })(); void r;
+        window.__ev("()=>{ suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false; gravityEnabled=true; }")();
+        window.__ev(`()=>{ gravityDir='${dir}'; selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(300, 300); const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.facingDir=${f}; setGamePaused(true); }`)();
+        window.__sim(2);
+        window.__ev(`()=>{ const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.grounded=true; p.impactMag=0; p.jumpCrouch=0; p.facingDir=${f}; }`)();
+        window.__sim(1);
+        return Array.from(document.getElementById("gameCanvas").getContext("2d").getImageData(95, 95, 32, 32).data); };
+      const at = (img, row, col) => { const i = ((row * 4 + 2) * 32 + (col * 4 + 2)) * 4; return img[i] + "," + img[i + 1] + "," + img[i + 2]; };
+      let qdiff = 0;
+      for (const [dir, map] of [["right", (r, c) => [7 - c, r]], ["left", (r, c) => [c, 7 - r]]]) {
+        const q = drawQ(dir);
+        // 'a' was drawn with facing +1; for right gravity the rotated draw used facing -1 (also unmirrored), so compare against a flipped-facing upright:
+        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) { const [rr, cc] = map(r, c); if (at(a, r, c) !== at(q, rr, cc)) qdiff++; }
+      }
       let diff = 0; const colors = new Set();
       // compare the colour at the centre of each 4x4 art cell: up's row (7-r) must equal down's row r
       for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
@@ -125,9 +143,10 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
         for (let k = 0; k < 4; k++) if (a[i + k] !== b[j + k]) { diff++; break; }
         colors.add(b[j] + "," + b[j + 1] + "," + b[j + 2]);
       }
-      return { diff, colors: colors.size };
+      return { diff, colors: colors.size, qdiff };
     });
     ok(res.diff === 0, `DPR ${dpr}: the upside-down player is the upright sprite flipped, cell by cell (${res.diff} of 64 art cells differ, ${res.colors} colors, no blending at cell centres)`);
+    ok(res.qdiff === 0, `DPR ${dpr}: left and right gravity draw the upright sprite turned a quarter turn, cell by cell (${res.qdiff} of 128 cells differ)`);
     // pointer accuracy with gravity up: click the centre of a cell and the right cell gets painted
     await r.page.evaluate(() => window.__ev("()=>{ gravityEnabled=true; gravityDir='up'; selectGeometry('solid'); }")());
     await r.page.evaluate(() => window.__ev("()=>{ setGamePaused(false); }")());

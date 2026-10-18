@@ -115,6 +115,76 @@ const RUNSC = `(spec, frames)=>{
     ok(moved > 30, `B: ${name}: the scenario actually moves things`);
   }
 
+
+  // ---------------- B2: quarter-turn invariance (left / right gravity), inside the central 18x18 region ----------------
+  // Scenarios are written in 18x18 local coordinates (u across, v down) with a solid frame; world "down" places them as is,
+  // "left" turns the whole region a quarter turn clockwise (gravity ends up pointing left), "right" counter-clockwise.
+  const QS = {
+    platform: { tiles: [[5,12,"solid:none",4],[11,13,"solid:none",3],[13,10,"solid:none",3]], actors: [["player", 2.37, 15]],
+      keys: [[10, 100, "ArrowRight"], [50, 62, " "], [120, 125, "ArrowUp"], [140, 200, "ArrowRight"], [150, 160, "ArrowUp"], [230, 300, "ArrowLeft"], [260, 270, " "]] },
+    bounce: { tiles: [[1,16,"solid:bouncy",16],[5,9,"solid:none",3]], actors: [["player", 3.41, 3.2]], keys: [[60, 120, "ArrowRight"], [90, 100, " "], [160, 220, "ArrowLeft"]] },
+    stack: { tiles: [], actors: [["player", 3.37, 15], ["crate", 8.3, 4], ["crate", 8.3, 8], ["crate", 8.3, 11], ["stone", 12.2, 3]], keys: [[10, 120, "ArrowRight"], [130, 170, "ArrowLeft"], [180, 195, " "], [210, 280, "ArrowRight"]] },
+    conveyor: { tiles: [[5,16,"solid:wind-e",5],[11,16,"solid:wind-w",4]], actors: [["player", 6.3, 15], ["crate", 8.2, 15], ["crate", 12.4, 15], ["stone", 5.5, 13]], keys: [[100, 140, "ArrowLeft"], [180, 200, " "]] },
+    bomb: { tiles: [[6,15,"solid:none",1],[8,15,"solid:none",1]], actors: [["player", 3.3, 15], ["bomb", 7.3, 1.4]], keys: [[200, 230, "ArrowRight"]] },
+    trampoline: { tiles: [[9,16,"trampoline:none",2]], actors: [["player", 10.0, 4], ["tramp", 14.3, 14], ["crate", 14.3, 3]], keys: [[140, 150, " "]] },
+    sticky: { tiles: [[9,6,"solid:sticky",1],[9,7,"solid:sticky",1],[9,8,"solid:sticky",1],[9,9,"solid:sticky",1],[9,10,"solid:sticky",1],[9,11,"solid:sticky",1],[9,12,"solid:sticky",1],[9,13,"solid:sticky",1],[9,14,"solid:sticky",1],[9,15,"solid:sticky",1]],
+      actors: [["player", 3.3, 15]], keys: [[10, 150, "ArrowRight"], [30, 40, " "], [90, 100, " "], [160, 230, "ArrowLeft"]] },
+    slippery: { tiles: [[1,16,"solid:slippery",16],[12,15,"solid:none",1]], actors: [["player", 3.3, 15], ["crate", 6.4, 15]], keys: [[10, 80, "ArrowRight"], [100, 130, "ArrowLeft"], [140, 150, " "], [170, 220, "ArrowRight"]] },
+  };
+  const CW = { "wind-n": "wind-e", "wind-e": "wind-s", "wind-s": "wind-w", "wind-w": "wind-n" };
+  const CCW = { "wind-n": "wind-w", "wind-w": "wind-s", "wind-s": "wind-e", "wind-e": "wind-n" };
+  const BUILDQ = `(spec, mode)=>{
+    if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; window.__seed(777);
+    suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false;
+    gravityEnabled=true; gravityDir=({down:'down',cw:'left',ccw:'right'})[mode];
+    const R=576, OX=3;
+    const cell=(u,v)=> mode==='down' ? [OX+u, v] : mode==='cw' ? [OX+(17-v), u] : [OX+v, 17-u];
+    const FL = mode==='cw' ? ${JSON.stringify(CW)} : mode==='ccw' ? ${JSON.stringify(CCW)} : {};
+    const mapKey=k=>{ const [g,m]=k.split(':'); return g+':'+(FL[m]||m); };
+    const put=(u,v,key)=>{ const [x,y]=cell(u,v); board[y][x]=mapKey(key); };
+    for(let i=0;i<18;i++){ put(i,0,'solid:none'); put(i,17,'solid:none'); put(0,i,'solid:none'); put(17,i,'solid:none'); }
+    for(const [u,v,key,len] of spec.tiles) for(let i=0;i<len;i++) put(u+i,v,key);
+    // the floor of the local frame (row 16 filled unless the scenario provides its own)
+    if(!spec.tiles.some(t=>t[1]===16)) for(let u=1;u<17;u++) put(u,16,'solid:none');
+    for(const [kind,cu,cv] of spec.actors){ const pu=cu*TILE+TILE/2, pv=cv*TILE+TILE/2;
+      const X = mode==='down' ? OX*TILE+pu : mode==='cw' ? OX*TILE+(R-pv) : OX*TILE+pv;
+      const Y = mode==='down' ? pv : mode==='cw' ? pu : R-pu;
+      if(kind==='player'){ selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(X,Y); }
+      else placeCarryableActor({crate:PUSHABLE_DEF_ID,stone:LARGE_STONE_DEF_ID,bomb:CARRY_BOMB2_DEF_ID,tramp:CARRY_TRAMPOLINE_DEF_ID}[kind],X,Y); }
+    enterPlayMode(); playReadyUntil=null; lastT=window.__T; return mode; }`;
+  const RUNQ = `(spec, frames)=>{
+    const held=new Set(); const out=[]; const keysOf=k=>{ const want=new Set(); for(const [a,b,key] of spec.keys) if(k>=a&&k<b) want.add(key);
+      for(const h of [...held]) if(!want.has(h)){ window.dispatchEvent(new KeyboardEvent('keyup',{key:h,bubbles:true})); held.delete(h); }
+      for(const w of want) if(!held.has(w)){ window.dispatchEvent(new KeyboardEvent('keydown',{key:w,bubbles:true})); held.add(w); } };
+    for(let k=0;k<frames;k++){ window.__sim(1,()=>keysOf(k)); out.push(actors.map(a=>[a.x-3*TILE,a.y,a.vx,a.vy,a.grounded?1:0,a.w,a.h])); }
+    for(const h of [...held]) window.dispatchEvent(new KeyboardEvent('keyup',{key:h,bubbles:true}));
+    return { out, board: board.map(r=>r.slice(3,21)) }; }`;
+  for (const [name, spec] of Object.entries(QS)) {
+    const runs = {};
+    for (const mode of ["down", "cw", "ccw"]) { const q = await open(browser, NEW); await q.page.evaluate(SCHEDULE);
+      await q.page.evaluate(`window.__ev(${JSON.stringify(BUILDQ)})(${JSON.stringify(spec)},${JSON.stringify(mode)})`);
+      runs[mode] = await q.page.evaluate(`window.__ev(${JSON.stringify(RUNQ)})(${JSON.stringify(spec)},330)`); if (q.errors.length) throw new Error(q.errors[0]); await q.ctx.close(); }
+    const R = 576;
+    for (const mode of ["cw", "ccw"]) {
+      const A = runs.down, B = runs[mode]; let maxd = 0, worst = -1, moved = 0;
+      for (let k = 0; k < A.out.length; k++) {
+        if (A.out[k].length !== B.out[k].length) { maxd = Infinity; worst = k; break; }
+        for (let i = 0; i < A.out[k].length; i++) { const a = A.out[k][i], b = B.out[k][i];
+          // a = upright (x,y,vx,vy,_,w,h); expected = the same state turned a quarter turn
+          const e = mode === "cw" ? [R - a[1] - a[6], a[0], -a[3], a[2]] : [a[1], R - a[0] - a[5], a[3], -a[2]];
+          const d = Math.max(Math.abs(e[0] - b[0]), Math.abs(e[1] - b[1]), Math.abs(e[2] - b[2]), Math.abs(e[3] - b[3]));
+          if (d > maxd) { maxd = d; worst = k; } }
+      }
+      for (let k = 0; k < A.out.length; k++) for (let i = 0; i < Math.min(A.out[k].length, A.out[0].length); i++) moved = Math.max(moved, Math.abs(A.out[k][i][0] - A.out[0][i][0]) + Math.abs(A.out[k][i][1] - A.out[0][i][1]));
+      ok(maxd < 1e-6, `B2: ${name} (${mode === "cw" ? "left" : "right"} gravity): 330 frames mirror the upright run exactly (max difference ${maxd.toExponential(2)} px at frame ${worst}; something moved ${moved.toFixed(0)} px)`);
+      let boardOk = true; const MP = mode === "cw" ? CW : CCW;
+      const rotk = k => { if (!k) return null; const [g, m] = k.split(":"); return g + ":" + (MP[m] || m); };
+      for (let v = 0; v < 18 && boardOk; v++) for (let u = 0; u < 18; u++) { const a = A.board[v][u]; const [x, y] = mode === "cw" ? [17 - v, u] : [v, 17 - u]; if ((rotk(a) || null) !== (B.board[y][x] || null)) { boardOk = false; break; } }
+      ok(boardOk, `B2: ${name} (${mode === "cw" ? "left" : "right"}): boards end as turned copies`);
+      ok(moved > 30, `B2: ${name} (${mode === "cw" ? "left" : "right"}): the scenario actually moves things`);
+    }
+  }
+
   await browser.close();
   console.log(`\n${pass} passed, ${fails.length} failed`); if (fails.length) { console.log(fails.join("\n")); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });
