@@ -75,6 +75,7 @@
   #statusRow #roomTabRow::-webkit-scrollbar { display: none; }
   #statusRow #roomTabRow > * { flex: 0 0 auto; }
   #statusRow #cameraPanRow { flex: 0 0 auto; }
+  #gravIndicator { display: inline-block; width: 24px; height: 24px; line-height: 22px; margin-left: 8px; text-align: center; font-size: 16px; font-weight: bold; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; vertical-align: middle; }
   #statusRow #hud { flex: 0 0 auto; white-space: nowrap; margin-left: 0; }
   #statusRow #autosaveHint { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
   #gameCanvas {
@@ -587,6 +588,7 @@
     <div>
       <div class="section-title featured">Game rules</div>
       <div class="swatch-row" id="gameRuleSwatches"></div>
+      <div class="swatch-row" id="gravityDirRow" style="display:none;"></div>
       <div class="section-title" style="margin-top:10px;">Camera</div>
       <div class="swatch-row" id="cameraSwatches"></div>
     </div>
@@ -711,7 +713,7 @@
     <div class="toolbar" id="statusRow">
       <div class="toolbar" id="roomTabRow"></div>
       <span id="sizeStepper" title="Board size" style="display:none;"><button class="tbtn" id="sizeDownBtn" aria-label="Smaller board" title="Smaller board">−</button><span id="sizeLabel"></span><button class="tbtn" id="sizeUpBtn" aria-label="Bigger board" title="Bigger board">+</button></span>
-      <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span></div>
+      <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span><span id="gravIndicator" style="display:none;"></span></div>
     </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
     <div class="toolbar" id="cameraPanRow" style="display:none;">
@@ -1366,6 +1368,7 @@
   // Tuned to match continuous-motion-test.html's own validated numbers for a 32px tile
   // (gravity/jump/accel/friction/max-fall come straight from that prototype); everything
   // else here is the same 2x scale-up from the previous 16px-tile pass.
+  const GRAVITY_DIRS = ["down", "up"]; // which way gravity can pull (a room rule, only meaningful while gravity is on)
   const GRAVITY = 1450;           // px/s^2, on globally once any gravity piece is placed —
                                    // slowed slightly from the prototype's own 1800 on playtest feedback
   const JUMP_VELOCITY = -620;    // px/s upward impulse, only while grounded and gravity is on
@@ -1697,6 +1700,7 @@
   // keeps reading/writing these same globals exactly as before — activateRoom() is what hot-swaps
   // them to a different room's own values, the same pattern board/actors/startPos already use.
   let gravityEnabled = false;
+  let gravityDir = "down"; // per room: which way gravity pulls while gravityEnabled ("down" or "up"; see GRAVITY_DIRS)
   let wrapHEnabled = false;
   let wrapVEnabled = false;
   // v2.17: "fixed" | "follow" | "runner" — see CAMERA_MODES/selectCameraMode(). Also per-room,
@@ -1804,7 +1808,7 @@
     for (let y = 0; y < ROWS; y++) { b.push(new Array(BOARD_MAX_COLS).fill(null)); bg.push(new Array(BOARD_MAX_COLS).fill(null)); cb.push(new Array(BOARD_MAX_COLS).fill(null)); gs.push(new Array(BOARD_MAX_COLS).fill(null)); gr.push(new Array(BOARD_MAX_COLS).fill(0)); }
     return {
       id: nextRoomId++, name, board: b, backgroundBoard: bg, colorBoard: cb, groundSkinBoard: gs, groundSkinRotationBoard: gr, actors: [], startPos: { x: 0, y: 0 },
-      gravityEnabled: false, wrapHEnabled: false, wrapVEnabled: false, cameraMode: "fixed", editorPanCol: 0
+      gravityEnabled: false, gravityDir: "down", wrapHEnabled: false, wrapVEnabled: false, cameraMode: "fixed", editorPanCol: 0
     };
   }
   // Pads every row of a room's 5 board layers out to BOARD_MAX_COLS — for a board wholesale
@@ -1834,7 +1838,7 @@
       outgoing.board = board; outgoing.backgroundBoard = backgroundBoard; outgoing.colorBoard = colorBoard;
       outgoing.groundSkinBoard = groundSkinBoard; outgoing.groundSkinRotationBoard = groundSkinRotationBoard;
       outgoing.actors = actors; outgoing.startPos = startPos;
-      outgoing.gravityEnabled = gravityEnabled; outgoing.wrapHEnabled = wrapHEnabled; outgoing.wrapVEnabled = wrapVEnabled;
+      outgoing.gravityEnabled = gravityEnabled; outgoing.gravityDir = gravityDir; outgoing.wrapHEnabled = wrapHEnabled; outgoing.wrapVEnabled = wrapVEnabled;
       outgoing.cameraMode = cameraMode; outgoing.editorPanCol = editorPanCol;
     }
     currentRoomId = roomId;
@@ -1842,7 +1846,7 @@
     board = incoming.board; backgroundBoard = incoming.backgroundBoard; colorBoard = incoming.colorBoard;
     groundSkinBoard = incoming.groundSkinBoard; groundSkinRotationBoard = incoming.groundSkinRotationBoard;
     actors = incoming.actors; startPos = incoming.startPos;
-    gravityEnabled = incoming.gravityEnabled; wrapHEnabled = incoming.wrapHEnabled; wrapVEnabled = incoming.wrapVEnabled;
+    gravityEnabled = incoming.gravityEnabled; gravityDir = incoming.gravityDir || "down"; wrapHEnabled = incoming.wrapHEnabled; wrapVEnabled = incoming.wrapVEnabled;
     cameraMode = incoming.cameraMode; editorPanCol = incoming.editorPanCol;
     cameraX = 0;
     cameraFollowSnapNeeded = true;
@@ -2035,7 +2039,7 @@
       room.board = board; room.backgroundBoard = backgroundBoard; room.colorBoard = colorBoard;
       room.groundSkinBoard = groundSkinBoard; room.groundSkinRotationBoard = groundSkinRotationBoard;
       room.actors = actors; room.startPos = startPos;
-      room.gravityEnabled = gravityEnabled; room.wrapHEnabled = wrapHEnabled; room.wrapVEnabled = wrapVEnabled;
+      room.gravityEnabled = gravityEnabled; room.gravityDir = gravityDir; room.wrapHEnabled = wrapHEnabled; room.wrapVEnabled = wrapVEnabled;
       room.cameraMode = cameraMode; room.editorPanCol = editorPanCol;
     }
   }
@@ -2329,6 +2333,7 @@
         for (let y = 0; y < ROWS; y++) r.groundSkinRotationBoard.push(new Array(COLS).fill(0));
       }
       if (r.gravityEnabled === undefined) r.gravityEnabled = snap.gravityEnabled || false;
+      if (!GRAVITY_DIRS.includes(r.gravityDir)) r.gravityDir = "down"; // saves from before gravity direction: down
       if (r.wrapHEnabled === undefined) r.wrapHEnabled = snap.wrapHEnabled || false;
       if (r.wrapVEnabled === undefined) r.wrapVEnabled = snap.wrapVEnabled || false;
       if (r.cameraMode === undefined) r.cameraMode = "fixed";
@@ -5399,6 +5404,54 @@
       });
       container.appendChild(sw);
     });
+    renderGravityDirSwatches();
+  }
+  // Which way gravity pulls (a per-room rule like the switches above). Only shown while gravity is on;
+  // a click applies instantly to everything in the room. Left and right come with the next stage.
+  const GRAVITY_DIR_BUTTONS = [
+    { dir: "down", glyph: "↓", label: "down" }, { dir: "up", glyph: "↑", label: "up" },
+    { dir: "left", glyph: "←", label: "left" }, { dir: "right", glyph: "→", label: "right" }
+  ];
+  function renderGravityDirSwatches() {
+    const row = document.getElementById("gravityDirRow");
+    if (!row) return;
+    row.style.display = gravityEnabled ? "" : "none";
+    row.innerHTML = "";
+    if (!gravityEnabled) return;
+    GRAVITY_DIR_BUTTONS.forEach(b => {
+      const usable = GRAVITY_DIRS.includes(b.dir), on = gravityDir === b.dir;
+      const sw = document.createElement("div");
+      sw.className = "swatch";
+      sw.dataset.dir = b.dir;
+      sw.style.background = on ? PLAYER_COLOR : "#2f3140";
+      sw.style.opacity = usable ? "1" : "0.35";
+      sw.style.cursor = usable ? "pointer" : "not-allowed";
+      sw.title = usable ? "Gravity pulls " + b.label : "Gravity pulls " + b.label + " (coming soon)";
+      const g = document.createElement("div");
+      g.style.fontSize = "22px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = b.glyph;
+      sw.appendChild(g);
+      if (usable) sw.addEventListener("click", () => setGravityDir(b.dir));
+      row.appendChild(sw);
+    });
+  }
+  function setGravityDir(dir) {
+    if (!GRAVITY_DIRS.includes(dir) || dir === gravityDir) return;
+    gravityDir = dir;
+    actors.forEach(a => { a.fallStartY = null; a.lastY = null; }); // a bomb's fall is measured along gravity; start over
+    log("Gravity now pulls " + dir + ".");
+    renderGameRuleSwatches();
+  }
+  // A small fixed-size arrow in the status strip (Play only, only when gravity isn't the ordinary down).
+  let gravIndicatorShown = null;
+  function updateGravIndicator() {
+    const el = document.getElementById("gravIndicator");
+    if (!el) return; // the standalone export has no status strip
+    const want = appMode === "play" && gravityOn() && gravityDir !== "down" ? gravityDir : "";
+    if (want === gravIndicatorShown) return;
+    gravIndicatorShown = want;
+    el.style.display = want ? "" : "none";
+    el.textContent = want === "up" ? "↑" : want === "left" ? "←" : want === "right" ? "→" : "";
+    el.title = want ? "Gravity pulls " + want : "";
   }
 
   // v2.17: a single mutually-exclusive choice, not two independent toggles — same swatch pattern
@@ -5832,6 +5885,10 @@
   // authoring choice, and a `switch` tile can flip the exact same value live during play —
   // both just read/write this one function's underlying state.
   function gravityOn() { return gravityEnabled; }
+  // +1 when "down" is +y on screen (the default and every room without a direction), -1 when gravity pulls up.
+  // Free-roam rooms always read +1. Every place that used to assume "falling = +y" multiplies by this, so at
+  // "down" the arithmetic is unchanged (x * 1 is exact).
+  function gravSign() { return gravityEnabled && gravityDir === "up" ? -1 : 1; }
 
   // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
   // relevant once wrap is switched on for that axis — otherwise that edge is just solid and
@@ -5866,7 +5923,7 @@
   // which never includes a solid tile the actor is resting ON TOP of (they don't overlap it,
   // they're flush against it). Needed for "standing on a slippery/hazard floor" checks.
   function cellsUnderneath(actor) {
-    const gy = Math.floor((actor.y + actor.h + 1) / TILE);
+    const gy = gravSign() > 0 ? Math.floor((actor.y + actor.h + 1) / TILE) : Math.floor((actor.y - 1) / TILE); // the row gravity pulls toward
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const cells = [];
     for (let cx = c0; cx <= c1; cx++) cells.push({ cx, cy: gy });
@@ -6093,7 +6150,7 @@
     const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
     const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
     const leftCol = Math.floor((actor.x - 1) / TILE), rightCol = Math.floor((actor.x + actor.w + 1) / TILE);
-    const topRow = Math.floor((actor.y - 1) / TILE);
+    const topRow = gravSign() > 0 ? Math.floor((actor.y - 1) / TILE) : Math.floor((actor.y + actor.h + 1) / TILE); // the side AWAY from gravity
     for (let cy = r0; cy <= r1; cy++) { if (isSticky(leftCol, cy) || isSticky(rightCol, cy)) return true; }
     for (let cx = c0; cx <= c1; cx++) { if (isSticky(cx, topRow)) return true; }
     return false;
@@ -6130,8 +6187,8 @@
   function applyBouncyWallKick(actor, dir, jumpHeld) {
     if (Math.abs(actor.vx) < BOUNCY_WALL_KICK) actor.vx = dir * BOUNCY_WALL_KICK;
     actor.bouncyCooldown = 350;
-    actor.vy -= BOUNCY_WALL_LIFT;
-    if (jumpHeld) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
+    actor.vy -= BOUNCY_WALL_LIFT * gravSign();
+    if (jumpHeld) { actor.vy += JUMP_VELOCITY * gravSign(); sounds.jump(); }
   }
 
   function resolveAxis(actor, axis, dt) {
@@ -6219,7 +6276,7 @@
         // it from above — bumping its side while just walking up next to it, or bonking its
         // underside, stops you like any other solid wall and nothing more. Captured before the
         // y-branch below resets vy, since that's the only place the original direction survives.
-        const steppedOnTop = axis === "y" && actor.vy > 0;
+        const steppedOnTop = axis === "y" && actor.vy * gravSign() > 0;
         // Captured BEFORE either axis branch below mutates vx/vy (zeroing or reflecting them) —
         // the one snapshot of "how fast was this actor actually moving at the moment of this
         // collision," reused below to gate the new impact-detonates-a-bomb reaction on real speed
@@ -6250,14 +6307,16 @@
             if (bouncy && boingHeard) bounceSound();
           }
         } else {
-          if (actor.vy > 0) {
-            actor.y = cy * TILE - actor.h;
+          const gs = gravSign();
+          const fall = actor.vy * gs; // > 0: moving toward the surface gravity pulls it to
+          if (fall > 0) {
+            actor.y = gs > 0 ? cy * TILE - actor.h : (cy + 1) * TILE;
             // A resting object on a bouncy floor used to be re-bounced every single frame (gravity adds
             // a sliver of vy, the reflection flips it, repeat), which looked still but sounded like an
             // endless boing — reflect only real impacts, anything slower just lands. The player on a
             // Trampoline keeps its guaranteed launch, so it is exempt.
-            const settles = bouncy && !(isTrampolineGeom && actor.isPlayer) && actor.vy < BOUNCE_REST_SPEED;
-            triggerImpact(actor, "y", actor.vy, bouncy && !settles);
+            const settles = bouncy && !(isTrampolineGeom && actor.isPlayer) && fall < BOUNCE_REST_SPEED;
+            triggerImpact(actor, "y", fall, bouncy && !settles);
             if (bouncy && !settles) {
               actor.vy = -actor.vy * restitution;
               // The Trampoline object's whole "extra jumping power" pitch: reflection alone still
@@ -6265,17 +6324,17 @@
               // enforce a real minimum launch on top — always a satisfying bounce, never a dud.
               // Only the player gets the guaranteed minimum launch: for a crate/bomb/ball it handed back
               // MORE energy than it landed with, so objects on a trampoline bounced forever.
-              if (isTrampolineGeom && actor.isPlayer) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+              if (isTrampolineGeom && actor.isPlayer) actor.vy = -gs * Math.max(-actor.vy * gs, TRAMPOLINE_LAUNCH_SPEED);
               // Same "jump off it for more lift" assist as a wall bounce, plain-bouncy-floor only —
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
-              if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY; sounds.jump(); }
+              if (isPlainBouncyHit && jumpHeldForBounce) { actor.vy += JUMP_VELOCITY * gs; sounds.jump(); }
               if (boingHeard) bounceSound();
             }
             else { actor.vy = 0; actor.grounded = true; }
-          } else if (actor.vy < 0) {
-            actor.y = (cy + 1) * TILE;
-            triggerImpact(actor, "y", actor.vy, bouncy);
+          } else if (fall < 0) {
+            actor.y = gs > 0 ? (cy + 1) * TILE : cy * TILE - actor.h;
+            triggerImpact(actor, "y", fall, bouncy);
             actor.vy = bouncy ? -actor.vy * restitution : 0;
             if (bouncy && boingHeard) bounceSound();
           }
@@ -6385,6 +6444,7 @@
     // mover just stays put (velocity cancelled) instead.
     const seatX = (nx) => { const ox = actor.x; actor.x = nx; if (actorBlockedByTiles(actor)) actor.x = ox; };
     const seatY = (ny) => { const oy = actor.y; actor.y = ny; if (actorBlockedByTiles(actor)) actor.y = oy; };
+    const gs = gravSign();
     for (const other of actors) {
       if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
@@ -6402,8 +6462,8 @@
           if (actor.vx > 0) { seatX(other.x - actor.w); actor.vx = 0; }
           else if (actor.vx < 0) { seatX(other.x + other.w); actor.vx = 0; }
         } else {
-          if (actor.vy > 0) { seatY(other.y - actor.h); actor.vy = 0; actor.grounded = true; }
-          else if (actor.vy < 0) { seatY(other.y + other.h); actor.vy = 0; }
+          if (actor.vy * gs > 0) { seatY(gs > 0 ? other.y - actor.h : other.y + other.h); actor.vy = 0; actor.grounded = true; }
+          else if (actor.vy * gs < 0) { seatY(gs > 0 ? other.y + other.h : other.y - actor.h); actor.vy = 0; }
         }
         continue;
       }
@@ -6426,14 +6486,14 @@
           if (blocked()) { other.x += delta; seatX(other.x + other.w); actor.vx = 0; }
         }
       } else {
-        if (actor.vy > 0) {
-          const delta = (actor.y + actor.h) - other.y;
-          other.y += delta;
-          if (blocked()) { other.y -= delta; seatY(other.y - actor.h); actor.vy = 0; actor.grounded = true; }
-        } else if (actor.vy < 0) {
-          const delta = (other.y + other.h) - actor.y;
-          other.y -= delta;
-          if (blocked()) { other.y += delta; seatY(other.y + other.h); actor.vy = 0; }
+        if (actor.vy * gs > 0) {
+          const delta = gs > 0 ? (actor.y + actor.h) - other.y : (other.y + other.h) - actor.y;
+          other.y += gs * delta;
+          if (blocked()) { other.y -= gs * delta; seatY(gs > 0 ? other.y - actor.h : other.y + other.h); actor.vy = 0; actor.grounded = true; }
+        } else if (actor.vy * gs < 0) {
+          const delta = gs > 0 ? (other.y + other.h) - actor.y : (actor.y + actor.h) - other.y;
+          other.y -= gs * delta;
+          if (blocked()) { other.y += gs * delta; seatY(gs > 0 ? other.y + other.h : other.y - actor.h); actor.vy = 0; }
         }
       }
     }
@@ -6460,8 +6520,9 @@
         if (actor.vx > 0) { actor.x = other.x - actor.w; actor.vx = 0; }
         else if (actor.vx < 0) { actor.x = other.x + other.w; actor.vx = 0; }
       } else {
-        if (actor.vy > 0) {
-          actor.y = other.y - actor.h;
+        const gs = gravSign(), fall = actor.vy * gs;
+        if (fall > 0) {
+          actor.y = gs > 0 ? other.y - actor.h : other.y + other.h;
           const actorDef = actorDefs[actor.defId];
           // v2.28: same widening as resolveAxis's tile-Trampoline branch — a thrown/dropped
           // physics object landing on a Trampoline OBJECT bounces too, not just the player/hazard
@@ -6471,16 +6532,16 @@
           const actorIsPhysicsObject = actorDef && isForceSusceptible(actorDef.temperament);
           const actorIsSteeringNPC = actorDef && isSteeringCharacter(actorDef.temperament);
           const bouncy = actor.isPlayer || actorIsPhysicsObject || actorIsSteeringNPC || (actorDef && actorDef.temperament === HAZARD_BALL_KIND);
-          const settles = bouncy && !actor.isPlayer && actor.vy < BOUNCE_REST_SPEED;
-          triggerImpact(actor, "y", actor.vy, bouncy && !settles);
+          const settles = bouncy && !actor.isPlayer && fall < BOUNCE_REST_SPEED;
+          triggerImpact(actor, "y", fall, bouncy && !settles);
           if (bouncy && !settles) {
             actor.vy = -actor.vy * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION);
-            if (actor.isPlayer) actor.vy = -Math.max(-actor.vy, TRAMPOLINE_LAUNCH_SPEED);
+            if (actor.isPlayer) actor.vy = -gs * Math.max(-actor.vy * gs, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (!actor.isPlayer) actor.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
             if (actor.isPlayer || actorIsPhysicsObject) sounds.trampolineBoing();
           } else { actor.vy = 0; actor.grounded = true; }
-        } else if (actor.vy < 0) { actor.y = other.y + other.h; actor.vy = 0; }
+        } else if (fall < 0) { actor.y = gs > 0 ? other.y + other.h : other.y - actor.h; actor.vy = 0; }
       }
     }
   }
@@ -6742,7 +6803,8 @@
       // An object the player just dropped/threw never crushes them (throwing at a wall drops it on your head),
       // and a fall has to be real: ~2 tiles, not a crate settling half a tile in a stack you just disturbed.
       const playerHandled = npcActor.safeUntil > gameNow() && npcActor.safeUntil - gameNow() <= SAFE_AFTER_HANDLING_MS; // (a stale value saved by an older session never counts)
-      if (!freshSpawn && !playerHandled && npcActor.vy > CRUSH_MIN_VY && npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2) {
+      const gsCrush = gravSign();
+      if (!freshSpawn && !playerHandled && npcActor.vy * gsCrush > CRUSH_MIN_VY && (gsCrush > 0 ? npcActor.y + npcActor.h / 2 < playerActor.y + playerActor.h / 2 : npcActor.y + npcActor.h / 2 > playerActor.y + playerActor.h / 2)) {
         triggerHazard(playerActor);
       }
     } else if (temperament === CARRY_CANNON2_KIND) {
@@ -6852,7 +6914,7 @@
     actor.flashTimer = 1;
     const speed = Math.hypot(actor.vx, actor.vy) || 1;
     const kx = away ? away.x : (speed > 1 ? -actor.vx / speed : 0);
-    const ky = away ? away.y : (speed > 1 ? -actor.vy / speed : -1);
+    const ky = away ? away.y : (speed > 1 ? -actor.vy / speed : -gravSign());
     actor.vx = kx * HAZARD_KNOCKBACK_SPEED;
     actor.vy = ky * HAZARD_KNOCKBACK_SPEED;
     actor.x += kx * 6; actor.y += ky * 6; // nudge clear of the hazard cell so it doesn't re-trigger
@@ -6948,7 +7010,7 @@
     if (actor.isPlayer) sounds.boing();
     const launchSpeed = BOUNCY_LAUNCH_SPEED;
     if (gravityOn()) {
-      actor.vy = -launchSpeed;
+      actor.vy = -launchSpeed * gravSign();
     } else {
       const speed = Math.hypot(actor.vx, actor.vy);
       if (speed > 10) {
@@ -7002,6 +7064,7 @@
       switchChannels[color] = !switchChannels[color];
       log((switchChannels[color] ? "Flip! " : "Flip back! ") + color + " channel " + (switchChannels[color] ? "on." : "off."));
     } else {
+      const gsPrev = gravSign(); // which way "up" was, for the weightless pop below
       gravityEnabled = !gravityEnabled;
       log(gravityEnabled ? "Flip! Gravity's on." : "Flip! Gravity's off.");
       renderGameRuleSwatches(); // the palette switch is the same shared value, so keep it in sync
@@ -7022,7 +7085,7 @@
       // very next frame instead caps the magnitude while preserving the diagonal ANGLE (it scales
       // vx/vy by the same factor), which is all "a real diagonal kick" actually needs.
       if (!gravityEnabled) {
-        actors.forEach(a => { a.vy -= GRAVITY_OFF_POP_SPEED; });
+        actors.forEach(a => { a.vy -= GRAVITY_OFF_POP_SPEED * gsPrev; });
       }
     }
   }
@@ -7832,10 +7895,10 @@
     // spot" fallback put a crate exactly on top of the player, which made the two ping-pong against
     // each other and could squeeze the player through a wall. No candidate fits -> keep carrying.
     const dropDir = player.facingDir || 1;
-    const feetY = player.y + player.h - obj.h;
+    const feetY = gravSign() > 0 ? player.y + player.h - obj.h : player.y;
     const cx = player.x + player.w / 2 - obj.w / 2;
     const reach = player.w / 2 + obj.w / 2 + 1;
-    const spots = [[cx + dropDir * reach, feetY], [cx - dropDir * reach, feetY], [cx, player.y - obj.h - 1]];
+    const spots = [[cx + dropDir * reach, feetY], [cx - dropDir * reach, feetY], [cx, gravSign() > 0 ? player.y - obj.h - 1 : player.y + player.h + 1]];
     const clear = ([sx, sy]) => {
       obj.x = sx; obj.y = sy;
       return !actorBlockedByTiles(obj)
@@ -7871,7 +7934,7 @@
     obj.x = player.x + player.w / 2 - obj.w / 2;
     obj.y = player.y + player.h / 2 - obj.h / 2;
     obj.vx = dir * speed;
-    obj.vy = -THROW_UPWARD_SPEED;
+    obj.vy = -THROW_UPWARD_SPEED * gravSign();
     // A thrown object's speed is deliberately stronger than the ordinary NPC_MAX_SPEED cap
     // stepActor's non-player branch clamps to every frame — without an exemption, that clamp
     // would flatten a real throw back down to a slow drift within the very next frame. Reusing
@@ -8125,9 +8188,11 @@
         // a player off the platform they had just reached. Without gravity `ballistic` ends at once, so the
         // cooldown still has to hold the line there.
         const shotLocksInput = inGravity ? !!actor.ballistic : actor.cannonCooldown > 0;
+        // Upside-down gravity: the character's left is the screen's right (Up/Space still means "away from the surface").
+        const mirrorLR = inGravity && gravSign() < 0 ? -1 : 1;
         if (!stuck && !shotLocksInput) {
           if (actor.digLock) { /* just dug through a side wall: held direction ignored until released */ }
-          else if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult;
+          else if (left && !right) ax += -MOVE_ACCEL * stickyMoveMult * mirrorLR; else if (right && !left) ax += MOVE_ACCEL * stickyMoveMult * mirrorLR;
           if (inGravity) {
             wantsJump = keys[" "] || up;
           } else {
@@ -8177,7 +8242,7 @@
         // so each axis clamps independently here
         if (!recentlyLaunched) actor.vx = Math.max(-effectiveCap, Math.min(effectiveCap, actor.vx));
         if (wantsJump && actor.grounded) {
-          actor.vy = JUMP_VELOCITY;
+          actor.vy = JUMP_VELOCITY * gravSign();
           actor.jumpCrouch = 1;
           sounds.jump();
         }
@@ -8202,13 +8267,14 @@
           // shape's own field default — so this is a no-op for every actor that was never stuck.
           const releaseScale = Math.min(1, actor.stickyReleaseT / STICKY_RELEASE_MS);
           actor.stickyReleaseT = Math.min(STICKY_RELEASE_MS, actor.stickyReleaseT + dt * 1000);
-          actor.vy += GRAVITY * releaseScale * dt;
+          const gsG = gravSign();
+          actor.vy += GRAVITY * releaseScale * dt * gsG;
           // vertical wind/fan/radial force still applies under gravity (e.g. a rising air current)
           // — gravity's own integration is a direct velocity add rather than accelInput/friction,
           // so this joins it the same way rather than through ay, which this branch never hands to
           // applyAxisFriction.
           actor.vy += ay * dt;
-          actor.vy = Math.min(actor.vy, MAX_FALL);
+          actor.vy = gsG > 0 ? Math.min(actor.vy, MAX_FALL) : Math.max(actor.vy, -MAX_FALL);
         }
       } else {
         applyAxisFriction(actor, "y", dt, ay);
@@ -8311,20 +8377,22 @@
       if (isCarryBombKind(temperament) && gravityOn() && !actor.detonating && !actor.carried) {
         // A teleport (Reset to start, Play restart, a drag, a door) is not a fall: forget the old
         // fall origin whenever the actor jumped more than two tiles between ticks.
-        if (actor.lastY != null && Math.abs(actor.y - actor.lastY) > TILE * 2) actor.fallStartY = actor.y;
+        // fallStartY is kept in "distance along gravity" terms (y when gravity points down, -y when up)
+        const gsB = gravSign(), along = gsB > 0 ? actor.y : -actor.y;
+        if (actor.lastY != null && Math.abs(actor.y - actor.lastY) > TILE * 2) actor.fallStartY = along;
         actor.lastY = actor.y;
-        const landed = vyBefore > 0 && (actor.grounded || actor.vy <= 0);
-        if (landed && actor.fallStartY != null && actor.y - actor.fallStartY > BOMB_FALL_DETONATE_TILES * TILE) {
+        const landed = vyBefore * gsB > 0 && (actor.grounded || actor.vy * gsB <= 0);
+        if (landed && actor.fallStartY != null && along - actor.fallStartY > BOMB_FALL_DETONATE_TILES * TILE) {
           detonateCarriedBombAt(currentRoomId, actor.id);
         }
-        if (actor.vy < 0 || actor.grounded || actor.fallStartY == null) actor.fallStartY = actor.y;
+        if (actor.vy * gsB < 0 || actor.grounded || actor.fallStartY == null) actor.fallStartY = along;
       }
     }
     checkActorContacts(actor, actors);
 
     // fell off the world (only meaningful once gravity/holes exist) — recycle to start, no
     // fail-state semantics, matching the throwaway prototype this folds in
-    if (actor.isPlayer && actor.y > ROWS * TILE + 200) {
+    if (actor.isPlayer && (actor.y > ROWS * TILE + 200 || (gravityOn() && gravSign() < 0 && actor.y + actor.h < -200))) {
       actor.x = startPos.x; actor.y = startPos.y; actor.vx = 0; actor.vy = 0;
     }
   }
@@ -8701,7 +8769,7 @@
       const carried = actors.find(a => a.id === player.carrying);
       if (carried) {
         carried.x = player.x + player.w / 2 - carried.w / 2;
-        carried.y = player.y - carried.h - 4;
+        carried.y = gravSign() > 0 ? player.y - carried.h - 4 : player.y + player.h + 4; // glued to the side away from gravity
         carried.vx = 0; carried.vy = 0;
       } else {
         player.carrying = null;
@@ -8736,7 +8804,7 @@
       const riderIds = [];
       for (const rider of snapshot) {
         if (rider.id === platform.id || rider.carried) continue;
-        if (Math.abs((rider.y + rider.h) - platform.y) < RIDE_CONTACT_EPSILON &&
+        if (Math.abs(gravSign() > 0 ? (rider.y + rider.h) - platform.y : rider.y - (platform.y + platform.h)) < RIDE_CONTACT_EPSILON &&
             rider.x < platform.x + platform.w && rider.x + rider.w > platform.x) {
           riderIds.push(rider.id);
         }
@@ -9195,7 +9263,7 @@
       board: cloned.board, backgroundBoard: cloned.backgroundBoard, colorBoard: cloned.colorBoard,
       groundSkinBoard: cloned.groundSkinBoard, groundSkinRotationBoard: cloned.groundSkinRotationBoard,
       actors: cloned.actors, startPos: cloned.startPos,
-      gravityEnabled: source.gravityEnabled, wrapHEnabled: source.wrapHEnabled, wrapVEnabled: source.wrapVEnabled,
+      gravityEnabled: source.gravityEnabled, gravityDir: source.gravityDir || "down", wrapHEnabled: source.wrapHEnabled, wrapVEnabled: source.wrapVEnabled,
       cameraMode: source.cameraMode, editorPanCol: source.editorPanCol
     };
     rooms.push(newRoom);
@@ -10724,10 +10792,16 @@
       ctx.restore();
     }
   }
+  function flipArtRows(art) {
+    const out = new Array(ART * ART);
+    for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) out[y * ART + x] = art[(ART - 1 - y) * ART + x];
+    return out;
+  }
   function renderActors(ctx, actorsArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = gameNow();
+    const gsR = gravSign(); // upside-down gravity turns characters over (objects keep their art)
     // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
@@ -10766,7 +10840,7 @@
         }
         if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
         if (!actor.grounded) {
-          const fall = Math.max(0, Math.min(1, actor.vy / MAX_FALL));
+          const fall = Math.max(0, Math.min(1, actor.vy * gsR / MAX_FALL));
           sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
         }
         // v2.15: an idle "spin" for defs that opt in (see COIN_ART) — reuses this same continuous
@@ -10834,7 +10908,12 @@
       const centerX = actor.x - viewOffsetPx + actor.w / 2 + t.ox * TILE;
       const centerY = actor.y + actor.h / 2 + t.oy * TILE;
       ctx.translate(centerX, centerY);
-      if (t.rot) ctx.rotate(t.rot);
+      // Half-turn for a character whose feet are on the ceiling: its rows reversed (drawn upright, so the
+      // pixel grid and seams are exactly the ordinary ones) plus a mirrored lean is the same picture as
+      // rotating 180 degrees once its left/right controls are swapped.
+      const turned = gsR < 0 && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
+      if (turned) art = flipArtRows(art);
+      if (t.rot) ctx.rotate(turned ? -t.rot : t.rot);
       ctx.scale(t.sx, t.sy);
       artCacheOff++;
       drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
@@ -12058,6 +12137,7 @@
   }
   function surpriseApplySpec(spec, resetCamera, seed) {
     gravityEnabled = spec.gravity;
+    gravityDir = "down"; // the templates are built for ordinary gravity
     wrapVEnabled = spec.wrapV;
     wrapHEnabled = spec.wrapH && cameraMode !== "runner";
     if (resetCamera) { cameraMode = "fixed"; editorPanCol = 0; }
@@ -12335,7 +12415,7 @@
     const floorRow = ROWS - 1, cols = roomCols();
     for (let x = 0; x < cols; x++) board[floorRow][x] = gameplayKey("solid", "none");
     board[floorRow - 1][cols - 3] = gameplayKey("goal", "none");
-    gravityEnabled = true;
+    gravityEnabled = true; gravityDir = "down";
     const saved = selectedActorDefId;
     selectedActorDefId = playerDefId;
     placeNewActor(2 * TILE + TILE / 2, floorRow * TILE - ACTOR_SIZE / 2);
@@ -12443,7 +12523,7 @@
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
-      gravityOn, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
+      gravityOn, gravSign, updateGravIndicator, flipArtRows, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
@@ -12543,6 +12623,7 @@
       `const CANNON_LOAD_MS = ${CANNON_LOAD_MS};`,
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
+      `const GRAVITY_DIRS = ${JSON.stringify(GRAVITY_DIRS)};`,
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
       `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
@@ -12681,6 +12762,7 @@
   // runtime source, called just below) populates these from whichever room is hot, the same way
   // the live editor's own globals work; the values here are placeholders until that first call.
   let gravityEnabled = false, wrapHEnabled = false, wrapVEnabled = false, cameraMode = "fixed", editorPanCol = 0;
+  let gravityDir = "down";
   let cameraX = 0;
   let cameraFollowSnapNeeded = true;
   let cameraShiftSide = null;
@@ -12851,6 +12933,7 @@
         tick(dt);
         tickDragCooldowns(dt);
       }
+      updateGravIndicator();
       renderGame();
     } catch (err) {
       // An uncaught throw here would otherwise silently stop requestAnimationFrame from ever

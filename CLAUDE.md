@@ -6682,3 +6682,50 @@ Presentation only. A swallowed thing is drawn as a **ghost** (`fxGhosts`, `spawn
 **Black hole sound**: `CHIP_DESIGNS.blackHole` (user-supplied per-frame data, 44 frames, ~0.7s; `sounds.blackHole`, limit 200ms/1 copy) replaces the splat for every black-hole capture (player, NPC, object). Never listened to by me; retune in the sound designer if needed.
 
 **Surprise Me always gives its room a player (fix)**: a surprise built into a room with no player (a new room tab from a whole-room event or "Create a new room", or any room while the project's player lives elsewhere) used to leave that room player-less ("your player lives in another room"). `surpriseApplySpec` now moves the project's one player into the surprise's room (`removeAllPlayerInstances()` then place, one undo puts it back). A room that already has a player is untouched. `tests/surprise.test.js` "new room option" now expects the player to be placed.
+
+## v2.52 Stage 1: gravity direction, "up" (a room rule; Stages 2-4 not done)
+
+**What it is.** `gravityDir` ("down" default, or "up"; `GRAVITY_DIRS`) is a per-room rule next to `gravityEnabled`, wired into every
+place that rule already lives: `createEmptyRoom`, `activateRoom` (both halves), `snapshotCurrentRoomState`, `duplicateRoom`,
+`restoreProjectSnapshot` (a missing or unknown value loads as "down", so every old save and embedded sample is unchanged), the Play
+snapshot (rooms are cloned wholesale), and the export (rooms in `GAME_DATA`; the template declares `let gravityDir`, `GRAVITY_DIRS` has a
+`constantsSource` line, `gravSign`/`updateGravIndicator`/`flipArtRows` are in `runtimeFunctions`). Surprise Me and the starter board reset it
+to "down" when they set gravity (their layouts are built for ordinary gravity; Stage 4 gives Surprise Me its own direction).
+**Palette:** under Game rules, four arrow buttons (`#gravityDirRow`, `renderGravityDirSwatches`) appear only while gravity is on; ↓ ↑ work and
+apply instantly (`setGravityDir`), ← → are shown dimmed ("coming soon"). **Play:** a small fixed-size arrow (`#gravIndicator`, in the HUD, updated
+once a frame) shows only when gravity is on and isn't down. The standalone export has no such element (its function returns early).
+
+**Approach, and a change from the Stage 0 recommendation.** Stage 0 recommended running everything in a rotated local frame. Reading the code
+again, that fails for one concrete reason: tile coordinates are used as KEYS and write targets (`digProgress`, `bombArmed`, `tileAnimState`,
+`board[cy][cx] = null` in dig/trap/bomb, locked doors, spawner state), so a half-turned frame would need every one of those mapped too.
+Instead the y-axis sites multiply by one sign, `gravSign()` (+1 down, -1 up; always +1 while gravity is off). `x * 1` is exact, so at "down" the
+arithmetic is bit-identical (proved below). Sites: gravity integration, MAX_FALL clamp, jump, `resolveAxis` y branch (land vs ceiling, bounce,
+trampoline minimum launch, jump assist, `steppedOnTop`), `applyBouncyWallKick`, `triggerBouncyLaunch`, `shovePushables`,
+`bounceOffTrampolineObjects`, `cellsUnderneath` (the row gravity pulls toward, used by conveyor/ice/mud under the feet), `isStuckToSticky` (the side
+away from gravity), the riding step in `tick()`, the carry-follow (carried object sits on the side away from gravity), drop spots, throw's upward
+arc, the default hazard knockback, the crush rule, the bomb >6-tile fall rule (`fallStartY` is now "distance along gravity"), the gravity-off pop
+(away from the old gravity), the fell-off-the-world check, and the sprite. Stage 2 (left/right) swaps axes, so it will have to generalize these same
+sites from a sign to an axis: expect that to be the big job, not a copy of this.
+
+**Controls (character-relative).** Keys keep their meaning for the character: Up/W/Space = jump away from the surface, Down = toward it (dig).
+Only Left/Right are mirrored on screen while gravity is up (`mirrorLR` in `stepActor`), so Left key = screen right. Hold keys across a flip and the
+meaning follows the current direction. Chasers/wanderers steer in screen terms as before.
+
+**Sprites.** Characters (the player, wanderer/chaser/fleer, stationary NPCs) are drawn with their rows reversed (`flipArtRows`) and a mirrored
+lean; objects (crates, bombs, collectibles...) keep their art. Rows are reversed in data and drawn upright rather than flipped with
+`ctx.scale(…, -1)`, because the engine's +0.5px cell overlap would otherwise move to the opposite edge and the flipped sprite would not be the
+ordinary sprite's mirror pixel for pixel. Characters are still drawn at fractional positions like everyone else.
+
+**Found, not changed (not caused by gravity direction).** Cells are scanned in ascending x, so when an actor's box spans two blocking cells the
+left one resolves first. A 180° turn reverses that order, so walking onto a Trampoline floor tile launches at a different moment depending on
+which side you come from (also true today in down gravity). Tie-sensitive discrete events (a crossing that lands within 1e-12 px of a cell edge)
+can land one frame apart between a world and its half-turned copy; the invariance scenarios avoid exact ties.
+
+**Not supported yet in non-down rooms:** Movers ("Traffic and floaters", sample-only) were not looked at; nothing was changed for them.
+
+**Tests.** `node tests/gravdir.test.js <baseline index.html>` (A: every sample, 625 frames, every actor x/y/vx/vy/grounded + board + score +
+lives + camera hashed per frame, baseline v2.51 vs new at "down" = identical; B: eight half-turn scenarios — platform run/jump, bouncy floor,
+crate+stone stack, conveyors, falling bomb with chain blast, dropped trampoline, sticky wall, cannon, ice — the half-turned world with up gravity and
+the SAME key presses mirrors the upright one to ~1e-12 px for 330 frames, with the boards mirrored at the end). `node tests/gravdir_ui.test.js` (buttons,
+real Play, indicator, controls, save/load/old save/unknown value, rooms, duplicate, Play round trip, exported game played with up gravity, flipped
+sprite cell by cell and pointer accuracy at DPR 1, 1.5, 2).
