@@ -11,7 +11,7 @@ module.exports = function hook() { return `
   { const o = triggerPlayerGravityWellCapture; triggerPlayerGravityWellCapture = function () { __ev("blackHole"); return o.apply(this, arguments); }; }
   { const o = attachCarryable; attachCarryable = function () { __ev("carry"); return o.apply(this, arguments); }; }
   { const o = triggerHazard; triggerHazard = function () { const r = o.apply(this, arguments); if (r) __ev("hit"); return r; }; }
-  { const o = triggerNpcCatch; triggerNpcCatch = function () { __ev("hit"); return o.apply(this, arguments); }; }
+  { const o = triggerNpcCatch; triggerNpcCatch = function () { __ev("hit"); __ev("npcHit"); return o.apply(this, arguments); }; }
   { const o = triggerNpcLethalReset; triggerNpcLethalReset = function () { __ev("respawn"); return o.apply(this, arguments); }; }
   { const o = respawnAtCheckpoint; respawnAtCheckpoint = function () { __ev("respawn"); return o.apply(this, arguments); }; }
   { const o = triggerFlip; triggerFlip = function () { __ev("buttonPress"); return o.apply(this, arguments); }; }

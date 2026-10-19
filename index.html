@@ -11558,10 +11558,10 @@
       legend: {"B": "bounce", "s": "spawner:s", "c": "crate", "P": "player", "=": "wall", "u": "reward", "p": "plate"},
       rows: ["...s.......", ".c.........", "...p.......", "...B...B...", ".B...B.....", "...B...B...", ".B...B..===", "........P.u", "........==="] },
     { id: "fallforever", category: "loop", closed: false, stooge: "w", names: ["Falling Forever", "The Bottomless Room", "Are We There Yet", "Elevator Without Floors"],
-      room: { gravity: "on", wrapH: false, wrapV: true }, requires: ["trampoline"], discover: "o",
-      expect: { fact: "everyone falls out the bottom and drops back in from the top", check: "wrap", needsInput: false, selfStart: true },
-      legend: {"P": "player", "w": "pet", "c": "crate", "t": "tramp", "o": "reward"},
-      rows: ["..P....w....", "............", "...c......t.", "............", ".t.......c..", "...w....o...", "............"] },
+      room: { gravity: "on", dir: "any", wrapH: true, wrapV: true }, requires: ["trampoline", "button"], discover: "g",
+      expect: { fact: "everyone falls out one side and drops back in from the other; a random gravity switch turns the fall", check: "wrap", needsInput: false, selfStart: true },
+      legend: {"P": "player", "w": "pet", "c": "crate", "t": "tramp", "o": "reward", "g": "gbutton:random"},
+      rows: ["..P....w....", "..g.........", "...c......t.", "............", ".t.......c..", "...w....o...", "............"] },
     { id: "rink", category: "loop", closed: false, stooge: "w", names: ["Skating Rink", "Zamboni Day", "Slip And Slide Society", "Curling Without The Curlers"],
       room: { gravity: "on", wrapH: true, wrapV: false }, requires: ["slippery", "cannon"], discover: "c",
       expect: { fact: "a crate drops into the cannon, lands on the ice and everyone slides around", check: "cannon", needsInput: false, selfStart: true },
@@ -11654,10 +11654,15 @@
       legend: { "=": "wall", u: "button0", P: "player", w: "pet", o: "reward" },
       rows: ["............", "............", "............", "....w.......", "............", "Puuuuuuuuuuo", "============"] },
     { id: "alltramps", category: "nonsense", nonsense: true, closed: true, stooge: "wP", names: ["Oops, All Trampolines", "The Bounce Box", "Springy Prison", "Boing Boing Boing"],
-      room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["trampoline"], discover: "o",
+      room: { gravity: "on", dir: "any", wrapH: false, wrapV: false }, requires: ["trampoline"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { t: "tramp", P: "player", c: "crate", w: "pet", o: "reward" },
       rows: ["tttttttttttt", "t..........t", "t.....c.w..t", "t....o.....t", "t..........t", "t.P......c.t", "tttttttttttt"] },
+    { id: "upsidedown", category: "toy", closed: true, stooge: "wP", names: ["The Upside-Down Picnic", "Ceiling Party", "Everything Is Stuck Up Here", "Look Up"],
+      room: { gravity: "on", dir: "up", wrapH: false, wrapV: false }, requires: ["button", "trampoline"], discover: "g",
+      expect: { fact: "needs a push", check: null, needsInput: true },
+      legend: { "=": "wall", P: "player", c: "crate", w: "pet", o: "reward", t: "tramp", g: "gbutton:down" },
+      rows: ["============", "=.Pw..c..o.=", "=..........=", "=....g.....=", "=..........=", "=.....t....=", "============"] },
     { id: "spawnerwar", category: "nonsense", nonsense: true, closed: false, stooge: "w", names: ["Crate Fountain War", "Spawner Standoff", "Two Crate Cannons", "Cold War Of Boxes"],
       room: { gravity: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: false }, requires: ["spawner", "lava"], discover: "o",
       expect: { fact: "both spawners keep firing crates at each other (two or more live spawns)", check: "spawnCount2", needsInput: false },
@@ -11704,10 +11709,10 @@
       legend: {"i": "slick", "=": "wall", "k": "cannon:ne", "c": "crate", "w": "pet", "P": "player"},
       rows: ["........................", "........................", "........................", "........................", "........................", "........................", "........................", "........................", "........................", ".......c.........w......", "....iiiiiii...iiiiiii...", "........................", "..c.....................", "........................", "........................", "..k.......w...c...w.P...", "iiiiiiiiiiiiiiiiiiiiiiii", "========================"] },
     { id: "roulette2", category: "room", closed: true, stooge: "wP", names: ["The Gravity Roulette", "Spin The Floor", "Which Way Is Down"],
-      room: {"gravity": "on", "wrapH": false, "wrapV": false}, requires: ["button"], discover: "o",
+      room: {"gravity": "on", "wrapH": false, "wrapV": false}, requires: ["button"], discover: "g",
       expect: {"fact": "a crate drops onto a gravity button and flips the room, and the walkers keep pressing them", "check": "buttonPress", "needsInput": false, "selfStart": true},
-      legend: {"=": "wall", "u": "button0", "c": "crate", "w": "pet", "P": "player", "o": "reward"},
-      rows: ["========================", "=......u....u...u......=", "=......................=", "=......................=", "=.............c........=", "=....c.................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=..P.......w....w...o..=", "=....u...u....u...u....=", "========================"] },
+      legend: {"=": "wall", "u": "button0", "g": "gbutton:random", "c": "crate", "w": "pet", "P": "player", "o": "reward"},
+      rows: ["========================", "=......u....g...u......=", "=......................=", "=......................=", "=.............c........=", "=....c.................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=..P.......w....w...o..=", "=....u...g....u...u....=", "========================"] },
     { id: "bombcarousel", category: "room", closed: false, stooge: "P", names: ["The Bomb Carousel", "Round And Round And Boom", "Carousel Of Regret"],
       room: {"gravity": "off", "wrapH": true, "wrapV": true}, requires: ["spawner", "bombActors"], discover: "o",
       expect: {"fact": "a ball is fired straight into the bombs and they go off one after another", "check": "explosion", "needsInput": false, "selfStart": true},
@@ -11719,7 +11724,7 @@
       legend: {"i": "slick", "=": "wall", "k": "cannon:ne", "B": "bounce", "P": "player", "c": "crate", "w": "pet", "p": "plate"},
       rows: ["........................", "........................", "...P....................", "........................", "........................", "........................", "........................", "........................", "........................", "........................", "...p....................", "........................", "........................", "............c...........", "...k.....B.....B...w....", "iiiiiiiiiiiiiiiiiiiiiiii", "========================", "========================"] },
     { id: "popcorn", category: "toy", closed: true, stooge: "Pw", names: ["The Popcorn Box", "Everything Bounces", "Pop Goes The Everything"],
-      room: {"gravity": "on", "wrapH": false, "wrapV": false}, requires: ["bouncy", "trampoline"], discover: "o",
+      room: {"gravity": "on", "dir": "any", "wrapH": false, "wrapV": false}, requires: ["bouncy", "trampoline"], discover: "o",
       expect: {"fact": "needs a push", "check": "", "needsInput": true},
       legend: {"B": "bounce", "t": "tramp", "c": "crate", "o": "reward", "P": "player", "w": "pet"},
       rows: ["BBBBBBBBBBBBBBBBBBBBBBBB", "B......................B", "B........c........o....B", "B...c..............c...B", "B.............c........B", "B......................B", "B......................B", "B......................B", "B......c....o..........B", "B......................B", "B....o........w........B", "B......................B", "B......................B", "B..................BBBBB", "B.........w............B", "B....................P.B", "B.....t.....t...t......B", "BBBBBBBBBBBBBBBBBBBBBBBB"] },
@@ -11807,7 +11812,8 @@
     if (!actorDefs[id]) { actorDefs[id] = structuredClone(base); actorDefs[id].lethal = want; }
     return id;
   }
-  const SURPRISE_MIRROR = { e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se", n: "n", s: "s" };
+  const SURPRISE_DIR_CHANCE = 0.25; // an "any"-direction template rolls a non-down gravity this often (chaos only)
+  const SURPRISE_MIRROR = { left: "right", right: "left", e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se", n: "n", s: "s" };
   function surpriseMirrorPiece(name) {
     if (name.includes("&")) return name.split("&").map(surpriseMirrorPiece).join("&"); // a compound piece: a tile and an actor in one cell
     if (name.startsWith("raw|")) return name.replace(/-(ne|nw|se|sw|e|w)\b/g, (m, d) => "-" + SURPRISE_MIRROR[d]);
@@ -11849,6 +11855,7 @@
       case "gate": return { tile: { key: gameplayKey(BARRIER_ORDER[0], "none"), color: pieceColor } };
       case "button": return { tile: { key: gameplayKey(PUSH_BUTTON_GEOMETRY, "none"), color: pieceColor } };
       case "button0": return g(PUSH_BUTTON_GEOMETRY); // uncolored: flips the room's gravity
+      case "gbutton": return { tile: { key: gameplayKey(PUSH_BUTTON_GEOMETRY, "none"), gravOpt: GRAV_BUTTON_OPTS.includes(dir) ? dir : "random" } }; // uncolored, points gravity (down/up/left/right/random)
       case "lava": return { tile: { key: gameplayKey("none", "lethal"), skin: groundTileDefs.lthLava ? "lthLava" : null } };
       case "spike": return { tile: { key: gameplayKey("solid", "lethal"), skin: groundTileDefs.lthSpike ? "lthSpike" : null } };
       case "player": return { player: true };
@@ -11902,7 +11909,11 @@
       }
       if (key === "plate:none" && color) return "plate" + col;
       if (key === BARRIER_ORDER[0] + ":none" && color) return "gate" + col;
-      if (key === PUSH_BUTTON_GEOMETRY + ":none") return color ? "button" + col : "button0";
+      if (key === PUSH_BUTTON_GEOMETRY + ":none") {
+        if (color) return "button" + col;
+        const rr = rooms.find(q => q.id === roomId), o = rr && rr.gravButtons && rr.gravButtons[x + "," + y];
+        return GRAV_BUTTON_OPTS.includes(o) && o !== "toggle" ? "gbutton:" + o : "button0";
+      }
       if (key === "none:lethal" && skin === "lthLava") return "lava";
       if (key === "solid:lethal" && skin === "lthSpike") return "spike";
       if (color && !geo.startsWith("door")) notes.push("colour " + color + " at " + x + "," + y + " dropped (" + key + ")");
@@ -11968,7 +11979,8 @@
         && rows.every(l => l[0] !== "." && l[COLS - 1] !== "." && legend[l[0]] === "wall" && legend[l[COLS - 1]] === "wall");
       if (r.cameraMode && r.cameraMode !== "fixed") notes.push("room " + r.name + " uses camera " + r.cameraMode + ": only its first " + COLS + " columns were written");
       return { rows, legend, closed: sealed, hasPlayer: playerHere,
-        room: { gravity: r.gravityEnabled ? "on" : "off", wrapH: !!r.wrapHEnabled, wrapV: !!r.wrapVEnabled } };
+        room: Object.assign({ gravity: r.gravityEnabled ? "on" : "off", wrapH: !!r.wrapHEnabled, wrapV: !!r.wrapVEnabled },
+          r.gravityEnabled && GRAVITY_DIRS.includes(r.gravityDir) && r.gravityDir !== "down" ? { dir: r.gravityDir } : {}) };
     });
     const first = parts[0];
     const stoogeChars = Object.keys(first.legend).filter(c => /^(player|playerplate|pet|walker|chaser)$/.test(first.legend[c]));
@@ -12081,13 +12093,23 @@
   function surpriseTemplateParts(template) {
     return template.rooms || [{ rows: template.rows, legend: template.legend, room: template.room }];
   }
-  function surpriseRollRoom(R, rng, chaos) {
+  // Which way gravity pulls in a surprise: R.dir is a fixed "down" (the default) / "up" / "left" / "right", or "any"
+  // (a layout that works whichever way it falls: mostly down, sometimes not, only when chaos is on). Drawn from its
+  // own stream so a template's other rolls (and every older seed) stay exactly as they were.
+  function surpriseRollDir(R, dirRng, chaos) {
+    if (R.dir === "any") {
+      if (!chaos || dirRng() >= SURPRISE_DIR_CHANCE) return "down";
+      return ["up", "left", "right"][Math.floor(dirRng() * 3)];
+    }
+    return GRAVITY_DIRS.includes(R.dir) ? R.dir : "down";
+  }
+  function surpriseRollRoom(R, rng, chaos, dirRng) {
     const nativeOn = R.gravity === "on" || (R.gravity === "either" && R.native === "on");
     const gravity = chaos && R.gravity === "either" && rng() < SURPRISE_GRAVITY_CHAOS ? !nativeOn : nativeOn;
     const roll = (v, chance) => v === true ? true : v === false ? false : (chaos ? rng() < chance : false);
     const wrapH = roll(R.wrapH, R.wrapHChance == null ? 0.08 : R.wrapHChance);
     const wrapV = roll(R.wrapV, SURPRISE_WRAP_V_CHANCE);
-    return { gravity, nativeGravity: nativeOn, gravityFlipped: gravity !== nativeOn, wrapH, wrapV };
+    return { gravity, nativeGravity: nativeOn, gravityFlipped: gravity !== nativeOn, wrapH, wrapV, dir: dirRng ? surpriseRollDir(R, dirRng, chaos) : "down" };
   }
   function surpriseBuildSpec(seed, attempt, template, name, ctx, opts) {
     const rng = mulberry32(surpriseHash(seed, attempt + 1));
@@ -12112,13 +12134,17 @@
     const chaos = opts.chaos !== false;
     const mirrorRoll = rng() < 0.5, mirror = opts.mirror != null ? !!opts.mirror : mirrorRoll; // opts.mirror is for tests (round trips)
     const parts = surpriseTemplateParts(template);
-    const mainRoll = surpriseRollRoom(parts[0].room, rng, chaos);
+    const dirRng = mulberry32(surpriseHash(seed, attempt + 5001));
+    const mainRoll = surpriseRollRoom(parts[0].room, rng, chaos, dirRng);
+    // a fixed left/right template mirrored left-to-right falls the other way
+    const mirrorDir = d => mirror && (d === "left" || d === "right") && parts[0].room.dir !== "any" ? SURPRISE_MIRROR[d] : d;
+    mainRoll.dir = mirrorDir(mainRoll.dir);
     const w = parts[0].rows[0].length, h = parts[0].rows.length;
     const cands = surpriseCandidates(ctx, w, h, opts.place === "overwrite" ? "overwrite" : "free");
     if (!cands.length) return { noRoom: true };
     const at = cands[Math.floor(rng() * cands.length) % cands.length];
     const spec = { seed, attempt, templateId: template.id, category: template.category, name, gravity: mainRoll.gravity, nativeGravity: mainRoll.nativeGravity,
-      gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror,
+      gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror, dir: mainRoll.dir,
       ox: at.ox, oy: at.oy, w, h, color: fills.color, cost: at.cost, tiles: [], actors: [], spawners: [], player: null, doors: [], extra: [],
       clearRect: opts.place === "overwrite" ? { x: at.ox, y: at.oy, w, h } : null };
     const fillPart = (part, target, pw, ph, bx, by) => {
@@ -12132,7 +12158,7 @@
           const x = bx + rx, y = by + ry;
           if (piece.tile) {
             if (!GAMEPLAY_TILE_DEFS[piece.tile.key]) throw new Error("Surprise Me: no tile " + piece.tile.key);
-            target.tiles.push({ x, y, key: piece.tile.key, color: piece.tile.color || null, skin: piece.tile.skin || null });
+            target.tiles.push({ x, y, key: piece.tile.key, color: piece.tile.color || null, skin: piece.tile.skin || null, gravOpt: piece.tile.gravOpt || null });
           }
           if (piece.doorId != null) target.doors.push({ id: piece.doorId, x, y });
           if (piece.spawnerContent) target.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
@@ -12144,7 +12170,8 @@
     };
     fillPart(parts[0], spec, w, h, at.ox, at.oy);
     for (let i = 1; i < parts.length; i++) {
-      const p = parts[i], pw = p.rows[0].length, ph = p.rows.length, roll = surpriseRollRoom(p.room, rng, chaos);
+      const p = parts[i], pw = p.rows[0].length, ph = p.rows.length, roll = surpriseRollRoom(p.room, rng, chaos, dirRng);
+      roll.dir = mirrorDir(roll.dir);
       const part = Object.assign({ w: pw, h: ph, ox: Math.floor((COLS - pw) / 2), oy: Math.floor((ROWS - ph) / 2), tiles: [], actors: [], spawners: [], player: null, doors: [] }, roll);
       fillPart(p, part, pw, ph, part.ox, part.oy);
       spec.extra.push(part);
@@ -12202,13 +12229,29 @@
       if (risky) for (const q of watched) if (Math.max(Math.abs(a.x - q.x), Math.abs(a.y - q.y)) <= 3) return "chaser within 3 tiles of the player";
     }
     if (blocking(p.x - 1, p.y) && blocking(p.x + 1, p.y) && blocking(p.x, p.y - 1) && blocking(p.x, p.y + 1)) return "player cannot move";
-    const seen = new Set([p.x + "," + p.y]), queue = [[p.x, p.y]];
-    while (queue.length) {
-      const [x, y] = queue.pop();
-      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
-        const nx = x + dx, ny = y + dy, k = nx + "," + ny;
-        if (!seen.has(k) && !blocking(nx, ny)) { seen.add(k); queue.push([nx, ny]); }
-      });
+    const seen = new Set([p.x + "," + p.y]);
+    if (spec.gravity && spec.dir && spec.dir !== "down") {
+      // with gravity pulling a non-down way a character can walk across, fall along gravity, and rise about three
+      // tiles against it from a standing spot: reachability follows that, not plain 4-way adjacency
+      const gv = { up: [0, -1], left: [-1, 0], right: [1, 0] }[spec.dir], px = -gv[1], py = gv[0];
+      const done = new Set([p.x + "," + p.y + ",0"]), stack = [[p.x, p.y, 0]];
+      const push = (x, y, r) => { const k = x + "," + y + "," + r; if (!done.has(k) && !blocking(x, y)) { done.add(k); seen.add(x + "," + y); stack.push([x, y, r]); } };
+      while (stack.length) {
+        const [x, y, r0] = stack.pop();
+        const standing = blocking(x + gv[0], y + gv[1]), r = standing ? 0 : r0;
+        push(x + px, y + py, r); push(x - px, y - py, r);
+        push(x + gv[0], y + gv[1], 3);
+        if (r < 3) push(x - gv[0], y - gv[1], r + 1);
+      }
+    } else {
+      const queue = [[p.x, p.y]];
+      while (queue.length) {
+        const [x, y] = queue.pop();
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+          const nx = x + dx, ny = y + dy, k = nx + "," + ny;
+          if (!seen.has(k) && !blocking(nx, ny)) { seen.add(k); queue.push([nx, ny]); }
+        });
+      }
     }
     if (seen.size < 15) return "fewer than 15 free tiles reachable";
     const doorsPerColor = {};
@@ -12270,6 +12313,7 @@
       const t = board[y][x] && GAMEPLAY_TILE_DEFS[board[y][x]];
       if (t && t.geometry === "door") severDoorLink(currentRoomId, x, y);
       delete digProgress[key]; cancelBombArm(key); delete spawnerContents[key];
+      { const hr = rooms.find(q => q.id === currentRoomId); if (hr && hr.gravButtons) delete hr.gravButtons[x + "," + y]; }
       board[y][x] = null; backgroundBoard[y][x] = null; colorBoard[y][x] = null; groundSkinBoard[y][x] = null; groundSkinRotationBoard[y][x] = 0;
     }
     actors = actors.filter(a => {
@@ -12295,7 +12339,7 @@
   }
   function surpriseApplySpec(spec, resetCamera, seed) {
     gravityEnabled = spec.gravity;
-    gravityDir = "down"; // the templates are built for ordinary gravity
+    gravityDir = spec.gravity && GRAVITY_DIRS.includes(spec.dir) ? spec.dir : "down"; // most templates are built for ordinary gravity
     wrapVEnabled = spec.wrapV;
     wrapHEnabled = spec.wrapH && cameraMode !== "runner";
     if (resetCamera) { cameraMode = "fixed"; editorPanCol = 0; }
@@ -12303,6 +12347,10 @@
       board[t.y][t.x] = t.key;
       if (t.color) colorBoard[t.y][t.x] = t.color;
       if (t.skin) { groundSkinBoard[t.y][t.x] = t.skin; groundSkinRotationBoard[t.y][t.x] = 0; }
+      if (GAMEPLAY_TILE_DEFS[t.key].geometry === PUSH_BUTTON_GEOMETRY && !t.color) { // an uncolored Button: its gravity option (none = toggle)
+        const hotRoom = rooms.find(r => r.id === currentRoomId); hotRoom.gravButtons = hotRoom.gravButtons || {};
+        if (t.gravOpt) hotRoom.gravButtons[t.x + "," + t.y] = t.gravOpt; else delete hotRoom.gravButtons[t.x + "," + t.y];
+      }
     });
     const savedSel = selectedActorDefId;
     const place = (defId, x, y) => { selectedActorDefId = defId; return placeNewActor(x * TILE + TILE / 2, y * TILE + TILE / 2); };

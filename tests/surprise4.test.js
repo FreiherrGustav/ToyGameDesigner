@@ -11,7 +11,7 @@ const HOOK = require("./surprise.hook.js")() + `
   window.__f = { run: seed => { surpriseRecent.length = 0; const r = surpriseMe(seed); if (!r) return null;
       const t = SURPRISE_TEMPLATES.find(t => t.id === r.templateId) || {};
       enterPlayMode(); tick(1/60); window.__iaStart(); let err = null; try { window.__iaTick(300); } catch (e) { err = String(e); }
-      const ia = window.__iaStop(); const types = Object.keys(ia.counts).filter(k => k !== "spawn");
+      const ia = window.__iaStop(); const types = Object.keys(ia.counts).filter(k => k !== "spawn" && k !== "npcHit");
       return { id: r.templateId, category: t.category, types, counts: ia.counts, err }; },
     probe: (seed, id, opts) => { surpriseRecent.length = 0; const r = surpriseMe(seed, Object.assign({ templateIds: [id] }, opts || {})); if (!r) return null;
       enterPlayMode(); tick(1/60); window.__iaStart(); window.__iaTick(300); const ia = window.__iaStop(); return { c: ia.counts, f: ia.first }; },

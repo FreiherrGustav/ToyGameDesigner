@@ -227,7 +227,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
           const rep = __st.press(seed, canon ? { templateId: id, chaos: false, canonical: true } : { templateId: id });
           if (!rep || !rep.templateId) return { built: false };
           __st.play(); __iaStart(); __iaTick(600); const ia = __iaStop(); __st.stop();
-          return { built: true, c: ia.counts[type] || 0, hits: ia.counts.hit || 0 };
+          return { built: true, c: ia.counts[type] || 0, hits: ia.counts.npcHit || 0, anyHit: ia.counts.hit || 0 }; // npcHit = a character caught the player; a crate dropped by a gravity Button is not a pet
         }, { id, seed: 4000 + k * 71, canon: mode === "canonical", type });
         n++; if (r.built && r.c >= min) okN++; else console.log("   expect miss:", id, mode, JSON.stringify(r));
         if (r.built && r.hits && !/^(catcannon|tunneltrouble)$/.test(id)) lifeLost++;
