@@ -57,7 +57,8 @@ const SC = {
   cannon: { tiles: [[0,16,"solid:none",23],[6,15,"cannon2-ne:none",1]], actors: [["player", 3, 15], ["crate", 9, 3]], keys: [[10, 45, "ArrowRight"], [160, 220, "ArrowRight"]] },
   slippery: { tiles: [[0,16,"solid:slippery",23],[14,15,"solid:none",1]], actors: [["player", 3, 15], ["crate", 6, 15]], keys: [[10, 80, "ArrowRight"], [100, 130, "ArrowLeft"], [140, 150, " "], [170, 220, "ArrowRight"]] },
 };
-const FLIPKEY = { "wind-e": "wind-w", "wind-w": "wind-e", "wind-n": "wind-s", "wind-s": "wind-n", "cannon2-ne": "cannon2-sw", "cannon2-sw": "cannon2-ne", "cannon2-se": "cannon2-nw", "cannon2-nw": "cannon2-se" };
+// Directions a piece stores are relative to gravity (the view turns with it), so turning the world leaves them as they are.
+const FLIPKEY = {};
 const BUILD = `(spec, rot)=>{
   if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; window.__seed(777);
   suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false;
@@ -131,8 +132,8 @@ const RUNSC = `(spec, frames)=>{
       actors: [["player", 3.3, 15]], keys: [[10, 150, "ArrowRight"], [30, 40, " "], [90, 100, " "], [160, 230, "ArrowLeft"]] },
     slippery: { tiles: [[1,16,"solid:slippery",16],[12,15,"solid:none",1]], actors: [["player", 3.3, 15], ["crate", 6.4, 15]], keys: [[10, 80, "ArrowRight"], [100, 130, "ArrowLeft"], [140, 150, " "], [170, 220, "ArrowRight"]] },
   };
-  const CW = { "wind-n": "wind-e", "wind-e": "wind-s", "wind-s": "wind-w", "wind-w": "wind-n" };
-  const CCW = { "wind-n": "wind-w", "wind-w": "wind-s", "wind-s": "wind-e", "wind-e": "wind-n" };
+  const CW = {};
+  const CCW = {};
   const BUILDQ = `(spec, mode)=>{
     if(appMode==='play') exitToBuildMode(); gameClockMs=0; clearGameTimers(); nextActorInstId=1000; window.__seed(777);
     suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false;

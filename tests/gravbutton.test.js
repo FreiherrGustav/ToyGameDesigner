@@ -114,6 +114,7 @@ const state = pg => ev(pg, "()=>({on:gravityEnabled,dir:gravityDir})");
 
   // ---- 3. the Button shows its option ----
   await scene(page, OPT);
+  await ev(page, "()=>{ gravityEnabled=true; gravityDir='down'; }"); // the view turns with gravity; measure the ordinary picture
   await sim(page, 2);
   const px = (gx, gy, dx, dy) => page.evaluate(([gx, gy, dx, dy]) => { const c = document.getElementById("gameCanvas"); const d = c.getContext("2d").getImageData(gx * 32 + dx, gy * 32 + dy, 1, 1).data; return [d[0], d[1], d[2]].join(); }, [gx, gy, dx, dy]);
   const badge = await px(8, 6, 24, 8), plain = await px(4, 12, 24, 8);

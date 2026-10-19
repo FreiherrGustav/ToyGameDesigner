@@ -96,7 +96,7 @@ const P = "()=>{ const p=actors.find(a=>a.isPlayer); return {x:p.x,y:p.y,vx:p.vx
   // ---- 5. a spawner's content falls to the wall ----
   {
     const { ctx, page, errors } = await open(browser);
-    await ev(page, SCENE("right", "put(12,9,'spawner-n:none'); spawnerContents[roomCellKey(currentRoomId,12,9)]=PUSHABLE_DEF_ID; player(20,4);"));
+    await ev(page, SCENE("right", "put(12,9,'spawner-e:none'); spawnerContents[roomCellKey(currentRoomId,12,9)]=PUSHABLE_DEF_ID; player(20,4);"));
     await sim(page, 330);
     const c = await ev(page, "()=>actors.filter(a=>!a.isPlayer).map(a=>({x:a.x,w:a.w,g:a.grounded,y:a.y}))");
     ok(c.length >= 1 && c.some(a => a.g && a.x + a.w > 767) && c.every(a => a.x > 380), `right gravity: of ${c.length} spawned crate(s), the first has fallen to the right wall and rests there, none stuck beside the spawner`);
@@ -105,7 +105,7 @@ const P = "()=>{ const p=actors.find(a=>a.isPlayer); return {x:p.x,y:p.y,vx:p.vx
   // ---- 6. a fan blowing against gravity ----
   {
     const { ctx, page } = await open(browser);
-    await ev(page, SCENE("right", "put(20,9,'fan-w:none'); obj(PUSHABLE_DEF_ID,18,9); player(2,4);"));
+    await ev(page, SCENE("right", "put(20,9,'fan-n:none'); obj(PUSHABLE_DEF_ID,18,9); player(2,4);"));
     await sim(page, 60); const f = await ev(page, "()=>{ const c=actors.find(a=>!a.isPlayer); return {x:c.x, vx:c.vx}; }");
     ok(f.x < 18 * 32 + 5, `right gravity: a fan blowing away from the wall keeps a crate off it (crate x ${f.x.toFixed(0)}, started ${18 * 32 + 5})`);
     const rest = await ev(page, "()=>fanAccelFor(actors.find(a=>!a.isPlayer))");

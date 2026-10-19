@@ -633,13 +633,13 @@
       <div class="swatch-row" id="collectibleSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Traffic and floaters</div>
       <div class="swatch-row" id="moverSwatches"></div>
-      <div id="buttonOptBlock" style="display:none;">
-        <div class="section-title" style="margin-top:10px;">Switch: when touched</div>
-        <div class="swatch-row" id="buttonOptSwatches"></div>
-      </div>
       <div id="objectColorBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">Color</div>
         <div class="swatch-row" id="objectColorSwatches"></div>
+      </div>
+      <div id="buttonOptBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Gravity: when touched (color: none)</div>
+        <div class="swatch-row" id="buttonOptSwatches"></div>
       </div>
     </div>
 
@@ -5933,6 +5933,41 @@
   // Down: right is screen right. Up: screen left. Feet on the right wall: screen up. Feet on the left wall: screen down.
   function rightSign() { return gravityEnabled ? (gravityDir === "up" || gravityDir === "right" ? -1 : 1) : 1; }
 
+  // ---- The view turns with gravity -------------------------------------------------------------------------
+  // The screen always shows gravity pulling toward its bottom edge: a room whose gravity points up is drawn turned
+  // half a turn, left/right a quarter turn. Physics stays in the room's own (world) coordinates; only drawing and the
+  // pointer are turned. Keys keep their meaning on the SCREEN (Left = screen left), which is why the character-relative
+  // mapping in stepActor already agrees with it. Every direction a piece stores (cannon ne/se/..., fan, belt and Gate
+  // n/e/s/w, spawner, mover heading, moving platform axis) is read on the screen, i.e. relative to gravity: the
+  // *_DIRECTIONS tables below hold the world vectors for the current gravity and are rebuilt when it changes.
+  // viewK: 0 = as stored, 2 = half turn (gravity up), 1 = view turned counter-clockwise (gravity left), 3 = clockwise (right).
+  function viewK() { return gravityEnabled ? (gravityDir === "up" ? 2 : gravityDir === "left" ? 1 : gravityDir === "right" ? 3 : 0) : 0; }
+  function viewKFor(dir, on) { return on ? (dir === "up" ? 2 : dir === "left" ? 1 : dir === "right" ? 3 : 0) : 0; }
+  // A screen-frame vector -> the world vector that shows up that way. (World -> screen is the inverse turn.)
+  function worldVecFromScreen(v, k) {
+    return k === 2 ? { x: -v.x, y: -v.y } : k === 1 ? { x: -v.y, y: v.x } : k === 3 ? { x: v.y, y: -v.x } : { x: v.x, y: v.y };
+  }
+  function screenVecFromWorld(x, y, k) {
+    return k === 2 ? { x: -x, y: -y } : k === 1 ? { x: y, y: -x } : k === 3 ? { x: -y, y: x } : { x: x, y: y };
+  }
+  const VIEW_BASE_TABLES = {
+    cannon: structuredClone(CANNON_DIRECTIONS), wind: structuredClone(WIND_DIRECTIONS), fan: structuredClone(FAN_DIRECTIONS),
+    spawner: structuredClone(SPAWNER_DIRECTIONS), barrier: structuredClone(BARRIER_DIRECTIONS), mover: structuredClone(MOVER_DIRS)
+  };
+  const VIEW_LIVE_TABLES = { cannon: CANNON_DIRECTIONS, wind: WIND_DIRECTIONS, fan: FAN_DIRECTIONS, spawner: SPAWNER_DIRECTIONS, barrier: BARRIER_DIRECTIONS, mover: MOVER_DIRS };
+  let viewTablesK = 0;
+  // A Moving Platform's stored axis is read on the screen too: a horizontal platform stays horizontal on screen.
+  function platformWorldAxis(actor) { const a = actor.platformAxis === "y" ? "y" : "x"; return viewK() % 2 === 1 ? (a === "y" ? "x" : "y") : a; }
+  function syncViewTables() {
+    const k = viewK();
+    if (k === viewTablesK) return;
+    viewTablesK = k;
+    for (const name in VIEW_BASE_TABLES) {
+      const base = VIEW_BASE_TABLES[name], live = VIEW_LIVE_TABLES[name];
+      for (const key in base) live[key] = worldVecFromScreen(base[key], k);
+    }
+  }
+
   // Teleports an actor that has fully exited a wrapped edge to the opposite side. Only
   // relevant once wrap is switched on for that axis — otherwise that edge is just solid and
   // resolveAxis() already stopped the actor there.
@@ -8134,6 +8169,7 @@
   const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];
   function stepActor(actor, dt, player) {
     if (actor.dragging) return;
+    syncViewTables();
     const vAlongBefore = gravAxis() === "x" ? actor.vx : actor.vy; // frozen while the editor is dragging it
     // v2.21: "no physics of its own while held, follows the player" — its x/y are driven directly
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
@@ -8171,7 +8207,7 @@
       else if (phase < 0.75) tri = 1 - (phase - 0.25) * 4;
       else tri = -1 + (phase - 0.75) * 4;
       const offset = tri * range;
-      if (actor.platformAxis === "y") { actor.x = actor.spawnX; actor.y = actor.spawnY + offset; }
+      if (platformWorldAxis(actor) === "y") { actor.x = actor.spawnX; actor.y = actor.spawnY + offset; }
       else { actor.x = actor.spawnX + offset; actor.y = actor.spawnY; }
       actor.vx = 0; actor.vy = 0;
       return;
@@ -8849,6 +8885,7 @@
   }
 
   function tick(dt) {
+    syncViewTables();
     advanceGameClock(dt);
     if (starTimer > 0) {
       starTimer -= dt * 1000;
@@ -8953,17 +8990,23 @@
   // position — painting always targets whichever slice of a wider-than-COLS room is currently
   // drawn, exactly matching renderGame()'s Build-mode view (see selectCameraMode(), which keeps
   // the two from ever disagreeing by zeroing editorPanCol the instant a room goes back to Fixed).
-  function cellFromEvent(e) {
+  // The pointer in WORLD pixels of the visible viewport (0..COLS*TILE, 0..ROWS*TILE): the CSS box is mapped onto the
+  // 768x576 backing store, then through the inverse of the gravity view turn (see applyViewTransform).
+  function viewportPxFromEvent(e) {
     const rect = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx, bh = canvasBorderPx; // the border is not board
     const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left - bw;
     const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top - bh;
-    return { gx: Math.floor(cx / ((rect.width - 2 * bw) / COLS)) + editorPanCol, gy: Math.floor(cy / ((rect.height - 2 * bh) / ROWS)) };
+    const bx = cx / ((rect.width - 2 * bw) / gameCanvas.width), by = cy / ((rect.height - 2 * bh) / gameCanvas.height);
+    const w = worldPxFromCanvasPx(bx, by, viewK());
+    return { x: w.x * (COLS * TILE / gameCanvas.width), y: w.y * (ROWS * TILE / gameCanvas.height) };
+  }
+  function cellFromEvent(e) {
+    const v = viewportPxFromEvent(e);
+    return { gx: Math.floor(v.x / TILE) + editorPanCol, gy: Math.floor(v.y / TILE) };
   }
   function pxFromEvent(e) {
-    const rect = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx, bh = canvasBorderPx;
-    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left - bw;
-    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top - bh;
-    return { px: cx / ((rect.width - 2 * bw) / (COLS * TILE)) + editorPanCol * TILE, py: cy / ((rect.height - 2 * bh) / (ROWS * TILE)) };
+    const v = viewportPxFromEvent(e);
+    return { px: v.x + editorPanCol * TILE, py: v.y };
   }
 
   function actorAABBAt(px, py) {
@@ -10436,6 +10479,10 @@
   // compares), so an edit in place to an art array can never show stale art; no invalidation hooks needed.
   const ART_CACHE_MAX = 6000;
   let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0;
+  // While the world is drawn through the gravity view turn (see viewK), art is turned back in data by the opposite
+  // amount so it stays upright on the screen. 0 everywhere else (swatches, the pixel editor, characters/movers that turn themselves).
+  let artViewK = 0;
+  function turnArtBack(art, k) { return k === 2 ? art.slice().reverse() : k === 1 ? rotateArt90CW(art) : k === 3 ? rotateArt90CCW(art) : art; }
   function artCacheStats() { return { entries: artCacheEntries, bytes: artCacheBytes }; }
   function artCacheCanvas(art, cell) {
     if (art.length !== ART * ART) return null;
@@ -10458,12 +10505,13 @@
       artCache.set(art, { snap: e.snap, cells: e.cells, shared: e });
       e = artCache.get(art);
     }
-    let c = e.cells[cell];
+    const ck = artViewK ? cell + "/" + artViewK : cell;
+    let c = e.cells[ck];
     if (!c) {
       const px = Math.ceil(ART * cell + 0.5);
       c = document.createElement("canvas"); c.width = px; c.height = px;
-      drawArtScaledLive(c.getContext("2d"), e.snap, 0, 0, 0, cell);
-      e.cells[cell] = c;
+      drawArtScaledLive(c.getContext("2d"), artViewK ? turnArtBack(e.snap, artViewK) : e.snap, 0, 0, 0, cell);
+      e.cells[ck] = c;
       artCacheBytes += px * px * 4;
     }
     return c;
@@ -10476,6 +10524,7 @@
     drawArtScaledLive(ctx, art, dx, dy, size, cellSize);
   }
   function drawArtScaledLive(ctx, art, dx, dy, size, cellSize) {
+    if (artViewK && art.length === ART * ART && ctx === gctx) art = turnArtBack(art, artViewK);
     for (let y = 0; y < ART; y++) {
       for (let x = 0; x < ART; x++) {
         const color = art[y * ART + x];
@@ -10537,7 +10586,15 @@
     ctx.restore();
   }
 
+  // Ground (plain/skinned solid, painted textures) and scenery turn with the room, so connected walls and textures stay
+  // connected; every other piece (cannon, fan, Gate, Button, door, ...) keeps its picture upright on the screen.
   function drawGameplayTile(ctx, x, y, tile, extra) {
+    const keepUpright = tile.geometry !== "none" && tile.geometry !== "solid" && !(extra && extra.skinDef);
+    const savedViewK = artViewK;
+    if (!keepUpright) artViewK = 0;
+    try { drawGameplayTileInner(ctx, x, y, tile, extra); } finally { artViewK = savedViewK; }
+  }
+  function drawGameplayTileInner(ctx, x, y, tile, extra) {
     const cell = TILE / ART;
     const windDir = WIND_DIRECTIONS[tile.modifier];
     if (tile.geometry === "none") {
@@ -10825,7 +10882,11 @@
         if (bx >= rowLen) continue;
         const screenX = bx * TILE - tileOffPx;
         const bgId = backgroundBoardArg[y][bx];
-        if (bgId && backgroundTileDefs[bgId]) drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), screenX, y * TILE, TILE, cell);
+        if (bgId && backgroundTileDefs[bgId]) {
+          const savedViewK = artViewK; artViewK = 0; // scenery turns with the room; it is only objects that stay upright
+          drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), screenX, y * TILE, TILE, cell);
+          artViewK = savedViewK;
+        }
 
         const key = bx + "," + y;
         const tanim = isLive ? tileAnimState[key] : null;
@@ -10919,7 +10980,10 @@
     const cell = TILE / ART;
     const vertical = moverIsVertical(m), ext = moverExtentPx(m);
     const along = Math.max(1, def.lenTiles || 1), across = Math.max(1, def.wTiles || 2);
-    const rot = { s: 0, n: Math.PI, e: -Math.PI / 2, w: Math.PI / 2 }[moverDirOf(m)];
+    // The heading follows the world vector (already turned for gravity), so on the screen it keeps the stored direction;
+    // the art itself is not turned back, it is the lane that turns.
+    const hv = MOVER_DIRS[moverDirOf(m)], rot = Math.atan2(-hv.x, hv.y);
+    const savedViewK = artViewK; artViewK = 0;
     for (const k of MOVER_GHOST_COPIES) {
       const sx = m.x + (vertical ? 0 : k * ext) - viewOffsetPx, sy = m.y + (vertical ? k * ext : 0);
       if (sx > COLS * TILE || sx + m.w < 0 || sy > ROWS * TILE || sy + m.h < 0) continue;
@@ -10936,6 +11000,7 @@
       }
       ctx.restore();
     }
+    artViewK = savedViewK;
   }
   function rotateArt90CCW(art) {
     const out = new Array(ART * ART).fill(null);
@@ -10951,7 +11016,8 @@
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
     const now = gameNow();
-    const gsR = gravSign(), gaR = gravAxis(), rsR = rightSign(); // gravity turns characters over / onto their side (objects keep their art)
+    const vk = viewK(), rsR = rightSign(); // the view is turned with gravity, so every actor is drawn in screen terms (upright)
+    const viewAngle = vk === 2 ? Math.PI : vk === 1 ? -Math.PI / 2 : vk === 3 ? Math.PI / 2 : 0;
     // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
@@ -10979,19 +11045,20 @@
         // fixed sequence, sampled straight from the actor's current physical state every
         // frame. This is what reads well on a blocky/blob-shaped sprite specifically.
         const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
-        const qturn0 = gaR === "x" && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
-        const lean = Math.max(-1, Math.min(1, (qturn0 ? rsR * actor.vy : actor.vx) / cap)) * 0.18;
+        const sv = screenVecFromWorld(actor.vx, actor.vy, vk); // velocity as the screen shows it
+        const impactScreenAxis = vk % 2 === 1 ? (actor.impactAxis === "x" ? "y" : "x") : actor.impactAxis;
+        const lean = Math.max(-1, Math.min(1, sv.x / cap)) * 0.18;
         let sx = 1, sy = 1;
         // impactWobble oscillates (positive = compress, negative = overshoot/stretch) and
         // decays toward zero — a real follow-through, not a single compress-and-release.
         const wobble = impactWobbleValue(actor);
         if (wobble !== 0) {
-          if (actor.impactAxis === (qturn0 ? "x" : "y")) { sy *= 1 - wobble * 0.5; sx *= 1 + wobble * 0.3; }
+          if (impactScreenAxis === "y") { sy *= 1 - wobble * 0.5; sx *= 1 + wobble * 0.3; }
           else { sx *= 1 - wobble * 0.5; sy *= 1 + wobble * 0.3; }
         }
         if (actor.jumpCrouch > 0) { sy *= 1 - actor.jumpCrouch * 0.3; sx *= 1 + actor.jumpCrouch * 0.15; }
         if (!actor.grounded) {
-          const fall = Math.max(0, Math.min(1, (qturn0 ? actor.vx : actor.vy) * gsR / MAX_FALL));
+          const fall = Math.max(0, Math.min(1, sv.y / MAX_FALL));
           sy *= 1 + fall * 0.12; sx *= 1 - fall * 0.06;
         }
         // v2.15: an idle "spin" for defs that opt in (see COIN_ART) — reuses this same continuous
@@ -11003,8 +11070,7 @@
       // v2.16: art is authored facing right by default — mirror it when the actor's last real
       // movement was leftward, so a side-facing character (hero/princess/ghost, but harmless for
       // the roughly-symmetric blob archetypes too) always faces the way it's actually going.
-      const qturn = gaR === "x" && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
-      if (!qturn) t.sx *= (actor.facingDir || 1); // (a character on a wall bakes its facing into the art below)
+      t.sx *= rsR * (actor.facingDir || 1); // facing is the character's own: rsR turns it into the screen's left/right
       // v2.20: a purely visual "floating" cue while genuinely lifted by a fan at close range (see
       // fanAccelFor's own near-force falloff/near flag) — a gentle sine bob, phase-offset per actor
       // so several floating things don't all bob in lockstep. Never touches actual physics.
@@ -11057,34 +11123,77 @@
 
       ctx.save();
       ctx.globalAlpha = t.alpha;
-      const centerX = actor.x - viewOffsetPx + actor.w / 2 + t.ox * TILE;
-      const centerY = actor.y + actor.h / 2 + t.oy * TILE;
+      const centerX = actor.x - viewOffsetPx + actor.w / 2;
+      const centerY = actor.y + actor.h / 2;
       ctx.translate(centerX, centerY);
-      // Half-turn for a character whose feet are on the ceiling: its rows reversed (drawn upright, so the
-      // pixel grid and seams are exactly the ordinary ones) plus a mirrored lean is the same picture as
-      // rotating 180 degrees once its left/right controls are swapped.
-      const turned = gaR === "y" && gsR < 0 && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
-      if (turned) art = flipArtRows(art);
-      if (qturn) {
-        // Feet on a wall: mirror for the facing (in the character's own terms), then turn the art a quarter turn in data
-        // (rotated arrays drawn upright, like the half-turn) so the pixel grid stays exact.
-        if (rsR * (actor.facingDir || 1) < 0) art = mirrorArtH(art);
-        art = gsR > 0 ? rotateArt90CCW(art) : rotateArt90CW(art);
-      }
-      if (t.rot) ctx.rotate(turned ? -t.rot : t.rot);
-      if (qturn) ctx.scale(t.sy, t.sx); else ctx.scale(t.sx, t.sy);
+      // Turn the view's turn back off locally: from here the axes are the screen's, so offsets, lean and squash are
+      // written exactly as for ordinary gravity and the sprite is drawn upright, feet toward the screen bottom.
+      if (viewAngle) ctx.rotate(-viewAngle);
+      ctx.translate(t.ox * TILE, t.oy * TILE);
+      if (t.rot) ctx.rotate(t.rot);
+      ctx.scale(t.sx, t.sy);
+      const savedViewK = artViewK; artViewK = 0;
       artCacheOff++;
       drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
       artCacheOff--;
+      artViewK = savedViewK;
       ctx.restore();
     });
     renderFxGhosts(ctx, viewOffsetPx);
   }
 
+  // Puts the world through the gravity view turn (see viewK). A quarter turn makes the 24x18 room 18x24, which is
+  // drawn at 3/4 size, centred (3px per art pixel, still a whole number).
+  function applyViewTransform(ctx, k) {
+    const W = gameCanvas.width, H = gameCanvas.height;
+    if (k === 2) { ctx.translate(W, H); ctx.rotate(Math.PI); }
+    else if (k === 1 || k === 3) {
+      const sc = H / W;
+      ctx.translate(W / 2, H / 2); ctx.rotate(k === 1 ? -Math.PI / 2 : Math.PI / 2); ctx.scale(sc, sc); ctx.translate(-W / 2, -H / 2);
+      ctx.imageSmoothingEnabled = false;
+    }
+  }
+  // Canvas pixel (backing-store coordinates) -> world pixel, the inverse of applyViewTransform.
+  function worldPxFromCanvasPx(cx, cy, k) {
+    const W = gameCanvas.width, H = gameCanvas.height;
+    if (k === 2) return { x: W - cx, y: H - cy };
+    if (k === 1 || k === 3) {
+      const sc = H / W, rx = (cx - W / 2) / sc, ry = (cy - H / 2) / sc;
+      return k === 1 ? { x: W / 2 - ry, y: H / 2 + rx } : { x: W / 2 + ry, y: H / 2 - rx };
+    }
+    return { x: cx, y: cy };
+  }
+
   function renderGame() {
+    syncViewTables();
     gctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
     gctx.fillStyle = "#111";
     gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+    const vk = viewK();
+    gctx.save();
+    applyViewTransform(gctx, vk);
+    artViewK = vk;
+    let inTransition;
+    try { inTransition = renderWorld(); } finally { artViewK = 0; gctx.restore(); }
+    if (inTransition) return;
+    // Everything below is a screen-space overlay: drawn upright whatever way gravity points.
+    if (appMode === "build" && isCanvasEmpty()) drawEmptySocketCue(gameNow());
+    // v2.18: a lethal-hazard death holds the overlay back until its own splat animation has
+    // actually played out — otherwise the overlay's dark wash would cover the "big comedic beat"
+    // the instant it starts (see triggerLethalHazard). Every other game-over path is untouched:
+    // nothing else ever plays this recipe, so midSplat is always false for them.
+    const scPlayer = actors.find(a => a.isPlayer);
+    const midSplat = (scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate") ||
+      fxGhosts.some(g => g.recipe === "blackHoleSuck" && g.holdOverlay);
+    if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
+    else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
+    if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
+    else if (appMode === "build" && !landingActive) drawKeyHint();
+    if (gamePaused && !landingActive && !(appMode === "play" && playSessionEnded)) drawPausedOverlay();
+  }
+
+  // The room itself (tiles, Build-only cues, actors), in world coordinates. Returns true during a room cross-fade.
+  function renderWorld() {
 
     // v2.17: Build mode always shows the manual editor pan (0 for a Fixed room — see
     // selectCameraMode); Play shows wherever the room's own camera mode has put cameraX.
@@ -11104,7 +11213,7 @@
       renderRoomContents(gctx, board, backgroundBoard, viewOffsetPx);
       renderActors(gctx, actors, viewOffsetPx);
       gctx.restore();
-      return;
+      return true;
     }
 
     renderRoomContents(gctx, board, backgroundBoard, viewOffsetPx);
@@ -11112,7 +11221,6 @@
     // The empty-socket cue and the start-position outline are Build-only editing affordances —
     // Play just shows the game itself.
     if (appMode === "build") {
-      if (isCanvasEmpty()) drawEmptySocketCue(gameNow());
       if (actors.some(a => a.isPlayer)) {
         gctx.strokeStyle = "rgba(255,209,102,0.7)";
         gctx.lineWidth = 1.5;
@@ -11142,19 +11250,7 @@
     }
 
     renderActors(gctx, actors, viewOffsetPx);
-
-    // v2.18: a lethal-hazard death holds the overlay back until its own splat animation has
-    // actually played out — otherwise the overlay's dark wash would cover the "big comedic beat"
-    // the instant it starts (see triggerLethalHazard). Every other game-over path is untouched:
-    // nothing else ever plays this recipe, so midSplat is always false for them.
-    const scPlayer = actors.find(a => a.isPlayer);
-    const midSplat = (scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate") ||
-      fxGhosts.some(g => g.recipe === "blackHoleSuck" && g.holdOverlay);
-    if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
-    else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
-    if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
-    else if (appMode === "build" && !landingActive) drawKeyHint();
-    if (gamePaused && !landingActive && !(appMode === "play" && playSessionEnded)) drawPausedOverlay();
+    return false;
   }
 
   // Direct feedback: Play used to drop a kid straight into a running simulation with zero time to
@@ -11658,7 +11754,7 @@
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { t: "tramp", P: "player", c: "crate", w: "pet", o: "reward" },
       rows: ["tttttttttttt", "t..........t", "t.....c.w..t", "t....o.....t", "t..........t", "t.P......c.t", "tttttttttttt"] },
-    { id: "upsidedown", category: "toy", closed: true, stooge: "wP", names: ["The Upside-Down Picnic", "Ceiling Party", "Everything Is Stuck Up Here", "Look Up"],
+    { id: "upsidedown", category: "toy", weight: 0.25, closed: true, stooge: "wP", names: ["The Upside-Down Picnic", "Ceiling Party", "Everything Is Stuck Up Here", "Look Up"],
       room: { gravity: "on", dir: "up", wrapH: false, wrapV: false }, requires: ["button", "trampoline"], discover: "g",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "=": "wall", P: "player", c: "crate", w: "pet", o: "reward", t: "tramp", g: "gbutton:down" },
@@ -11812,7 +11908,7 @@
     if (!actorDefs[id]) { actorDefs[id] = structuredClone(base); actorDefs[id].lethal = want; }
     return id;
   }
-  const SURPRISE_DIR_CHANCE = 0.25; // an "any"-direction template rolls a non-down gravity this often (chaos only)
+  const SURPRISE_DIR_CHANCE = 0.12; // an "any"-direction template rolls a non-down gravity this often (chaos only)
   const SURPRISE_MIRROR = { left: "right", right: "left", e: "w", w: "e", ne: "nw", nw: "ne", se: "sw", sw: "se", n: "n", s: "s" };
   function surpriseMirrorPiece(name) {
     if (name.includes("&")) return name.split("&").map(surpriseMirrorPiece).join("&"); // a compound piece: a tile and an actor in one cell
@@ -12192,6 +12288,11 @@
     for (const e of spec.extra || []) { const w2 = surpriseValidatePart(e, surpriseEmptyContext(), false); if (w2) return w2; }
     return null;
   }
+  // A spawner's stored facing is relative to gravity; in a surprise whose gravity points elsewhere its world vector is turned.
+  function specSpawnerDir(spec, geometry) {
+    const base = VIEW_BASE_TABLES.spawner[geometry];
+    return base ? worldVecFromScreen(base, viewKFor(spec.dir || "down", !!spec.gravity)) : null;
+  }
   function surpriseValidatePart(spec, ctx, needPlayer) {
     const tileAt = new Map(spec.tiles.map(t => [t.x + "," + t.y, t]));
     const blocking = (x, y) => {
@@ -12204,7 +12305,7 @@
     if (!spec.player) {
       if (needPlayer) return "no player cell";
       for (const sp of spec.spawners) { // a part without the player still needs working spawners
-        const t = tileAt.get(sp.x + "," + sp.y), dir = SPAWNER_DIRECTIONS[GAMEPLAY_TILE_DEFS[t.key].geometry];
+        const t = tileAt.get(sp.x + "," + sp.y), dir = specSpawnerDir(spec, GAMEPLAY_TILE_DEFS[t.key].geometry);
         if (!dir || blocking(sp.x + dir.x, sp.y + dir.y)) return "spawner has no open target";
       }
       return null;
@@ -12260,7 +12361,7 @@
     }
     for (const s of spec.spawners) {
       const t = tileAt.get(s.x + "," + s.y);
-      const dir = SPAWNER_DIRECTIONS[GAMEPLAY_TILE_DEFS[t.key].geometry];
+      const dir = specSpawnerDir(spec, GAMEPLAY_TILE_DEFS[t.key].geometry);
       if (!dir || blocking(s.x + dir.x, s.y + dir.y)) return "spawner has no open target";
     }
     return null;
@@ -12277,7 +12378,12 @@
     const total = cats.reduce((n, c) => n + (SURPRISE_CATEGORY_WEIGHTS[c] || 1), 0);
     let r = rng() * total, cat = cats[cats.length - 1];
     for (const c of cats) { r -= (SURPRISE_CATEGORY_WEIGHTS[c] || 1); if (r < 0) { cat = c; break; } }
-    return byCat[cat][Math.floor(rng() * byCat[cat].length) % byCat[cat].length];
+    // Inside the category every template counts once, except one that turns gravity away from down for good (`weight` < 1):
+    // those are a rare treat. With all weights 1 this is exactly the old uniform pick.
+    const list = byCat[cat], wt = t => (t.weight == null ? 1 : t.weight);
+    let r2 = rng() * list.reduce((n, t) => n + wt(t), 0);
+    for (const t of list) { r2 -= wt(t); if (r2 < 0) return t; }
+    return list[list.length - 1];
   }
   // seed -> template -> name; re-rolls (same seed, attempt counter) when a floor rejects an attempt.
   // opts: templateId (force one), chaos:false (canonical: native gravity, no wrap), place "free"|"overwrite", ctx.
@@ -12729,7 +12835,7 @@
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
-      gravityOn, gravSign, gravAxis, rightSign, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
+      gravityOn, gravSign, gravAxis, rightSign, viewK, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
@@ -12789,14 +12895,14 @@
       `const CARRY_BOMB2_KIND = ${JSON.stringify(CARRY_BOMB2_KIND)}, CARRY_CANNON2_KIND = ${JSON.stringify(CARRY_CANNON2_KIND)};`,
       `const CARRY_BOMB2_DEF_ID = ${JSON.stringify(CARRY_BOMB2_DEF_ID)}, CARRY_CANNON2_DEF_ID = ${JSON.stringify(CARRY_CANNON2_DEF_ID)};`,
       `const WIND_ORDER = ${JSON.stringify(WIND_ORDER)};`,
-      `const WIND_DIRECTIONS = ${JSON.stringify(WIND_DIRECTIONS)};`,
+      `const WIND_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.wind)};`,
       `const WIND_FORCE = ${WIND_FORCE};`,
       `const FAN_ORDER = ${JSON.stringify(FAN_ORDER)};`,
-      `const FAN_DIRECTIONS = ${JSON.stringify(FAN_DIRECTIONS)};`,
+      `const FAN_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.fan)};`,
       `const BARRIER_ORDER = ${JSON.stringify(BARRIER_ORDER)};`,
-      `const BARRIER_DIRECTIONS = ${JSON.stringify(BARRIER_DIRECTIONS)};`,
+      `const BARRIER_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.barrier)};`,
       `const SPAWNER_ORDER = ${JSON.stringify(SPAWNER_ORDER)};`,
-      `const SPAWNER_DIRECTIONS = ${JSON.stringify(SPAWNER_DIRECTIONS)};`,
+      `const SPAWNER_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.spawner)};`,
       `const SPAWNER_LAUNCH_SPEED = ${SPAWNER_LAUNCH_SPEED};`,
       `const FAN_RANGE_TILES = ${FAN_RANGE_TILES}, FAN_NEAR_FORCE = ${FAN_NEAR_FORCE};`,
       `const FAN_BOUNCE_MIN_SPEED = ${FAN_BOUNCE_MIN_SPEED}, FAN_BOUNCE_RESTITUTION = ${FAN_BOUNCE_RESTITUTION};`,
@@ -12816,7 +12922,7 @@
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
       `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
       `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
-      `const MOVER_KIND = ${JSON.stringify(MOVER_KIND)}, MOVER_SPEEDS = ${JSON.stringify(MOVER_SPEEDS)}, MOVER_DIRS = ${JSON.stringify(MOVER_DIRS)}, MOVER_GHOST_COPIES = ${JSON.stringify(MOVER_GHOST_COPIES)};`,
+      `const MOVER_KIND = ${JSON.stringify(MOVER_KIND)}, MOVER_SPEEDS = ${JSON.stringify(MOVER_SPEEDS)}, MOVER_DIRS = ${JSON.stringify(VIEW_BASE_TABLES.mover)}, MOVER_GHOST_COPIES = ${JSON.stringify(MOVER_GHOST_COPIES)};`,
       `const MOVING_PLATFORM_KIND = ${JSON.stringify(MOVING_PLATFORM_KIND)}, MOVING_PLATFORM_DEF_ID = ${JSON.stringify(MOVING_PLATFORM_DEF_ID)};`,
       `const MOVING_PLATFORM_RANGE_TILES = ${MOVING_PLATFORM_RANGE_TILES}, MOVING_PLATFORM_SPEED = ${MOVING_PLATFORM_SPEED};`,
       `const RIDE_CONTACT_EPSILON = ${RIDE_CONTACT_EPSILON};`,
@@ -12825,7 +12931,8 @@
       `const TEMPERAMENT_COLORS = ${JSON.stringify(TEMPERAMENT_COLORS)};`,
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
-      `const CANNON_DIRECTIONS = ${JSON.stringify(CANNON_DIRECTIONS)};`,
+      `const CANNON_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.cannon)};`,
+      `const VIEW_BASE_TABLES = ${JSON.stringify(VIEW_BASE_TABLES)}; const VIEW_LIVE_TABLES = { cannon: CANNON_DIRECTIONS, wind: WIND_DIRECTIONS, fan: FAN_DIRECTIONS, spawner: SPAWNER_DIRECTIONS, barrier: BARRIER_DIRECTIONS, mover: MOVER_DIRS }; let viewTablesK = 0;`,
       `const CANNON_LOAD_MS = ${CANNON_LOAD_MS};`,
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,
@@ -12954,7 +13061,7 @@
   let doorLinks = GAME_DATA.doorLinks;
   let spawnerContents = GAME_DATA.spawnerContents;
   const ART_CACHE_MAX = 6000;
-  let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0;
+  let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0; let artViewK = 0;
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};

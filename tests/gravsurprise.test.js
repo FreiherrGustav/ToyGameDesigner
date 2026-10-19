@@ -41,7 +41,7 @@ const ev = (pg, code, arg) => pg.evaluate(([c, a]) => window.__ev(c)(a), [code, 
       out[id]={c,k}; } return out; }`);
   for (const id of anyIds) {
     const c = roll[id].c, tot = c.down + c.up + c.left + c.right, nd = (tot - c.down) / tot;
-    ok(nd > 0.15 && nd < 0.36 && c.up > 5 && c.left > 5 && c.right > 5, `${id}: chaos rolls non-down ${(nd * 100).toFixed(0)}% of the time, all three directions seen (${JSON.stringify(c)})`);
+    ok(nd > 0.06 && nd < 0.2 && c.up > 5 && c.left > 5 && c.right > 5, `${id}: chaos rolls non-down ${(nd * 100).toFixed(0)}% of the time, all three directions seen (${JSON.stringify(c)})`);
     ok(roll[id].k.down === 300 - (300 - roll[id].k.down) && roll[id].k.up + roll[id].k.left + roll[id].k.right === 0, `${id}: canonical (Try this) is always down`);
   }
   ok(roll.upsidedown.c.up === 300 && roll.upsidedown.k.up === 300, "upsidedown is up in chaos and canonical, every seed");
