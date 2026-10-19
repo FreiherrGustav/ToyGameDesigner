@@ -5941,7 +5941,10 @@
   // n/e/s/w, spawner, mover heading, moving platform axis) is read on the screen, i.e. relative to gravity: the
   // *_DIRECTIONS tables below hold the world vectors for the current gravity and are rebuilt when it changes.
   // viewK: 0 = as stored, 2 = half turn (gravity up), 1 = view turned counter-clockwise (gravity left), 3 = clockwise (right).
-  function viewK() { return gravityEnabled ? (gravityDir === "up" ? 2 : gravityDir === "left" ? 1 : gravityDir === "right" ? 3 : 0) : 0; }
+  // The board itself no longer turns (viewFollowsGravity is off): gravity really changes direction and the CHARACTERS turn to
+  // stand on the new wall/ceiling (see renderActors). The turned-view machinery below stays available behind this switch.
+  let viewFollowsGravity = false;
+  function viewK() { return viewFollowsGravity && gravityEnabled ? (gravityDir === "up" ? 2 : gravityDir === "left" ? 1 : gravityDir === "right" ? 3 : 0) : 0; }
   function viewKFor(dir, on) { return on ? (dir === "up" ? 2 : dir === "left" ? 1 : dir === "right" ? 3 : 0) : 0; }
   // A screen-frame vector -> the world vector that shows up that way. (World -> screen is the inverse turn.)
   function worldVecFromScreen(v, k) {
@@ -11018,6 +11021,7 @@
     const now = gameNow();
     const vk = viewK(), rsR = rightSign(); // the view is turned with gravity, so every actor is drawn in screen terms (upright)
     const viewAngle = vk === 2 ? Math.PI : vk === 1 ? -Math.PI / 2 : vk === 3 ? Math.PI / 2 : 0;
+    const gravK = viewKFor(gravityDir, gravityEnabled); // which wall a character's feet are on (0 = floor)
     // v2.21: while charging a throw, the carried object visibly shakes with increasing intensity —
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
@@ -11034,6 +11038,10 @@
       let art = posed ? (def.poses[currentPoseFor(actor)] || def.poses.stand) : def.art;
       if (actor.defId === "colKey") art = tintedKeyArt(art, actor.channel);
 
+      // Characters stand on whatever wall gravity pulls toward: their sprite is turned to it (and eases round when gravity
+      // changes). Objects keep their picture. kLocal = how the sprite's own axes sit on the screen.
+      const turnable = vk === 0 && (actor.isPlayer || isSteeringCharacter(def.temperament) || def.temperament === "stationary");
+      const kLocal = turnable ? gravK : vk;
       let t;
       if (posed) {
         // Posed humanoids get their state read from which drawn frame is showing, not from
@@ -11045,8 +11053,8 @@
         // fixed sequence, sampled straight from the actor's current physical state every
         // frame. This is what reads well on a blocky/blob-shaped sprite specifically.
         const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
-        const sv = screenVecFromWorld(actor.vx, actor.vy, vk); // velocity as the screen shows it
-        const impactScreenAxis = vk % 2 === 1 ? (actor.impactAxis === "x" ? "y" : "x") : actor.impactAxis;
+        const sv = screenVecFromWorld(actor.vx, actor.vy, kLocal); // velocity in the sprite's own terms (x = its right, y = toward its feet)
+        const impactScreenAxis = kLocal % 2 === 1 ? (actor.impactAxis === "x" ? "y" : "x") : actor.impactAxis;
         const lean = Math.max(-1, Math.min(1, sv.x / cap)) * 0.18;
         let sx = 1, sy = 1;
         // impactWobble oscillates (positive = compress, negative = overshoot/stretch) and
@@ -11130,6 +11138,18 @@
       // written exactly as for ordinary gravity and the sprite is drawn upright, feet toward the screen bottom.
       if (viewAngle) ctx.rotate(-viewAngle);
       ctx.translate(t.ox * TILE, t.oy * TILE);
+      if (turnable) {
+        // eased turn toward the wall gravity points at (shortest way round); the first draw snaps
+        const target = gravK === 2 ? Math.PI : gravK === 1 ? Math.PI / 2 : gravK === 3 ? -Math.PI / 2 : 0;
+        if (actor.dispAng === undefined || !isFinite(actor.dispAng)) actor.dispAng = target;
+        else {
+          const dtA = Math.max(0, Math.min(0.1, (now - (actor.dispAngT || now)) / 1000));
+          let d = ((target - actor.dispAng + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+          actor.dispAng = Math.abs(d) < 0.01 ? target : actor.dispAng + d * (1 - Math.exp(-dtA / 0.07));
+        }
+        actor.dispAngT = now;
+        if (actor.dispAng) ctx.rotate(actor.dispAng);
+      }
       if (t.rot) ctx.rotate(t.rot);
       ctx.scale(t.sx, t.sy);
       const savedViewK = artViewK; artViewK = 0;
@@ -12291,7 +12311,7 @@
   // A spawner's stored facing is relative to gravity; in a surprise whose gravity points elsewhere its world vector is turned.
   function specSpawnerDir(spec, geometry) {
     const base = VIEW_BASE_TABLES.spawner[geometry];
-    return base ? worldVecFromScreen(base, viewKFor(spec.dir || "down", !!spec.gravity)) : null;
+    return base ? worldVecFromScreen(base, viewFollowsGravity ? viewKFor(spec.dir || "down", !!spec.gravity) : 0) : null;
   }
   function surpriseValidatePart(spec, ctx, needPlayer) {
     const tileAt = new Map(spec.tiles.map(t => [t.x + "," + t.y, t]));
@@ -12835,7 +12855,7 @@
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
-      gravityOn, gravSign, gravAxis, rightSign, viewK, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
+      gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
@@ -12932,7 +12952,7 @@
       `const GEOMETRY_SWATCH_COLORS = ${JSON.stringify(GEOMETRY_SWATCH_COLORS)};`,
       `const MODIFIER_SWATCH_COLORS = ${JSON.stringify(MODIFIER_SWATCH_COLORS)};`,
       `const CANNON_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.cannon)};`,
-      `const VIEW_BASE_TABLES = ${JSON.stringify(VIEW_BASE_TABLES)}; const VIEW_LIVE_TABLES = { cannon: CANNON_DIRECTIONS, wind: WIND_DIRECTIONS, fan: FAN_DIRECTIONS, spawner: SPAWNER_DIRECTIONS, barrier: BARRIER_DIRECTIONS, mover: MOVER_DIRS }; let viewTablesK = 0;`,
+      `const VIEW_BASE_TABLES = ${JSON.stringify(VIEW_BASE_TABLES)}; const VIEW_LIVE_TABLES = { cannon: CANNON_DIRECTIONS, wind: WIND_DIRECTIONS, fan: FAN_DIRECTIONS, spawner: SPAWNER_DIRECTIONS, barrier: BARRIER_DIRECTIONS, mover: MOVER_DIRS }; let viewTablesK = 0; let viewFollowsGravity = false;`,
       `const CANNON_LOAD_MS = ${CANNON_LOAD_MS};`,
       `const PLAYER_COLOR = ${JSON.stringify(PLAYER_COLOR)};`,
       `const PLAYER_DEF_ID = ${JSON.stringify(PLAYER_DEF_ID)};`,

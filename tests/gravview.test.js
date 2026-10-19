@@ -1,4 +1,4 @@
-// The view turns with gravity (not deployed). Usage: node tests/gravview.test.js [shotDir]
+// The OPTIONAL turned-board mode (viewFollowsGravity = true; off by default since the user wanted the board to stay put) (not deployed). Usage: node tests/gravview.test.js [shotDir]
 // Everything a kid sees is as if gravity pointed down: keys, pointer, and every direction a piece stores are on the SCREEN.
 const fs = require("fs"), os = require("os"), path = require("path");
 const { chromium } = require("/opt/node22/lib/node_modules/playwright");
@@ -15,7 +15,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
 const FAKE = () => { window.__T = 0; window.__q = []; performance.now = () => window.__T; window.requestAnimationFrame = cb => { window.__q.push(cb); return 1; }; };
 const open = async (b, vp) => { const ctx = await b.newContext({ viewport: vp || { width: 1366, height: 700 }, acceptDownloads: true }); const page = await ctx.newPage(); const errors = [];
   page.on("pageerror", e => errors.push(String(e))); page.on("dialog", d => d.accept()); await page.addInitScript(FAKE);
-  await page.goto("file://" + FILE + "#t"); await page.waitForFunction(() => window.__sim); return { ctx, page, errors }; };
+  await page.goto("file://" + FILE + "#t"); await page.waitForFunction(() => window.__sim); await page.evaluate(() => window.__ev("()=>{ viewFollowsGravity=true; }")()); /* the optional turned-board mode */ return { ctx, page, errors }; };
 const ev = (pg, code) => pg.evaluate(c => window.__ev(c)(), code);
 const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new KeyboardEvent(t, { key: k, bubbles: true })), [type, k]);
 const sim = (pg, n) => pg.evaluate(n => window.__sim(n), n);

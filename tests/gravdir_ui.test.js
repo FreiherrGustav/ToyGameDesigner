@@ -110,27 +110,43 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
   // ---- 5. crispness: the turned-over character is the vertical mirror of the upright one, pixel for pixel ----
   for (const dpr of [1, 1.5, 2]) {
     const r = await open(browser, { dpr });
-    // The view turns with gravity, so the character is drawn upright and identical on the screen whichever way gravity points.
     const res = await r.page.evaluate(() => {
-      const grab = (dir, f) => {
+      const draw = (dir) => {
         window.__ev("()=>{ suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false; gravityEnabled=true; }")();
-        const put = `p.x=384-p.w/2; p.y=288-p.h/2; p.vx=0; p.vy=0; p.facingDir=${f}; p.grounded=true; p.impactMag=0; p.jumpCrouch=0;`;
-        window.__ev(`()=>{ gravityDir='${dir}'; selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(300, 300); const p=actors.find(a=>a.isPlayer); ${put} setGamePaused(true); }`)();
+        window.__ev(`()=>{ gravityDir='${dir}'; selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(300, 300); const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; setGamePaused(true); }`)();
         window.__sim(2);
-        window.__ev(`()=>{ const p=actors.find(a=>a.isPlayer); ${put} }`)();
+        window.__ev("()=>{ const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.grounded=true; p.impactMag=0; p.jumpCrouch=0; }")();
         window.__sim(1);
-        const c = document.getElementById("gameCanvas").getContext("2d");
-        const cellPx = dir === "left" || dir === "right" ? 3 : 4, half = cellPx * 4, out = [];
-        const img = c.getImageData(384 - half, 288 - half, half * 2, half * 2).data;
-        for (let r = 0; r < 8; r++) for (let q = 0; q < 8; q++) { const i = ((r * cellPx + 1) * half * 2 + (q * cellPx + 1)) * 4; out.push(img[i] + "," + img[i + 1] + "," + img[i + 2]); }
-        return out;
+        const c = document.getElementById("gameCanvas"); const ctx = c.getContext("2d");
+        return Array.from(ctx.getImageData(100 - 5, 100 - 5 - 0, 32, 32).data);
       };
-      const a = grab("down", 1);
-      const cmp = (b) => b.reduce((n, v, i) => n + (v !== a[i] ? 1 : 0), 0);
-      return { up: cmp(grab("up", -1)), left: cmp(grab("left", 1)), right: cmp(grab("right", -1)) };
+      const a = draw("down"), b = draw("up");
+      // quarter turns: facing chosen so no mirroring is needed (local facing = right); down's cell (r,c) must land at the rotated cell
+      const drawQ = (dir) => { const f = dir === "right" ? -1 : 1; const r = (() => { return null; })(); void r;
+        window.__ev("()=>{ suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false; gravityEnabled=true; }")();
+        window.__ev(`()=>{ gravityDir='${dir}'; selectedActorDefId=playerDefId; paintMode='actor'; placeNewActor(300, 300); const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.facingDir=${f}; setGamePaused(true); }`)();
+        window.__sim(2);
+        window.__ev(`()=>{ const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.grounded=true; p.impactMag=0; p.jumpCrouch=0; p.facingDir=${f}; }`)();
+        window.__sim(1);
+        return Array.from(document.getElementById("gameCanvas").getContext("2d").getImageData(95, 95, 32, 32).data); };
+      const at = (img, row, col) => { const i = ((row * 4 + 2) * 32 + (col * 4 + 2)) * 4; return img[i] + "," + img[i + 1] + "," + img[i + 2]; };
+      let qdiff = 0;
+      for (const [dir, map] of [["right", (r, c) => [7 - c, r]], ["left", (r, c) => [c, 7 - r]]]) {
+        const q = drawQ(dir);
+        // 'a' was drawn with facing +1; for right gravity the rotated draw used facing -1 (also unmirrored), so compare against a flipped-facing upright:
+        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) { const [rr, cc] = map(r, c); if (at(a, r, c) !== at(q, rr, cc)) qdiff++; }
+      }
+      let diff = 0; const colors = new Set();
+      // compare the colour at the centre of each 4x4 art cell: up's row (7-r) must equal down's row r
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+        const i = ((r * 4 + 2 + 0) * 32 + (c * 4 + 2)) * 4, j = (((7 - r) * 4 + 2) * 32 + (c * 4 + 2)) * 4;
+        for (let k = 0; k < 4; k++) if (a[i + k] !== b[j + k]) { diff++; break; }
+        colors.add(b[j] + "," + b[j + 1] + "," + b[j + 2]);
+      }
+      return { diff, colors: colors.size, qdiff };
     });
-    ok(res.up === 0, `DPR ${dpr}: the character in an upside-down room is drawn upright, cell by cell (${res.up} of 64 art cells differ)`);
-    ok(res.left === 0 && res.right === 0, `DPR ${dpr}: left and right gravity also draw it upright (${res.left}, ${res.right} of 64 cells differ)`);
+    ok(res.diff === 0, `DPR ${dpr}: the upside-down player is the upright sprite flipped, cell by cell (${res.diff} of 64 art cells differ, ${res.colors} colors, no blending at cell centres)`);
+    ok(res.qdiff === 0, `DPR ${dpr}: left and right gravity draw the upright sprite turned a quarter turn, cell by cell (${res.qdiff} of 128 cells differ)`);
     // pointer accuracy with gravity up: click the centre of a cell and the right cell gets painted
     await r.page.evaluate(() => window.__ev("()=>{ gravityEnabled=true; gravityDir='up'; selectGeometry('solid'); }")());
     await r.page.evaluate(() => window.__ev("()=>{ setGamePaused(false); }")());
@@ -142,7 +158,7 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
       const px = rect.l + rect.bw + (gx + 0.5) * (rect.w - 2 * rect.bw) / 24, py = rect.t + rect.bw + (gy + 0.5) * (rect.h - 2 * rect.bw) / 18;
       await r.page.mouse.click(px, py); await r.page.evaluate(() => window.__sim(2));
       const got = await r.page.evaluate(([x, y]) => window.__ev(`()=>board[${y}][${x}]`)(), [gx, gy]);
-      if (!(await r.page.evaluate(([x, y]) => window.__ev(`()=>board[${17 - y}][${23 - x}]`)(), [gx, gy]))) bad++; // the screen is the room turned half a turn
+      if (!got) bad++;
     }
     ok(bad === 0, `DPR ${dpr}, gravity up: clicks at 4 corners + centre paint the cell under the cursor`);
     ok(r.errors.length === 0, `DPR ${dpr}: no errors ` + r.errors.join(";"));
