@@ -6292,8 +6292,12 @@
     const exitCell = actor.cannonExit;
     if (exitCell && (actor.x + actor.w <= exitCell.cx * TILE || actor.x >= (exitCell.cx + 1) * TILE ||
                      actor.y + actor.h <= exitCell.cy * TILE || actor.y >= (exitCell.cy + 1) * TILE)) actor.cannonExit = null;
-    const c0 = Math.floor(actor.x / TILE), c1 = Math.floor((actor.x + actor.w - 0.01) / TILE);
-    const r0 = Math.floor(actor.y / TILE), r1 = Math.floor((actor.y + actor.h - 0.01) / TILE);
+    // A non-player body that overlaps a tile by under a pixel on the OTHER axis (nudged against a wall by a hit) is not
+    // touching it on this one: counting that sliver resolved it out the far side of the wall or a tile up. The player keeps
+    // the exact old behaviour.
+    const slack = actor.isPlayer ? 0 : COLLISION_SLIVER_PX, slackX = axis === "y" ? slack : 0, slackY = axis === "x" ? slack : 0;
+    const c0 = Math.floor((actor.x + slackX) / TILE), c1 = Math.floor((actor.x + actor.w - 0.01 - slackX) / TILE);
+    const r0 = Math.floor((actor.y + slackY) / TILE), r1 = Math.floor((actor.y + actor.h - 0.01 - slackY) / TILE);
     // The cells are visited in the CHARACTER's own order — from the side away from gravity toward it, and left to right in its
     // own terms — so that when the box spans two different blocking cells the same one wins in every orientation. At ordinary
     // gravity that is exactly the old order (rows top to bottom, columns left to right).
@@ -6577,14 +6581,32 @@
       const depth = Math.min(actor[pk] + actor[sk], other[pk] + other[sk]) - Math.max(actor[pk], other[pk]);
       if (depth > actor[sk] * 0.75) continue;
       const v = actor[vk];
-      if (v > 0) {
-        const delta = (actor[pk] + actor[sk]) - other[pk];
-        other[pk] += delta;
-        if (blocked()) { other[pk] -= delta; seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
-      } else if (v < 0) {
-        const delta = (other[pk] + other[sk]) - actor[pk];
-        other[pk] -= delta;
-        if (blocked()) { other[pk] += delta; seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
+      if (v !== 0) {
+        const dir = v > 0 ? 1 : -1;
+        // A moving non-player can't shove a heavy object (Large Stone) along like a feather: it stops flush against
+        // it and trades momentum by weight instead (a crate bounces off a stone; the stone barely moves).
+        if (!actor.isPlayer && axis !== ga && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED && actorMass(other) >= MASS_HEAVY && actorMass(actor) < MASS_HEAVY) {
+          seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+          if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+          exchangeAlong(actor, other, vk, -dir);
+          continue;
+        }
+        const delta = dir > 0 ? (actor[pk] + actor[sk]) - other[pk] : (other[pk] + other[sk]) - actor[pk];
+        other[pk] += dir * delta;
+        if (blocked()) {
+          const byTile = actorBlockedByTiles(other);
+          other[pk] -= dir * delta;
+          seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+          if (!actor.isPlayer && axis !== ga && !byTile && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED) {
+            if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+            exchangeAlong(actor, other, vk, -dir);   // pushed into another object, not a wall: pass the momentum on by weight
+          } else {
+            actor[vk] = 0;
+            // a medium/heavy object coming down hard onto another thuds, scaled by how hard
+            if (!actor.isPlayer && axis === ga && Math.abs(v) >= MASS_LAND_THUD_MIN_SPEED && actorMass(actor) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+          }
+          if (axis === ga && dir * gs > 0) actor.grounded = true;
+        }
       }
     }
   }
@@ -6827,7 +6849,12 @@
       const cdy = (moverActor.y + moverActor.h / 2) - (otherActor.y + otherActor.h / 2);
       const closing = Math.abs(cdx) >= Math.abs(cdy) ? (otherActor.vx - moverActor.vx) * Math.sign(cdx || 1) : (otherActor.vy - moverActor.vy) * Math.sign(cdy || 1);
       if (closing < 40) return;
-      reflectActorsApart(moverActor, otherActor, isQuiet(moverActor) || isQuiet(otherActor));
+      // Weight matters: a hit involving anything medium or heavy is a thud scaled by how hard they met
+      // (replacing the old flat boing); light-vs-light (enemy bumps) stays as quiet as before.
+      const heavyHit = Math.max(actorMass(moverActor), actorMass(otherActor)) >= MASS_MEDIUM;
+      reflectActorsApart(moverActor, otherActor, true);
+      if (heavyHit) sounds.thud(Math.min(1, closing / HIT_THUD_FULL_SPEED));
+      else if (!(isQuiet(moverActor) || isQuiet(otherActor))) sounds.boing();
       return;
     }
     const npcActor = playerActor === moverActor ? otherActor : moverActor;
@@ -6963,13 +6990,65 @@
     return recoloredArt(recoloredArt(recoloredArt(art, KEY_TINT_FROM[0], base), KEY_TINT_FROM[1], shadeHex(base, 0.45)), KEY_TINT_FROM[2], shadeHex(base, -0.35));
   }
 
-  // Any two actors colliding: velocities reflect off each other (a real bounce, elastic-ish).
+  // Weight classes for actor-vs-actor hits (the player is never weighed: its contacts are unchanged).
+  // light = every character and the hazard ball, medium = crates, bombs and the carried trampoline/magnet/
+  // cannon, heavy = Large Stone. One fixed table, no per-object settings.
+  const MASS_LIGHT = 1, MASS_MEDIUM = 2, MASS_HEAVY = 6;
+  const COLLISION_SLIVER_PX = 1;      // see resolveAxis: overlaps this thin on the other axis don't count for non-player bodies
+  const MASS_ANCHORED = 1e6;          // standing on the ground counts as immovable along gravity
+  const MASS_RESTITUTION = 0.5;       // how much of the closing speed comes back as separation (the old feel, ~0.5)
+  const MASS_MIN_SEPARATION = 60;     // overlapping things always leave each other at least this fast (as before)
+  const MASS_MAX_SPEED = 500;         // nothing is flung faster than this by a hit (no tunnelling through walls)
+  const MASS_TRANSFER_MIN_SPEED = 40; // a push slower than this into another object is just a stop (resting piles stay still)
+  const MASS_LAND_THUD_MIN_SPEED = 120; // a medium/heavy object landing on another thuds from this speed up
+  const HIT_THUD_FULL_SPEED = 400;    // closing speed at which a hit's thud is full size
+  function actorMass(actor) {
+    const def = actorDefs[actor.defId], t = def && def.temperament;
+    if (t === LARGE_STONE_KIND) return MASS_HEAVY;
+    if (t === PUSHABLE_KIND || t === CARRY_BOMB2_KIND || t === CARRY_TRAMPOLINE_KIND || t === CARRY_MAGNET_KIND || t === CARRY_CANNON2_KIND) return MASS_MEDIUM;
+    return MASS_LIGHT;
+  }
+  // The weight-based exchange itself: velocities along one axis (vk), `s` = +1 when `a` sits on the positive side of `b`.
+  function exchangeAlong(a, b, vk, s) {
+      let ma = actorMass(a), mb = actorMass(b);
+      // Something standing on the floor can't be driven into it: along gravity, whichever of the two is lower
+      // and resting on the ground counts as immovable, so a hit from above bounces off instead of sinking it.
+      if ((vk === "vx") === (gravAxis() === "x")) {
+        const lower = s * gravSign() > 0 ? a : b;
+        if (lower.grounded) { if (lower === a) ma = MASS_ANCHORED; else mb = MASS_ANCHORED; }
+      }
+      const ua = a[vk] * s, ub = b[vk] * s;
+      const p = ma * ua + mb * ub;                        // momentum (conserved)
+      let na = (p + mb * MASS_RESTITUTION * (ub - ua)) / (ma + mb);
+      let nb = (p + ma * MASS_RESTITUTION * (ua - ub)) / (ma + mb);
+      if (na - nb < MASS_MIN_SEPARATION) {                // resting overlap or a weak hit: still part ways, by weight
+        const cm = p / (ma + mb);
+        na = cm + MASS_MIN_SEPARATION * mb / (ma + mb);
+        nb = cm - MASS_MIN_SEPARATION * ma / (ma + mb);
+      }
+      na = Math.max(-MASS_MAX_SPEED, Math.min(MASS_MAX_SPEED, na));
+      nb = Math.max(-MASS_MAX_SPEED, Math.min(MASS_MAX_SPEED, nb));
+      a[vk] = na * s; b[vk] = nb * s;
+      // a hit harder than the walking cap would be flattened by stepActor's NPC speed clamp next frame; exempt it
+      // for a beat (the same exemption every launch uses), and let a flung character lose its steering for a moment
+      for (const o of [a, b]) {
+        if (Math.abs(o[vk]) > NPC_MAX_SPEED) {
+          o.bouncyCooldown = Math.max(o.bouncyCooldown || 0, 350);
+          if (isSteeringCharacter((actorDefs[o.defId] || {}).temperament)) o.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
+        }
+      }
+  }
+  // Any two actors colliding. Two non-player actors trade momentum along the contact axis by weight
+  // (a stone plows through crates and sends pets flying; a crate bounces off a stone); anything involving the
+  // player keeps the old even split.
   function reflectActorsApart(a, b, silent) {
     if (!silent) sounds.boing();
     const dx = (a.x + a.w / 2) - (b.x + b.w / 2);
     const dy = (a.y + a.h / 2) - (b.y + b.h / 2);
     const horizontal = Math.abs(dx) >= Math.abs(dy);
-    if (horizontal) {
+    if (!a.isPlayer && !b.isPlayer) {
+      exchangeAlong(a, b, horizontal ? "vx" : "vy", Math.sign(horizontal ? dx : dy) || 1);
+    } else if (horizontal) {
       const speed = Math.max(60, Math.abs(a.vx) + Math.abs(b.vx));
       a.vx = Math.sign(dx || 1) * speed * 0.5;
       b.vx = -Math.sign(dx || 1) * speed * 0.5;
@@ -6986,6 +7065,7 @@
   function pushApart(a, b) {
     const dx = (a.x + a.w / 2) - (b.x + b.w / 2);
     const dy = (a.y + a.h / 2) - (b.y + b.h / 2);
+    const ax = a.x, ay = a.y, bx = b.x, by = b.y;
     if (Math.abs(dx) >= Math.abs(dy)) {
       const push = Math.sign(dx || 1) * 3;
       a.x += push; b.x -= push;
@@ -6993,6 +7073,9 @@
       const push = Math.sign(dy || 1) * 3;
       a.y += push; b.y -= push;
     }
+    // The nudge never shoves anyone into a wall or the floor (a body even slightly inside a tile can be resolved out the far side of it).
+    if (actorBlockedByTiles(a)) { a.x = ax; a.y = ay; }
+    if (actorBlockedByTiles(b)) { b.x = bx; b.y = by; }
   }
 
   // `away` (optional unit vector) overrides the default "back against your own velocity, or straight up
@@ -8974,7 +9057,12 @@
       if (dx === 0 && dy === 0) continue;
       for (const riderId of link.riderIds) {
         const rider = actors.find(a => a.id === riderId);
-        if (rider && !rider.carried) { rider.x += dx; rider.y += dy; }
+        if (rider && !rider.carried) {
+          // carried along by the platform, but never into a wall: a crate riding a shoved crate used to be dragged into the side wall
+          const ox = rider.x, oy = rider.y;
+          rider.x += dx; rider.y += dy;
+          if (!rider.isPlayer && actorBlockedByTiles(rider)) { rider.x = ox; rider.y = oy; }
+        }
       }
     }
     tickActorContactCooldowns(dt);
@@ -12862,7 +12950,7 @@
       currentSkinFrame, currentBackgroundArt,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
-      reflectActorsApart, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
+      reflectActorsApart, exchangeAlong, actorMass, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
@@ -12983,6 +13071,7 @@
       `const THROW_MIN_SPEED = ${THROW_MIN_SPEED}, THROW_MAX_SPEED = ${THROW_MAX_SPEED}, THROW_UPWARD_SPEED = ${THROW_UPWARD_SPEED};`,
       `const IMPACT_WOBBLE_FREQ = ${IMPACT_WOBBLE_FREQ}, IMPACT_WOBBLE_DECAY = ${IMPACT_WOBBLE_DECAY};`,
       `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
+      `const MASS_LIGHT = ${MASS_LIGHT}, MASS_MEDIUM = ${MASS_MEDIUM}, MASS_HEAVY = ${MASS_HEAVY}, MASS_ANCHORED = ${MASS_ANCHORED}, COLLISION_SLIVER_PX = ${COLLISION_SLIVER_PX}, MASS_RESTITUTION = ${MASS_RESTITUTION}, MASS_MIN_SEPARATION = ${MASS_MIN_SEPARATION}, MASS_MAX_SPEED = ${MASS_MAX_SPEED}, HIT_THUD_FULL_SPEED = ${HIT_THUD_FULL_SPEED}, MASS_TRANSFER_MIN_SPEED = ${MASS_TRANSFER_MIN_SPEED}, MASS_LAND_THUD_MIN_SPEED = ${MASS_LAND_THUD_MIN_SPEED};`,
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
