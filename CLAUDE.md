@@ -6841,3 +6841,17 @@ Part of the "When things meet" patch (Stage 0 matrix harness: `tests/pairs.matri
 - **Export**: `actorMass`, `exchangeAlong` in `runtimeFunctions`; one `constantsSource` line for the MASS_*/HIT_THUD/COLLISION_SLIVER constants. Verified a scene with the new functions exports and runs 3 s error-free (the exported run does not exercise a hit: velocities reset on load).
 - **Known limit**: ground friction (1800 px/s²) stops a flung pet within ~1-2 tiles, so "sends pets flying" mostly shows in the first few frames and in the air; a hit at 500 px/s moves a row of pets a few tiles at most. Changing friction was out of scope.
 - **Behavior changes to report, not retune**: NPCs can't push Large Stone any more (Rock Bottom's stone puzzles never relied on that); crate-vs-crate hits at 40+ px/s now exchange momentum instead of stopping dead.
+
+## v2.53 Stage 2: squash works both ways (crate/stone onto NPCs)
+
+A falling crate or Large Stone now flattens a wanderer, chaser (lethal or not), fleer or stationary NPC, the mirror of the existing crate-on-player crush. Rule (`tryCrushNpc`, called first in `resolveActorContact`'s non-player branch): gravity on; neither body carried or cannon-loaded; crusher is `PUSHABLE_KIND` or `LARGE_STONE_KIND`; along-gravity speed > `CRUSH_MIN_VY` (400, ~2 tiles of fall; a 1-tile drop, ~305 px/s, does not squash); crusher's centre on the gravity side of the target's centre; a fresh spawn burst (`spawnerKey` + `bouncyCooldown`) never squashes. Unlike the player crush, an object the player just dropped/threw DOES squash NPCs. Not targets: the player, collectibles, crates, the stone, bombs. Speed is measured along gravity only, so a horizontally thrown crate does not squash.
+
+Reaction (`squashNpc`): `squashed` flag (actor frozen in `stepActor`, with a `squashFailsafe` deadline so a snapshot restored mid-animation cannot freeze it), `sounds.splat()` (the existing sound, no new one), `RECIPES.squashFlat` (260 ms, wide and flat, fades; skipped when `reducedMotion()`, which also zeroes the delay), log "Squashed!". After `SQUASH_FLATTEN_MS` on the game clock (`gameSetTimeout`, so Pause freezes it): a placed NPC returns to its own spawn with `caughtBounceIn` and `squashImmuneUntil` = `SQUASH_COOLDOWN_MS` (900) so a crate resting there cannot repeat it; a spawner-made NPC is destroyed with `popVanish` like a popped one. Nothing is ever deleted outright; the player ignores a squashed NPC. `resetActorsToSpawn` clears both fields.
+
+Interpretation calls to flag: the fleer is squashed and sent home like the rest (its own pop is still the reaction to the player touching it); `splat` was reused.
+
+Export: `reducedMotion`, `tryCrushNpc`, `squashNpc` in `runtimeFunctions`; one `constantsSource` line for the two constants.
+
+Samples: all 12 run 60 s idle and with a scripted pass (`tests/squash.samples.js`): 0 squashes, 0 errors, so no sample changes; Rock Bottom's beast and Large Stones never meet. No exemption flag was needed.
+
+Tests: `node tests/squash.test.js` (drops from 1, 2 and 4 tiles on each NPC kind, thrown crate, held crate does not crush the player, placed vs spawner-made, resting crate does nothing, cooldown, Pause mid-animation, reduced motion). Regression suites (rockbottom 48, overengineered 63, weight, bombs, deathdig, lethalnpc, stage1, crossingguard, cannonlanding, magnet, vortex) pass.

@@ -4517,6 +4517,14 @@
   // velocity every frame — see stepActor(). These few recipes remain only for the handful of
   // reactions that are genuinely one-off narrative beats, not continuous physical states.
   const RECIPES = {
+    // A crate or stone landing on a character: flattened to a pancake, held there, then gone (it is sent home
+    // right after, see squashNpc). SQUASH_FLATTEN_MS below must match this duration.
+    squashFlat: { duration: 260, keyframes: [
+      { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
+      { t: 0.2, sx: 1.6, sy: 0.2, rot: 0, ox: 0, oy: 0.3, alpha: 1 },
+      { t: 0.8, sx: 1.6, sy: 0.2, rot: 0, ox: 0, oy: 0.3, alpha: 1 },
+      { t: 1, sx: 1.7, sy: 0.1, rot: 0, ox: 0, oy: 0.35, alpha: 0 }
+    ]},
     popVanish: { duration: 220, keyframes: [
       { t: 0, sx: 1, sy: 1, rot: 0, ox: 0, oy: 0, alpha: 1 },
       { t: 0.5, sx: 1.3, sy: 1.3, rot: 0.2, ox: 0, oy: 0, alpha: 0.7 },
@@ -6839,6 +6847,8 @@
   function resolveActorContact(moverActor, otherActor) {
     const playerActor = moverActor.isPlayer ? moverActor : (otherActor.isPlayer ? otherActor : null);
     if (!playerActor) {
+      // A heavy/medium object coming down hard on a character squashes it (see tryCrushNpc); that is the whole reaction.
+      if (tryCrushNpc(moverActor, otherActor) || tryCrushNpc(otherActor, moverActor)) return;
       // NPCs brushing past collectibles are silent — only the bounce between two non-collectibles is heard.
       // Also silent for enemies (any steering character, stationary, or a hazard ball): crowds of them
       // bumping each other made a constant boing. Object-vs-object bumps (crates, bombs...) still sound.
@@ -6861,7 +6871,7 @@
     // v2.21: a carried object is glued right above the player's own head (see tick()'s carry-follow
     // update) — close enough that its AABB can graze the player's. None of the reactions below
     // should ever fire on something the player is currently holding.
-    if (npcActor.carried || npcActor.cannonLoad) return;
+    if (npcActor.carried || npcActor.cannonLoad || npcActor.squashed) return;
     const def = actorDefs[npcActor.defId];
     const temperament = def ? def.temperament : null;
 
@@ -7735,6 +7745,55 @@
       if (modifierAt(cx, cy) === "lethal") { triggerNpcLethalReset(actor); return; }
     }
   }
+  // ---- "squash works both ways": a crate or stone coming down hard on a character flattens it ----
+  // Same gates as the crush on the player (CRUSH_MIN_VY along gravity, centre above the target, a fresh spawner
+  // burst is a shove not a fall, a bomb never crushes), except that something the player just dropped or threw DOES
+  // count against characters. A placed character is sent back to its own start, a spawner-made one despawns the way a
+  // popped one does; nothing is ever destroyed outright. Presentation only: a flatten recipe, held still while it plays
+  // (the reduced-motion preference skips the animation), on the game clock so Pause freezes it.
+  const SQUASH_FLATTEN_MS = 260;      // = RECIPES.squashFlat.duration
+  const SQUASH_COOLDOWN_MS = 900;     // a squashed character can't be squashed again for this long after it is sent home
+  function reducedMotion() {
+    try { return !!(typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; }
+  }
+  function tryCrushNpc(crusher, target) {
+    if (!gravityOn() || crusher.carried || crusher.cannonLoad || target.carried || target.cannonLoad) return false;
+    const cd = actorDefs[crusher.defId], td = actorDefs[target.defId];
+    if (!cd || !td) return false;
+    if (cd.temperament !== PUSHABLE_KIND && cd.temperament !== LARGE_STONE_KIND) return false; // crate or stone (a bomb never crushes)
+    const t = td.temperament;
+    if (!(t === "wanderer" || t === "chaser" || t === "fleer" || t === "stationary")) return false;
+    if (target.squashed || target.destroyed || target.squashImmuneUntil > gameNow()) return false;
+    if (crusher.spawnerKey && crusher.bouncyCooldown > 0) return false; // a fresh spawner launch is a shove, not a fall
+    const gs = gravSign(), ax = gravAxis() === "x";
+    if (!((ax ? crusher.vx : crusher.vy) * gs > CRUSH_MIN_VY)) return false;
+    const cAlong = ax ? crusher.x + crusher.w / 2 : crusher.y + crusher.h / 2, tAlong = ax ? target.x + target.w / 2 : target.y + target.h / 2;
+    if (!(gs > 0 ? cAlong < tAlong : cAlong > tAlong)) return false;
+    squashNpc(target);
+    return true;
+  }
+  function squashNpc(target) {
+    const calm = reducedMotion();
+    target.squashed = true; target.squashFailsafe = gameNow() + SQUASH_FLATTEN_MS + 400; target.vx = 0; target.vy = 0;
+    sounds.splat();
+    if (!calm) playRecipe(target, "squashFlat");
+    log("Squashed!");
+    gameSetTimeout(() => {
+      if (!actors.includes(target)) return;
+      if (target.spawnerKey) {
+        target.destroyed = true;
+        playRecipe(target, "popVanish");
+        gameSetTimeout(() => removeActorObject(target), RECIPES.popVanish.duration);
+        return;
+      }
+      target.squashed = false;
+      target.x = target.spawnX; target.y = target.spawnY; target.vx = 0; target.vy = 0;
+      target.displacedCooldown = 0;
+      target.squashImmuneUntil = gameNow() + SQUASH_COOLDOWN_MS;
+      if (!calm) playRecipe(target, "caughtBounceIn");
+    }, calm ? 0 : SQUASH_FLATTEN_MS);
+  }
+
   function triggerNpcLethalReset(actor) {
     if (actor.destroyed) return;
     // A spawner-made character has no "home" of its own — its spawn point is just the spawner's
@@ -8261,6 +8320,7 @@
     // by tick()'s own carry-follow update instead. A fuse still ticks while carried (see
     // attachCarryable's setTimeout) since that's a game-clock timer, not part of this per-frame step.
     if (actor.carried) return;
+    if (actor.squashed) { if (actor.squashFailsafe > gameNow()) return; actor.squashed = false; } // flattened by a falling crate/stone: held still until it is sent home (squashNpc); the failsafe keeps a lost timer (a restored snapshot) from freezing it forever
     if (actor.cannonLoad) { tickCannonLoad(actor, dt); return; }
     const def = actorDefs[actor.defId];
     const temperament = def ? def.temperament : null;
@@ -9741,6 +9801,7 @@
         // just have the very next frame immediately overwrite this reset with wherever its
         // un-reset sweep says it should be instead. Resetting both together is what makes "reset to
         // start" actually mean something for a self-driven actor like this one.
+        actor.squashed = false; actor.squashImmuneUntil = 0;
         const def = actorDefs[actor.defId];
         if (def && def.temperament === MOVING_PLATFORM_KIND) actor.platformT = 0;
         if (def && def.temperament === MOVER_KIND) { actor.moverT = 0; moverPlaceAt(actor); }
@@ -12940,7 +13001,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
@@ -13078,6 +13139,7 @@
       `const READY_DURATION_MS = ${READY_DURATION_MS};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
+      `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
       `const PLAYER_BOARD_MARGIN = ${PLAYER_BOARD_MARGIN}, PLAYER_EMBED_FRAMES = ${PLAYER_EMBED_FRAMES};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
