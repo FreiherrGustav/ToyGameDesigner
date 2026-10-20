@@ -27,6 +27,11 @@ module.exports = function hook() { return `
   { const o = sounds.boing; sounds.boing = function () { __ev("bounce"); return o.apply(this, arguments); }; }
   { const o = sounds.trampolineBoing; sounds.trampolineBoing = function () { __ev("bounce"); return o.apply(this, arguments); }; }
   { const o = triggerBouncyLaunch; triggerBouncyLaunch = function () { __ev("bounce"); return o.apply(this, arguments); }; }
+  if (typeof exchangeAlong === "function") { const o = exchangeAlong; exchangeAlong = function () { __ev("shove"); return o.apply(this, arguments); }; }
+  if (typeof squashNpc === "function") { const o = squashNpc; squashNpc = function () { __ev("squash"); return o.apply(this, arguments); }; }
+  if (typeof tryImpactDetonate === "function") { const o = tryImpactDetonate; tryImpactDetonate = function () { const r = o.apply(this, arguments); if (r) __ev("impactBomb"); return r; }; }
+  if (typeof bigHitFx === "function") { const o = bigHitFx; bigHitFx = function (a, b, sp) { if (sp >= BIG_HIT_MIN_SPEED && Math.max(actorMass(a), actorMass(b)) >= MASS_MEDIUM) __ev("bigHit"); return o.apply(this, arguments); }; }
+  { const o = detonateCarriedBombAt; let depth = 0; detonateCarriedBombAt = function () { if (depth > 0) __ev("chainBlast"); depth++; try { return o.apply(this, arguments); } finally { depth--; } }; }
   window.__iaPrev = {};
   window.__iaPoll = () => { // channel edges: a plate/button channel turning on, and a gate of that color opening
     const ia = window.__ia; if (!ia.on) return;

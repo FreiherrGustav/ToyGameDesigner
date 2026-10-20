@@ -2,7 +2,7 @@
 // Runs every (mover, target) pair of actor kinds in a temp, hooked copy of index.html (the repo file stays clean).
 const fs = require("fs"), os = require("os"), path = require("path");
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || "/opt/node22/lib/node_modules/playwright");
-const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const src = fs.readFileSync(process.env.HTML || path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 if (!src.includes(anchor)) throw new Error("anchor missing");
 const HOOK = `

@@ -215,7 +215,8 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   // ---- F. Stage 2 templates: expectation within 10 simulated seconds, canonical and chaotic, fresh page per run ----
   const STAGE2 = { lemmings: ["wrap", 1], plinko: ["bounce", 3], fallforever: ["wrap", 1], rink: ["cannon", 1], treadmill: ["wrap", 1], tornado: ["wrap", 1],
     pinballroom: ["wrap", 1], catcannon: ["cannon", 1], trampit: ["bounce", 3], bigrink: ["cannon", 1], roulette2: ["buttonPress", 1],
-    bombcarousel: ["explosion", 1], slipgauntlet: ["cannon", 1], elevator: ["wrap", 1], warploop: ["warp", 1] };
+    bombcarousel: ["explosion", 1], slipgauntlet: ["cannon", 1], elevator: ["wrap", 1], warploop: ["warp", 1],
+    stonepets: ["squash", 1], craterain: ["squash", 1], bombrow: ["impactBomb", 1] };
   for (const [id, [type, min]] of Object.entries(STAGE2)) {
     ok(T.some(t => t.id === id) && !elig.skipped.some(k => k.id === id), id + ": template exists and is eligible");
     for (const mode of ["canonical", "chaos"]) {
