@@ -6650,8 +6650,9 @@
         const dir = v > 0 ? 1 : -1;
         // A moving non-player can't shove a heavy object (Large Stone) along like a feather: it stops flush against
         // it and trades momentum by weight instead (a crate bounces off a stone; the stone barely moves).
-        if (!actor.isPlayer && axis !== ga && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED && actorMass(other) >= MASS_HEAVY && actorMass(actor) < MASS_HEAVY) {
+        if (!actor.isPlayer && axis !== ga && (Math.abs(v) >= MASS_TRANSFER_MIN_SPEED || npcJustWalking(actor)) && actorMass(other) >= MASS_HEAVY && actorMass(actor) < MASS_HEAVY) {
           seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+          if (npcJustWalking(actor)) { actor[vk] = 0; continue; }   // a character merely walking into it: stop, no thud, no momentum
           if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) { sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED)); bigHitFx(actor, other, Math.abs(v)); }
           exchangeAlong(actor, other, vk, -dir);
           continue;
@@ -6662,7 +6663,7 @@
           const byTile = actorBlockedByTiles(other);
           other[pk] -= dir * delta;
           seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
-          if (!actor.isPlayer && axis !== ga && !byTile && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED) {
+          if (!actor.isPlayer && axis !== ga && !byTile && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED && !npcJustWalking(actor)) {
             if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) { sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED)); bigHitFx(actor, other, Math.abs(v)); }
             exchangeAlong(actor, other, vk, -dir);   // pushed into another object, not a wall: pass the momentum on by weight
           } else {
@@ -6916,6 +6917,10 @@
       const cdy = (moverActor.y + moverActor.h / 2) - (otherActor.y + otherActor.h / 2);
       const closing = Math.abs(cdx) >= Math.abs(cdy) ? (otherActor.vx - moverActor.vx) * Math.sign(cdx || 1) : (otherActor.vy - moverActor.vy) * Math.sign(cdy || 1);
       if (closing < 40) return;
+      // A character just walking into a crate/stone is not a collision: shovePushables already stops it flush (or shoves a crate).
+      // Reflecting + nudging apart every half second is what made a chaser and a stone shuffle, creep and thud forever.
+      { const wm = npcJustWalking(moverActor), wo = npcJustWalking(otherActor);
+        if ((wm && !wo && actorMass(otherActor) >= MASS_MEDIUM) || (wo && !wm && actorMass(moverActor) >= MASS_MEDIUM)) return; }
       // Weight matters: a hit involving anything medium or heavy is a thud scaled by how hard they met
       // (replacing the old flat boing); light-vs-light (enemy bumps) stays as quiet as before.
       const heavyHit = Math.max(actorMass(moverActor), actorMass(otherActor)) >= MASS_MEDIUM;
@@ -7066,6 +7071,13 @@
   const MASS_RESTITUTION = 0.5;       // how much of the closing speed comes back as separation (the old feel, ~0.5)
   const MASS_MIN_SEPARATION = 60;     // overlapping things always leave each other at least this fast (as before)
   const MASS_MAX_SPEED = 500;         // nothing is flung faster than this by a hit (no tunnelling through walls)
+  // A steering character that is only walking (no launch, bounce or knock) pushing against an object has nothing to "hit" with:
+  // its own steering re-creates ~walking speed every frame, which used to read as a new hit every frame (a thud stream, and
+  // the object creeping along). Only a flung character (bounce/cannon/knock cooldowns running) or a faster-than-walking one trades momentum.
+  function npcJustWalking(a) {
+    const def = actorDefs[a.defId];
+    return !!def && isSteeringCharacter(def.temperament) && !(a.bouncyCooldown > 0) && !(a.cannonCooldown > 0) && !(a.displacedCooldown > 0) && Math.abs(a.vx) + Math.abs(a.vy) <= NPC_MAX_SPEED + 1;
+  }
   const MASS_TRANSFER_MIN_SPEED = 40; // a push slower than this into another object is just a stop (resting piles stay still)
   const MASS_LAND_THUD_MIN_SPEED = 120; // a medium/heavy object landing on another thuds from this speed up
   const HIT_THUD_FULL_SPEED = 400;    // closing speed at which a hit's thud is full size
@@ -13076,7 +13088,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, bigHitFx, shakeOffset, renderPuffs,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
