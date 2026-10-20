@@ -6,11 +6,12 @@ const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-s
 const HOOK = `window.__sw = (() => {
   let rs = 1; Math.random = () => (rs = (rs * 1664525 + 1013904223) % 4294967296) / 4294967296;
   const sq = []; { const o = squashNpc; squashNpc = function (t) { const d = actorDefs[t.defId]; sq.push({ t: Math.round(gameClockMs / 1000), who: d && d.name || t.defId, spawned: !!t.spawnerKey, x: Math.round(t.x / 32), y: Math.round(t.y / 32) }); return o.apply(this, arguments); }; }
+  let det = 0, imp = 0; { const o = detonateCarriedBombAt; detonateCarriedBombAt = function () { det++; return o.apply(this, arguments); }; } if (typeof tryImpactDetonate === 'function') { const o = tryImpactDetonate; tryImpactDetonate = function () { const r = o.apply(this, arguments); if (r) imp++; return r; }; }
   const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", " ", "ArrowDown"];
   return {
     list: () => SAMPLE_GAMES.map(g => g.id),
     run(idx, mode, seconds) {
-      rs = 1; sq.length = 0; if (appMode === "play") exitToBuildMode(); gameClockMs = 0; clearGameTimers();
+      rs = 1; sq.length = 0; det = 0; imp = 0; if (appMode === "play") exitToBuildMode(); gameClockMs = 0; clearGameTimers();
       const g = SAMPLE_GAMES[idx]; loadExampleGame(g.builder, g.name, { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       for (const k in keys) keys[k] = false;
       let lives0 = lives;
@@ -23,7 +24,7 @@ const HOOK = `window.__sw = (() => {
         tick(1 / 60);
       }
       for (const k in keys) keys[k] = false;
-      return { id: g.id, mode, squashes: sq.slice(), ended: !!playSessionEnded };
+      return { id: g.id, mode, squashes: sq.slice(), ended: !!playSessionEnded, det, imp };
     }
   };
 })();`;
@@ -38,7 +39,7 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
     await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__sw);
     let r; try { r = await page.evaluate(([i, m, s]) => __sw.run(i, m, s), [i, mode, secs]); } catch (e) { errors.push(ids[i] + ": " + String(e).slice(0, 150)); await page.close(); continue; }
     total += r.squashes.length;
-    console.log((ids[i] + " " + mode).padEnd(34), "squashes:", r.squashes.length, r.squashes.length ? JSON.stringify(r.squashes.slice(0, 6)) : "");
+    console.log((ids[i] + " " + mode).padEnd(34), "squashes:", r.squashes.length, "bomb detonations:", r.det, "by impact:", r.imp, r.squashes.length ? JSON.stringify(r.squashes.slice(0, 6)) : "");
     await page.close();
   }
   console.log("TOTAL squashes:", total, "errors:", errors.length, errors.slice(0, 5));

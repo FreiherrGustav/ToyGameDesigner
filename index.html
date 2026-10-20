@@ -1889,7 +1889,7 @@
   // snapshot rather than the just-played (and possibly mid-game-over) live state, so repeated
   // "try again" clicks always restart from the true original build, not accumulated play state.
   function clearTransientRuntimeState() {
-    animState = {}; tileAnimState = {}; fxGhosts = []; actorContactCooldown = {}; dragContactCooldown = {};
+    animState = {}; tileAnimState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
@@ -2006,7 +2006,7 @@
     spareHearts = cp.spareHearts; starTimer = 0;
     score = cp.score; intensity = 0;
     const scoreEl = document.getElementById("scoreVal"); if (scoreEl) scoreEl.textContent = score;
-    animState = {}; tileAnimState = {}; fxGhosts = []; actorContactCooldown = {}; dragContactCooldown = {};
+    animState = {}; tileAnimState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9; actorContactCooldown = {}; dragContactCooldown = {};
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {}; switchTouchedCells = {};
     activateRoom(cp.roomId);
@@ -6552,6 +6552,59 @@
   // stop on top of it exactly the way a mover already stopped on top of a single pushable resting
   // on a tile — no chain-push physics needed, since pushables never carry their own horizontal
   // velocity (PUSHABLE_KIND's "zero self-driven accel") beyond an occasional bounce.
+  // Stage 3: a physics object (crate, stone, a thrown magnet...) hitting a bomb ACTOR at BOMB_IMPACT_DETONATE_SPEED or more
+  // sets it off through the re-entrancy-guarded detonateCarriedBombAt. The player's touch still arms the fuse (never here),
+  // enemies still can't set bombs off, and one bomb never sets off another by weight: a bomb's danger is its blast.
+  function tryImpactDetonate(striker, bomb, speed) {
+    if (speed < BOMB_IMPACT_DETONATE_SPEED || striker.isPlayer || striker.carried || striker.cannonLoad || bomb.detonating || bomb.carried || bomb.cannonLoad) return false;
+    const sd = actorDefs[striker.defId], bd = actorDefs[bomb.defId];
+    if (!sd || !bd || !isCarryBombKind(bd.temperament) || isCarryBombKind(sd.temperament) || !PHYSICS_OBJECT_KINDS.includes(sd.temperament)) return false;
+    detonateCarriedBombAt(currentRoomId, bomb.id);
+    return true;
+  }
+  // Stage 3: dust puffs and a tiny screen shake for a big medium/heavy hit. Presentation only: crisp pixel squares, whole-pixel
+  // shake, throttled so a pile never strobes, off under reduced-motion, frozen with the game clock (and not drawn shaking while paused).
+  const BIG_HIT_FX = true;           // master on/off for the puff and the shake
+  const BIG_HIT_MIN_SPEED = 360;     // closing speed (px/s) a medium/heavy hit needs to count as an event (~2 tiles of fall)
+  const BIG_HIT_PUFF_MS = 320, BIG_HIT_PUFF_GAP_MS = 120, BIG_HIT_PUFF_MAX = 6;
+  const BIG_HIT_SHAKE_PX = 3, BIG_HIT_SHAKE_MS = 160, BIG_HIT_SHAKE_PER_SEC = 2;
+  let fxPuffs = [], bigHitTimes = [], lastPuffAt = -1e9, shakeAt = -1e9;
+  function bigHitFx(a, b, speed) {
+    if (!BIG_HIT_FX || speed < BIG_HIT_MIN_SPEED || Math.max(actorMass(a), actorMass(b)) < MASS_MEDIUM || reducedMotion()) return;
+    const now = gameNow();
+    if (now - lastPuffAt >= BIG_HIT_PUFF_GAP_MS && fxPuffs.length < BIG_HIT_PUFF_MAX) {
+      lastPuffAt = now;
+      fxPuffs.push({ t: now, x: (a.x + a.w / 2 + b.x + b.w / 2) / 2, y: Math.max(a.y + a.h, b.y + b.h) - 4, seed: fxPuffs.length + Math.floor(now) % 7 });
+    }
+    bigHitTimes = bigHitTimes.filter(t => now - t < 1000);
+    if (bigHitTimes.length < BIG_HIT_SHAKE_PER_SEC) { bigHitTimes.push(now); shakeAt = now; }
+  }
+  function shakeOffset() {
+    if (gamePaused || reducedMotion()) return null;
+    const e = gameNow() - shakeAt;
+    if (e < 0 || e >= BIG_HIT_SHAKE_MS) return null;
+    const amp = Math.round(BIG_HIT_SHAKE_PX * (1 - e / BIG_HIT_SHAKE_MS));
+    if (amp < 1) return null;
+    return Math.floor(e / 40) % 2 ? { x: -amp, y: 0 } : { x: amp, y: Math.floor(e / 20) % 2 ? 1 : 0 };
+  }
+  function renderPuffs(ctx, viewOffsetPx) {
+    if (!fxPuffs.length) return;
+    const now = gameNow();
+    fxPuffs = fxPuffs.filter(p => now - p.t < BIG_HIT_PUFF_MS && now >= p.t);
+    fxPuffs.forEach(p => {
+      const f = (now - p.t) / BIG_HIT_PUFF_MS;
+      ctx.save();
+      ctx.globalAlpha = 1 - f;
+      ctx.fillStyle = "#e6dfcf";
+      for (let i = 0; i < 5; i++) {
+        const dir = (i - 2), r = 6 + f * 14;
+        const px = Math.round(p.x - viewOffsetPx + dir * r), py = Math.round(p.y - Math.abs(dir) * 2 - f * 8 - ((i + p.seed) % 2) * 2);
+        const s = f < 0.5 ? 4 : 3;
+        ctx.fillRect(px - s / 2, py - s / 2, s, s);
+      }
+      ctx.restore();
+    });
+  }
   function shovePushables(actor, axis) {
     // Seat the mover flush against an object's edge — but never into a tile. A player who is already
     // overlapping a crate that is wedged against a wall used to be "seated" on the far side of the
@@ -6567,8 +6620,12 @@
       if (other.id === actor.id || other.carried || other.cannonLoad) continue;
       const def = actorDefs[other.defId];
       if (!def || !STANDABLE_OBJECT_KINDS.includes(def.temperament)) continue;
+      if (other.detonating) continue; // already going off: no longer a solid thing to land on or shove
       if (!(actor.x < other.x + other.w && actor.x + actor.w > other.x &&
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
+      // A fast object hitting a bomb actor sets it off (the actor twin of the tile rule in resolveAxis); slow shoves and resting stacks never do.
+      { const sv = actor[vk];
+        if (sv !== 0 && (other[pk] + other[sk] / 2 - (actor[pk] + actor[sk] / 2)) * sv > 0 && tryImpactDetonate(actor, other, Math.abs(sv))) continue; }
       // Touching an unlit bomb with the player lights it, same as bumping the tile always did.
       if (actor.isPlayer && isCarryBombKind(def.temperament) && other.fuseTimerId == null && !other.detonating) startOrResumeBombFuse(other);
       // A Moving Platform is never shoved — it's self-driven on a fixed track, not something a kid
@@ -6595,7 +6652,7 @@
         // it and trades momentum by weight instead (a crate bounces off a stone; the stone barely moves).
         if (!actor.isPlayer && axis !== ga && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED && actorMass(other) >= MASS_HEAVY && actorMass(actor) < MASS_HEAVY) {
           seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
-          if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+          if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) { sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED)); bigHitFx(actor, other, Math.abs(v)); }
           exchangeAlong(actor, other, vk, -dir);
           continue;
         }
@@ -6606,12 +6663,12 @@
           other[pk] -= dir * delta;
           seat(dir > 0 ? other[pk] - actor[sk] : other[pk] + other[sk]);
           if (!actor.isPlayer && axis !== ga && !byTile && Math.abs(v) >= MASS_TRANSFER_MIN_SPEED) {
-            if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+            if (Math.max(actorMass(actor), actorMass(other)) >= MASS_MEDIUM) { sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED)); bigHitFx(actor, other, Math.abs(v)); }
             exchangeAlong(actor, other, vk, -dir);   // pushed into another object, not a wall: pass the momentum on by weight
           } else {
             actor[vk] = 0;
             // a medium/heavy object coming down hard onto another thuds, scaled by how hard
-            if (!actor.isPlayer && axis === ga && Math.abs(v) >= MASS_LAND_THUD_MIN_SPEED && actorMass(actor) >= MASS_MEDIUM) sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED));
+            if (!actor.isPlayer && axis === ga && Math.abs(v) >= MASS_LAND_THUD_MIN_SPEED && actorMass(actor) >= MASS_MEDIUM) { sounds.thud(Math.min(1, Math.abs(v) / HIT_THUD_FULL_SPEED)); bigHitFx(actor, other, Math.abs(v)); }
           }
           if (axis === ga && dir * gs > 0) actor.grounded = true;
         }
@@ -6863,7 +6920,7 @@
       // (replacing the old flat boing); light-vs-light (enemy bumps) stays as quiet as before.
       const heavyHit = Math.max(actorMass(moverActor), actorMass(otherActor)) >= MASS_MEDIUM;
       reflectActorsApart(moverActor, otherActor, true);
-      if (heavyHit) sounds.thud(Math.min(1, closing / HIT_THUD_FULL_SPEED));
+      if (heavyHit) { sounds.thud(Math.min(1, closing / HIT_THUD_FULL_SPEED)); bigHitFx(moverActor, otherActor, closing); }
       else if (!(isQuiet(moverActor) || isQuiet(otherActor))) sounds.boing();
       return;
     }
@@ -11309,6 +11366,7 @@
       ctx.restore();
     });
     renderFxGhosts(ctx, viewOffsetPx);
+    renderPuffs(ctx, viewOffsetPx);
   }
 
   // Puts the world through the gravity view turn (see viewK). A quarter turn makes the 24x18 room 18x24, which is
@@ -11340,6 +11398,7 @@
     gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
     const vk = viewK();
     gctx.save();
+    { const sk = shakeOffset(); if (sk) gctx.translate(sk.x, sk.y); }
     applyViewTransform(gctx, vk);
     artViewK = vk;
     let inTransition;
@@ -13001,7 +13060,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, bigHitFx, shakeOffset, renderPuffs,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
@@ -13140,6 +13199,7 @@
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
+      `const BIG_HIT_FX = ${BIG_HIT_FX}, BIG_HIT_MIN_SPEED = ${BIG_HIT_MIN_SPEED}, BIG_HIT_PUFF_MS = ${BIG_HIT_PUFF_MS}, BIG_HIT_PUFF_GAP_MS = ${BIG_HIT_PUFF_GAP_MS}, BIG_HIT_PUFF_MAX = ${BIG_HIT_PUFF_MAX}, BIG_HIT_SHAKE_PX = ${BIG_HIT_SHAKE_PX}, BIG_HIT_SHAKE_MS = ${BIG_HIT_SHAKE_MS}, BIG_HIT_SHAKE_PER_SEC = ${BIG_HIT_SHAKE_PER_SEC};`,
       `const PLAYER_BOARD_MARGIN = ${PLAYER_BOARD_MARGIN}, PLAYER_EMBED_FRAMES = ${PLAYER_EMBED_FRAMES};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
       `const GEOMETRY_ICONS = ${JSON.stringify(GEOMETRY_ICONS)};`,
@@ -13254,7 +13314,7 @@
   let cameraX = 0;
   let cameraFollowSnapNeeded = true;
   let cameraShiftSide = null;
-  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {}, fxGhosts = [];
+  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {}, fxGhosts = []; let fxPuffs = [], bigHitTimes = [], lastPuffAt = -1e9, shakeAt = -1e9;
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
   let score = 0, intensity = 0;
@@ -13312,7 +13372,7 @@
     plateChannelsActive = {}; channelStateSince = {};
     switchTouchedCells = {}; gravRandomCount = 0;
     playerRoomId = initialGameData.playerRoomId;
-    digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {}; fxGhosts = [];
+    digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9;
     actorContactCooldown = {}; dragContactCooldown = {};
     roomTransition = null;
     score = 0; intensity = 0;

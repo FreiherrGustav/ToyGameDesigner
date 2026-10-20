@@ -187,7 +187,7 @@ const row = (r) => r[0] + ": " + r[1].map(a => `${a.k}(${a.x},${a.y} v${a.vx},${
   r = await page.evaluate(() => __w.crateIntoStone()); show("C3 crate into a stone", r, 10);
   console.log("  stone moved:", r.stoneMoved, "thud:", JSON.stringify(r.thud));
   for (const n of [3, 6]) { r = await page.evaluate(n => __w.rest(n), n); console.log("rest", n, JSON.stringify(r)); if (r.maxDrift > 0.5 || r.reflect || r.maxV > 5) fail("resting stack of " + n + " moved " + JSON.stringify(r)); }
-  r = await page.evaluate(() => __w.stoneIntoBomb()); console.log("stone->bomb det:", r.det, "bombThere:", r.there, "armed:", r.armed); if (r.det || !r.there) fail("stone detonated the bomb");
+  r = await page.evaluate(() => __w.stoneIntoBomb()); console.log("stone->bomb det:", r.det, "bombThere:", r.there, "armed:", r.armed); if (!r.det) fail("stone should now set the bomb off (Stage 3 does that on purpose)");
   for (const [label, opts] of [["all kinds, 450px/s", {}], ["no hazard balls", { noBall: true }], ["all kinds, 250px/s", { speed: 500 }]]) {
     let o = 0, w = 0, one = 0; for (let seed = 1; seed <= 30; seed++) { r = await page.evaluate(([s, op]) => __w.chaos(s, op), [seed, opts]); o += r.out; w += r.wall; one += r.oneFrame; }
     console.log("chaos x30 (" + label + "): stuck out-of-room frames", o, "stuck in-wall frames", w, "one-off embeds", one); if (o || w) fail("chaos leaked (" + label + ") " + o + "/" + w);
