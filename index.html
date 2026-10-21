@@ -6554,6 +6554,16 @@
   // Stage 3: a physics object (crate, stone, a thrown magnet...) hitting a bomb ACTOR at BOMB_IMPACT_DETONATE_SPEED or more
   // sets it off through the re-entrancy-guarded detonateCarriedBombAt. The player's touch still arms the fuse (never here),
   // enemies still can't set bombs off, and one bomb never sets off another by weight: a bomb's danger is its blast.
+  // A Large Stone coming down hard (CRUSH_MIN_VY, ~2 tiles of fall) on a crate smashes the crate. Crates are
+  // destroyed (never reset), the same way lethal ground destroys one; nothing else is crushed by this.
+  function tryStoneCrushCrate(stone, crate, speed) {
+    if (speed < CRUSH_MIN_VY || !gravityOn() || stone.carried || crate.carried || crate.destroyed || crate.cannonLoad || stone.cannonLoad) return false;
+    const sd = actorDefs[stone.defId], cd = actorDefs[crate.defId];
+    if (!sd || !cd || sd.temperament !== LARGE_STONE_KIND || cd.temperament !== PUSHABLE_KIND) return false;
+    if (gravAxis() === "x" ? stone.vx * gravSign() <= 0 : stone.vy * gravSign() <= 0) return false; // must be falling, not sliding sideways
+    destroyPhysicsObjectInLethal(crate);
+    return true;
+  }
   function tryImpactDetonate(striker, bomb, speed) {
     if (speed < BOMB_IMPACT_DETONATE_SPEED || striker.isPlayer || striker.carried || striker.cannonLoad || bomb.detonating || bomb.carried || bomb.cannonLoad) return false;
     const sd = actorDefs[striker.defId], bd = actorDefs[bomb.defId];
@@ -6624,7 +6634,8 @@
             actor.y < other.y + other.h && actor.y + actor.h > other.y)) continue;
       // A fast object hitting a bomb actor sets it off (the actor twin of the tile rule in resolveAxis); slow shoves and resting stacks never do.
       { const sv = actor[vk];
-        if (sv !== 0 && (other[pk] + other[sk] / 2 - (actor[pk] + actor[sk] / 2)) * sv > 0 && tryImpactDetonate(actor, other, Math.abs(sv))) continue; }
+        if (sv !== 0 && (other[pk] + other[sk] / 2 - (actor[pk] + actor[sk] / 2)) * sv > 0 && tryImpactDetonate(actor, other, Math.abs(sv))) continue;
+        if (sv !== 0 && (other[pk] + other[sk] / 2 - (actor[pk] + actor[sk] / 2)) * sv > 0 && tryStoneCrushCrate(actor, other, Math.abs(sv))) continue; }
       // Touching an unlit bomb with the player lights it, same as bumping the tile always did.
       if (actor.isPlayer && isCarryBombKind(def.temperament) && other.fuseTimerId == null && !other.detonating) startOrResumeBombFuse(other);
       // A Moving Platform is never shoved — it's self-driven on a fixed track, not something a kid
@@ -7521,6 +7532,7 @@
         detonateCarriedBombAt(roomId, actor.id);
         return;
       }
+      if (actorDef && actorDef.temperament === PUSHABLE_KIND && !actor.destroyed) { destroyPhysicsObjectInLethal(actor); return; } // a crate is blown apart
       const dx = (actor.x + actor.w / 2) - (gx * TILE + TILE / 2);
       const dy = (actor.y + actor.h / 2) - (gy * TILE + TILE / 2);
       const dd = Math.hypot(dx, dy) || 1;
@@ -7797,7 +7809,7 @@
     actor.destroyed = true;
     playActorSound(actor, "splat");
     playRecipe(actor, "popVanish");
-    log("Destroyed by lethal!");
+    log("Smashed!");
     gameSetTimeout(() => removeActorObject(actor), RECIPES.popVanish.duration);
   }
   // Object-to-object interaction matrix: a NEW reaction — the matrix's own Lethal row marked
@@ -13087,7 +13099,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, tryStoneCrushCrate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
