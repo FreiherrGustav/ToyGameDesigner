@@ -8,7 +8,7 @@ const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-s
 const HOOK = require("./surprise.hook.js")() + `
   window.__st = {
     reset: keep => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; if (!keep) surpriseRecent.length = 0; },
-    templates: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, category: t.category, closed: t.closed, stooge: t.stooge, room: t.room || null, expect: t.expect || null, nonsense: !!t.nonsense, legend: t.legend || null, rows: t.rows || null, rooms: t.rooms || null, requires: t.requires, names: t.names, discover: t.discover })),
+    templates: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, category: t.category, closed: t.closed, stooge: t.stooge, room: t.room || null, expect: t.expect || null, nonsense: !!t.nonsense, legend: t.legend || null, rows: t.rows || null, rooms: t.rooms || null, requires: t.requires, names: t.names, discover: t.discover, authored: !!t.authored })),
     eligible: () => surpriseEligibleTemplates(),
     gen: (seed, o) => generateSurprise(seed, o), press: (seed, o) => surpriseMe(seed, o),
     play: () => enterPlayMode(), stop: () => exitToBuildMode(),
