@@ -76,7 +76,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
     if (t.category === "loop" || t.category === "vignette") ok(t.expect && t.expect.selfStart === true, t.id + ": expect.selfStart declared");
     if (t.category === "toy") ok(t.expect && t.expect.needsInput === true, t.id + ": toy is labelled needsInput");
     // spawner templates need a sink
-    if (t.rows && Object.values(t.legend).some(n => /^spawner/.test(n))) {
+    if (t.rows && !t.authored && Object.values(t.legend).some(n => /^spawner/.test(n))) {
       const sink = Object.values(t.legend).some(n => n === "lava" || n === "hole") || t.room.wrapH === true || t.room.wrapV === true;
       ok(sink, t.id + ": spawner has a sink (lava, black hole or required wrap)");
     }

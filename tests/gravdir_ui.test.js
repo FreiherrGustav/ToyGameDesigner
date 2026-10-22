@@ -118,7 +118,7 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
         window.__ev("()=>{ const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.grounded=true; p.impactMag=0; p.jumpCrouch=0; }")();
         window.__sim(1);
         const c = document.getElementById("gameCanvas"); const ctx = c.getContext("2d");
-        return Array.from(ctx.getImageData(100 - 5, 100 - 5 - 0, 32, 32).data);
+        return Array.from(ctx.getImageData(95, 95, 32, 32).data);
       };
       const a = draw("down"), b = draw("up");
       // quarter turns: facing chosen so no mirroring is needed (local facing = right); down's cell (r,c) must land at the rotated cell
@@ -129,17 +129,17 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
         window.__ev(`()=>{ const p=actors.find(a=>a.isPlayer); p.x=100; p.y=100; p.vx=0; p.vy=0; p.grounded=true; p.impactMag=0; p.jumpCrouch=0; p.facingDir=${f}; }`)();
         window.__sim(1);
         return Array.from(document.getElementById("gameCanvas").getContext("2d").getImageData(95, 95, 32, 32).data); };
-      const at = (img, row, col) => { const i = ((row * 4 + 2) * 32 + (col * 4 + 2)) * 4; return img[i] + "," + img[i + 1] + "," + img[i + 2]; };
+      const at = (img, row, col, o) => { const i = ((o[1] + row * 3 + 1) * 32 + (o[0] + col * 3 + 1)) * 4; return img[i] + "," + img[i + 1] + "," + img[i + 2]; };
       let qdiff = 0;
-      for (const [dir, map] of [["right", (r, c) => [7 - c, r]], ["left", (r, c) => [c, 7 - r]]]) {
+      for (const [dir, map, qo] of [["right", (r, c) => [7 - c, r], [3, 4]], ["left", (r, c) => [c, 7 - r], [5, 4]]]) {
         const q = drawQ(dir);
         // 'a' was drawn with facing +1; for right gravity the rotated draw used facing -1 (also unmirrored), so compare against a flipped-facing upright:
-        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) { const [rr, cc] = map(r, c); if (at(a, r, c) !== at(q, rr, cc)) qdiff++; }
+        for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) { const [rr, cc] = map(r, c); if (at(a, r, c, [4, 3]) !== at(q, rr, cc, qo)) qdiff++; }
       }
       let diff = 0; const colors = new Set();
       // compare the colour at the centre of each 4x4 art cell: up's row (7-r) must equal down's row r
       for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
-        const i = ((r * 4 + 2 + 0) * 32 + (c * 4 + 2)) * 4, j = (((7 - r) * 4 + 2) * 32 + (c * 4 + 2)) * 4;
+        const i = ((3 + r * 3 + 1) * 32 + (4 + c * 3 + 1)) * 4, j = ((5 + (7 - r) * 3 + 1) * 32 + (4 + c * 3 + 1)) * 4;
         for (let k = 0; k < 4; k++) if (a[i + k] !== b[j + k]) { diff++; break; }
         colors.add(b[j] + "," + b[j + 1] + "," + b[j + 2]);
       }

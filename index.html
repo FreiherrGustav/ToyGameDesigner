@@ -756,6 +756,7 @@
   // (see roomCols()/colsForCameraMode()).
   const BOARD_MAX_COLS = COLS * 3;
   const ACTOR_INSET = 5;
+  const ACTOR_DRAW = ART * 3; // drawn size of an actor's picture (24px): close to its 22px hitbox
   const ACTOR_SIZE = TILE - ACTOR_INSET * 2; // continuous AABB size, ~30% margin inside the cell
 
   // A tile is three independent questions: background (pure decoration, see BACKGROUND_*
@@ -1052,7 +1053,7 @@
 
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
   const SPAWN_INTERVAL_MS = 2500;
-  const SPAWNER_MAX_LIVE = 8; // per spawner; see tickSpawners' safety valve
+  const SPAWNER_MAX_LIVE = 60; // per spawner; see tickSpawners' safety valve
   const SPAWNER_VIEW_MARGIN_PX = 64; // a spawner keeps running this far beyond the screen edge (2 tiles)
   const SPAWNER_WINDUP_MS = 350;
   // v2.34: SPAWNER_MAX_CONCURRENT (a hard per-spawner population cap) removed outright — direct
@@ -8931,7 +8932,9 @@
         let liveOwn = 0;
         for (const a of actors) if (a.spawnerKey === key && !a.ttlPopped) liveOwn++;
         const atCap = liveOwn >= SPAWNER_MAX_LIVE;
-        const destOccupied = atCap || cellOccupiedByActor(x + dir.x, y + dir.y);
+        // A spawner is never blocked by whatever happens to sit in its launch cell: occupants are
+        // shoved out (ejectFromSpawnCell). Only a Large Stone holds a spawner shut.
+        const destOccupied = atCap || spawnCellHeldByStone(x + dir.x, y + dir.y);
         const timeToNext = SPAWN_INTERVAL_MS - state.clock;
         // the wind-up pulse — a brief physical "tell" right before firing, a structural stand-in
         // for a numeric countdown this toy never shows anywhere (see renderRoomContents). Suppressed
@@ -8962,9 +8965,32 @@
         // the spawner's own tile at all, sidestepping the ambiguity rather than trying to teach
         // resolveAxis (shared, delicate, see its own v2.20.1 history) which of two overlapping
         // blocking cells is the "real" one.
+        ejectFromSpawnCell(x + dir.x, y + dir.y, dir);
         spawnActorAt(defId, (x + dir.x) * TILE + TILE / 2, (y + dir.y) * TILE + TILE / 2, key, dir);
       }
     }
+  }
+  function spawnCellHeldByStone(cx, cy) {
+    const left = cx * TILE, top = cy * TILE, right = left + TILE, bottom = top + TILE;
+    return actors.some(a => a.defId && actorDefs[a.defId] && actorDefs[a.defId].temperament === LARGE_STONE_KIND &&
+      a.x < right && a.x + a.w > left && a.y < bottom && a.y + a.h > top);
+  }
+  // Pushes every actor overlapping the launch cell out along the spawner's facing, with a launch
+  // impulse, so the new spawn always has room. Moves them a cell further only if that spot is free.
+  function ejectFromSpawnCell(cx, cy, dir) {
+    const left = cx * TILE, top = cy * TILE, right = left + TILE, bottom = top + TILE;
+    actors.forEach(a => {
+      if (moverDefOf(a) || a.carried || a.cannonLoad) return;
+      if (!(a.x < right && a.x + a.w > left && a.y < bottom && a.y + a.h > top)) return;
+      const ox = a.x, oy = a.y;
+      a.x += dir.x * TILE; a.y += dir.y * TILE;
+      if (actorBlockedByTiles(a)) { a.x = ox; a.y = oy; }
+      a.vx = dir.x * SPAWNER_LAUNCH_SPEED + (dir.x ? 0 : a.vx);
+      a.vy = dir.y * SPAWNER_LAUNCH_SPEED + (dir.y ? 0 : a.vy);
+      a.bouncyCooldown = 350;
+      if (!a.isPlayer) a.displacedCooldown = NPC_DISPLACED_RECOVERY_MS;
+      a.grounded = false;
+    });
   }
   // v2.38: is any actor currently sitting in this cell? Used only to stop a spawner from
   // materializing a brand-new actor fully on top of one that's already there — not a population
@@ -11387,7 +11413,10 @@
       ctx.scale(t.sx, t.sy);
       const savedViewK = artViewK; artViewK = 0;
       artCacheOff++;
-      drawArtScaled(ctx, art, -TILE / 2, -TILE / 2, TILE, cell);
+      // The hitbox is ACTOR_SIZE (22px) but the picture used to be a full TILE (32px) centred on it,
+      // so feet sank 5px into the floor and a stacked crate overlapped the one below by 10px. Draw it
+      // at ACTOR_DRAW px (3px per art pixel) with its feet flush with the hitbox's feet instead.
+      drawArtScaled(ctx, art, -ACTOR_DRAW / 2, -ACTOR_DRAW / 2 - (ACTOR_DRAW - ACTOR_SIZE) / 2, ACTOR_DRAW, ACTOR_DRAW / ART);
       artCacheOff--;
       artViewK = savedViewK;
       ctx.restore();
@@ -12129,7 +12158,12 @@
     { "id":"domino","category":"room","closed":false,"stooge":"wP","names":["The Domino Effect","Drop, Boom, Plop, Open","Rube Goldberg's Lunch Break"],"room":{"gravity":"on","wrapH":true,"wrapV":false},"requires":["spawner","bombActors","largestone","plate","gate"],"discover":"o","expect":{"fact":"a crate drops on the bomb, the blast knocks the floor out from under the stone, the stone lands on the plate and the gate opens","check":"gateOpen","chain":["spawn","impact","detonate","blastClear","fall","plateOn","gateOpen"],"needsInput":false,"selfStart":true},"vary":{"payload":{"c":["crate","stone"]}},"legend":{"=":"wall","s":"spawnerc:s","b":"bomb","S":"stone","p":"plate:green","G":"gate:green","w":"pet","c":"crate","P":"player","o":"reward",">":"belt:w"},"rows":["........................",".........s..............","........................","........................","........................","........................","........................","........................","........................","........=...=...........","........=...=...........","........=...=...........","........=...=..========.","........=.S.=..=......=.","........=b===..G......=.","........==..=..G......=.","...P....==p.=..G.cw.wo=.","================>>>>>>=="]},
     { "id":"opensdoor","category":"room","closed":false,"stooge":"wP","names":["Crate Opens The Door","The Long Way Around","Door Policy: Crates Only"],"room":{"gravity":"on","wrapH":true,"wrapV":false},"requires":["spawner","cannon","plate","gate","trampoline","conveyor"],"discover":"o","expect":{"fact":"a crate drops into the cannon and is fired onto the plate, the gate opens and the pets in the pen are let out","check":"released","chain":["spawn","cannonLoad","cannonFire","plateOn","gateOpen","released"],"needsInput":false,"selfStart":true},"vary":{"payload":{"w":["pet","walker"]}},"legend":{"=":"wall","s":"spawnerc:s","k":"cannon:ne","p":"plate:red","G":"gate:red","t":"tramp",">":"belt:w","w":"pet","P":"player","o":"reward"},"rows":["........................","........................","........................","...s....................","........................","........................","........................","........................","........................","...k................====","....................G..=","....................Gww=",".........o..........=>>=","........===.............","........................",".....................P..",".............pppp==t....","========================"]},
     { "id":"carousel","category":"room","closed":false,"stooge":"wP","names":["Crate Carousel","Round And Round It Goes","The Crate Commute"],"room":{"gravity":"on","wrapH":false,"wrapV":false},"requires":["fan","conveyor","npcWind"],"discover":"o","expect":{"fact":"three crates ride a belt loop, a fan lifts each one back to the top","check":"fanLift","chain":["beltCarry","fanLift","beltCarry"],"selfStart":true},"vary":{"payload":{"w":["pet","walker"]}},"legend":{"=":"wall",">":"belt:e","<":"belt:w","f":"fan:n","g":"gust:w","c":"crate","w":"pet","P":"player","o":"reward"},"rows":["========================","........................","........................","........................","........................","........................","........................","........................","........................","........................","........................",".....................==.","=.....................=.","=...w................g=.","=o......c...c........g=.","=...<<<<<<<<<<<<<<<<<.=.","=P..............c.....=.","===>>>>>>>>>>>>>>>>>>f.."]},
-
+    {"id":"cannoncat","category":"room","closed":false,"stooge":"P","names":["Cannon Cat","Fourteen Cannons, One Inventor","Ready, Aim, Gem"],"room":{"gravity":"on","wrapH":true,"wrapV":true},"requires":["cannon"],"discover":"o","expect":{"fact":"the inventor is fired from cannon to cannon across the wrapping room, gathering the gems","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"A":"cannon:ne","o":"reward","B":"cannon:nw","P":"player"},"rows":["...A........o..........B","....o...................","................A.......","........A.......o.......",".....o..................",".A..........o...........","..................B.....","........B.........o.....","........................","...............B........",".......A..............o.",".P.........o..........B.","....................o...","...............A........","...o..........o.........","........A...............",".................A......",".Ao..................o.."],"authored":true},
+    {"id":"fanloop","category":"room","closed":false,"stooge":"P","names":["The Fan Loop","Seventy Fans, One Breeze","Round And Round The Wind"],"room":{"gravity":"on","wrapH":true,"wrapV":true},"requires":["fan"],"discover":"P","expect":{"fact":"a ring of fans carries the inventor round and round","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"A":"fan:e","B":"fan:s","D":"fan:n","E":"fan:w","P":"player"},"rows":["..A...A.....B......A...B","..A...A...A.......A....B","..A..............A.....B","...DDDDDDDA.....A......B","...........A...A....D..B","............A......D...E",".......A.....A....D....E","......A.......A..D....EA",".....A.........DD....E.A","....A....D....E.....E..A",".P.A....D....E.....E..A.","..A....D....E.A...E..A..","......D....E..A.....A...","A....D....E....A...A....","A...D....E......A......D","A..D....E........A....D.","..D....E..........A..D..",".D....E............DD..."],"authored":true},
+    {"id":"monsterescape","category":"room","closed":false,"stooge":"CP","names":["Monster Escape","Bombs Away, Monster","The Monster Behind The Wall"],"room":{"gravity":"on","wrapH":false,"wrapV":true,"dir":"left"},"requires":["spawner","bombActors"],"discover":"P","expect":{"fact":"bombs rain out of the spawners while a monster is shut in its cell","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"=":"wall","b":"bomb","A":"spawnerb:w","C":"chaser","P":"player"},"rows":["........................","=.....................b.","=.....................b.","=.....................b.","=.....................b.","=.....................b.","=====.................A.","=...=.................b.","=C..=.................b.","=...=.................b.","=...=.................b.","=====.................A.","=.....................b.","=.....................b.","=.....................b.","=.....................b.","......................P.","........................"],"authored":true},
+    {"id":"byebyecupcake","category":"room","closed":false,"stooge":"P","names":["Bye Bye Cupcake","Stones, Plates And Goodbyes","Rolling Stones Gather No Gates"],"room":{"gravity":"on","wrapH":false,"wrapV":false},"requires":["largestone","plate","gate"],"discover":"P","expect":{"fact":"stones fall on plates one after another and open the gates in turn","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"P":"player","=":"wall","S":"stone","A":"stone&stone","B":"gate:brown","D":"gate:cyan","E":"gate:yellow","F":"gate:pink","G":"gate:purple","H":"gate:blue","I":"gate:green","J":"gate:orange","K":"gate:red","L":"raw|solid:lethal","M":"raw|none:lethal","N":"plate:brown","O":"plate:cyan","Q":"plate:yellow","R":"plate:pink","T":"plate:purple","U":"plate:blue","V":"plate:green","X":"plate:orange","Y":"plate:red"},"rows":["...P=SSASSSSSASASSASSSS.","BBBB=DDEEFFGGHHIIJJKK...","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","....L...................","MMMMMN.O.Q.R.T.U.V.X.Y.."],"authored":true},
+    {"id":"gravity1","category":"room","closed":false,"stooge":"P","names":["Gravity Trampolines","Random Gravity Playground","Which Way Is Down Now"],"room":{"gravity":"on","wrapH":false,"wrapV":false},"requires":["spawner","trampoline"],"discover":"P","expect":{"fact":"crates and pets fly out of the spawners over trampolines and moving platforms while the gravity buttons spin the room","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"A":"tramp","B":"actor|movingplatform","D":"gbutton:random","E":"spawnerc:e","P":"player","F":"spawnerp:w"},"rows":["..............A.........","A.......................","........................","......A............A....","........................","............B...........",".D......................","........................","E..D...B......P........F","..................B....A",".D......................","........................","............B...........","......A.................","........................","A..................A....","........................","..............A........."],"authored":true},
+    {"id":"chaos1","category":"room","closed":false,"stooge":"wCP","names":["Chaos One","Please Do Not Panic","Forty-Eight Bombs And A Dream"],"room":{"gravity":"on","wrapH":true,"wrapV":true},"requires":["bombActors","spawner","cannon","blackhole"],"discover":"P","expect":{"fact":"crates, bombs, chasers and black holes all at once","check":"selfStart","needsInput":false,"selfStart":true},"legend":{"c":"crate","A":"crate&crate","b":"bomb","w":"pet","B":"pet&pet","C":"chaser","D":"chaser&chaser","E":"hole","F":"bounce","P":"player","G":"cannon:ne","H":"raw|solid:indestructible","I":"cannon:nw"},"rows":["ccccccccccc.Ac.A.ccccccc","bbbbbbbbbbbbbbbbbbbbbbbb","www.BwBw.ww.wwwwBwwBwwBw","ccAc.ccAcAcccccccccccccc","bbbbbbbbbbbbbbbbbbbbbbbb","CCDCCCCC.CCCCCDCCDCCCCCC","........................","...E................E...","........................",".F...E.....P.....E.....F","........................","........................","........................",".F.........F.........F..","........................","........................","...GGGGGGFHFHFHIIIIII...","........................"],"authored":true}
   ];
   SURPRISE_ROOMS.forEach(r => SURPRISE_TEMPLATES.push(r));
   // SURPRISE_ROOMS END
@@ -12236,6 +12270,8 @@
       case "spawner": return Object.assign(g("spawner-" + dir), { spawnerContent: fills.ball });
       case "spawnerh": return Object.assign(g("spawner-" + dir), { spawnerContent: HAZARD_BALL_DEF_ID }); // always the plain hazard ball
       case "spawnerc": return Object.assign(g("spawner-" + dir), { spawnerContent: PUSHABLE_DEF_ID });
+      case "spawnerb": return Object.assign(g("spawner-" + dir), { spawnerContent: CARRY_BOMB2_DEF_ID }); // drops bombs
+      case "spawnerp": return Object.assign(g("spawner-" + dir), { spawnerContent: fills.pet }); // drops pets
       case "warp": return g("warp");
       case "playerwarp": return Object.assign(g("warp"), { player: true }); // the player starts standing on a warp tile
       case "goal": return g("goal");
@@ -12559,7 +12595,7 @@
     const spec = { seed, attempt, templateId: template.id, category: template.category, name, gravity: mainRoll.gravity, nativeGravity: mainRoll.nativeGravity,
       gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror, dir: mainRoll.dir,
       ox: at.ox, oy: at.oy, w, h, color: fills.color, cost: at.cost, tiles: [], actors: [], spawners: [], player: null, doors: [], extra: [],
-      clearRect: opts.place === "overwrite" ? { x: at.ox, y: at.oy, w, h } : null };
+      clearRect: opts.place === "overwrite" ? { x: at.ox, y: at.oy, w, h } : null, authored: !!template.authored };
     const fillPart = (part, target, pw, ph, bx, by) => {
       part.rows.forEach((row, ry) => {
         for (let rx = 0; rx < pw; rx++) {
@@ -12640,7 +12676,7 @@
       const def = GAMEPLAY_TILE_DEFS[t.key];
       const risky = def.modifier === "lethal" || def.modifier === "hazard" || def.geometry === BOMB2_GEOMETRY;
       const hole = def.geometry === "gravitywell";
-      for (const q of watched) {
+      if (!spec.authored) for (const q of watched) { // a hand-built room (authored) is the author's call: no distance rules
         const d = Math.max(Math.abs(t.x - q.x), Math.abs(t.y - q.y));
         if (risky && d <= 3) return "hazard within 3 tiles of the player";
         if (hole && Math.hypot(t.x - q.x, t.y - q.y) <= GRAVITY_WELL_RADIUS_TILES + 0.5) return "black hole too close to the player";
@@ -12650,8 +12686,9 @@
       const rd = actorDefs[a.defId]; // a pet is harmless even when it looks like a chaser
       const lethalNpc = rd && (a.role === "chaser" ? true : a.role === "pet" ? false : npcIsLethal(rd));
       const risky = rd && ((rd.temperament === "chaser" && lethalNpc) || rd.temperament === HAZARD_BALL_KIND);
-      if (risky) for (const q of watched) if (Math.max(Math.abs(a.x - q.x), Math.abs(a.y - q.y)) <= 3) return "chaser within 3 tiles of the player";
+      if (risky && !spec.authored) for (const q of watched) if (Math.max(Math.abs(a.x - q.x), Math.abs(a.y - q.y)) <= 3) return "chaser within 3 tiles of the player";
     }
+    if (spec.authored) return null; // a hand-built room may start the player boxed in on purpose
     if (blocking(p.x - 1, p.y) && blocking(p.x + 1, p.y) && blocking(p.x, p.y - 1) && blocking(p.x, p.y + 1)) return "player cannot move";
     const seen = new Set([p.x + "," + p.y]);
     if (spec.gravity && spec.dir && spec.dir !== "down") {
@@ -13179,7 +13216,7 @@
       updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
       steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
-      spawnActorAt, tickSpawners, cellOccupiedByActor, despawnSpawnedActor,
+      spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
       stepActor, tick,
       drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
       currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
@@ -13214,6 +13251,7 @@
       `const CHIP_TND_MIX = ${JSON.stringify(CHIP_TND_MIX)};`,
       `const CHIP_DESIGNS = ${JSON.stringify(CHIP_DESIGNS)};`,
       `const ACTOR_SIZE = ${ACTOR_SIZE};`,
+      `const ACTOR_DRAW = ${ACTOR_DRAW};`,
       `const GEOMETRIES = ${JSON.stringify(GEOMETRIES)};`,
       `const MODIFIERS = ${JSON.stringify(MODIFIERS)};`,
       `const CANNON2_ORDER = ${JSON.stringify(CANNON2_ORDER)};`,
