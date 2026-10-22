@@ -81,10 +81,11 @@ module.exports = function hook() { return `
           const t = (flipY && board[cy] && GAMEPLAY_TILE_DEFS[board[cy][cx]]) || null; __emit(t && t.geometry === "trampoline" ? "trampolineLaunch" : "bounce", a);
         }
       }
-      if (pg === true && !a.grounded && a.vy > 0 && gravityOn()) {
+      if (a.grounded) a.__falling = false;
+      else if (!a.__falling && a.vy >= 0 && gravityOn() && !a.carried) {
         const x0 = Math.floor(a.x / TILE), x1 = Math.floor((a.x + a.w - 0.01) / TILE), cy = Math.floor((a.y + a.h + 1) / TILE);
         let c = null; for (let x = x0; x <= x1; x++) { const k = __cellCause[x + "," + cy]; if (k != null && (c == null || k > c)) c = k; }
-        if (c != null) __emit("fall", a, c);
+        if (c != null) { __emit("fall", a, c); a.__falling = true; }
       }
       __prevV[a.id] = { vx: a.vx, vy: a.vy }; __prevG[a.id] = a.grounded;
     });
@@ -100,7 +101,10 @@ module.exports = function hook() { return `
       else if (window.__czColorCause[c] != null) evId = window.__czColorCause[c];
       else if (!now[c]) { evId = ++z.n; z.events.push({ id: evId, f: z.frame, type: "plateOff", cause: null, subj: null, char: false }); }
       const gates = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < board[0].length; x++) if (colorBoard[y][x] === c && /^(barrier|solid)/.test(String(board[y][x]))) gates.push([x, y]);
-      if (gates.length && evId != null) { const gid = ++z.n; z.events.push({ id: gid, f: z.frame, type: now[c] ? "gateOpen" : "gateClose", cause: evId, subj: null, char: false }); gates.forEach(([x, y]) => { __cellCause[x + "," + y] = gid; }); }
+      if (gates.length && evId != null) { const gid = ++z.n; z.events.push({ id: gid, f: z.frame, type: now[c] ? "gateOpen" : "gateClose", cause: evId, subj: null, char: false }); gates.forEach(([x, y]) => { __cellCause[x + "," + y] = gid; });
+        if (now[c]) actors.forEach(a => { // whatever was held against the gate is released by it
+          if (gates.some(([gx, gy]) => a.x < (gx + 1) * TILE + 4 && a.x + a.w > gx * TILE - 4 && a.y < (gy + 1) * TILE + 4 && a.y + a.h > gy * TILE - 4)) __emit("released", a, gid);
+        }); }
     });
     window.__czColorCause = {}; __prevCh = now;
   };
