@@ -6955,3 +6955,15 @@ Reported: in the Over-Engineered Escape the first bomb, fired by the cannon, no 
 ## "Stay Alive" added to Surprise Me (whole-room entry no. 7)
 
 `stayalive` (category `room`, `authored: true`) from the user's `Stay Alive - surprise me 7.json` (kept in the repo root), serialized with `surpriseSerialize("all")`. Gravity on, wrapH, six chasers (the project's chaser def has no `lethal` field, so they are lethal, as the title implies; unlike Chaos One they were NOT made harmless). Two spawners that carried bombs were rewritten as `spawnerb`; stale spawner-content keys in the upload were ignored. Builds, plays and starts something in canonical and chaos presses. Tests: surprise5 163/0.
+
+## Actors back to 32px; the Escape's bomb path no longer depends on the frame rate (as far as it can be)
+
+**Sprites.** `ACTOR_DRAW` is 32 again (`ART * 4`, a full tile); the picture is still drawn feet-flush with the 22px hitbox (so feet no longer sink into the floor), but it extends ~5px past each side and ~10px above the hitbox. Characters standing on a crate therefore still overlap it by ~5px. Shrinking the hitbox to match would change every gap, jump and sample timing, so it was not done. `tests/gravdir_ui.test.js` is back to its 4px-cell version (39 pass).
+
+**The Over-Engineered Escape's bomb (traced at 30-240 fps, `/tmp` scripts: load the sample, hold Left 20 s, sample the bomb every 0.5 s).** The cannon-1 -> trampoline-side bounce -> west upper belt -> lower-left belt ("the X") -> cannon-2 -> magnet route depended on the frame rate in three knife-edge places, all fixed:
+1. *Cannon 1 clips the end of the belt above it.* The shot leaves a few px from the belt tile's corner; at 144 fps it clipped it and slid the wrong way. Cannon shots (`actor.ballistic`) now get `CANNON_CORNER_SLACK_PX` (8) of corner forgiveness while rising: the side being left behind on the y pass, and the top on the x pass (`resolveAxis`).
+2. *The trampoline-side bounce depended on a ~1.3px overlap* (a 60 fps path hit the trampoline's corner, a 120 fps path passed it). The level got one tile: `solid:bouncy` (lwoIron skin) at (22,2), so every frame rate bounces off it. **This edits the user's sample level.**
+3. *Landing on the lower-left belt needed x within 0.2 tile of col 11.* Two belt tiles (west, lwoBeltW) were added at (12,5) and (13,5), closing the gap between the two row-5 belts. **Also a level edit.**
+4. *The magnet hold reach was 2px*, less than a frame of a 343px/s shot at 60 fps and more than at 144 (the bomb bounced off the wall instead of clinging). `magnetHoldsActor` reach is 8px.
+
+Result: the bomb completes the X at 48, 60, 72, 90, 100, 110, 120, 125, 144 and 240 fps (and 30, 75); at 165 it flies straight to the magnet from the first cannon (it skips the X, still ends held). Not solved: the underlying cause is semi-implicit integration (trajectories differ by ~3px between frame rates); a jittery real-world dt will still vary the path a little. `overengineered` 63/63 (it had failed 2 at 144 fps mid-way and now passes), magnet, bombs, weight, chain, cannonlanding, rockbottom pass.
