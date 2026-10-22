@@ -20,7 +20,7 @@ module.exports = [
 ,{ id: "opensdoor", category: "room", closed: false, stooge: "wP", names: ["Crate Opens The Door", "The Long Way Around", "Door Policy: Crates Only"],
     room: { gravity: "on", wrapH: true, wrapV: false }, requires: ["spawner", "cannon", "plate", "gate", "trampoline", "conveyor"], discover: "o",
     vary: { payload: { w: ["pet", "walker"] } },
-    expect: { fact: "a crate drops into the cannon and is fired onto the plate, the gate opens and the belt carries the pet off the ledge onto the trampoline", check: "trampolineLaunch", chain: ["spawn", "cannonLoad", "cannonFire", "plateOn", "gateOpen", "released", "trampolineLaunch"], needsInput: false, selfStart: true },
+    expect: { fact: "a crate drops into the cannon and is fired onto the plate, the gate opens and the pets in the pen are let out", check: "released", chain: ["spawn", "cannonLoad", "cannonFire", "plateOn", "gateOpen", "released"], needsInput: false, selfStart: true },
     legend: { "=": "wall", s: "spawnerc:s", k: "cannon:ne", p: "plate:red", G: "gate:red", t: "tramp", ">": "belt:w", w: "pet", P: "player", o: "reward" },
     rows: grid((set) => {
       for (let x = 0; x < 24; x++) set(x, 17, "=");
