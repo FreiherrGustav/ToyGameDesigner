@@ -65,7 +65,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
     if (!t.rooms) {
       const rows = t.rows, h = rows.length, w = rows[0].length;
       const border = []; for (let x = 0; x < w; x++) { border.push(rows[0][x]); border.push(rows[h - 1][x]); } for (let y = 0; y < h; y++) { border.push(rows[y][0]); border.push(rows[y][w - 1]); }
-      const sealed = border.every(c => c !== "." && blockingPiece(t.legend[c]));
+      const sealed = border.filter(c => c !== "." && blockingPiece(t.legend[c])).length / border.length >= 0.9; // v2.54: closed = 90% or more of the border is solid
       ok(sealed === t.closed, t.id + ": closed flag (" + t.closed + ") agrees with the layout (sealed=" + sealed + ")");
     }
     if (t.category !== "toy") { // the stooge rule

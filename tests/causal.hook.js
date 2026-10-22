@@ -57,15 +57,18 @@ module.exports = function hook() { return `
   { const o = triggerPlayerGravityWellCapture; triggerPlayerGravityWellCapture = function (p) { __emit("capture", p); return o.apply(this, arguments); }; }
   { const o = triggerWarp; triggerWarp = function (p) { __emit("warp", p); return o.apply(this, arguments); }; }
   { const o = applyWorldWrap; applyWorldWrap = function (a) { const x = a.x, y = a.y; const r = o.apply(this, arguments); if (a.x !== x || a.y !== y) __emit("wrap", a); return r; }; }
-  const __fan = {}, __belt = {};
+  const __fan = {}, __belt = {}, __pull = {};
   { const o = fanAccelFor; fanAccelFor = function (actor) { const r = o.apply(this, arguments); if (actor && r && Math.abs(r.ax) + Math.abs(r.ay) > 1) __fan[actor.id] = r.ay < -1 ? "fanLift" : "fanPush"; return r; }; }
   { const o = windAccelFor; windAccelFor = function (actor) { const r = o.apply(this, arguments); if (actor && r && Math.abs(r.ax) + Math.abs(r.ay) > 1 && actor.grounded) __belt[actor.id] = true; return r; }; }
-  let __prevFan = {}, __prevBelt = {}, __prevCh = {}, __prevV = {}, __prevG = {};
+  { const o = radialForceAccelFor; radialForceAccelFor = function (actor) { const r = o.apply(this, arguments); if (actor && !actor.isPlayer && r && Math.abs(r.ax) + Math.abs(r.ay) > 200) __pull[actor.id] = true; return r; }; }
+  let __prevPull = {}, __prevFan = {}, __prevBelt = {}, __prevCh = {}, __prevV = {}, __prevG = {};
   window.__czPoll = () => {
     const z = window.__cz; if (!z.on) return;
     const byId = {}; actors.forEach(a => { byId[a.id] = a; });
     for (const id in __fan) if (!__prevFan[id] && byId[id]) __emit(__fan[id], byId[id]);
     for (const id in __belt) if (!__prevBelt[id] && byId[id]) __emit("beltCarry", byId[id]);
+    for (const id in __pull) if (!__prevPull[id] && byId[id]) __emit("pull", byId[id]);
+    __prevPull = Object.assign({}, __pull); for (const k in __pull) delete __pull[k];
     __prevFan = Object.assign({}, __fan); __prevBelt = Object.assign({}, __belt); for (const k in __fan) delete __fan[k]; for (const k in __belt) delete __belt[k];
     // bounces and falls from velocity / grounded edges
     actors.forEach(a => {
@@ -101,7 +104,7 @@ module.exports = function hook() { return `
     });
     window.__czColorCause = {}; __prevCh = now;
   };
-  window.__czStart = () => { window.__cz = { on: true, events: [], frame: 0, n: 0 }; __prevCh = {}; __prevFan = {}; __prevBelt = {}; __prevV = {}; __prevG = {}; for (const k in __cellCause) delete __cellCause[k]; window.__czColorCause = {}; actors.forEach(a => { delete a.__cause; }); };
+  window.__czStart = () => { window.__cz = { on: true, events: [], frame: 0, n: 0 }; __prevCh = {}; __prevFan = {}; __prevBelt = {}; __prevPull = {}; __prevV = {}; __prevG = {}; for (const k in __cellCause) delete __cellCause[k]; window.__czColorCause = {}; actors.forEach(a => { delete a.__cause; }); };
   window.__czStop = () => { window.__cz.on = false; return window.__cz; };
   window.__czTick = n => { for (let i = 0; i < n; i++) { window.__cz.frame++; tick(1 / 60); window.__czPoll(); } };
 `; };

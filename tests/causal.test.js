@@ -5,14 +5,15 @@
 const fs = require("fs"), os = require("os"), path = require("path");
 const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 const N = Number(process.argv[2] || 1000), file = path.resolve(process.argv[3] || path.join(__dirname, "..", "index.html")), OUT = process.argv[4], FRAMES = Number(process.argv[5] || 600);
+const ONLY_T = process.env.TEMPLATE || null, VARY = process.env.VARY ? JSON.parse(process.env.VARY) : null; // force a template / force variation operators on
 const src = fs.readFileSync(file, "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 if (!src.includes(anchor)) throw new Error("anchor missing");
 const HOOK = require("./causal.hook.js")() + `
-  window.__f = { run: (seed, frames) => { surpriseRecent.length = 0; const r = surpriseMe(seed); if (!r) return null;
+  window.__f = { run: (seed, frames, only, vary) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; const r = surpriseMe(seed, only ? { templateIds: [only], vary: vary || undefined } : undefined); if (!r) return null;
       const t = SURPRISE_TEMPLATES.find(t => t.id === r.templateId) || {};
       enterPlayMode(); tick(1/60); window.__czStart(); let err = null; try { window.__czTick(frames); } catch (e) { err = String(e); }
-      const z = window.__czStop(); return { id: r.templateId, category: t.category, events: z.events, err }; } };
+      const z = window.__czStop(); return { id: r.templateId, category: t.category, events: z.events, err, ops: r.ops, variant: r.variant }; } };
 `;
 const tmp = path.join(os.tmpdir(), "causal_hooked.html");
 fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
@@ -29,7 +30,8 @@ function analyse(events) {
     if (n >= 2 && types.size >= 2) lenient = true;
   }
   const payoff = events.filter(e => e.char && e.type !== "spawn").map(e => e.f)[0];
-  const settled = events.filter(e => e.char && e.type !== "spawn" && e.f > 15).map(e => e.f)[0]; // ignore the 15-frame start-up settle (things landing on their first frames)
+  const SETTLE = new Set(["shove", "bounce", "trampolineLaunch", "fall", "blastHit"]); // start-up landing noise: ignored in the first 15 frames only
+  const settled = events.filter(e => e.char && e.type !== "spawn" && !(e.f <= 15 && SETTLE.has(e.type))).map(e => e.f)[0];
   return { strict, lenient, anyLink, bestEdges, payoff: payoff == null ? null : payoff, payoffSettled: settled == null ? null : settled, n: events.length, types: [...new Set(events.map(e => e.type))] };
 }
 (async () => {
@@ -42,8 +44,8 @@ function analyse(events) {
       page.on("dialog", d => d.accept()); let pe = null; page.on("pageerror", e => { pe = String(e); });
       try {
         await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__f);
-        const r = await page.evaluate(([s, f]) => window.__f.run(s, f), [seed, FRAMES]);
-        if (r) { if (r.err || pe) { errs++; console.log("seed", seed, r.id, "error", r.err || pe); } const a = analyse(r.events); rows.push(Object.assign({ seed, id: r.id, category: r.category }, a)); }
+        const r = await page.evaluate(([s, f, o, v]) => window.__f.run(s, f, o, v), [seed, FRAMES, ONLY_T, VARY]);
+        if (r) { if (r.err || pe) { errs++; console.log("seed", seed, r.id, "error", r.err || pe); } const a = analyse(r.events); rows.push(Object.assign({ seed, id: r.id, category: r.category, ops: r.ops || [], variant: r.variant }, a)); }
       } catch (e) { errs++; console.log("seed", seed, "crash", String(e).slice(0, 120)); }
       await ctx.close();
     }
@@ -62,6 +64,7 @@ function analyse(events) {
   console.log(""); show("ALL presses", rows); show("NON-TOY (loop/vig/room)", nonToy);
   ["loop", "vignette", "room", "toy", "nonsense"].forEach(c => { const r = rows.filter(x => x.category === c); if (r.length) show("  " + c, r); });
   console.log("\nfive lowest strict (n>=5):", table.filter(t => t[2].n >= 5).sort((a, b) => a[2].strict - b[2].strict).slice(0, 5).map(t => t[0] + " " + t[2].strict + "%").join(", "));
+  const opCount = {}; rows.forEach(r => (r.ops || []).forEach(o => { opCount[o] = (opCount[o] || 0) + 1; })); console.log("operators active in:", JSON.stringify(opCount), "| distinct variants:", new Set(rows.map(r => r.variant)).size);
   console.log("seeds run:", rows.length, "errors:", errs);
   await browser.close(); process.exit(errs ? 1 : 0);
 })();
