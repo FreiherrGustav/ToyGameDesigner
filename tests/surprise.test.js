@@ -283,7 +283,12 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   // the real button opens the dialog and Cancel changes nothing
   await page.evaluate(() => { __st.reset(); for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x + y) % 3 === 0) __st.paint(x, y, "solid:none"); });
   const boardBefore = await page.evaluate(() => JSON.stringify(__st.state().board));
-  await page.click("#surpriseBtn");
+  // a whole-room event goes into a new tab without asking (no dialog): undo it and press again until a small template asks
+  for (let tries = 0; tries < 12; tries++) {
+    await page.click("#surpriseBtn");
+    if (await page.evaluate(() => !!document.getElementById("surpriseFullOverlay"))) break;
+    await page.evaluate(() => __st.undo());
+  }
   const dlg = await page.evaluate(() => [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent));
   console.log("dialog buttons:", JSON.stringify(dlg));
   await page.click("#surpriseFullOverlay button:last-child");
