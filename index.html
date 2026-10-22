@@ -6302,9 +6302,13 @@
     // A non-player body that overlaps a tile by under a pixel on the OTHER axis (nudged against a wall by a hit) is not
     // touching it on this one: counting that sliver resolved it out the far side of the wall or a tile up. The player keeps
     // the exact old behaviour.
-    const slack = actor.isPlayer ? 0 : COLLISION_SLIVER_PX, slackX = axis === "y" ? slack : 0, slackY = axis === "x" ? slack : 0;
-    const c0 = Math.floor((actor.x + slackX) / TILE), c1 = Math.floor((actor.x + actor.w - 0.01 - slackX) / TILE);
-    const r0 = Math.floor((actor.y + slackY) / TILE), r1 = Math.floor((actor.y + actor.h - 0.01 - slackY) / TILE);
+    // The exception: a body still travelling INTO that side (sliding off a ledge onto the corner of the next tile) is about to
+    // overlap it for real, so that side keeps counting and the body lands on the corner as it always did.
+    const slack = actor.isPlayer ? 0 : COLLISION_SLIVER_PX;
+    const slackL = axis === "y" && !(actor.vx < 0) ? slack : 0, slackR = axis === "y" && !(actor.vx > 0) ? slack : 0;
+    const slackT = axis === "x" && !(actor.vy < 0) ? slack : 0, slackB = axis === "x" && !(actor.vy > 0) ? slack : 0;
+    const c0 = Math.floor((actor.x + slackL) / TILE), c1 = Math.floor((actor.x + actor.w - 0.01 - slackR) / TILE);
+    const r0 = Math.floor((actor.y + slackT) / TILE), r1 = Math.floor((actor.y + actor.h - 0.01 - slackB) / TILE);
     // The cells are visited in the CHARACTER's own order — from the side away from gravity toward it, and left to right in its
     // own terms — so that when the box spans two different blocking cells the same one wins in every orientation. At ordinary
     // gravity that is exactly the old order (rows top to bottom, columns left to right).
