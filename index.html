@@ -12093,7 +12093,7 @@
       rows: ["........................", "........................", "........................", "........................", "........................", "........................", "........................", "........................", "........................", ".......c.........w......", "....iiiiiii...iiiiiii...", "........................", "..c.....................", "........................", "........................", "..k.......w...c...w.P...", "iiiiiiiiiiiiiiiiiiiiiiii", "========================"] },
     { id: "roulette2", category: "toy", closed: true, stooge: "wP", names: ["The Gravity Roulette", "Spin The Floor", "Which Way Is Down"],
       room: {"gravity": "on", "wrapH": false, "wrapV": false}, requires: ["button"], discover: "g",
-      expect: {"fact": "a crate drops onto a gravity button and flips the room, and the walkers keep pressing them", "check": "buttonPress", "needsInput": false, "selfStart": true},
+      expect: {"fact": "a crate drops onto a gravity button and flips the room, and the walkers keep pressing them", "check": "buttonPress", "needsInput": true, "selfStart": true},
       legend: {"=": "wall", "u": "button0", "g": "gbutton:random", "c": "crate", "w": "pet", "P": "player", "o": "reward"},
       rows: ["========================", "=......u....g...u......=", "=......................=", "=......................=", "=.............c........=", "=....c.................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=......................=", "=..P.......w....w...o..=", "=....u...g....u...u....=", "========================"] },
     { id: "bombcarousel", category: "room", closed: false, stooge: "Pw", names: ["The Bomb Carousel", "Round And Round And Boom", "Carousel Of Regret"],
@@ -12438,6 +12438,8 @@
         let ok = true;
         for (let y = oy; ok && y < oy + h; y++)
           for (let x = ox; x < ox + w; x++) if (ctx.occ[y][x] !== 0) { ok = false; break; }
+        // the 1-tile margin: never touching an earlier surprise's footprint
+        if (ok && (ctx.rects || []).some(r => !(ox + w + 1 <= r.rect.x || r.rect.x + r.rect.w + 1 <= ox || oy + h + 1 <= r.rect.y || r.rect.y + r.rect.h + 1 <= oy))) ok = false;
         if (ok) {
           // snug is better: count ring cells that are walls of the room, the view edge or somebody's stuff,
           // so several surprises pack into corners instead of fragmenting the room

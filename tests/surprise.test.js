@@ -25,7 +25,8 @@ const HOOK = `
     setGravity: v => { gravityEnabled = v; }, room: () => { snapshotCurrentRoomState(); return rooms.find(r => r.id === currentRoomId); },
     select: (pm, g, m, kind, defId) => { paintMode = pm; selectedGeometry = g; selectedModifier = m; selectedActorKind = kind; selectedActorDefId = defId; },
     piece: () => surpriseSelectedPiece(), tryThis: seed => surpriseTry(seed), forPiece: k => surpriseTemplatesFor(k), pieceKeys: () => Object.keys(SURPRISE_PIECE_MATCH),
-    templateById: id => SURPRISE_TEMPLATES.find(t => t.id === id)
+    templateById: id => SURPRISE_TEMPLATES.find(t => t.id === id),
+    smallIds: () => SURPRISE_TEMPLATES.filter(t => !t.rooms && t.rows[0].length < 20).map(t => t.id)
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise_hooked.html");
@@ -181,7 +182,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
     const placed = [];
     for (let i = 0; i < 12; i++) {
       const snapBefore = __st.snapshot();
-      const rep = __st.press(7000 + i, { chaos: false });
+      const rep = __st.press(7000 + i, { chaos: false, templateIds: __st.smallIds() }); // small templates only: a whole-room event never goes over the kid's stuff (it opens a new room tab)
       if (rep && rep.pending) { out.pendingAt = i; out.overlay = !!document.getElementById("surpriseFullOverlay"); out.buttons = [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent); document.getElementById("surpriseFullOverlay").remove(); break; }
       if (!rep || !rep.templateId) { out.problems.push("press " + i + " returned " + JSON.stringify(rep)); break; }
       placed.push(rep.rect);
@@ -352,7 +353,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
       const rep = __st.tryThis(4242);
       const t = rep && rep.templateId && __st.templateById(rep.templateId);
       const has = t && __st.forPiece(want).includes(t.id);
-      return { piece, built: !!(rep && rep.templateId), has: !!has, tid: rep && rep.templateId, fallback: !!(rep && rep.fallback), gravityFlipped: rep && rep.gravityFlipped, wrapH: rep && rep.wrapH };
+      return { piece, built: !!(rep && rep.templateId), has: !!has, tid: rep && rep.templateId, fallback: !!(rep && rep.fallback), gravityFlipped: rep && rep.gravityFlipped, wrapH: rep && rep.wrapH && !(t && t.room && t.room.wrapH === true) }; // a template that REQUIRES wrap keeps it in Try this
     }, { pm, g, m, kind, defId, want });
     if (r.piece !== want || !r.built || !r.has || r.fallback || r.gravityFlipped || r.wrapH) fail("try this " + want + " " + JSON.stringify(r));
   }
