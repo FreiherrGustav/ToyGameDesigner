@@ -12,7 +12,7 @@ module.exports = function hook() { return `
     const prev = cause != null ? z.events[cause - 1] : null;
     if (prev && prev.type === type && subj && prev.subj === subj.id) { return cause; } // repeats of one thing on one actor are one link
     const id = ++z.n;
-    z.events.push({ id, f: z.frame, type, cause: cause == null ? null : cause, subj: subj ? subj.id : null, char: __isChar(subj) || __isChar(subj2) });
+    const ca = subj || subj2; z.events.push({ id, f: z.frame, type, cause: cause == null ? null : cause, subj: subj ? subj.id : null, char: __isChar(subj) || __isChar(subj2), cx: ca ? Math.floor((ca.x + ca.w / 2) / TILE) : null, cy: ca ? Math.floor((ca.y + ca.h / 2) / TILE) : null });
     if (subj) subj.__cause = id; if (subj2) subj2.__cause = id;
     return id;
   };

@@ -11925,9 +11925,10 @@
   // expect.selfStart: an idle player standing where the template put them sees an interaction within 3 seconds.
   // rooms: [...] (optional) a multi-room template; each part has its own rows/legend/room, joined by "door:<n>" pieces
   //   (two cells with the same n in different parts are linked both ways).
-  const SURPRISE_CATEGORY_WEIGHTS = { room: 40, loop: 30, vignette: 15, toy: 10, nonsense: 5 }; // room = machines / whole-room events (v2.54)
+  const SURPRISE_CATEGORY_WEIGHTS = { room: 30, loop: 30, vignette: 25, toy: 10, nonsense: 5 }; // room = machines / whole-room events (v2.54)
   const SURPRISE_RECENT_MAX = 5; // never repeat any of the last 5 templates (kept for the editor session, not in saves)
   let surpriseRecent = [];
+  let surpriseRecentPresses = []; // how many template ids each of the last presses pushed onto surpriseRecent
   // v2.54 variation operators. A template (above all a whole-room machine) names which it allows in `vary`; each one is a
   // fixed, closed table and every variant it can produce has to pass the template's own checks in the fuzz:
   //   mirror:false          never flipped left-to-right (one-way geometry, a fixed cannon arc)
@@ -11962,12 +11963,12 @@
       expect: { fact: "everyone falls out one side and drops back in from the other; a random gravity switch turns the fall", check: "wrap", needsInput: false, selfStart: true },
       legend: {"P": "player", "w": "pet", "c": "crate", "t": "tramp", "o": "reward", "g": "gbutton:random"},
       rows: ["..P....w....", "..g.........", "...c......t.", "............", ".t.......c..", "...w....o...", "............"] },
-    { id: "rink", category: "loop", closed: false, stooge: "w", names: ["Skating Rink", "Zamboni Day", "Slip And Slide Society", "Curling Without The Curlers"],
+    { id: "rink", category: "loop", strip: true, closed: false, stooge: "w", names: ["Skating Rink", "Zamboni Day", "Slip And Slide Society", "Curling Without The Curlers"],
       room: { gravity: "on", wrapH: true, wrapV: false }, requires: ["slippery", "cannon"], discover: "c",
       expect: { fact: "a crate drops into the cannon, lands on the ice and everyone slides around", check: "cannon", needsInput: false, selfStart: true },
       legend: {"i": "slick", "k": "cannon:ne", "c": "crate", "w": "pet", "Q": "playerplate", "G": "gate"},
       rows: ["........................", "...c....................", "...G....................", "...k.....w....c..w..Q...", "iiiiiiiiiiiiiiiiiiiiiiii"] },
-    { id: "treadmill", category: "toy", closed: false, stooge: "w", names: ["The Treadmill", "Conveyor Sushi, No Sushi", "Round And Round We Go", "Belt Up"],
+    { id: "treadmill", category: "toy", strip: true, closed: false, stooge: "w", names: ["The Treadmill", "Conveyor Sushi, No Sushi", "Round And Round We Go", "Belt Up"],
       room: { gravity: "on", wrapH: true, wrapV: false }, requires: ["conveyor"], discover: "c",
       expect: { fact: "everything on the belt rides to the edge and comes around the other side", check: "wrap", needsInput: false, selfStart: true },
       legend: {"e": "belt:e", "c": "crate", "P": "player", "w": "pet", "o": "reward"},
@@ -11977,37 +11978,37 @@
       expect: { fact: "crates and a pet rise in the wind column, leave through the ceiling and come back up from the floor", check: "wrap", needsInput: false, selfStart: true },
       legend: {"g": "gust:n", "c": "gust:n&crate", "P": "player", "w": "gust:n&pet", "o": "reward"},
       rows: ["..ggg..", "..ggg..", "..gcg..", "..ggg..", "..ggg..", "..gog..", "..ggg..", "..cgg..", "..ggg..", "..ggg..", "..ggg..", "..ggw..", "..ggg..", "..ggg..", "..ggg..", "..ggg..", "P.ggg..", "..ggg.."] },
-    { id: "fanclub", category: "vignette", closed: false, stooge: "P", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
+    { id: "fanclub", category: "vignette", filler: true, closed: false, stooge: "P", names: ["The Fan Club", "Wind Up Crate", "A Breeze Of Crate", "Plate Expectations"],
       room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["fan", "plate", "gate"], discover: "o",
       expect: { fact: "the fan blows the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false, selfStart: true },
       legend: { "#": "wall", f: "fan:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward" },
       rows: ["#......###", "#......#.#", "#......#.#", "#......#.#", "#......#.#", "#fPc..pGo#", "##########"] },
-    { id: "moat", category: "toy", closed: false, names: ["Moat Problem", "The Floor Is Lava", "Stone Cold Bridge", "Lava Lamp Lunch"],
+    { id: "moat", category: "toy", filler: true, closed: false, names: ["Moat Problem", "The Floor Is Lava", "Stone Cold Bridge", "Lava Lamp Lunch"],
       room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["lava", "largestone"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", L: "lava", P: "player", S: "stone", c: "crate", w: "pet", o: "reward" },
       rows: ["............", "............", "............", "............", ".P.Sc....w.o", "#####LLL####", "############"] },
-    { id: "sticky", category: "toy", closed: false, names: ["Sticky Situation", "Bounce Then Stick", "Velcro Tuesday", "The Gummy Wall"],
+    { id: "sticky", category: "toy", filler: true, closed: false, names: ["Sticky Situation", "Bounce Then Stick", "Velcro Tuesday", "The Gummy Wall"],
       room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["sticky", "bouncy"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { Y: "sticky", b: "bounce", "=": "wall", P: "player", o: "reward", w: "pet" },
       rows: ["............", "........Y.o.", "........Y...", "........Y...", "...P....Y.w.", "........Y...", "bbbbbbbb===="] },
-    { id: "slippery", category: "toy", closed: false, names: ["Slippery Kitchen", "Soapy Launch Pad", "Ice Skating To Nowhere", "Wet Floor Sign Missing"],
+    { id: "slippery", category: "toy", filler: true, closed: false, names: ["Slippery Kitchen", "Soapy Launch Pad", "Ice Skating To Nowhere", "Wet Floor Sign Missing"],
       room: { gravity: "either", native: "on", wrapH: "maybe", wrapHChance: 0.3, wrapV: "maybe" }, requires: ["slippery", "trampoline", "lethal"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { i: "slick", "=": "wall", P: "player", t: "tramp", "^": "spike", o: "reward", w: "pet" },
       rows: ["............", ".........o..", "............", "............", "............", ".P..w....t^.", "iiiiiiiii==="] },
-    { id: "zeropinata", category: "toy", closed: true, names: ["Zero-G Pinata", "Candy Cannon", "Crates Everywhere", "Floaty Party"],
+    { id: "zeropinata", category: "toy", filler: true, closed: true, names: ["Zero-G Pinata", "Candy Cannon", "Crates Everywhere", "Floaty Party"],
       room: { gravity: "either", native: "off", wrapH: "maybe", wrapV: "maybe" }, requires: ["cannon"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", c: "crate", n: "cannon:ne", P: "player", w: "pet", o: "reward" },
       rows: ["############", "#.....cc...#", "#.....c.o..#", "#...........", "#P.n.......#", "#.........w#", "############"] },
-    { id: "conveyor", category: "vignette", closed: false, stooge: "P", names: ["Conveyor Commute", "Rush Hour Crate", "Belt Up", "The Slow Escalator"],
+    { id: "conveyor", category: "vignette", filler: true, closed: false, stooge: "P", names: ["Conveyor Commute", "Rush Hour Crate", "Belt Up", "The Slow Escalator"],
       room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["conveyor", "plate", "gate"], discover: "o",
       expect: { fact: "the belt carries the crate onto the plate, so the plate's color channel turns on", check: "plateOn", needsInput: false, selfStart: true },
       legend: { "#": "wall", ">": "belt:e", P: "player", c: "crate", p: "plate", G: "gate", o: "reward", w: "pet" },
       rows: ["#......###", "#......#.#", "#......#.#", "#..w...#.#", "#......#.#", "#P.c..pGo#", "#>>>>>>###"] },
-    { id: "orchestra", category: "toy", closed: true, names: ["Button Orchestra", "Too Many Buttons", "Push Everything", "The Clicky Room"],
+    { id: "orchestra", category: "toy", filler: true, closed: true, names: ["Button Orchestra", "Too Many Buttons", "Push Everything", "The Clicky Room"],
       room: { gravity: "either", native: "on", wrapH: false, wrapV: false }, requires: ["button", "gate"], discover: "o",
       expect: { fact: "needs a push", check: null, needsInput: true },
       legend: { "#": "wall", G: "gate", b: "button", P: "player", o: "reward", w: "pet" },
@@ -12022,7 +12023,7 @@
       expect: { fact: "the spawner keeps lobbing balls into the black hole, and the pet keeps getting pulled in", check: "spawnCount2", needsInput: false, selfStart: true },
       legend: { "#": "wall", s: "spawner:e", h: "hole", P: "player", o: "reward", w: "pet" },
       rows: ["##########..", "#..s........", "#......o.h..", "#.....w.....", "#...........", "#P..........", "############"] },
-    { id: "magnet", category: "vignette", closed: false, stooge: "w", names: ["Magnet Mischief", "Crate Attraction", "Stuck On You", "The Clingy Magnet"],
+    { id: "magnet", category: "vignette", filler: true, closed: false, stooge: "w", names: ["Magnet Mischief", "Crate Attraction", "Stuck On You", "The Clingy Magnet"],
       room: { gravity: "either", native: "on", wrapH: "maybe", wrapV: "maybe" }, requires: ["magnet"], discover: "o",
       expect: { fact: "the magnet drags a crate toward it (at least 20px closer in three seconds)", check: "crateTowardMagnet", needsInput: false, selfStart: true },
       legend: { "=": "wall", P: "player", c: "crate", m: "magnet", w: "pet", o: "reward", p: "plate", G: "gate" },
@@ -12218,15 +12219,25 @@
   function surprisePick(rng, list) { return list[Math.floor(rng() * list.length) % list.length]; }
 
   // What the project itself offers to fill the soft slots with.
+  // A FIXED inventory (v2.56): only what a brand-new project ships with. Never a kid's custom character or texture, and never
+  // anything a sample game added to the project (exCat, rbDirt, cfPanel...), so a surprise looks the same in every project.
+  function surpriseFixedInventory() {
+    const wanderer = defaultDefIdForKind("wanderer"), chaser = defaultDefIdForKind("chaser");
+    return {
+      skins: GROUND_SEEDS.map(sd => sd.id),
+      pets: [wanderer].filter(Boolean), chasers: [chaser].filter(Boolean),
+      rewards: COLLECTIBLE_SEEDS.map(sd => sd.id).filter(id => !POWERUP_DEF_IDS.includes(id))
+    };
+  }
   function surpriseKit() {
-    const skins = groundSlotIds.filter(id => { const d = groundTileDefs[id]; return d && d.geometry === "solid" && d.modifier === "none" && d.frames && d.frames.length; });
-    // pets always move (wanderers/fleers) so no arrangement is ever a frozen still life
-    const pets = [defaultDefIdForKind("wanderer")].filter(Boolean)
-      .concat(customActorSlotIds.filter(id => actorDefs[id] && id !== playerDefId && ["wanderer", "fleer"].includes(actorDefs[id].temperament)));
-    const chasers = Object.keys(actorDefs).filter(id => actorDefs[id].temperament === "chaser" && id !== playerDefId && !id.startsWith("sp~"));
+    const fx = surpriseFixedInventory();
+    const skins = fx.skins.filter(id => { const d = groundTileDefs[id]; return d && d.geometry === "solid" && d.modifier === "none" && d.frames && d.frames.length; });
+    // pets always move (wanderers) so no arrangement is ever a frozen still life
+    const pets = fx.pets.filter(id => actorDefs[id]);
+    const chasers = fx.chasers.filter(id => actorDefs[id]);
     // variety: a chaser can also be cast as a pet (it follows you around; harmless, see surpriseDefFor)
     chasers.forEach(id => { if (!pets.includes(id)) pets.push(id); });
-    const rewards = collectibleSlotIds.filter(id => actorDefs[id] && !POWERUP_DEF_IDS.includes(id));
+    const rewards = fx.rewards.filter(id => actorDefs[id]);
     const balls = [HAZARD_BALL_DEF_ID, HAZARD_BALL_DEF_ID, PUSHABLE_DEF_ID].concat(pets.filter(id => actorDefs[id].temperament === "wanderer"));
     const walkers = pets.filter(id => actorDefs[id].temperament === "wanderer");
     return { skins, pets, walkers, chasers, rewards: rewards.length ? rewards : [EXAMPLE_CHEESE_DEF_ID], balls };
@@ -12484,7 +12495,7 @@
     const out = [];
     let best = Infinity;
     for (let oy = 0; oy <= ROWS - h; oy++) for (let ox = ctx.viewStart; ox <= ctx.viewEnd - w; ox++) {
-      if (mode === "free") {
+      if (mode === "free" || mode === "spread") {
         let ok = true;
         for (let y = oy; ok && y < oy + h; y++)
           for (let x = ox; x < ox + w; x++) if (ctx.occ[y][x] !== 0) { ok = false; break; }
@@ -12506,6 +12517,8 @@
       }
     }
     if (mode === "free" && out.length) { const top = Math.max(...out.map(c => c.snug)); return out.filter(c => c.snug === top); }
+    // "spread" (scenes): every free spot, no packing into corners; the caller picks one
+    if (mode === "spread") return out;
     if (mode === "overwrite" && out.length) {
       // Cheapest first, but not one single spot forever: keep everything about as cheap as the best (exactly as
       // cheap when it costs the kid nothing), and steer away from the surprise that was just placed so repeated
@@ -12590,6 +12603,14 @@
       if (used.length) { const r = opRng(1), pool = CHANNEL_COLORS.slice(); for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
         fills.colorMap = {}; used.forEach((c, i) => { fills.colorMap[c] = pool[i]; }); ops.push("colors"); }
     }
+    if (opts.avoidColors) { // a filler never shares a channel colour with the primary (or another filler): its plates must not open someone else's gates
+      const free = CHANNEL_COLORS.filter(c => !opts.avoidColors.includes(c));
+      const used = []; parts.forEach(pt => Object.values(pt.legend).forEach(n => n.split("&").forEach(q => { const c = q.split(":")[1]; if (c && CHANNEL_COLORS.includes(c) && !used.includes(c)) used.push(c); })));
+      if (free.length < used.length + 1) return { noRoom: true };
+      const r = opRng(9), pool = free.slice();
+      for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+      fills.colorMap = {}; used.forEach((c, i) => { fills.colorMap[c] = pool[i]; }); fills.color = pool[used.length];
+    }
     const payloadChoice = {};
     if (opOn("payload", 2)) { const r = opRng(2); Object.keys(V.payload).forEach(ch => { const list = V.payload[ch]; payloadChoice[ch] = list[Math.floor(r() * list.length) % list.length]; }); ops.push("payload"); }
     const mainRoll = surpriseRollRoom(parts[0].room, rng, chaos, dirRng);
@@ -12599,11 +12620,12 @@
     const mirrorDir = d => mirror && (d === "left" || d === "right") && parts[0].room.dir !== "any" ? SURPRISE_MIRROR[d] : d;
     mainRoll.dir = mirrorDir(mainRoll.dir);
     const w = parts[0].rows[0].length, h = parts[0].rows.length;
-    const cands = surpriseCandidates(ctx, w, h, opts.place === "overwrite" ? "overwrite" : "free");
+    const cands = surpriseCandidates(ctx, w, h, opts.place === "overwrite" ? "overwrite" : (opts.pick ? "spread" : "free"));
     if (!cands.length) return { noRoom: true };
-    const at = cands[Math.floor(rng() * cands.length) % cands.length];
+    const rolledAt = cands[Math.floor(rng() * cands.length) % cands.length]; // always drawn, so every later roll stays where it was
+    const at = (opts.pick && opts.pick(cands, w, h)) || rolledAt;
     const spec = { seed, attempt, templateId: template.id, category: template.category, name, gravity: mainRoll.gravity, nativeGravity: mainRoll.nativeGravity,
-      gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror, dir: mainRoll.dir,
+      gravityFlipped: mainRoll.gravityFlipped, wrapH: mainRoll.wrapH, wrapV: mainRoll.wrapV, mirror, dir: mainRoll.dir, filler: !!opts.filler,
       ox: at.ox, oy: at.oy, w, h, color: fills.color, cost: at.cost, tiles: [], actors: [], spawners: [], player: null, doors: [], extra: [],
       clearRect: opts.place === "overwrite" ? { x: at.ox, y: at.oy, w, h } : null, authored: !!template.authored };
     const fillPart = (part, target, pw, ph, bx, by) => {
@@ -12622,7 +12644,7 @@
           if (piece.doorId != null) target.doors.push({ id: piece.doorId, x, y });
           if (piece.spawnerContent) target.spawners.push({ x, y, content: piece.spawnerContent === HAZARD_BALL_DEF_ID ? null : piece.spawnerContent });
           if (piece.actor) target.actors.push({ x, y, defId: piece.actor, role: piece.role || null });
-          if (piece.player) target.player = { x, y };
+          if (piece.player && !opts.filler) target.player = { x, y }; // a filler never holds the player
           if (ch === template.discover && target === spec) spec.discoverCells = (spec.discoverCells || []).concat([{ x, y }]);
         }
       });
@@ -12755,6 +12777,82 @@
     for (const t of list) { r2 -= wt(t); if (r2 < 0) return t; }
     return list[list.length - 1];
   }
+  // ---- v2.56 scenes: one primary template plus one or two compatible small fillers in other parts of the room ----
+  // A template whose footprint is under SURPRISE_SMALL_FRAC of the room can never use the room alone, so it always gets
+  // fillers; others get them SURPRISE_SCENE_CHANCE of the time. A filler is a small vignette/toy flagged `filler: true`:
+  // no spawner, no player piece, no gravity Button, no chaser. Never in an overwrite, a Try-this, a multi-room template
+  // or a room whose gravity is not plain down. Every roll comes from its own seeded stream, so the primary's own build is unchanged.
+  const SURPRISE_SCENE_CHANCE = 0.7;
+  const SURPRISE_SMALL_FRAC = 0.35;
+  function surpriseScenePlan(seed, template, opts) {
+    const r = mulberry32(surpriseHash(seed, 9100)); const wantRoll = r(), nRoll = r(), sideRoll = r();
+    const p0 = surpriseTemplateParts(template)[0];
+    const small = p0.rows.length * p0.rows[0].length < SURPRISE_SMALL_FRAC * ROWS * COLS;
+    const on = opts.scene !== false && !opts.canonical && opts.place !== "overwrite" && !template.rooms;
+    return { want: on && (small || wantRoll < SURPRISE_SCENE_CHANCE), nFill: nRoll < 0.6 ? 1 : 2, side: sideRoll < 0.5 ? "left" : "right", strip: !!template.strip };
+  }
+  // Where the primary goes in a scene: in one corner of the room (a strip hugs the floor side), so the rest of the room stays
+  // open for the fillers: one side of the room (left/right), and the floor side or the ceiling side (the floor side more often).
+  function surprisePrimaryPicker(plan, seed, attempt, ctx) {
+    const rng = mulberry32(surpriseHash(seed, attempt + 9200));
+    const floorSide = plan.strip || rng() < 0.6;
+    return (cands, w) => {
+      let list = cands;
+      const edge = floorSide ? Math.max(...list.map(c => c.oy)) : Math.min(...list.map(c => c.oy));
+      const byEdge = list.filter(c => c.oy === edge);
+      if (plan.strip) list = byEdge;
+      else {
+        const mid = (ctx.viewStart + ctx.viewEnd) / 2, half = list.filter(c => (plan.side === "left") === (c.ox + w / 2 < mid));
+        const corner = half.filter(c => c.oy === edge);
+        list = corner.length ? corner : half.length ? half : byEdge.length ? byEdge : list;
+      }
+      return list[Math.floor(rng() * list.length) % list.length];
+    };
+  }
+  function surpriseComposeScene(seed, primary, template, ctx, opts, plan) {
+    primary.fillers = [];
+    if (!plan.want || primary.noRoom || primary.failed || primary.dir !== "down" || (primary.extra && primary.extra.length)) return primary;
+    const pRect = { x: primary.ox, y: primary.oy, w: primary.w, h: primary.h };
+    const { eligible } = surpriseEligibleTemplates();
+    const avoid = (opts.avoid || []).concat([primary.templateId]);
+    const taken = [pRect], takenColors = (ctx.usedColors || []).slice();
+    primary.tiles.forEach(t => { if (t.color && !takenColors.includes(t.color)) takenColors.push(t.color); });
+    const sceneRng = mulberry32(surpriseHash(seed, 9300)), fillerTiles = new Map(), fillers = [];
+    const gravityOk = t => t.room.gravity === "either" || (t.room.gravity === "on") === !!primary.gravity;
+    for (let k = 0; k < plan.nFill; k++) {
+      const pool = eligible.filter(t => t.filler && !avoid.includes(t.id) && gravityOk(t));
+      if (!pool.length) break;
+      const ft = pool[Math.floor(sceneRng() * pool.length) % pool.length];
+      const name = ft.names[Math.floor(sceneRng() * ft.names.length) % ft.names.length];
+      avoid.push(ft.id);
+      const occ = ctx.occ.map(row => row.slice()); // everything taken so far is occupied, plus a 1-tile margin (and the usual margin on top)
+      taken.forEach(r => { for (let y = Math.max(0, r.y - 1); y <= Math.min(ROWS - 1, r.y + r.h); y++) for (let x = Math.max(0, r.x - 1); x <= r.x + r.w && x < occ[0].length; x++) if (!occ[y][x]) occ[y][x] = 1; });
+      const ctx2 = Object.assign({}, ctx, { occ, usedColors: takenColors.slice(), rects: (ctx.rects || []).concat(taken.map(r => ({ rect: r, untouched: false }))) });
+      const jit = c => (surpriseHash(seed + k * 131, c.ox * 64 + c.oy) % 1000) / 1000 * 3;
+      const pick = (cands, w, h) => {
+        let list = cands.filter(c => c.ox + w + 1 <= pRect.x || pRect.x + pRect.w + 1 <= c.ox); // beside the primary, never over or under it
+        if (!list.length) list = cands;
+        let best = null, bs = -1;
+        for (const c of list) { let d = Infinity; taken.forEach(r => { d = Math.min(d, Math.hypot(c.ox + w / 2 - (r.x + r.w / 2), c.oy + h / 2 - (r.y + r.h / 2))); }); const sc = d + jit(c); if (sc > bs) { bs = sc; best = c; } }
+        return best;
+      };
+      let built = null;
+      for (let attempt = 0; attempt < 6 && !built; attempt++) {
+        const f = surpriseBuildSpec(seed, 40 + k * 10 + attempt, ft, name, ctx2, { chaos: false, filler: true, pick, avoidColors: takenColors });
+        if (f.noRoom) break;
+        if (surpriseValidatePart(f, ctx2, false) == null) built = f;
+      }
+      if (!built) continue;
+      fillers.push(built); taken.push({ x: built.ox, y: built.oy, w: built.w, h: built.h });
+      built.tiles.forEach(t => { fillerTiles.set(t.x + "," + t.y, t); if (t.color && !takenColors.includes(t.color)) takenColors.push(t.color); });
+    }
+    if (fillers.length) { // the primary's floors must still hold with the fillers standing in the room
+      const blockAt = (x, y) => { const t = fillerTiles.get(x + "," + y); if (t) { const d = GAMEPLAY_TILE_DEFS[t.key]; return isBlockingGeometry(d.geometry, { isPlayer: true }, d.modifier); } return ctx.blockAt(x, y); };
+      if (surpriseValidatePart(primary, Object.assign({}, ctx, { blockAt }), !(primary.extra || []).some(e => e.player))) fillers.length = 0;
+    }
+    primary.fillers = fillers;
+    return primary;
+  }
   // seed -> template -> name; re-rolls (same seed, attempt counter) when a floor rejects an attempt.
   // opts: templateId (force one), chaos:false (canonical: native gravity, no wrap), place "free"|"overwrite", ctx.
   function generateSurprise(seed, opts) {
@@ -12768,19 +12866,20 @@
     const template = surprisePickTemplate(trng, pool, opts.avoid || []);
     const name = template.names[Math.floor(trng() * template.names.length) % template.names.length];
     const failures = [];
+    const plan = surpriseScenePlan(seed, template, opts);
     let sameVariant = null; // a valid build whose variant was shown recently: kept as the fallback while other attempts are tried
     for (let attempt = 0; attempt < SURPRISE_MAX_ATTEMPTS; attempt++) {
-      const spec = surpriseBuildSpec(seed, attempt, template, name, ctx, opts);
+      const spec = surpriseBuildSpec(seed, attempt, template, name, ctx, plan.want ? Object.assign({}, opts, { pick: surprisePrimaryPicker(plan, seed, attempt, ctx) }) : opts);
       if (spec.noRoom) return { noRoom: true, templateId: template.id, category: template.category, name, w: surpriseTemplateParts(template)[0].rows[0].length, h: surpriseTemplateParts(template)[0].rows.length };
       const why = surpriseValidate(spec, ctx);
       if (!why) {
         spec.attempts = attempt + 1;
         if (opts.avoidVariants && opts.avoidVariants.includes(spec.variant) && attempt < SURPRISE_MAX_ATTEMPTS - 1) { sameVariant = sameVariant || spec; continue; }
-        return spec;
+        return surpriseComposeScene(seed, spec, template, ctx, opts, plan);
       }
       failures.push(why);
     }
-    if (sameVariant) return sameVariant;
+    if (sameVariant) return surpriseComposeScene(seed, sameVariant, template, ctx, opts, plan);
     return { failed: true, templateId: template.id, failures };
   }
   function surpriseRoomIsEmpty(room) {
@@ -12820,11 +12919,13 @@
     } else { def.poses = null; def.art = preset.art.slice(); }
   }
   function surpriseApplySpec(spec, resetCamera, seed) {
-    gravityEnabled = spec.gravity;
-    gravityDir = spec.gravity && GRAVITY_DIRS.includes(spec.dir) ? spec.dir : "down"; // most templates are built for ordinary gravity
-    wrapVEnabled = spec.wrapV;
-    wrapHEnabled = spec.wrapH && cameraMode !== "runner";
-    if (resetCamera) { cameraMode = "fixed"; editorPanCol = 0; }
+    if (!spec.filler) { // a filler joins the primary's room and never changes its rules
+      gravityEnabled = spec.gravity;
+      gravityDir = spec.gravity && GRAVITY_DIRS.includes(spec.dir) ? spec.dir : "down"; // most templates are built for ordinary gravity
+      wrapVEnabled = spec.wrapV;
+      wrapHEnabled = spec.wrapH && cameraMode !== "runner";
+      if (resetCamera) { cameraMode = "fixed"; editorPanCol = 0; }
+    }
     spec.tiles.forEach(t => {
       board[t.y][t.x] = t.key;
       if (t.color) colorBoard[t.y][t.x] = t.color;
@@ -12892,6 +12993,7 @@
       surpriseClearRect(cr);
     }
     let playerPlaced = surpriseApplySpec(spec, roomWasEmpty, seed);
+    (spec.fillers || []).forEach(f => surpriseApplySpec(f, false, seed));
     snapshotCurrentRoomState();
     const room = rooms.find(r => r.id === currentRoomId);
     // later parts of a multi-room template: one new room tab each, joined to the first by door pairs
@@ -12909,13 +13011,17 @@
       doorLinks[roomCellKey(partRooms[b.part], b.x, b.y)] = { toRoomId: partRooms[a.part], toX: a.x, toY: a.y };
     });
     if (partRooms.length > 1) activateRoom(room.id);
-    surpriseRecent.push(spec.templateId);
-    if (surpriseRecent.length > SURPRISE_RECENT_MAX) surpriseRecent.shift();
+    // recency counts presses, and a press is its primary plus its fillers: none of them comes back within SURPRISE_RECENT_MAX presses
+    if (surpriseRecent.length === 0) surpriseRecentPresses.length = 0;
+    const pressIds = [spec.templateId].concat((spec.fillers || []).map(f => f.templateId));
+    pressIds.forEach(id => surpriseRecent.push(id)); surpriseRecentPresses.push(pressIds.length);
+    while (surpriseRecentPresses.length > SURPRISE_RECENT_MAX) surpriseRecent.splice(0, surpriseRecentPresses.shift());
     surpriseRecentVariants.push(spec.variant);
     if (surpriseRecentVariants.length > SURPRISE_RECENT_VARIANTS_MAX) surpriseRecentVariants.shift();
     const rect = { x: spec.ox, y: spec.oy, w: spec.w, h: spec.h };
     const overlaps = s => !(s.rect.x + s.rect.w <= rect.x || rect.x + rect.w <= s.rect.x || s.rect.y + s.rect.h <= rect.y || rect.y + rect.h <= s.rect.y);
-    room.surprises = (room.surprises || []).filter(s => !(spec.clearRect && overlaps(s))).concat([{ seed, templateId: spec.templateId, rect, sig: surpriseRectSignature(rect) }]);
+    room.surprises = (room.surprises || []).filter(s => !(spec.clearRect && overlaps(s))).concat([{ seed, templateId: spec.templateId, rect, sig: surpriseRectSignature(rect) }])
+      .concat((spec.fillers || []).map(f => { const fr = { x: f.ox, y: f.oy, w: f.w, h: f.h }; return { seed, templateId: f.templateId, rect: fr, sig: surpriseRectSignature(fr), filler: true }; }));
     renderRoomTabs();
     renderAll();
     const caption = "Surprise #" + seed + ": " + spec.name;
@@ -12924,9 +13030,11 @@
     let extra = "";
     if (!playerPlaced && playerRoomId !== currentRoomId) extra += " (your player lives in another room — drag them over to join in)";
     if (gravityEnabled !== wasGravity) extra += " — gravity is now " + (gravityEnabled ? "on" : "off");
+    if ((spec.fillers || []).length) extra += " + " + spec.fillers.map(f => f.name).join(", ");
     log(caption + extra);
     try { playChip("pop"); } catch (e) { /* audio can be unavailable */ }
     return { seed, templateId: spec.templateId, category: spec.category, name: spec.name, attempts: spec.attempts, variant: spec.variant, ops: spec.ops, playerPlaced, roomId: room.id, roomIds: partRooms, rect,
+      fillers: (spec.fillers || []).map(f => ({ templateId: f.templateId, name: f.name, rect: { x: f.ox, y: f.oy, w: f.w, h: f.h } })),
       gravity: spec.gravity, gravityFlipped: spec.gravityFlipped, wrapH: spec.wrapH, wrapV: spec.wrapV,
       mode: newRoomMode ? "new" : spec.clearRect ? "overwrite" : "free", overwroteKidStuff: spec.clearRect ? spec.cost : 0 };
   }

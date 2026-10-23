@@ -74,7 +74,8 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
       ok(has, t.id + ": a character is in the way (stooge " + t.stooge + ")");
     }
     if (t.category === "loop" || t.category === "vignette") ok(t.expect && t.expect.selfStart === true, t.id + ": expect.selfStart declared");
-    if (t.category === "toy") ok(t.expect && t.expect.needsInput === true, t.id + ": toy is labelled needsInput");
+    // a toy is either something the kid does (needsInput) or a self-running piece with no cause-and-effect chain (selfStart; v2.56 moved those here)
+    if (t.category === "toy") ok(t.expect && (t.expect.needsInput === true || t.expect.selfStart === true), t.id + ": toy is labelled needsInput or selfStart");
     // spawner templates need a sink
     if (t.rows && !t.authored && Object.values(t.legend).some(n => /^spawner/.test(n))) {
       const sink = Object.values(t.legend).some(n => n === "lava" || n === "hole") || t.room.wrapH === true || t.room.wrapV === true;

@@ -323,7 +323,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
         const rep = __st.press(7000 + k * 11, { templateId: id, chaos: false, canonical: true });
         if (!rep || !rep.templateId) { bad.push(id + " no build"); continue; }
         const defs = __st.defs();
-        const odd = __st.room().actors.filter(a => !a.isPlayer && !["pushable", "largestone", "wanderer1", "colCheese", "hazardball"].includes(a.defId) && defs[a.defId].temperament !== "chaser" && defs[a.defId].temperament !== "wanderer" && defs[a.defId].temperament !== "collectible");
+        const odd = __st.room().actors.filter(a => !a.isPlayer && !["pushable", "largestone", "wanderer1", "colCheese", "hazardball", "movingplatform"].includes(a.defId) && defs[a.defId].temperament !== "chaser" && defs[a.defId].temperament !== "wanderer" && defs[a.defId].temperament !== "collectible");
         if (odd.length) bad.push(id + " odd actor " + odd[0].defId);
         const skins = __st.room().groundSkinBoard.flat().filter(Boolean).filter(x => !String(x).startsWith("lth"));
         if (skins.length) bad.push(id + " has a wall skin");

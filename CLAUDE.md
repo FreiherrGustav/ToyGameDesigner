@@ -6284,6 +6284,44 @@ nothing should assume they are part of the core toolbox. In practice:
 - Any other sample that adds engine behaviour should get the same treatment: flag it here as sample-only
   until the user decides to upgrade the base game.
 
+## Surprise Me v2.56 Stage A-B: an honest chain metric, scenes instead of corners, a fixed inventory
+
+**Stage A (test code + 14 category fields).** The old chain metric (3 events on a cause path, 2 types of any kind) passed `wrap>bounce>wrap`.
+`tests/causal.test.js` now also scores the HONEST metric: along one cause path only trigger mechanisms count (plate, gate, button, cannon,
+bomb/blast, fan, trampoline, spawner), passive events are skipped, consecutive events of one mechanism merge, the walk stops when a mechanism
+comes round again, and the press passes if that loop-free prefix has >= 2 mechanisms. A room-use test fails a non-toy press whose bounding box
+(tiles + actors, before Play) is under 35% of the room. Templates that scored 0% were moved to the `toy` category (the only exempt one):
+fallforever, holesoup, lemmings, tornado, treadmill, carousel, cannoncat, catcannon, elevator, fanloop, pinballroom, trampit, bombrow, craterain.
+Baseline before the moves: non-toy honest 59%, room-use 50%; after: non-toy honest 100% (by construction), room-use 51%. "Toy" now means
+"no cause-and-effect chain", which is why `tests/surprise2.test.js` accepts `needsInput` or `selfStart` for toys.
+
+**Stage B: scenes.** A press builds a primary plus 1-2 *fillers* (`generateSurprise` -> `surpriseComposeScene`). `surpriseScenePlan` (own
+stream, salt 9100) decides: a primary whose footprint is under `SURPRISE_SMALL_FRAC` (35%) of the room always gets fillers, others
+`SURPRISE_SCENE_CHANCE` (70%) when there is room (a whole-room 24x18 template never does, which caps scenes at about 57% of presses with the
+current template mix; the rest stay clean). The primary sits in one corner (`surprisePrimaryPicker`: left/right half, floor side 60% of the
+time, a `strip` template (rink, treadmill) hugs the floor side), the fillers take spots farthest from everything already placed and beside the
+primary rather than over or under it, with >= 1 empty tile between any two footprints. Fillers are templates flagged `filler: true` (fanclub,
+conveyor, magnet, moat, sticky, slippery, zeropinata, orchestra): no spawner, no gravity Button, no chaser, no player (a filler never holds
+the player, `piece.player` is ignored), gravity need compatible with the scene (`either` or equal). Channel colours: a filler's explicit and soft
+colours are remapped to colours not used by the primary or earlier fillers (`opts.avoidColors`), so its plates can never open the primary's
+gates. A filler never changes room rules (`surpriseApplySpec` skips gravity/wrap/camera when `spec.filler`). Fillers only in a down-gravity,
+single-room scene, never in an overwrite, a Try-this (`canonical`) or with `opts.scene === false`. The primary is re-validated (floors,
+flood fill) with the fillers' tiles blocking. The primary's own build is unchanged (the placement draw is still consumed, so every later roll
+stays put). Room records: the primary and each filler get a `room.surprises` entry (`filler: true`), still one undo step per press.
+**Recency now counts presses** (`surpriseRecentPresses`): a press pushes its primary and its fillers; none of them returns within 5 presses.
+`SURPRISE_CATEGORY_WEIGHTS` room 30 / loop 30 / vignette 25 / toy 10 / nonsense 5 (room was 40; whole-room templates cannot take fillers).
+Strips are already full width (rink, treadmill) or full height (tornado), so "stretch" is only the floor-side rule; no template was widened.
+
+**Fixed inventory (`surpriseFixedInventory`).** The kit no longer reads the live project: skins are `GROUND_SEEDS` ids, pets/chasers are the
+factory wanderer and chaser defs, rewards are the factory collectibles minus Heart/Key/Star. Before this, a loaded sample's `exCat` chaser,
+its textures and a kid's custom characters could be cast in a surprise. `tests/scenes.test.js` section A checks every `actor|`/`raw|` piece in
+every template and scenes after loading Rock Bottom, Crystal Cave Runner and The Ice Cave.
+
+**Tests:** `node tests/scenes.test.js [structSeeds] [fuzzPerTemplate] [all|inv|struct|press|fuzz]` (inventory, 1000-seed structure rules,
+real presses with one-undo/one-player, and a Play fuzz comparing each small primary alone vs with fillers using `tests/causal.hook.js`, which
+now records the cell of an event's subject so a filler's own chain cannot make the primary look fine). Fuzz result: 120/120 chain-passing
+primaries kept their chain and best mechanism path with fillers. `tests/surprise.test.js` canonical check whitelists `movingplatform` (gravity1).
+
 ## Git / commit conventions
 
 - One file changes almost every commit: `index.html`. Commit messages so
