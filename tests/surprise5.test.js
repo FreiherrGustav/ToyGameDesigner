@@ -101,7 +101,7 @@ const ok = (c, m, x) => { if (c) { pass++; console.log("ok  ", m); } else { fail
   ok(repeats === 0, "no template repeats within any 5 consecutive presses", repeats);
   let vrep = 0; for (let i = 0; i < ch.length; i++) for (let j = Math.max(0, i - 6); j < i; j++) if (ch[i].variant === ch[j].variant) vrep++;
   ok(vrep === 0, "no variant repeats within any 6 consecutive presses", vrep);
-  ok(Math.abs((share.room || 0) - 40) <= 12 && Math.abs((share.loop || 0) - 30) <= 12, "mix is near the target (room ~40, loop ~30)", share);
+  ok(Math.abs((share.room || 0) - 14) <= 8 && Math.abs((share.loop || 0) - 20) <= 8 && Math.abs((share.vignette || 0) - 42) <= 10, "mix is near the target (room ~14, loop ~20, vignette ~42)", share);
   // variant recency on one template: chained presses of the same template keep changing variant
   await E("reset"); await E("push", Object.assign({}, machine, { category: "loop" }));
   const same = await E("chain", 40, ["opTest"]);

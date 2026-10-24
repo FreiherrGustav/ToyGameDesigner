@@ -11925,7 +11925,7 @@
   // expect.selfStart: an idle player standing where the template put them sees an interaction within 3 seconds.
   // rooms: [...] (optional) a multi-room template; each part has its own rows/legend/room, joined by "door:<n>" pieces
   //   (two cells with the same n in different parts are linked both ways).
-  const SURPRISE_CATEGORY_WEIGHTS = { room: 30, loop: 30, vignette: 25, toy: 10, nonsense: 5 }; // room = machines / whole-room events (v2.54)
+  const SURPRISE_CATEGORY_WEIGHTS = { room: 14, loop: 22, vignette: 40, toy: 15, nonsense: 9 }; // room = machines / whole-room events (v2.54)
   const SURPRISE_RECENT_MAX = 5; // never repeat any of the last 5 templates (kept for the editor session, not in saves)
   let surpriseRecent = [];
   let surpriseRecentPresses = []; // how many template ids each of the last presses pushed onto surpriseRecent
