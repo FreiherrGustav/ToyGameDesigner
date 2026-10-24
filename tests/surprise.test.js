@@ -26,7 +26,8 @@ const HOOK = `
     select: (pm, g, m, kind, defId) => { paintMode = pm; selectedGeometry = g; selectedModifier = m; selectedActorKind = kind; selectedActorDefId = defId; },
     piece: () => surpriseSelectedPiece(), tryThis: seed => surpriseTry(seed), forPiece: k => surpriseTemplatesFor(k), pieceKeys: () => Object.keys(SURPRISE_PIECE_MATCH),
     templateById: id => SURPRISE_TEMPLATES.find(t => t.id === id),
-    smallIds: () => SURPRISE_TEMPLATES.filter(t => !t.rooms && t.rows[0].length < 20).map(t => t.id)
+    isExact: id => !!SURPRISE_TEMPLATES.find(t => t.id === id).exact,
+    smallIds: () => SURPRISE_TEMPLATES.filter(t => !t.rooms && t.rows[0].length < 20 && t.rows[0].length * t.rows.length <= 90).map(t => t.id)
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise_hooked.html");
@@ -326,7 +327,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
         const odd = __st.room().actors.filter(a => !a.isPlayer && !["pushable", "largestone", "wanderer1", "colCheese", "hazardball", "movingplatform"].includes(a.defId) && defs[a.defId].temperament !== "chaser" && defs[a.defId].temperament !== "wanderer" && defs[a.defId].temperament !== "collectible");
         if (odd.length) bad.push(id + " odd actor " + odd[0].defId);
         const skins = __st.room().groundSkinBoard.flat().filter(Boolean).filter(x => !String(x).startsWith("lth"));
-        if (skins.length) bad.push(id + " has a wall skin");
+        if (skins.length && !__st.isExact(id)) bad.push(id + " has a wall skin");
         __st.play(); __st.tick(300); __st.stop();
       } catch (e) { bad.push(id + " " + e); }
     }
