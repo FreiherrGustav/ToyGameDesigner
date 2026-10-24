@@ -603,6 +603,7 @@
       <button id="landingMakeBtn"><span class="ic" aria-hidden="true">✎</span>Make a game</button>
       <button id="landingSurpriseBtn"><span class="ic" aria-hidden="true">🎲</span>Surprise me</button>
       <button id="landingPlayBtn"><span class="ic" aria-hidden="true">▶</span>Play a game</button>
+      <button id="landingShowBtn"><span class="ic" aria-hidden="true">💡</span>Show me how</button>
     </div>
     <div id="landingTrust">Free. No account. Nothing leaves your browser.</div>
     </div>
@@ -13295,6 +13296,8 @@
     $("appTitle").textContent = APP_NAME;
     document.title = APP_NAME + " — a toy for making games";
     $("landingPlayBtn").addEventListener("click", openSamplesModal);
+    $("landingShowBtn").addEventListener("click", () => { endLanding(true); startShowMeHow(); });
+    try { if (localStorage.getItem("toyGameDesigner.tutorialDone")) $("landingShowBtn").title = "Done once already"; } catch (e) { /* convenience only */ }
     $("landingMakeBtn").addEventListener("click", () => { const blank = !landingHadWork; endLanding(true); if (blank) loadStarterBoard(); });
     $("landingSurpriseBtn").addEventListener("click", () => { endLanding(true); $("surpriseBtn").click(); });
     $("landingTakeApartBtn").addEventListener("click", () => {
@@ -13318,7 +13321,11 @@
   // { cell: { x, y, w, h } } (board cells). Input is never blocked: the layer is pointer-events:none.
   // The kid's project is untouched: the tutorial builds in a blank current room, or in a new room called
   // "Tutorial" if the current one has stuff. Quitting restores the whole project from a snapshot.
+  // A hidden target is only brought back once the kid has stopped to look (a tab they switched to on purpose is never snapped away mid-click).
+  const TUT_IDLE_MS = 1500;
   let tutorial = null, tutorialActive = false;
+  function tutNoteInput() { if (tutorial) tutorial.lastInput = performance.now(); }
+  ["pointerdown", "keydown", "wheel"].forEach(ev => window.addEventListener(ev, tutNoteInput, true));
   function tutBoardRect(c) {
     const r = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx;
     const k = (r.width - 2 * bw) / gameCanvas.width;
@@ -13401,7 +13408,7 @@
     const t = step.target();
     const key = step.name + "|" + (t ? (t.sel || "cell") : "none");
     let rect = tutTargetRect(t);
-    if (t && t.prep && (tutorial.lastKey !== key || (!rect && tutNow() - tutorial.lastPrepAt > 500))) {
+    if (t && t.prep && (tutorial.lastKey !== key || (!rect && tutNow() - tutorial.lastPrepAt > 500 && tutNow() - tutorial.lastInput > TUT_IDLE_MS))) {
       tutorial.lastPrepAt = tutNow();
       try { t.prep(); } catch (e) { /* a prep that can't run just means no spotlight this frame */ }
       rect = tutTargetRect(t);
@@ -13417,7 +13424,7 @@
     snapshotCurrentRoomState();
     const snap = captureProjectSnapshot();
     const hadPlayerElsewhere = playerRoomId != null && playerRoomId !== currentRoomId;
-    tutorial = { steps, snap, undo: undoStack, redo: redoStack, lastKey: null, lastPrepAt: 0, raf: 0, timer: 0, finishing: false,
+    tutorial = { steps, snap, undo: undoStack, redo: redoStack, lastKey: null, lastPrepAt: 0, lastInput: 0, raf: 0, timer: 0, finishing: false,
       finishDelayMs: (opts && opts.finishDelayMs != null) ? opts.finishDelayMs : 2500, hadPlayerElsewhere, origPlayerRoom: playerRoomId };
     tutorialActive = true;
     pushUndoSnapshot();
@@ -13430,6 +13437,8 @@
       activateRoom(room.id);
     }
     snapshotCurrentRoomState();
+    tutorial.onFinish = opts && opts.onFinish;
+    paintMode = "erase";
     renderRoomTabs(); renderAll(); fitCanvasAndAlign();
     tutEnsureLayer();
     tutorial.raf = requestAnimationFrame(tutTick);
@@ -13458,6 +13467,7 @@
     const t = tutorial;
     tutStop(); tutorial = null;
     if (appMode === "play") exitToBuildMode();
+    if (t.onFinish) t.onFinish();
     if (t.hadPlayerElsewhere) {
       const src = t.snap.rooms.find(r => r.id === t.origPlayerRoom);
       const orig = src && src.actors.find(a => a.isPlayer);
@@ -13469,6 +13479,66 @@
       }
     }
     updateUndoRedoButtons(); renderRoomTabs(); renderAll(); fitCanvasAndAlign();
+  }
+
+  // ---- The real "Show me how" steps: player, ground under it, an enemy, a goal, press Play, reach the goal.
+  // Each build step points at its palette swatch first (switching tab + scrolling it into view), then, once that
+  // piece is picked, at a sensible empty board spot. A tab click selects that tab's last piece, so prep neutralizes
+  // the selection (paintMode "erase" highlights nothing) to keep "swatch first" honest.
+  const TUT_DONE_KEY = "toyGameDesigner.tutorialDone";
+  function tutNeutral() { paintMode = "erase"; renderAll(); }
+  function tutShowTab(tabId, tab) {
+    if (activeTab !== tab) { document.getElementById(tabId).click(); tutNeutral(); }
+    const pw = document.getElementById("paletteWrap"); if (pw) { /* scroll happens per swatch below */ }
+  }
+  function tutSwatchTarget(sel, tabId, tab) {
+    return { sel, prep: () => { tutShowTab(tabId, tab); const e = document.querySelector(sel); if (e) e.scrollIntoView({ block: "center" }); } };
+  }
+  function tutPlayerCell() {
+    const a = actors.find(x => x.isPlayer);
+    if (!a) return null;
+    // the spawn spot, not the live position: in Build the player falls while there is no ground yet
+    const sx = a.spawnX != null ? a.spawnX : a.x, sy = a.spawnY != null ? a.spawnY : a.y;
+    return { x: Math.floor((sx + a.w / 2) / TILE), y: Math.floor((sy + a.h - 1) / TILE) };
+  }
+  // Where the starter pieces go: relative to the player when there is one, else a default spot.
+  function tutLayout() {
+    const pc = tutPlayerCell() || { x: 3, y: 13 };
+    const bx = Math.max(1, Math.min(COLS - 8, pc.x)), by = Math.max(1, Math.min(ROWS - 2, pc.y));
+    return { player: { x: bx, y: by }, floor: { x: bx - 1, y: by + 1, w: 8, h: 1 }, enemy: { x: bx + 3, y: by }, goal: { x: bx + 6, y: by } };
+  }
+  function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
+  function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
+  function tutHasEnemy() { return actors.some(a => !a.isPlayer && actorDefs[a.defId] && TEMPERAMENTS.includes(actorDefs[a.defId].temperament)); }
+  const TUTORIAL_STEPS = [
+    { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
+      target: () => (paintMode === "actor" && selectedActorKind === "player")
+        ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
+        : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
+    { name: "ground", applies: () => appMode === "build", done: () => tutCount("solid:") >= 4,
+      target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
+        ? { cell: tutLayout().floor }
+        : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
+    { name: "enemy", applies: () => appMode === "build", done: () => tutHasEnemy(),
+      target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
+        ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
+        : tutSwatchTarget('#characterSwatches .swatch[title="wanderer"]', "modeCharacter", "character") },
+    { name: "goal", applies: () => appMode === "build", done: () => !!tutGoalCell(),
+      target: () => (paintMode === "tile" && selectedGeometry === "goal")
+        ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
+        : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
+    { name: "play", done: () => appMode === "play", target: () => ({ sel: "#modePlayBtn" }) },
+    // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
+    { name: "win", done: () => appMode === "play" && playSessionEnded === "win",
+      target: () => {
+        if (appMode !== "play") return { sel: "#modePlayBtn" };
+        if (playSessionEnded === "lose") return { sel: "#modePlayBtn" };
+        const g = tutGoalCell();
+        return g ? { cell: { x: g.x, y: g.y, w: 1, h: 1 } } : null;
+      } }
+  ];
+  function startShowMeHow() {
+    startTutorial(TUTORIAL_STEPS, { onFinish: () => { try { localStorage.setItem(TUT_DONE_KEY, "1"); } catch (e) { /* convenience only */ } } });
   }
   window.addEventListener("keydown", (e) => { if (tutorial && e.key === "Escape") { e.preventDefault(); quitTutorial(); } });
 

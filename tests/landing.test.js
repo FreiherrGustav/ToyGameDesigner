@@ -47,8 +47,8 @@ const open = async (b, vp, hash, init) => {
     ok(await page.evaluate(() => document.body.classList.contains("landing")), "Escape does nothing destructive");
     const order = [];
     ok(await page.evaluate(() => document.activeElement.id) === "landingMakeBtn", "Make one is focused first");
-    for (let i = 0; i < 5; i++) { await page.keyboard.press("Tab"); order.push(await page.evaluate(() => document.activeElement.id)); }
-    ok(JSON.stringify(order) === JSON.stringify(["landingSurpriseBtn","landingPlayBtn","landingTakeApartBtn","landingPrivacy","landingContact"]), "keyboard order " + order);
+    for (let i = 0; i < 6; i++) { await page.keyboard.press("Tab"); order.push(await page.evaluate(() => document.activeElement.id)); }
+    ok(JSON.stringify(order) === JSON.stringify(["landingSurpriseBtn","landingPlayBtn","landingShowBtn","landingTakeApartBtn","landingPrivacy","landingContact"]), "keyboard order " + order);
     await page.evaluate(() => document.getElementById("landingPlayBtn").focus());
     await page.keyboard.press("Enter");
     ok(await page.evaluate(() => document.getElementById("samplesModalOverlay").style.display) === "flex", "Play a game (Enter) opens the Samples gallery");

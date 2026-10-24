@@ -26,7 +26,7 @@ const open = async (b, vp, hash) => {
     await page.waitForTimeout(1200);
     await page.screenshot({ path: path.join(SHOTS, `s1_landing_${w}x${h}.png`) });
     const ids = await page.evaluate(() => [...document.querySelectorAll("#landingButtons button")].map(b => b.id));
-    ok(JSON.stringify(ids) === JSON.stringify(["landingMakeBtn", "landingSurpriseBtn", "landingPlayBtn"]), `${w}x${h}: order Make, Surprise, Play`);
+    ok(JSON.stringify(ids) === JSON.stringify(["landingMakeBtn", "landingSurpriseBtn", "landingPlayBtn", "landingShowBtn"]), `${w}x${h}: order Make, Surprise, Play, Show me how`);
     ok(await page.evaluate(() => document.activeElement.id) === "landingMakeBtn", `${w}x${h}: Make one has focus`);
     const col = await page.evaluate(() => { const g = id => getComputedStyle(document.getElementById(id)).backgroundColor; return [g("landingMakeBtn"), g("landingSurpriseBtn"), g("landingPlayBtn")]; });
     ok(col[0] !== col[1] && col[1] === col[2], `${w}x${h}: Make is primary, the others share the secondary style ${col}`);
