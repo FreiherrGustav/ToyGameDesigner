@@ -13510,12 +13510,20 @@
   function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
   function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
   function tutHasEnemy() { return actors.some(a => !a.isPlayer && actorDefs[a.defId] && TEMPERAMENTS.includes(actorDefs[a.defId].temperament)); }
+  // Ground is done when the whole ringed floor is painted, or when at least 4 tiles are down and the kid has paused
+  // (so moving on never interrupts a stroke or a slow row-by-row paint).
+  function tutGroundDone() {
+    const f = tutLayout().floor; let full = true;
+    for (let i = 0; i < f.w; i++) { const c = board[f.y] && board[f.y][f.x + i]; if (!c || !c.startsWith("solid:")) { full = false; break; } }
+    if (full) return true;
+    return tutCount("solid:") >= 4 && tutorial && tutNow() - tutorial.lastInput > 2000;
+  }
   const TUTORIAL_STEPS = [
     { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
         : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
-    { name: "ground", applies: () => appMode === "build", done: () => tutCount("solid:") >= 4,
+    { name: "ground", applies: () => appMode === "build", done: () => tutGroundDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
         ? { cell: tutLayout().floor }
         : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
