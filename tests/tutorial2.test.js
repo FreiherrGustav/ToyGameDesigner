@@ -11,6 +11,7 @@ src = src.replace(anchor, `  window.__t = { snap: () => JSON.stringify(capturePr
     border: () => canvasBorderPx, active: () => !!tutorial, rooms: () => rooms.map(r => r.name), appMode: () => appMode,
     teleportToGoal: () => { const g = tutGoalCell(); const p = actors.find(a => a.isPlayer); p.x = g.x * TILE + 4; p.y = g.y * TILE + 4; p.vx = p.vy = 0; },
     lose: () => { playSessionEnded = "lose"; }, hero: () => { const a = actors.find(x => x.isPlayer); return a && { x: a.x, y: a.y, sx: a.spawnX, sy: a.spawnY, grounded: a.grounded }; }, stepName: () => { const s = tutorial && tutCurrentStep(); return s ? s.name : null; },
+    goalCell: () => { const c = tutGoalCell(); return c ? [c.x, c.y] : null; },
     stuff: () => { snapshotCurrentRoomState(); return [actors.length, tutCount("solid:"), !!tutGoalCell()]; } };
 ` + anchor);
 fs.writeFileSync('/tmp/tut2_hooked.html', src);
@@ -107,11 +108,13 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   { const h = await p0.evaluate(() => __t.hero()); ok(h && h.grounded && h.x === h.sx && h.y === h.sy, 'hero standing on the floor: live position equals spawn ' + JSON.stringify(h)); }
   ok(await p0.evaluate(() => __t.stepName()) === 'play', 'all four pieces placed out of order -> Play is next');
   ok(onRect(await ring(p0), await rect(p0, '#modePlayBtn')), 'ring on Play');
-  // death path: a lost run points at Play (the existing restart)
+  // death path: a lost run goes back to Build and points at the goal
   await p0.click('#modePlayBtn'); await p0.waitForTimeout(1500);
-  await p0.evaluate(() => __t.lose()); await settle(p0);
-  ok(onRect(await ring(p0), await rect(p0, '#modePlayBtn')), 'lost run: ring on Play (restart)');
-  await shot(p0, 's2_death_play');
+  await p0.evaluate(() => __t.lose()); await p0.waitForTimeout(2300); await settle(p0);
+  ok(await p0.evaluate(() => document.getElementById('modeBuildBtn') ? true : true) && await p0.evaluate(() => !document.body.classList.contains('play-mode')), 'game over returns to Build');
+  { const g = await p0.evaluate(() => __t.goalCell());
+    ok(!!g && onRect(await ring(p0), await cellRect(p0, g[0], g[1])), 'lost run: ring on the goal in Build ' + JSON.stringify(g)); }
+  await shot(p0, 's2_death_goal');
   // Home round trip keeps the tutorial going
   await p0.evaluate(() => document.getElementById('homeLogo').click()); await settle(p0);
   ok(await p0.evaluate(() => document.body.classList.contains('landing')), 'Home shows the landing screen');

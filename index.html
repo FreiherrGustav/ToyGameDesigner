@@ -13444,6 +13444,12 @@
     if (landingActive) { tutDraw(null); return; }
     if (tutorial.finishing) { tutDraw(null); return; }
     tutSettleSpawns();
+    // game over: after a short beat, return to Build and point at the goal; Play again (or moving the goal) ends that
+    if (appMode === "play" && playSessionEnded === "lose") {
+      if (!tutorial.loseAt) tutorial.loseAt = tutNow();
+      else if (tutNow() - tutorial.loseAt > 1600) { tutorial.lostRun = true; tutorial.goalKey = tutGoalKey(); tutorial.loseAt = 0; exitToBuildMode(); }
+    } else tutorial.loseAt = 0;
+    if (tutorial.lostRun && (appMode === "play" || tutGoalKey() !== tutorial.goalKey)) tutorial.lostRun = false;
     const step = tutCurrentStep();
     if (!step) {
       tutorial.finishing = true; tutDraw(null);
@@ -13557,6 +13563,13 @@
   }
   function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
   function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
+  // A goal only counts when it sits on or beside solid ground (below, left or right of it), so it can't float in mid-air.
+  function tutGoalSupported(x, y) {
+    const solid = (cx, cy) => { const c = board[cy] && board[cy][cx]; return !!c && c.startsWith("solid:"); };
+    return solid(x, y + 1) || solid(x - 1, y) || solid(x + 1, y);
+  }
+  function tutGoalDone() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:") && tutGoalSupported(x, y)) return true; } return false; }
+  function tutGoalKey() { let k = ""; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) k += x + "," + y + ";"; } return k; }
   function tutHasEnemy() { return actors.some(a => !a.isPlayer && actorDefs[a.defId] && TEMPERAMENTS.includes(actorDefs[a.defId].temperament)); }
   // Ground is done when the whole ringed floor is painted, or 8 tiles are down anywhere, or 4+ tiles and the kid picked a
   // different piece. Never time-based, so a slow paint is never cut off.
@@ -13601,16 +13614,18 @@
       target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
         : tutSwatchTarget('#characterSwatches .swatch[title="wanderer"]', "modeCharacter", "character") },
-    { name: "goal", applies: () => appMode === "build", done: () => !!tutGoalCell(),
+    { name: "goal", applies: () => appMode === "build", done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
         : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
-    { name: "play", done: () => appMode === "play", target: () => ({ sel: "#modePlayBtn" }) },
+    { name: "play", done: () => appMode === "play" || !!(tutorial && tutorial.lostRun), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
     { name: "win", done: () => appMode === "play" && playSessionEnded === "win",
       target: () => {
+        // a run that ended in game over: the kid is back in Build and the ring is on the goal (move it closer, then Play again)
+        if (tutorial && tutorial.lostRun && appMode !== "play") { const g0 = tutGoalCell(); return g0 ? { cell: { x: g0.x, y: g0.y, w: 1, h: 1 } } : { sel: "#modePlayBtn" }; }
         if (appMode !== "play") return { sel: "#modePlayBtn" };
-        if (playSessionEnded === "lose") return { sel: "#modePlayBtn" };
+        if (playSessionEnded === "lose") return null;
         const g = tutGoalCell();
         return g ? { cell: { x: g.x, y: g.y, w: 1, h: 1 } } : null;
       } }
