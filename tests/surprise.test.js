@@ -183,7 +183,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
     const placed = [];
     for (let i = 0; i < 12; i++) {
       const snapBefore = __st.snapshot();
-      const rep = __st.press(7000 + i, { chaos: false, templateIds: __st.smallIds() }); // small templates only: a whole-room event never goes over the kid's stuff (it opens a new room tab)
+      const rep = __st.press(7000 + i, { chaos: false, scene: false, templateIds: __st.smallIds() }); // small templates only: a whole-room event never goes over the kid's stuff (it opens a new room tab)
       if (rep && rep.pending) { out.pendingAt = i; out.overlay = !!document.getElementById("surpriseFullOverlay"); out.buttons = [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent); document.getElementById("surpriseFullOverlay").remove(); break; }
       if (!rep || !rep.templateId) { out.problems.push("press " + i + " returned " + JSON.stringify(rep)); break; }
       placed.push(rep.rect);
