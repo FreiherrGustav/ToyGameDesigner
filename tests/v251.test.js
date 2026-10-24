@@ -33,7 +33,7 @@ const rectsOverlap = (a, b) => !(a.r <= b.l + 0.5 || b.r <= a.l + 0.5 || a.b <= 
         const groups = [...document.querySelectorAll("#buildToolbar .tgroup")].map(g => { const r = g.getBoundingClientRect(); const bs = [...g.querySelectorAll("button")].map(b => Math.round(b.getBoundingClientRect().top)); return { splits: new Set(bs).size > 1, top: r.top, w: r.width }; });
         const ctl = [...document.querySelectorAll("#topBar button, #buildToolbar button, #roomTabRow button, #cameraPanRow button, #pauseBtn")].filter(b => b.offsetParent).map(b => { const r = b.getBoundingClientRect(); return { id: b.id || b.textContent, l: r.left, r: r.right, t: r.top, b: r.bottom }; });
         return { cv, tg, tabs, clipped, groups, ctl, scroll: document.scrollingElement.scrollHeight > innerHeight + 1 || scrollY !== 0,
-          hud: document.getElementById("hud").offsetParent !== null, panVis: document.getElementById("cameraPanRow").offsetParent !== null,
+          hud: document.getElementById("hud").offsetParent !== null, panVis: (e => e.offsetParent !== null && getComputedStyle(e).visibility === "visible")(document.getElementById("cameraPanRow")),
           msg: R("msgRow"), log: R("log"), hint: R("keyHint"), toolbarRows: new Set([...document.querySelectorAll("#buildToolbar .tgroup")].map(g => Math.round(g.getBoundingClientRect().top))).size };
       });
       const cc = m.cv.l + m.cv.w / 2;

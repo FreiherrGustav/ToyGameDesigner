@@ -15,7 +15,8 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
 const ev = (pg, code) => pg.evaluate(c => window.__ev(c)(), code);
 const SIZES = [[1366, 635], [1280, 590], [1440, 900], [1728, 1000], [1920, 1080], [2560, 1300], [3440, 1440]];
 // canvas widths (CSS px, incl. 6px border) before this patch: v2.48 Stage 2 for the small sizes, the 774 native cap for the big ones
-const BEFORE_W = { "1366x635": 6 + 768 * 0.857, "1280x590": 6 + 768 * 0.779, "1440x900": 774, "1728x1000": 774, "1920x1080": 774, "2560x1300": 774, "3440x1440": 774 };
+// compact sizes reduced by the always-reserved pan row (Stage 1 of the tool-panel patch)
+const BEFORE_W = { "1366x635": 6 + 768 * 0.833, "1280x590": 6 + 768 * 0.755, "1440x900": 774, "1728x1000": 774, "1920x1080": 774, "2560x1300": 774, "3440x1440": 774 };
 const COMFORTABLE = (w, h) => w >= 1500 && h >= 820;
 
 const BOXES = `(()=>{ const sels=["#topBar button","#buildToolbar button","#statusRow button","#statusRow #hud"];

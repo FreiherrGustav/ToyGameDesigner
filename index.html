@@ -719,7 +719,7 @@
       <div id="hud"><span id="livesRow" style="display:none;">Lives <span id="livesVal">3</span> &nbsp;</span><span id="heartsRow" style="display:none;"></span><span id="keysRow" style="display:none;"></span>Score: <span id="scoreVal">0</span><span id="gravIndicator" style="display:none;"></span></div>
     </div>
     <canvas id="gameCanvas" width="768" height="576"></canvas>
-    <div class="toolbar" id="cameraPanRow" style="display:none;">
+    <div class="toolbar" id="cameraPanRow" style="visibility:hidden;" aria-hidden="true">
       <button class="tbtn" id="panLeftBtn">◀ Pan</button>
       <span class="hint" id="panPositionLabel" style="margin:0;"></span>
       <button class="tbtn" id="panRightBtn">Pan ▶</button>
@@ -5551,7 +5551,10 @@
   function renderCameraPanRow() {
     const row = document.getElementById("cameraPanRow");
     const maxPan = roomCols() - COLS;
-    row.style.display = cameraMode === "fixed" ? "none" : "flex";
+    // the row's height is always reserved in Build (hidden, not removed), or the board resizes whenever the camera mode changes
+    const showPan = cameraMode !== "fixed";
+    row.style.visibility = showPan ? "visible" : "hidden";
+    row.setAttribute("aria-hidden", showPan ? "false" : "true");
     document.getElementById("panLeftBtn").disabled = editorPanCol <= 0;
     document.getElementById("panRightBtn").disabled = editorPanCol >= maxPan;
     document.getElementById("panPositionLabel").textContent =
