@@ -28,7 +28,7 @@ const HOOK = require("./causal.hook.js")() + `
 `;
 const tmp = path.join(os.tmpdir(), "causal_hooked.html");
 fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
-const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", cannonLoad: "cannon", cannonFire: "cannon",
+const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon",
   bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 function honestPath(path) { // path: events root -> leaf. Returns the loop-free mechanism prefix.
   const steps = []; for (const e of path) { const m = MECH[e.type]; if (!m) continue; if (steps.length && steps[steps.length - 1] === m) continue; if (steps.includes(m)) break; steps.push(m); }

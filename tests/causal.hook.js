@@ -20,7 +20,7 @@ module.exports = function hook() { return `
   { const o = spawnActorAt; spawnActorAt = function () { const a = o.apply(this, arguments); if (a) __emit("spawn", a, null); return a; }; }
   { const o = triggerCannon; triggerCannon = function (actor) { const had = !!actor.cannonLoad; const r = o.apply(this, arguments); if (!had && actor.cannonLoad) __emit("cannonLoad", actor); return r; }; }
   { const o = fireLoadedCannon; fireLoadedCannon = function (actor) { const r = o.apply(this, arguments); __emit("cannonFire", actor); return r; }; }
-  { const o = triggerFlip; triggerFlip = function (actor, gx, gy) { const r = o.apply(this, arguments); const col = (typeof colorAt === "function") ? colorAt(gx, gy) : null; const id = __emit("buttonPress", actor); if (col) window.__czColorCause[col] = id; return r; }; }
+  { const o = triggerFlip; triggerFlip = function (actor, gx, gy) { const r = o.apply(this, arguments); const col = (typeof colorAt === "function") ? colorAt(gx, gy) : null; const id = __emit(col ? "buttonPress" : "gravityFlip", actor); if (col) window.__czColorCause[col] = id; return r; }; }
   window.__czColorCause = {};
   { const o = exchangeAlong; exchangeAlong = function (a, b) { const r = o.apply(this, arguments); __emit("shove", a, null, b); return r; }; }
   { const o = tryCrushNpc; tryCrushNpc = function (crusher, target) { const r = o.apply(this, arguments); if (r) __emit("squash", crusher, null, target); return r; }; }

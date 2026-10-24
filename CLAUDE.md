@@ -7005,3 +7005,13 @@ Reported: in the Over-Engineered Escape the first bomb, fired by the cannon, no 
 4. *The magnet hold reach was 2px*, less than a frame of a 343px/s shot at 60 fps and more than at 144 (the bomb bounced off the wall instead of clinging). `magnetHoldsActor` reach is 8px.
 
 Result: the bomb completes the X at 48, 60, 72, 90, 100, 110, 120, 125, 144 and 240 fps (and 30, 75); at 165 it flies straight to the magnet from the first cannon (it skips the X, still ends held). Not solved: the underlying cause is semi-implicit integration (trajectories differ by ~3px between frame rates); a jittery real-world dt will still vary the path a little. `overengineered` 63/63 (it had failed 2 at 144 fps mid-way and now passes), magnet, bombs, weight, chain, cannonlanding, rockbottom pass.
+
+## Surprise Me v2.56 Stage C: true machines (existing pieces only; no engine change)
+
+`tests/reliability.test.js` runs each template alone (`scene:false`, chaos on, no input, 10 s) and reports **honest%** (loop-free trigger-mechanism path with >= 2 mechanisms), **strong%** (honest AND the path ends in an effect: gate, cannon, bomb, fan, trampoline, gravity) and **freed%** (a character or object released/dropped by a gate opening on the path). A **true machine** = non-toy, strong >= 95%. The hook now emits `gravityFlip` for an uncolored Button so a gravity Button counts as a mechanism.
+
+**Edits (rows/legend/requires only):** pinball, plinko, bombcarousel, craterain, carousel, pinballroom, treadmill, lemmings, trampit each got a second mechanism from existing pieces (a plate under the first spawn plus a gate that holds something, or a plate row feeding a gate). Categories: craterain -> vignette; carousel, pinballroom, trampit -> room; treadmill, lemmings -> loop. bombcarousel's reward became a pet behind gates, so its `discover` is now the pet (`w`).
+
+**Result:** all non-toy templates strong 100% in 1300 reliability runs, 0 errors; 1000 chained generation presses: machine share 83.6% (target 25%), bounding box >= 40% of the room 97.9%, scene share 57.8%, repeats 0 within 5 presses. Suites: scenes 37/0, surprise2 761/0, surprise5 155/0, surprise.test ALL PASSED.
+
+**Honest caveats:** in chaserparade, magnet, orchestra, warploop and trampit the gate is decorative (freed% < 100%: nothing physical is released), so the "machine" there is plate -> gate with a visible but not essential payoff. Toys that could not become chains and stay toys (or are retire candidates): holesoup, tornado, bombrow, elevator, fallforever, cannoncat, catcannon, fanloop. Scene share is capped near 57% because whole-room 24x18 templates cannot take fillers; room weight and the over-represented loops (five templates take about 27% of presses) should be retuned before Stage D.
