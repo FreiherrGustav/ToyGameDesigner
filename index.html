@@ -13510,13 +13510,16 @@
   function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
   function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
   function tutHasEnemy() { return actors.some(a => !a.isPlayer && actorDefs[a.defId] && TEMPERAMENTS.includes(actorDefs[a.defId].temperament)); }
-  // Ground is done when the whole ringed floor is painted, or when at least 4 tiles are down and the kid has paused
-  // (so moving on never interrupts a stroke or a slow row-by-row paint).
+  // Ground is done when the whole ringed floor is painted, or 8 tiles are down anywhere, or 4+ tiles and the kid picked a
+  // different piece. Never time-based, so a slow paint is never cut off.
   function tutGroundDone() {
     const f = tutLayout().floor; let full = true;
     for (let i = 0; i < f.w; i++) { const c = board[f.y] && board[f.y][f.x + i]; if (!c || !c.startsWith("solid:")) { full = false; break; } }
     if (full) return true;
-    return tutCount("solid:") >= 4 && tutorial && tutNow() - tutorial.lastInput > 2000;
+    const n = tutCount("solid:");
+    if (n >= 8) return true;
+    // 4+ tiles and the kid has picked something else: they've moved on by choice
+    return n >= 4 && !(paintMode === "tile" && selectedGeometry === "solid");
   }
   const TUTORIAL_STEPS = [
     { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
