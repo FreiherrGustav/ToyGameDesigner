@@ -122,6 +122,42 @@
 
   /* ---------- Palette panel ---------- */
   #paletteWrap { width: 280px; flex: 0 0 280px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+  /* Scrollbars: thin, rounded, quiet; the panel's own gutter is always reserved so nothing reflows when it appears */
+  #paletteWrap { scrollbar-gutter: stable; }
+  #paletteWrap, #samplesModalCard, #landing {
+    scrollbar-width: thin;
+    scrollbar-color: var(--panel-light) transparent;
+    scrollbar-color: color-mix(in srgb, var(--accent) 38%, var(--panel-light)) transparent;
+  }
+  /* Chromium/Safari draw the ::-webkit-scrollbar version (it also gives the accent on hover; Chromium ignores it when
+     scrollbar-width/color are set, so those two are kept for engines without it, i.e. Firefox) */
+  @supports selector(::-webkit-scrollbar) {
+    #paletteWrap, #samplesModalCard, #landing { scrollbar-width: auto; scrollbar-color: auto; }
+    #paletteWrap::-webkit-scrollbar, #samplesModalCard::-webkit-scrollbar, #landing::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+    #paletteWrap::-webkit-scrollbar-track, #samplesModalCard::-webkit-scrollbar-track, #landing::-webkit-scrollbar-track { background: transparent; }
+    #paletteWrap::-webkit-scrollbar-button, #samplesModalCard::-webkit-scrollbar-button, #landing::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+    #paletteWrap::-webkit-scrollbar-corner, #samplesModalCard::-webkit-scrollbar-corner, #landing::-webkit-scrollbar-corner { background: transparent; }
+    #paletteWrap::-webkit-scrollbar-thumb, #samplesModalCard::-webkit-scrollbar-thumb, #landing::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--accent) 38%, var(--panel-light)); border-radius: 4px; border: 1px solid transparent; background-clip: padding-box; }
+    #paletteWrap::-webkit-scrollbar-thumb:hover, #samplesModalCard::-webkit-scrollbar-thumb:hover, #landing::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+  }
+  /* A soft fade at the top/bottom edge of the panel while there is more to scroll that way (scroll-driven, no extra
+     elements; engines without scroll timelines, and reduced-motion users, simply get no fade) */
+  @property --fadeT { syntax: "<length>"; inherits: false; initial-value: 0px; }
+  @property --fadeB { syntax: "<length>"; inherits: false; initial-value: 0px; }
+  @keyframes paletteFadeT { from { --fadeT: 0px; } to { --fadeT: 22px; } }
+  @keyframes paletteFadeB { from { --fadeB: 22px; } to { --fadeB: 0px; } }
+  @supports (animation-timeline: scroll()) {
+    @media (prefers-reduced-motion: no-preference) {
+      #paletteWrap {
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fadeT), #000 calc(100% - var(--fadeB)), transparent 100%);
+        mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fadeT), #000 calc(100% - var(--fadeB)), transparent 100%);
+        animation: paletteFadeT linear both, paletteFadeB linear both;
+        animation-timeline: scroll(self block), scroll(self block);
+        animation-range: 0 22px, calc(100% - 22px) 100%;
+      }
+    }
+  }
   #placeTabs { flex-wrap: nowrap; }
   #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
@@ -13513,6 +13549,8 @@
   .hudKey { display: inline-block; border-radius: 4px; padding: 0 3px; margin-right: 2px; font-size: 12px; }
 
   #log { font-size:12px; color:#bbb; max-height:50px; overflow-y:auto; width:768px; max-width:100%; }
+  @supports not selector(::-webkit-scrollbar) { #log { scrollbar-width: thin; scrollbar-color: var(--panel-light) transparent; } }
+  #log::-webkit-scrollbar { width: 8px; background: transparent; } #log::-webkit-scrollbar-thumb { background: var(--panel-light); border-radius: 4px; } #log::-webkit-scrollbar-thumb:hover { background: var(--accent); } #log::-webkit-scrollbar-button { display: none; }
   #errorOverlay { position:fixed; inset:0; background:rgba(10,10,14,0.85); display:none; align-items:center; justify-content:center; z-index:1000; }
   #errorOverlayCard { background:var(--panel); border-radius:12px; padding:24px 28px; max-width:360px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,0.5); }
   #errorOverlayTitle { font-size:18px; font-weight:bold; color:var(--accent); margin-bottom:10px; }
