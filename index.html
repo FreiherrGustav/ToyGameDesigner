@@ -570,10 +570,14 @@
   #tutLayer .tutArrow { position: fixed; width: 40px; height: 40px; pointer-events: none; transform-origin: 50% 50%; }
   #tutLayer .tutArrow svg { display: block; width: 40px; height: 40px; shape-rendering: crispEdges; animation: tutBob 0.8s steps(4, end) infinite; }
   @keyframes tutBob { 0% { transform: translateY(0); } 50% { transform: translateY(8px); } 100% { transform: translateY(0); } }
+  #tutLayer .tutKeys { position: fixed; display: none; gap: 4px; pointer-events: none; transform: translateX(-50%); animation: tutKeyPulse 0.8s steps(2, end) infinite; }
+  #tutLayer .tutKeys b { box-sizing: border-box; min-width: 30px; height: 30px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
+    font: bold 18px/1 ui-monospace, Menlo, Consolas, monospace; color: #222; background: #f3f3f3; border: 2px solid #222; border-bottom-width: 5px; border-radius: 6px; }
+  @keyframes tutKeyPulse { 0% { transform: translateX(-50%) translateY(0); } 100% { transform: translateX(-50%) translateY(-5px); } }
   #tutClose { position: fixed; top: 8px; right: 8px; z-index: 901; width: 32px; height: 32px; padding: 0; font: bold 18px/1 inherit;
     border-radius: 6px; border: 2px solid var(--border, #555); background: var(--panel, #222); color: #fff; cursor: pointer; pointer-events: auto; }
   #tutClose:hover, #tutClose:focus-visible { background: var(--accent); color: #222; }
-  @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg, #tutLayer .tutKeys { animation: none; } }
 </style>
 </head>
 <body>
@@ -13361,6 +13365,9 @@
   let tutorial = null, tutorialActive = false;
   function tutNoteInput() { if (tutorial) tutorial.lastInput = performance.now(); }
   ["pointerdown", "keydown", "wheel"].forEach(ev => window.addEventListener(ev, tutNoteInput, true));
+  // the win-step key cue shows until the first movement key is pressed in Play
+  const TUT_MOVE_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "A", "d", "D", "w", "W", "s", "S", " "];
+  window.addEventListener("keydown", e => { if (tutorial && appMode === "play" && TUT_MOVE_KEYS.includes(e.key)) tutorial.keyed = true; }, true);
   function tutBoardRect(c) {
     const r = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx;
     const k = (r.width - 2 * bw) / gameCanvas.width;
@@ -13383,7 +13390,8 @@
     const layer = document.createElement("div");
     layer.id = "tutLayer";
     layer.innerHTML = '<div class="tutDim" data-d="t"></div><div class="tutDim" data-d="b"></div><div class="tutDim" data-d="l"></div><div class="tutDim" data-d="r"></div>' +
-      '<div class="tutRing"></div><div class="tutArrow"><svg viewBox="0 0 8 8"><path fill="#fff" d="M3 0h2v4h2v1H6v1H5v1H3V6H2V5H1V4h2z"/></svg></div>';
+      '<div class="tutRing"></div><div class="tutArrow"><svg viewBox="0 0 8 8"><path fill="#fff" d="M3 0h2v4h2v1H6v1H5v1H3V6H2V5H1V4h2z"/></svg></div>' +
+      '<div class="tutKeys"><b>←</b><b>→</b><b>␣</b></div>';
     document.body.appendChild(layer);
     const x = document.createElement("button");
     x.id = "tutClose"; x.type = "button"; x.textContent = "✕"; x.title = "Close"; x.setAttribute("aria-label", "Close");
@@ -13422,6 +13430,17 @@
     ax = Math.max(0, Math.min(W - A, Math.round(ax))); ay = Math.max(0, Math.min(H - A, Math.round(ay)));
     arrow.style.display = "block"; arrow.style.left = ax + "px"; arrow.style.top = ay + "px"; arrow.style.transform = "rotate(" + rot + "deg)";
   }
+  function tutKeyCue(step) {
+    const el = document.querySelector("#tutLayer .tutKeys");
+    if (!el) return;
+    if (appMode !== "play") tutorial.keyed = false;
+    const p = actors.find(a => a.isPlayer);
+    if (!step || step.name !== "win" || appMode !== "play" || tutorial.keyed || !p || playSessionEnded) { el.style.display = "none"; return; }
+    const r = tutBoardRect({ x: p.x / TILE, y: p.y / TILE, w: p.w / TILE, h: p.h / TILE });
+    el.style.display = "flex";
+    el.style.left = Math.round(r.left + r.width / 2) + "px";
+    el.style.top = Math.max(0, Math.round(r.top - 44)) + "px";
+  }
   function tutCurrentStep() {
     for (const s of tutorial.steps) {
       if (s.applies && !s.applies()) continue;
@@ -13442,7 +13461,7 @@
     if (!tutorial) return;
     tutorial.raf = requestAnimationFrame(tutTick);
     if (landingActive) { tutDraw(null); return; }
-    if (tutorial.finishing) { tutDraw(null); return; }
+    if (tutorial.finishing) { tutDraw(null); tutKeyCue(null); return; }
     tutSettleSpawns();
     // game over: after a short beat, return to Build and point at the goal; Play again (or moving the goal) ends that
     if (appMode === "play" && playSessionEnded === "lose") {
@@ -13466,6 +13485,7 @@
     }
     tutorial.lastKey = key;
     tutDraw(rect);
+    tutKeyCue(step);
   }
   function tutNow() { return performance.now(); }
   function startTutorial(steps, opts) {

@@ -110,6 +110,15 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   ok(onRect(await ring(p0), await rect(p0, '#modePlayBtn')), 'ring on Play');
   // death path: a lost run goes back to Build and points at the goal
   await p0.click('#modePlayBtn'); await p0.waitForTimeout(1500);
+  { const vis = () => p0.evaluate(() => { const e = document.querySelector('#tutLayer .tutKeys'); return !!e && getComputedStyle(e).display !== 'none'; });
+    ok(await vis(), 'win step: key cue shown in Play before any key');
+    const kr = await p0.evaluate(() => { const r = document.querySelector('#tutLayer .tutKeys').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; });
+    const hr = await p0.evaluate(() => { const a = actors.find(x => x.isPlayer); return null; }).catch(() => null);
+    ok(kr[2] > 0 && kr[1] >= 0, 'key cue is on screen ' + JSON.stringify(kr));
+    await p0.keyboard.press('x'); await p0.waitForTimeout(100);
+    ok(await vis(), 'a non-movement key does not hide the cue');
+    await p0.keyboard.down('ArrowRight'); await p0.waitForTimeout(150); await p0.keyboard.up('ArrowRight');
+    ok(!(await vis()), 'first movement key hides the cue'); }
   await p0.evaluate(() => __t.lose()); await p0.waitForTimeout(2300); await settle(p0);
   ok(await p0.evaluate(() => document.getElementById('modeBuildBtn') ? true : true) && await p0.evaluate(() => !document.body.classList.contains('play-mode')), 'game over returns to Build');
   { const g = await p0.evaluate(() => __t.goalCell());
