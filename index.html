@@ -561,6 +561,19 @@
     #gameWrap .roomTab button.tbtn, #gameWrap #roomTabRow button.tbtn.ghost { padding-top: 3px; padding-bottom: 3px; }
     #msgRow { height: 20px; }
   }
+  /* ---- "Show me how" tutorial layer (editor only; never in the export) ---- */
+  #tutLayer { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+  #tutLayer .tutDim { position: fixed; background: rgba(10,10,18,0.55); pointer-events: none; }
+  #tutLayer .tutRing { position: fixed; box-sizing: border-box; border: 3px solid var(--accent); pointer-events: none;
+    animation: tutRing 0.8s steps(3, end) infinite; }
+  @keyframes tutRing { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 9px rgba(255,255,255,0); } }
+  #tutLayer .tutArrow { position: fixed; width: 40px; height: 40px; pointer-events: none; transform-origin: 50% 50%; }
+  #tutLayer .tutArrow svg { display: block; width: 40px; height: 40px; shape-rendering: crispEdges; animation: tutBob 0.8s steps(4, end) infinite; }
+  @keyframes tutBob { 0% { transform: translateY(0); } 50% { transform: translateY(8px); } 100% { transform: translateY(0); } }
+  #tutClose { position: fixed; top: 8px; right: 8px; z-index: 901; width: 32px; height: 32px; padding: 0; font: bold 18px/1 inherit;
+    border-radius: 6px; border: 2px solid var(--border, #555); background: var(--panel, #222); color: #fff; cursor: pointer; pointer-events: auto; }
+  #tutClose:hover, #tutClose:focus-visible { background: var(--accent); color: #222; }
+  @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg { animation: none; } }
 </style>
 </head>
 <body>
@@ -2507,7 +2520,7 @@
     if (el) el.textContent = text;
   }
   function saveAutosave() {
-    if (landingActive) return; // visiting the landing screen never touches the saved project
+    if (landingActive || tutorialActive) return; // visiting the landing screen or the tutorial never touches the saved project
     const payload = JSON.stringify(wrapProjectSnapshot(captureProjectSnapshot()));
     if (payload === lastAutosaveJSON) return; // nothing's actually changed since the last save
     try {
@@ -13295,6 +13308,169 @@
     });
     $("homeLogo").addEventListener("click", showLanding);
   })();
+
+  // ============== "Show me how": optional guided tutorial (editor only, not in the export) ==============
+  // A spotlight layer (dim with a hole, pulsing ring, bobbing arrow) over the real editor, driven by an
+  // ordered list of steps. Steps follow BOARD STATE, never clicks: every tick the first step whose done()
+  // is false is the current one, so out-of-order building simply skips ahead and nothing is ever undone.
+  // A step is { name, done(), target(), applies?() }. target() returns null (nothing to point at),
+  // { sel, prep? } (a DOM element; prep() brings it on screen, e.g. switches the palette tab) or
+  // { cell: { x, y, w, h } } (board cells). Input is never blocked: the layer is pointer-events:none.
+  // The kid's project is untouched: the tutorial builds in a blank current room, or in a new room called
+  // "Tutorial" if the current one has stuff. Quitting restores the whole project from a snapshot.
+  let tutorial = null, tutorialActive = false;
+  function tutBoardRect(c) {
+    const r = gameCanvas.getBoundingClientRect(), bw = canvasBorderPx;
+    const k = (r.width - 2 * bw) / gameCanvas.width;
+    return { left: r.left + bw + (c.x - editorPanCol) * TILE * k, top: r.top + bw + c.y * TILE * k,
+      width: (c.w || 1) * TILE * k, height: (c.h || 1) * TILE * k };
+  }
+  function tutTargetRect(t) {
+    if (!t) return null;
+    if (t.cell) return tutBoardRect(t.cell);
+    const el = document.querySelector(t.sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const pw = el.closest("#paletteWrap");
+    if (pw) { const p = pw.getBoundingClientRect(); if (r.top < p.top || r.bottom > p.bottom) return null; }
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  }
+  function tutEnsureLayer() {
+    if (document.getElementById("tutLayer")) return;
+    const layer = document.createElement("div");
+    layer.id = "tutLayer";
+    layer.innerHTML = '<div class="tutDim" data-d="t"></div><div class="tutDim" data-d="b"></div><div class="tutDim" data-d="l"></div><div class="tutDim" data-d="r"></div>' +
+      '<div class="tutRing"></div><div class="tutArrow"><svg viewBox="0 0 8 8"><path fill="#fff" d="M3 0h2v4h2v1H6v1H5v1H3V6H2V5H1V4h2z"/></svg></div>';
+    document.body.appendChild(layer);
+    const x = document.createElement("button");
+    x.id = "tutClose"; x.type = "button"; x.textContent = "✕"; x.title = "Close"; x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", () => quitTutorial());
+    document.body.appendChild(x);
+  }
+  function tutRemoveLayer() {
+    ["tutLayer", "tutClose"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
+  }
+  function tutDraw(rect) {
+    const layer = document.getElementById("tutLayer");
+    if (!layer) return;
+    const dims = layer.querySelectorAll(".tutDim"), ring = layer.querySelector(".tutRing"), arrow = layer.querySelector(".tutArrow");
+    if (!rect) { dims.forEach(d => d.style.display = "none"); ring.style.display = "none"; arrow.style.display = "none"; return; }
+    const pad = 6, W = innerWidth, H = innerHeight;
+    const L = Math.round(rect.left) - pad, T = Math.round(rect.top) - pad;
+    const w = Math.round(rect.width) + 2 * pad, h = Math.round(rect.height) + 2 * pad;
+    const set = (el, l, t, ww, hh) => { el.style.display = "block"; el.style.left = l + "px"; el.style.top = t + "px"; el.style.width = Math.max(0, ww) + "px"; el.style.height = Math.max(0, hh) + "px"; };
+    dims.forEach(d => {
+      const k = d.dataset.d;
+      if (k === "t") set(d, 0, 0, W, T);
+      else if (k === "b") set(d, 0, T + h, W, H - (T + h));
+      else if (k === "l") set(d, 0, T, L, h);
+      else set(d, L + w, T, W - (L + w), h);
+    });
+    set(ring, L, T, w, h);
+    // the arrow sits on the side with the most room and points at the hole
+    const room = { up: T, down: H - (T + h), left: L, right: W - (L + w) };
+    const side = Object.keys(room).sort((a, b) => room[b] - room[a])[0];
+    const A = 40, gap = 6, cx = L + w / 2, cy = T + h / 2;
+    let ax, ay, rot;
+    if (side === "up") { ax = cx - A / 2; ay = T - A - gap; rot = 0; }
+    else if (side === "down") { ax = cx - A / 2; ay = T + h + gap; rot = 180; }
+    else if (side === "left") { ax = L - A - gap; ay = cy - A / 2; rot = 270; }
+    else { ax = L + w + gap; ay = cy - A / 2; rot = 90; }
+    ax = Math.max(0, Math.min(W - A, Math.round(ax))); ay = Math.max(0, Math.min(H - A, Math.round(ay)));
+    arrow.style.display = "block"; arrow.style.left = ax + "px"; arrow.style.top = ay + "px"; arrow.style.transform = "rotate(" + rot + "deg)";
+  }
+  function tutCurrentStep() {
+    for (const s of tutorial.steps) {
+      if (s.applies && !s.applies()) continue;
+      if (!s.done()) return s;
+    }
+    return null;
+  }
+  function tutTick() {
+    if (!tutorial) return;
+    tutorial.raf = requestAnimationFrame(tutTick);
+    if (landingActive) { tutDraw(null); return; }
+    if (tutorial.finishing) { tutDraw(null); return; }
+    const step = tutCurrentStep();
+    if (!step) {
+      tutorial.finishing = true; tutDraw(null);
+      tutorial.timer = setTimeout(finishTutorial, tutorial.finishDelayMs);
+      return;
+    }
+    const t = step.target();
+    const key = step.name + "|" + (t ? (t.sel || "cell") : "none");
+    let rect = tutTargetRect(t);
+    if (t && t.prep && (tutorial.lastKey !== key || (!rect && tutNow() - tutorial.lastPrepAt > 500))) {
+      tutorial.lastPrepAt = tutNow();
+      try { t.prep(); } catch (e) { /* a prep that can't run just means no spotlight this frame */ }
+      rect = tutTargetRect(t);
+    }
+    tutorial.lastKey = key;
+    tutDraw(rect);
+  }
+  function tutNow() { return performance.now(); }
+  function startTutorial(steps, opts) {
+    if (tutorial) return;
+    if (landingActive) endLanding(true);
+    if (appMode === "play") exitToBuildMode();
+    snapshotCurrentRoomState();
+    const snap = captureProjectSnapshot();
+    const hadPlayerElsewhere = playerRoomId != null && playerRoomId !== currentRoomId;
+    tutorial = { steps, snap, undo: undoStack, redo: redoStack, lastKey: null, lastPrepAt: 0, raf: 0, timer: 0, finishing: false,
+      finishDelayMs: (opts && opts.finishDelayMs != null) ? opts.finishDelayMs : 2500, hadPlayerElsewhere, origPlayerRoom: playerRoomId };
+    tutorialActive = true;
+    pushUndoSnapshot();
+    if (isCanvasEmpty()) {
+      gravityEnabled = true; gravityDir = "down";
+    } else {
+      const room = createEmptyRoom("Tutorial");
+      room.gravityEnabled = true;
+      rooms.push(room);
+      activateRoom(room.id);
+    }
+    snapshotCurrentRoomState();
+    renderRoomTabs(); renderAll(); fitCanvasAndAlign();
+    tutEnsureLayer();
+    tutorial.raf = requestAnimationFrame(tutTick);
+  }
+  function tutStop() {
+    if (!tutorial) return;
+    cancelAnimationFrame(tutorial.raf); clearTimeout(tutorial.timer);
+    tutRemoveLayer();
+    tutorialActive = false;
+  }
+  // Quit: the whole project goes back exactly as it was before the tutorial started.
+  function quitTutorial() {
+    if (!tutorial) return;
+    const t = tutorial;
+    tutStop(); tutorial = null;
+    if (appMode === "play") exitToBuildMode();
+    suppressHistory = true;
+    restoreProjectSnapshot(structuredClone(t.snap));
+    suppressHistory = false;
+    undoStack = t.undo; redoStack = t.redo;
+    updateUndoRedoButtons(); renderRoomTabs(); renderAll(); fitCanvasAndAlign();
+  }
+  // Finished: the tutorial board stays. The kid's own player, if it lived in another room, goes back there.
+  function finishTutorial() {
+    if (!tutorial) return;
+    const t = tutorial;
+    tutStop(); tutorial = null;
+    if (appMode === "play") exitToBuildMode();
+    if (t.hadPlayerElsewhere) {
+      const src = t.snap.rooms.find(r => r.id === t.origPlayerRoom);
+      const orig = src && src.actors.find(a => a.isPlayer);
+      const dest = rooms.find(r => r.id === t.origPlayerRoom);
+      if (orig && dest) {
+        removeAllPlayerInstances();
+        dest.actors.push(structuredClone(orig));
+        playerRoomId = dest.id;
+      }
+    }
+    updateUndoRedoButtons(); renderRoomTabs(); renderAll(); fitCanvasAndAlign();
+  }
+  window.addEventListener("keydown", (e) => { if (tutorial && e.key === "Escape") { e.preventDefault(); quitTutorial(); } });
 
   // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
   // Captured now — after every built-in actor/background def above has been seeded and the
