@@ -72,7 +72,7 @@ function primaryPaths(events, rect) {
       await page.evaluate(k => window.__sc.loadSample(window.__sc.builders()[k]), key);
       await kitCheck("after loading " + name);
       // a press in that project uses only base pieces
-      const bad = await page.evaluate(() => { const B = window.__sc.base(); const al = new Set(B.actors.concat(B.skins)); const odd = []; for (let s = 1; s <= 120; s++) { const r = window.__sc.emptyGen(s); if (r.fail) continue; [r].concat(r.fillers).forEach(x => x.actors.concat(x.content, x.skins).forEach(id => { if (!al.has(String(id).replace(/^sp~\w+~/, ""))) odd.push(x.id + ":" + id); })); } return odd.slice(0, 5); });
+      const bad = await page.evaluate(() => { const B = window.__sc.base(); const al = new Set(B.actors.concat(B.skins)); const odd = []; for (let s = 1; s <= 120; s++) { const r = window.__sc.emptyGen(s); if (r.fail) continue; [r].concat(r.fillers).forEach(x => x.actors.concat(x.content, x.skins).forEach(id => { if (!al.has(String(id).replace(/^sp~\w+~/, "").replace(/^sx~\w+~/, ""))) odd.push(x.id + ":" + id); })); } return odd.slice(0, 5); });
       ok(bad.length === 0, "120 scenes after loading " + name + " use only base-game actors and textures" + (bad.length ? " (odd " + bad.join(",") + ")" : ""));
     }
     await page.evaluate(() => { window.__sc.reset(); });

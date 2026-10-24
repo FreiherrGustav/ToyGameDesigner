@@ -64,9 +64,12 @@ async function run(name, launcher, opts) {
     const S = { player: '#playerSwatchRow .swatch[title="player"]', ground: '#groundSwatches .swatch[title="solid"]', enemy: '#characterSwatches .swatch[title="wanderer"]', goal: '#fixtureSwatches .swatch[title="goal"]' };
     await check('swatch', S.ground); await p.click(S.ground); await p.waitForTimeout(350); await cellCheck('floor');
     { const a = await cellRect(2, 14), z = await cellRect(9, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); await p.waitForTimeout(350); }
+    await cellCheck('ledge');
+    for (const row of [12, 13]) { const a = await cellRect(6, row), z = await cellRect(9, row); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 8 }); await p.mouse.up(); }
+    await p.waitForTimeout(350);
     await check('swatch', S.player); await p.click(S.player); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(3, 13);
-    await check('swatch', S.enemy); await p.click(S.enemy); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(6, 13);
-    await check('swatch', S.goal); await p.click(S.goal); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(9, 13);
+    await check('swatch', S.enemy); await p.click(S.enemy); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(5, 13);
+    await check('swatch', S.goal); await p.click(S.goal); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(8, 11);
     await check('button', '#modePlayBtn');
     await p.click('#modePlayBtn'); await p.waitForTimeout(1500); await cellCheck('goal while playing');
     ok(errs.length === 0, tag + ': page errors ' + errs.join('|'));
