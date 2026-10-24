@@ -10,7 +10,7 @@ const anchor = '  if (loadAutosave()) log(';
 src = src.replace(anchor, `  window.__t = { snap: () => JSON.stringify(captureProjectSnapshot(), (k, v) => (k === 'impactWobbleT' || k === 'dispAngT') ? undefined : v),
     border: () => canvasBorderPx, active: () => !!tutorial, rooms: () => rooms.map(r => r.name), appMode: () => appMode,
     teleportToGoal: () => { const g = tutGoalCell(); const p = actors.find(a => a.isPlayer); p.x = g.x * TILE + 4; p.y = g.y * TILE + 4; p.vx = p.vy = 0; },
-    lose: () => { playSessionEnded = "lose"; }, stepName: () => { const s = tutorial && tutCurrentStep(); return s ? s.name : null; },
+    lose: () => { playSessionEnded = "lose"; }, hero: () => { const a = actors.find(x => x.isPlayer); return a && { x: a.x, y: a.y, sx: a.spawnX, sy: a.spawnY, grounded: a.grounded }; }, stepName: () => { const s = tutorial && tutCurrentStep(); return s ? s.name : null; },
     stuff: () => { snapshotCurrentRoomState(); return [actors.length, tutCount("solid:"), !!tutGoalCell()]; } };
 ` + anchor);
 fs.writeFileSync('/tmp/tut2_hooked.html', src);
@@ -36,14 +36,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     const before = await p.evaluate(() => localStorage.getItem('toyGameDesigner.autosave.v1'));
     await start(p);
     ok(await p.evaluate(() => __t.active() && !document.body.classList.contains('landing')), w + ': tutorial started from landing');
-    // 1 player: swatch, then cell
-    let g = await ring(p); ok(onRect(g, await rect(p, '#playerSwatchRow .swatch[title="player"]')), w + ': 1 ring on player swatch');
-    await shot(p, `s2_1a_player_swatch_${w}`);
-    await p.click('#playerSwatchRow .swatch[title="player"]'); await settle(p);
-    ok(onRect(await ring(p), await cellRect(p, 3, 13)), w + ': 1 ring on board cell');
-    await shot(p, `s2_1b_player_cell_${w}`);
-    await clickCell(p, 3, 13); await settle(p);
-    // 2 ground: swatch, then 8-cell span; drag
+    // 1 ground: swatch, then 8-cell span; drag
     ok(onRect(await ring(p), await rect(p, '#groundSwatches .swatch[title="solid"]')), w + ': 2 ring on solid swatch');
     await shot(p, `s2_2a_ground_swatch_${w}`);
     await p.click('#groundSwatches .swatch[title="solid"]'); await settle(p);
@@ -51,6 +44,13 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await shot(p, `s2_2b_ground_span_${w}`);
     { const a = await cellRect(p, 2, 14), z = await cellRect(p, 9, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); }
     await settle(p);
+    // 2 player: swatch, then cell
+    let g = await ring(p); ok(onRect(g, await rect(p, '#playerSwatchRow .swatch[title="player"]')), w + ': 1 ring on player swatch');
+    await shot(p, `s2_1a_player_swatch_${w}`);
+    await p.click('#playerSwatchRow .swatch[title="player"]'); await settle(p);
+    ok(onRect(await ring(p), await cellRect(p, 3, 13)), w + ': 1 ring on board cell');
+    await shot(p, `s2_1b_player_cell_${w}`);
+    await clickCell(p, 3, 13); await settle(p);
     // 3 enemy
     ok(onRect(await ring(p), await rect(p, '#characterSwatches .swatch[title="wanderer"]')), w + ': 3 ring on enemy swatch');
     await shot(p, `s2_3a_enemy_swatch_${w}`);
@@ -88,14 +88,15 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   // out of order: goal swatch first, then enemy before player; nothing scolds, steps follow state
   await start(p0);
   await pick(p0, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await clickCell(p0, 9, 13); await settle(p0);
-  ok(await p0.evaluate(() => __t.stepName()) === 'player', 'goal before anything: still points at the player step');
+  ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'goal before anything: still points at the ground step');
   await pick(p0, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p0, 6, 13); await settle(p0);
-  ok(await p0.evaluate(() => __t.stepName()) === 'player', 'enemy before player: player step stays current');
-  await pick(p0, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p0, 3, 13); await settle(p0);
-  ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'skips ahead to ground');
+  ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'enemy before ground: ground step stays current');
   await pick(p0, '#modeGround', '#groundSwatches .swatch[title="solid"]');
   { const a = await cellRect(p0, 2, 14), z = await cellRect(p0, 9, 14); await p0.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p0.mouse.down(); await p0.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p0.mouse.up(); }
   await settle(p0);
+  ok(await p0.evaluate(() => __t.stepName()) === 'player', 'skips ahead to player');
+  await pick(p0, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p0, 3, 13); await p0.waitForTimeout(900);
+  { const h = await p0.evaluate(() => __t.hero()); ok(h && h.grounded && h.x === h.sx && h.y === h.sy, 'hero standing on the floor: live position equals spawn ' + JSON.stringify(h)); }
   ok(await p0.evaluate(() => __t.stepName()) === 'play', 'all four pieces placed out of order -> Play is next');
   ok(onRect(await ring(p0), await rect(p0, '#modePlayBtn')), 'ring on Play');
   // death path: a lost run points at Play (the existing restart)
@@ -121,8 +122,8 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     const snap = await p.evaluate(() => __t.snap());
     await p.evaluate(() => { document.getElementById('homeLogo').click(); }); await settle(p);
     await p.click('#landingShowBtn'); await settle(p);
-    if (n >= 1) { await pick(p, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p, 3, 13); }
-    if (n >= 2) { await pick(p, '#modeGround', '#groundSwatches .swatch[title="solid"]'); const a = await cellRect(p, 2, 14), z = await cellRect(p, 9, 14); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 10 }); await p.mouse.up(); }
+    if (n >= 1) { await pick(p, '#modeGround', '#groundSwatches .swatch[title="solid"]'); const a = await cellRect(p, 2, 14), z = await cellRect(p, 9, 14); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 10 }); await p.mouse.up(); }
+    if (n >= 2) { await pick(p, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p, 3, 13); }
     if (n >= 3) { await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p, 6, 13); }
     if (n >= 4) { await pick(p, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await clickCell(p, 9, 13); }
     await settle(p);

@@ -13394,11 +13394,21 @@
     }
     return null;
   }
+  // The hero is placed where the kid clicked, then settles a few px onto the floor. Once it has settled in Build,
+  // its spawn becomes that resting spot, so Reset/Play start exactly where it stands (live position == spawn).
+  function tutSettleSpawns() {
+    if (appMode !== "build") return;
+    const p = actors.find(a => a.isPlayer);
+    if (!p || !p.grounded || Math.abs(p.vx) > 1 || Math.abs(p.vy) > 1) return;
+    if (Math.abs(p.x - p.spawnX) > 12 || Math.abs(p.y - p.spawnY) > 12) return;
+    if (p.x !== p.spawnX || p.y !== p.spawnY) { p.spawnX = p.x; p.spawnY = p.y; startPos.x = p.x; startPos.y = p.y; }
+  }
   function tutTick() {
     if (!tutorial) return;
     tutorial.raf = requestAnimationFrame(tutTick);
     if (landingActive) { tutDraw(null); return; }
     if (tutorial.finishing) { tutDraw(null); return; }
+    tutSettleSpawns();
     const step = tutCurrentStep();
     if (!step) {
       tutorial.finishing = true; tutDraw(null);
@@ -13513,6 +13523,12 @@
   // Ground is done when the whole ringed floor is painted, or 8 tiles are down anywhere, or 4+ tiles and the kid picked a
   // different piece. Never time-based, so a slow paint is never cut off.
   function tutGroundDone() {
+    if (tutorial && tutorial.groundLatched) return true;
+    const r = tutGroundDoneNow();
+    if (r && tutorial) tutorial.groundLatched = true;
+    return r;
+  }
+  function tutGroundDoneNow() {
     const f = tutLayout().floor; let full = true;
     for (let i = 0; i < f.w; i++) { const c = board[f.y] && board[f.y][f.x + i]; if (!c || !c.startsWith("solid:")) { full = false; break; } }
     if (full) return true;
@@ -13522,14 +13538,14 @@
     return n >= 4 && !(paintMode === "tile" && selectedGeometry === "solid");
   }
   const TUTORIAL_STEPS = [
-    { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
-      target: () => (paintMode === "actor" && selectedActorKind === "player")
-        ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
-        : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
     { name: "ground", applies: () => appMode === "build", done: () => tutGroundDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
         ? { cell: tutLayout().floor }
         : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
+    { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
+      target: () => (paintMode === "actor" && selectedActorKind === "player")
+        ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
+        : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
     { name: "enemy", applies: () => appMode === "build", done: () => tutHasEnemy(),
       target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
