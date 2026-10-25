@@ -10,6 +10,7 @@ const tmp = '/tmp/tut_hooked.html';
 let src = fs.readFileSync(HTML, 'utf8');
 const anchor = '  if (loadAutosave()) log(';
 if (src.split(anchor).length !== 2) throw new Error('anchor');
+src = src.replace('const TUT_GLIDE_RATE = 11, TUT_HOLD_MS = 900;', 'const TUT_GLIDE_RATE = 400, TUT_HOLD_MS = 80;');
 src = src.replace(anchor, `  window.__t = { start: (n) => startTutorial(TESTSTEPS(n), {finishDelayMs: 200}), quit: quitTutorial, border: () => canvasBorderPx, active: () => !!tutorial,
     snap: () => JSON.stringify(captureProjectSnapshot(), (k, v) => (k === 'impactWobbleT' || k === 'dispAngT') ? undefined : v), rooms: () => rooms.map(r => r.name), gravity: () => gravityEnabled,
     appMode: () => appMode, setPlayer: () => { selectedActorDefId = playerDefId; placeNewActor(3*TILE+16, 13*TILE+5); snapshotCurrentRoomState(); renderAll(); },
@@ -33,7 +34,7 @@ fs.writeFileSync(tmp, src);
     await p.goto('file://' + tmp + '#t'); await p.waitForTimeout(400); p.errs = errs; return p;
   };
   const geom = p => p.evaluate(() => {
-    const q = s => document.querySelector(s); const r = q('#tutLayer .tutRing'); if (!r || r.style.display === 'none') return null;
+    const q = s => document.querySelector(s); const r = q('#tutLayer .tutRing'); if (!r || r.style.display === 'none' || document.getElementById('tutLayer').classList.contains('off')) return null;
     const b = r.getBoundingClientRect(); const a = q('#tutLayer .tutArrow').getBoundingClientRect(); return { ring: [b.left, b.top, b.width, b.height], arrow: [a.left, a.top] };
   });
   const targetRect = (p, sel) => p.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }, sel);

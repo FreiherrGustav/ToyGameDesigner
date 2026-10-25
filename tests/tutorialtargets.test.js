@@ -7,6 +7,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m); } };
 let src = fs.readFileSync(HTML, 'utf8');
 const anchor = '  if (loadAutosave()) log(';
+src = src.replace('const TUT_GLIDE_RATE = 11, TUT_HOLD_MS = 900;', 'const TUT_GLIDE_RATE = 400, TUT_HOLD_MS = 80;');
 src = src.replace(anchor, `  window.__t = { border: () => canvasBorderPx, stepName: () => { const s = tutorial && tutCurrentStep(); return s ? s.name : null; } };\n` + anchor);
 fs.writeFileSync('/tmp/tuttargets_hooked.html', src);
 const VIEWPORTS = [[1280, 590], [1366, 635], [1366, 768], [1920, 1080]];
@@ -23,7 +24,7 @@ async function run(name, launcher, opts) {
     const check = async (label, sel) => {
       const step = await p.evaluate(() => __t.stepName());
       const where = `${tag} step "${step}" (${label})`;
-      const ring = await p.evaluate(() => { const r = document.querySelector('#tutLayer .tutRing'); if (!r || r.style.display === 'none') return null; const q = r.getBoundingClientRect(); return [q.left, q.top, q.width, q.height]; });
+      const ring = await p.evaluate(() => { const r = document.querySelector('#tutLayer .tutRing'); if (!r || r.style.display === 'none' || document.getElementById('tutLayer').classList.contains('off')) return null; const q = r.getBoundingClientRect(); return [q.left, q.top, q.width, q.height]; });
       ok(!!ring, where + ': ring shown (target missing or hidden)');
       const info = await p.evaluate(({ sel }) => {
         const e = document.querySelector(sel); if (!e) return { missing: true };
@@ -51,7 +52,7 @@ async function run(name, launcher, opts) {
     const cellCheck = async label => {
       const step = await p.evaluate(() => __t.stepName());
       const where = `${tag} step "${step}" (${label})`;
-      const ring = await p.evaluate(() => { const r = document.querySelector('#tutLayer .tutRing'); if (!r || r.style.display === 'none') return null; const q = r.getBoundingClientRect(); return [q.left, q.top, q.width, q.height]; });
+      const ring = await p.evaluate(() => { const r = document.querySelector('#tutLayer .tutRing'); if (!r || r.style.display === 'none' || document.getElementById('tutLayer').classList.contains('off')) return null; const q = r.getBoundingClientRect(); return [q.left, q.top, q.width, q.height]; });
       ok(!!ring, where + ': ring shown');
       if (!ring) return;
       const cv = await p.evaluate(() => { const r = document.getElementById('gameCanvas').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom, innerWidth, innerHeight]; });
@@ -63,13 +64,13 @@ async function run(name, launcher, opts) {
     const clickCell = async (x, y) => { const r = await cellRect(x, y); await p.mouse.click(r[0] + r[2] / 2, r[1] + r[3] / 2); await p.waitForTimeout(350); };
     const S = { player: '#playerSwatchRow .swatch[title="player"]', ground: '#groundSwatches .swatch[title="solid"]', enemy: '#characterSwatches .swatch[title="wanderer"]', goal: '#fixtureSwatches .swatch[title="goal"]' };
     await check('swatch', S.ground); await p.click(S.ground); await p.waitForTimeout(350); await cellCheck('floor');
-    { const a = await cellRect(2, 14), z = await cellRect(9, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); await p.waitForTimeout(350); }
+    { const a = await cellRect(2, 14), z = await cellRect(11, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); await p.waitForTimeout(350); }
     await cellCheck('ledge');
-    for (const row of [12, 13]) { const a = await cellRect(6, row), z = await cellRect(9, row); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 8 }); await p.mouse.up(); }
+    for (const row of [12, 13]) { const a = await cellRect(8, row), z = await cellRect(11, row); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 8 }); await p.mouse.up(); }
     await p.waitForTimeout(350);
-    await check('swatch', S.player); await p.click(S.player); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(3, 13);
-    await check('swatch', S.enemy); await p.click(S.enemy); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(5, 13);
-    await check('swatch', S.goal); await p.click(S.goal); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(8, 11);
+    await check('swatch', S.player); await p.click(S.player); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(5, 13);
+    await check('swatch', S.enemy); await p.click(S.enemy); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(2, 13);
+    await check('swatch', S.goal); await p.click(S.goal); await p.waitForTimeout(350); await cellCheck('cell'); await clickCell(11, 11);
     await check('button', '#modePlayBtn');
     await p.click('#modePlayBtn'); await p.waitForTimeout(1500); await cellCheck('goal while playing');
     ok(errs.length === 0, tag + ': page errors ' + errs.join('|'));

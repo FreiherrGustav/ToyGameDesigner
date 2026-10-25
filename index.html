@@ -563,21 +563,36 @@
   }
   /* ---- "Show me how" tutorial layer (editor only; never in the export) ---- */
   #tutLayer { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
-  #tutLayer .tutDim { position: fixed; background: rgba(10,10,18,0.55); pointer-events: none; }
-  #tutLayer .tutRing { position: fixed; box-sizing: border-box; border: 3px solid var(--accent); pointer-events: none;
-    animation: tutRing 0.8s steps(3, end) infinite; }
-  @keyframes tutRing { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 9px rgba(255,255,255,0); } }
-  #tutLayer .tutArrow { position: fixed; width: 40px; height: 40px; pointer-events: none; transform-origin: 50% 50%; }
-  #tutLayer .tutArrow svg { display: block; width: 40px; height: 40px; shape-rendering: crispEdges; animation: tutBob 0.8s steps(4, end) infinite; }
+  #tutLayer .tutDim { position: fixed; background: rgba(10,10,18,0.55); pointer-events: none; transition: opacity 0.35s ease; }
+  #tutLayer .tutRing { position: fixed; box-sizing: border-box; border: 3px solid var(--accent); pointer-events: none; border-radius: 4px;
+    transition: opacity 0.35s ease; animation: tutRing 1.6s ease-in-out infinite; }
+  @keyframes tutRing { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 10px rgba(255,255,255,0); } }
+  #tutLayer .tutArrow { position: fixed; width: 40px; height: 40px; pointer-events: none; transform-origin: 50% 50%; transition: opacity 0.35s ease; }
+  #tutLayer .tutArrow svg { display: block; width: 40px; height: 40px; shape-rendering: crispEdges; animation: tutBob 1.4s ease-in-out infinite; }
   @keyframes tutBob { 0% { transform: translateY(0); } 50% { transform: translateY(8px); } 100% { transform: translateY(0); } }
-  #tutLayer .tutKeys { position: fixed; display: none; gap: 4px; pointer-events: none; transform: translateX(-50%); animation: tutKeyPulse 0.8s steps(2, end) infinite; }
-  #tutLayer .tutKeys b { box-sizing: border-box; min-width: 30px; height: 30px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
-    font: bold 18px/1 ui-monospace, Menlo, Consolas, monospace; color: #222; background: #f3f3f3; border: 2px solid #222; border-bottom-width: 5px; border-radius: 6px; }
-  @keyframes tutKeyPulse { 0% { transform: translateX(-50%) translateY(0); } 100% { transform: translateX(-50%) translateY(-5px); } }
+  #tutLayer.off .tutDim, #tutLayer.off .tutRing, #tutLayer.off .tutArrow { opacity: 0; }
+  #tutNote { position: fixed; z-index: 902; box-sizing: border-box; max-width: 270px; padding: 10px 14px 11px; border-radius: 10px; pointer-events: none;
+    background: #fffdf5; color: #1b1b24; border: 3px solid var(--accent); box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    font: 600 16px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; opacity: 0; transition: opacity 0.3s ease; }
+  #tutNote.on { opacity: 1; }
+  #tutNote .nt { display: block; font-size: 19px; font-weight: 800; margin-bottom: 3px; }
+  #tutNote .nb { display: block; font-weight: 600; }
+  #tutNote .skip { display: inline-block; margin-top: 7px; padding: 2px 9px; font: 700 13px/1.4 system-ui, sans-serif; color: #1b1b24; background: #e8e2cc;
+    border: 2px solid #1b1b24; border-radius: 6px; cursor: pointer; pointer-events: auto; }
+  #tutNote .skip:hover, #tutNote .skip:focus-visible { background: var(--accent); }
+  #tutLayer .tutKeys { position: fixed; display: none; flex-direction: column; gap: 6px; padding: 9px 13px 10px; pointer-events: none; transform: translateX(-50%);
+    background: #fffdf5; color: #1b1b24; border: 3px solid var(--accent); border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    font: 700 16px/1 system-ui, -apple-system, "Segoe UI", sans-serif; animation: tutKeyBob 1.6s ease-in-out infinite; }
+  #tutLayer .tutKeys::after { content: ""; position: absolute; left: 50%; bottom: -13px; margin-left: -9px; border: 9px solid transparent; border-top-color: var(--accent); border-bottom: 0; }
+  #tutLayer .tutKeys .kr { display: flex; align-items: center; gap: 6px; }
+  #tutLayer .tutKeys .kr span { margin-left: 4px; }
+  #tutLayer .tutKeys b { box-sizing: border-box; min-width: 34px; height: 32px; padding: 0 9px; display: flex; align-items: center; justify-content: center;
+    font: 800 18px/1 system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff; background: #2b2b3a; border-radius: 6px; border-bottom: 4px solid #000; }
+  @keyframes tutKeyBob { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
   #tutClose { position: fixed; top: 8px; right: 8px; z-index: 901; width: 32px; height: 32px; padding: 0; font: bold 18px/1 inherit;
     border-radius: 6px; border: 2px solid var(--border, #555); background: var(--panel, #222); color: #fff; cursor: pointer; pointer-events: auto; }
   #tutClose:hover, #tutClose:focus-visible { background: var(--accent); color: #222; }
-  @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg, #tutLayer .tutKeys { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg, #tutLayer .tutKeys { animation: none; } #tutLayer .tutDim, #tutLayer .tutRing, #tutLayer .tutArrow, #tutNote { transition: none; } }
 </style>
 </head>
 <body>
@@ -11554,9 +11569,10 @@
       ctx.scale(t.sx, t.sy);
       const savedViewK = artViewK; artViewK = 0;
       artCacheOff++;
-      // The hitbox is ACTOR_SIZE (22px) but the picture used to be a full TILE (32px) centred on it,
-      // so feet sank 5px into the floor and a stacked crate overlapped the one below by 10px. Draw it
-      // at ACTOR_DRAW px (3px per art pixel) with its feet flush with the hitbox's feet instead.
+      // The hitbox is ACTOR_SIZE (22px) but the picture is ACTOR_DRAW (ART * 4 = 32px, 4px per art pixel,
+      // a full tile), drawn with its feet flush with the hitbox's feet so it never sinks into the floor.
+      // That leaves it sticking out ~5px at each side and ~10px above the box; a picture resting on another
+      // actor is shifted away from gravity by that overlap (actorLiftShown, applied just above), drawing only.
       drawArtScaled(ctx, art, -ACTOR_DRAW / 2, -ACTOR_DRAW / 2 - (ACTOR_DRAW - ACTOR_SIZE) / 2, ACTOR_DRAW, ACTOR_DRAW / ART);
       artCacheOff--;
       artViewK = savedViewK;
@@ -13472,21 +13488,38 @@
     layer.id = "tutLayer";
     layer.innerHTML = '<div class="tutDim" data-d="t"></div><div class="tutDim" data-d="b"></div><div class="tutDim" data-d="l"></div><div class="tutDim" data-d="r"></div>' +
       '<div class="tutRing"></div><div class="tutArrow"><svg viewBox="0 0 8 8"><path fill="#fff" d="M3 0h2v4h2v1H6v1H5v1H3V6H2V5H1V4h2z"/></svg></div>' +
-      '<div class="tutKeys"><b>←</b><b>→</b><b>␣</b></div>';
+      '<div class="tutKeys"><div class="kr"><b>←</b><b>→</b><span>walk</span></div><div class="kr"><b>Space</b><span>jump</span></div></div>';
+    layer.className = "off";
     document.body.appendChild(layer);
+    const note = document.createElement("div");
+    note.id = "tutNote"; note.setAttribute("role", "status"); note.setAttribute("aria-live", "polite");
+    document.body.appendChild(note);
     const x = document.createElement("button");
     x.id = "tutClose"; x.type = "button"; x.textContent = "✕"; x.title = "Close"; x.setAttribute("aria-label", "Close");
     x.addEventListener("click", () => quitTutorial());
     document.body.appendChild(x);
   }
   function tutRemoveLayer() {
-    ["tutLayer", "tutClose"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
+    ["tutLayer", "tutClose", "tutNote"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
   }
+  // The spotlight glides: the hole/ring/dim follow a smoothed copy of the target rect (about 0.2 s to settle) so moving from one
+  // step to the next slides instead of jumping. Reduced motion snaps. Returns the arrow's box so the note card can stay clear of it.
+  const TUT_GLIDE_RATE = 11, TUT_HOLD_MS = 900;
   function tutDraw(rect) {
     const layer = document.getElementById("tutLayer");
-    if (!layer) return;
+    if (!layer) return null;
     const dims = layer.querySelectorAll(".tutDim"), ring = layer.querySelector(".tutRing"), arrow = layer.querySelector(".tutArrow");
-    if (!rect) { dims.forEach(d => d.style.display = "none"); ring.style.display = "none"; arrow.style.display = "none"; return; }
+    const now = tutNow(), dt = Math.max(0, Math.min(0.1, (now - (tutorial.lastDrawT || now)) / 1000));
+    tutorial.lastDrawT = now;
+    if (!rect) { layer.classList.add("off"); return null; }
+    layer.classList.remove("off");
+    const sh = tutorial.shown;
+    if (!sh || reducedMotion()) tutorial.shown = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    else {
+      const k = 1 - Math.exp(-TUT_GLIDE_RATE * dt);
+      ["left", "top", "width", "height"].forEach(p => { sh[p] += (rect[p] - sh[p]) * k; if (Math.abs(rect[p] - sh[p]) < 0.4) sh[p] = rect[p]; });
+    }
+    rect = tutorial.shown;
     const W = innerWidth, H = innerHeight;
     // padding shrinks near the window edge so the ring is never clipped by it
     const rl = Math.round(rect.left), rt = Math.round(rect.top), rr = Math.round(rect.left + rect.width), rb = Math.round(rect.top + rect.height);
@@ -13513,7 +13546,7 @@
     // other controls the arrow must not cover (anything that isn't the target itself)
     const others = [];
     document.querySelectorAll("button, .swatch, select, input, #gameCanvas").forEach(e => {
-      if (e.closest("#tutLayer")) return;
+      if (e.closest("#tutLayer") || e.closest("#tutNote")) return;
       const r = e.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
       if (r.left < L + w && r.right > L && r.top < T + h && r.bottom > T) return;
@@ -13527,6 +13560,48 @@
     if (!best) best = { p: clampXY(place(sides[0])), n: 0 };
     let { ax, ay, rot } = best.p;
     arrow.style.display = "block"; arrow.style.left = ax + "px"; arrow.style.top = ay + "px"; arrow.style.transform = "rotate(" + rot + "deg)";
+    return { left: ax, top: ay, right: ax + A, bottom: ay + A, ring: { left: L, top: T, right: L + w, bottom: T + h } };
+  }
+  // The note card: one short line (or title + line) next to the ring, on the side that covers the fewest controls and not on
+  // the arrow. With no ring (a hold between steps) it stays where it was.
+  function tutNoteDraw(info, text, withSkip) {
+    const el = document.getElementById("tutNote");
+    if (!el) return;
+    if (!text) { el.classList.remove("on"); return; }
+    const key = (text.t || "") + "|" + (text.b || "") + "|" + (withSkip ? 1 : 0);
+    if (el.dataset.key !== key) {
+      el.dataset.key = key;
+      el.innerHTML = (text.t ? '<span class="nt"></span>' : "") + (text.b ? '<span class="nb"></span>' : "") + (withSkip ? '<span class="skip" role="button" tabindex="0">Skip</span>' : "");
+      if (text.t) el.querySelector(".nt").textContent = text.t;
+      if (text.b) el.querySelector(".nb").textContent = text.b;
+      const sk = el.querySelector(".skip");
+      if (sk) { const go = () => { if (tutorial && tutorial.curName) { tutorial.skipped[tutorial.curName] = true; } }; sk.addEventListener("click", go); sk.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }); }
+    }
+    el.classList.add("on");
+    if (!info) return; // holding: stay put
+    const W = innerWidth, H = innerHeight, bw = el.offsetWidth, bh = el.offsetHeight, g = 12, R = info.ring;
+    const keys = document.querySelector("#tutLayer .tutKeys"), kr = keys && keys.style.display !== "none" ? keys.getBoundingClientRect() : null;
+    const avoid = [info];
+    if (kr) avoid.push({ left: kr.left, top: kr.top, right: kr.right, bottom: kr.bottom });
+    const cands = [
+      { x: R.right + g + 44, y: (R.top + R.bottom) / 2 - bh / 2 }, { x: R.left - g - 44 - bw, y: (R.top + R.bottom) / 2 - bh / 2 },
+      { x: (R.left + R.right) / 2 - bw / 2, y: R.bottom + g + 44 }, { x: (R.left + R.right) / 2 - bw / 2, y: R.top - g - 44 - bh },
+      { x: R.right + g, y: R.bottom + g }, { x: R.left - g - bw, y: R.bottom + g }, { x: R.right + g, y: R.top - g - bh }, { x: R.left - g - bw, y: R.top - g - bh }
+    ];
+    const ctrls = [];
+    document.querySelectorAll("button, .swatch, select, input, #gameCanvas").forEach(e => {
+      if (e.closest("#tutLayer") || e.closest("#tutNote") || e.id === "gameCanvas") return;
+      const r = e.getBoundingClientRect(); if (r.width && r.height) ctrls.push(r);
+    });
+    let best = null;
+    cands.forEach(c => {
+      const x = Math.round(Math.max(8, Math.min(W - bw - 8, c.x))), y = Math.round(Math.max(8, Math.min(H - bh - 8, c.y)));
+      const box = { left: x, top: y, right: x + bw, bottom: y + bh };
+      const hit = (r) => box.left < r.right && box.right > r.left && box.top < r.bottom && box.bottom > r.top;
+      let cost = ctrls.filter(hit).length * 10 + avoid.filter(hit).length * 40 + (hit(R) ? 60 : 0);
+      if (!best || cost < best.cost) best = { x, y, cost };
+    });
+    el.style.left = best.x + "px"; el.style.top = best.y + "px";
   }
   function tutKeyCue(step) {
     const el = document.querySelector("#tutLayer .tutKeys");
@@ -13536,12 +13611,14 @@
     if (!step || step.name !== "win" || appMode !== "play" || tutorial.keyed || !p || playSessionEnded) { el.style.display = "none"; return; }
     const r = tutBoardRect({ x: p.x / TILE, y: p.y / TILE, w: p.w / TILE, h: p.h / TILE });
     el.style.display = "flex";
-    el.style.left = Math.round(r.left + r.width / 2) + "px";
-    el.style.top = Math.max(0, Math.round(r.top - 44)) + "px";
+    const half = (el.offsetWidth || 120) / 2;
+    el.style.left = Math.round(Math.max(half + 6, Math.min(innerWidth - half - 6, r.left + r.width / 2))) + "px";
+    el.style.top = Math.max(6, Math.round(r.top - (el.offsetHeight || 80) - 22)) + "px";
   }
   function tutCurrentStep() {
     for (const s of tutorial.steps) {
       if (s.applies && !s.applies()) continue;
+      if (tutorial.skipped[s.name]) continue;
       if (!s.done()) return s;
     }
     return null;
@@ -13559,26 +13636,33 @@
     if (!tutorial) return;
     tutorial.raf = requestAnimationFrame(tutTick);
     if (landingActive) { tutDraw(null); return; }
-    if (tutorial.finishing) { tutDraw(null); tutKeyCue(null); return; }
+    if (tutorial.finishing) { tutDraw(null); tutNoteDraw(null); tutKeyCue(null); return; }
     tutSettleSpawns();
     // game over: after a short beat, return to Build and point at the goal; Play again (or moving the goal) ends that
     if (appMode === "play" && playSessionEnded === "lose") {
       if (!tutorial.loseAt) tutorial.loseAt = tutNow();
-      else if (tutNow() - tutorial.loseAt > 1600) { tutorial.lostRun = true; tutorial.goalKey = tutGoalKey(); tutorial.loseAt = 0; exitToBuildMode(); }
+      else if (tutNow() - tutorial.loseAt > 2000) { tutorial.lostRun = true; tutorial.goalKey = tutGoalKey(); tutorial.loseAt = 0; exitToBuildMode(); }
     } else tutorial.loseAt = 0;
     if (tutorial.lostRun && (appMode === "play" || tutGoalKey() !== tutorial.goalKey)) tutorial.lostRun = false;
     // latch the win; after a beat in Play, go back to Build so the Objects tab can be ringed
     if (appMode === "play" && playSessionEnded === "win" && tutorial.steps.some(x => x.name === "objects")) {
       tutorial.won = true;
       if (!tutorial.winAt) tutorial.winAt = tutNow();
-      else if (tutNow() - tutorial.winAt > 1600) { tutorial.winAt = 0; exitToBuildMode(); }
+      else if (tutNow() - tutorial.winAt > 2600) { tutorial.winAt = 0; exitToBuildMode(); }
     }
     const step = tutCurrentStep();
     if (!step) {
-      tutorial.finishing = true; tutDraw(null);
+      tutorial.finishing = true; tutDraw(null); tutNoteDraw(null);
       tutorial.timer = setTimeout(finishTutorial, tutorial.finishDelayMs);
       return;
     }
+    // finishing a build step is not rushed past: a short "Nice!" beat with the spotlight faded out, then the next one glides in
+    if (tutorial.curName !== step.name) {
+      const prev = tutorial.curName;
+      tutorial.curName = step.name;
+      if (prev && TUT_BUILD_STEPS.includes(prev)) tutorial.holdUntil = tutNow() + TUT_HOLD_MS;
+    }
+    if (tutNow() < tutorial.holdUntil) { tutDraw(null); tutNoteDraw(null, { t: "Nice!" }, false); tutKeyCue(null); return; }
     const t = step.target();
     const key = step.name + "|" + (t ? (t.sel || "cell") : "none");
     let rect = tutTargetRect(t);
@@ -13588,7 +13672,9 @@
       rect = tutTargetRect(t);
     }
     tutorial.lastKey = key;
-    tutDraw(rect);
+    const info = tutDraw(rect);
+    const say = step.say ? step.say(t) : null;
+    tutNoteDraw(info, info ? say : null, !!(say && TUT_SKIPPABLE.includes(step.name)));
     tutKeyCue(step);
   }
   function tutNow() { return performance.now(); }
@@ -13599,8 +13685,8 @@
     snapshotCurrentRoomState();
     const snap = captureProjectSnapshot();
     const hadPlayerElsewhere = playerRoomId != null && playerRoomId !== currentRoomId;
-    tutorial = { steps, snap, undo: undoStack, redo: redoStack, lastKey: null, lastPrepAt: 0, lastInput: 0, raf: 0, timer: 0, finishing: false,
-      finishDelayMs: (opts && opts.finishDelayMs != null) ? opts.finishDelayMs : 2500, hadPlayerElsewhere, origPlayerRoom: playerRoomId };
+    tutorial = { steps, snap, undo: undoStack, redo: redoStack, lastKey: null, lastPrepAt: 0, lastInput: 0, curName: null, holdUntil: 0, skipped: {}, shown: null, lastDrawT: 0, raf: 0, timer: 0, finishing: false,
+      finishDelayMs: (opts && opts.finishDelayMs != null) ? opts.finishDelayMs : 700, hadPlayerElsewhere, origPlayerRoom: playerRoomId };
     tutorialActive = true;
     pushUndoSnapshot();
     if (isCanvasEmpty()) {
@@ -13661,6 +13747,7 @@
   // piece is picked, at a sensible empty board spot. A tab click selects that tab's last piece, so prep neutralizes
   // the selection (paintMode "erase" highlights nothing) to keep "swatch first" honest.
   const TUT_DONE_KEY = "toyGameDesigner.tutorialDone";
+  const TUT_BUILD_STEPS = ["ground", "ledge", "player", "enemy", "goal"], TUT_SKIPPABLE = ["ground", "ledge", "enemy"];
   function tutNeutral() { paintMode = "erase"; renderAll(); }
   function tutShowTab(tabId, tab) {
     if (activeTab !== tab) { document.getElementById(tabId).click(); tutNeutral(); }
@@ -13676,14 +13763,14 @@
     const sx = a.spawnX != null ? a.spawnX : a.x, sy = a.spawnY != null ? a.spawnY : a.y;
     return { x: Math.floor((sx + a.w / 2) / TILE), y: Math.floor((sy + a.h - 1) / TILE) };
   }
-  // Where the starter pieces go: relative to the player when there is one, else a default spot.
+  // Where the starter pieces go: relative to the player when there is one, else a default spot (the hero's square, col 5 row 13).
+  // The picture: a 10-wide floor, the hero near its left, a wanderer at the far left end, and a 4 x 2 step up at the right end with the
+  // flag on top, so the hero has to jump past the wanderer's side and climb the step.
   function tutLayout() {
-    const pc = tutPlayerCell() || { x: 3, y: 13 };
-    const bx = Math.max(1, Math.min(COLS - 8, pc.x)), by = Math.max(1, Math.min(ROWS - 2, pc.y));
-    // a second level of ground: a 4 x 2 block on the floor's right end. The enemy walks the floor in front of it, so the hero
-    // has to jump past the enemy and up onto the block to reach the flag on top.
-    return { player: { x: bx, y: by }, floor: { x: bx - 1, y: by + 1, w: 8, h: 1 }, ledge: { x: bx + 3, y: by - 1, w: 4, h: 2 },
-      enemy: { x: bx + 2, y: by }, goal: { x: bx + 5, y: by - 2 } };
+    const pc = tutPlayerCell() || { x: 5, y: 13 };
+    const bx = Math.max(3, Math.min(COLS - 7, pc.x)), by = Math.max(2, Math.min(ROWS - 2, pc.y));
+    return { player: { x: bx, y: by }, floor: { x: bx - 3, y: by + 1, w: 10, h: 1 }, ledge: { x: bx + 3, y: by - 1, w: 4, h: 2 },
+      enemy: { x: bx - 3, y: by }, goal: { x: bx + 6, y: by - 2 } };
   }
   function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
   function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
@@ -13695,56 +13782,48 @@
   function tutGoalDone() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:") && tutGoalSupported(x, y)) return true; } return false; }
   function tutGoalKey() { let k = ""; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) k += x + "," + y + ";"; } return k; }
   function tutHasEnemy() { return actors.some(a => !a.isPlayer && actorDefs[a.defId] && TEMPERAMENTS.includes(actorDefs[a.defId].temperament)); }
-  // Ground is done when the whole ringed floor is painted, or 8 tiles are down anywhere, or 4+ tiles and the kid picked a
-  // different piece. Never time-based, so a slow paint is never cut off.
+  // Ground and the step are done only when EVERY ringed square is painted (never on a count, never on a timer, never because another
+  // piece was picked), so a slow or careful kid is never moved on early. The note's Skip button is the way out.
+  function tutShapeFull(R) {
+    for (let j = 0; j < R.h; j++) for (let i = 0; i < R.w; i++) { const c = board[R.y + j] && board[R.y + j][R.x + i]; if (!c || !c.startsWith("solid:")) return false; }
+    return true;
+  }
   function tutGroundDone() {
     if (tutorial && tutorial.groundLatched) return true;
-    const r = tutGroundDoneNow();
+    const r = tutShapeFull(tutLayout().floor);
     if (r && tutorial) tutorial.groundLatched = true;
     return r;
   }
   function tutLedgeDone() {
     if (tutorial && tutorial.ledgeLatched) return true;
-    const L = tutLayout().ledge; let full = true;
-    for (let j = 0; j < L.h && full; j++) for (let i = 0; i < L.w; i++) { const c = board[L.y + j] && board[L.y + j][L.x + i]; if (!c || !c.startsWith("solid:")) { full = false; break; } }
-    const n = tutCount("solid:");
-    const r = full || n >= 16 || (n >= 12 && !(paintMode === "tile" && selectedGeometry === "solid"));
+    const r = tutShapeFull(tutLayout().ledge);
     if (r && tutorial) tutorial.ledgeLatched = true;
     return r;
   }
-  function tutGroundDoneNow() {
-    const f = tutLayout().floor; let full = true;
-    for (let i = 0; i < f.w; i++) { const c = board[f.y] && board[f.y][f.x + i]; if (!c || !c.startsWith("solid:")) { full = false; break; } }
-    if (full) return true;
-    const n = tutCount("solid:");
-    if (n >= 8) return true;
-    // 4+ tiles and the kid has picked something else: they've moved on by choice
-    return n >= 4 && !(paintMode === "tile" && selectedGeometry === "solid");
-  }
   const TUTORIAL_STEPS = [
-    { name: "ground", applies: () => appMode === "build", done: () => tutGroundDone(),
+    { name: "ground", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Drag across the glowing squares to draw the ground." } : { b: "Pick the ground tile to start building." }), done: () => tutGroundDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
         ? { cell: tutLayout().floor }
         : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
-    { name: "ledge", applies: () => appMode === "build", done: () => tutLedgeDone(),
+    { name: "ledge", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Now add a step up. Fill in the glowing block." } : { b: "Pick the ground tile again." }), done: () => tutLedgeDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
         ? { cell: tutLayout().ledge }
         : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
-    { name: "player", applies: () => appMode === "build", done: () => actors.some(a => a.isPlayer),
+    { name: "player", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click the glowing square to put your hero there." } : { b: "Now pick your hero." }), done: () => actors.some(a => a.isPlayer),
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
         : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
-    { name: "enemy", applies: () => appMode === "build", done: () => tutHasEnemy(),
+    { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop a wanderer. It roams around." } : { b: "Pick a wanderer to add some trouble." }), done: () => tutHasEnemy(),
       target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
         : tutSwatchTarget('#characterSwatches .swatch[title="wanderer"]', "modeCharacter", "character") },
-    { name: "goal", applies: () => appMode === "build", done: () => tutGoalDone(),
+    { name: "goal", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to plant the flag on top of the step." } : { b: "Pick the goal flag." }), done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
         : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
-    { name: "play", done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
+    { name: "play", say: (t) => ({ b: "All set! Press Play." }), done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
-    { name: "win", done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
+    { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past the wanderer and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
       target: () => {
         // a run that ended in game over: the kid is back in Build and the ring is on the goal (move it closer, then Play again)
         if (tutorial && tutorial.lostRun && appMode !== "play") { const g0 = tutGoalCell(); return g0 ? { cell: { x: g0.x, y: g0.y, w: 1, h: 1 } } : { sel: "#modePlayBtn" }; }
@@ -13754,7 +13833,7 @@
         return g ? { cell: { x: g.x, y: g.y, w: 1, h: 1 } } : null;
       } }
     // after the win: one last wordless ring on the Objects tab (the next place to explore), then the tutorial ends
-    ,{ name: "objects", done: () => !!(tutorial && tutorial.objClicked), target: () => (appMode === "build" ? { sel: "#modeObject" } : null) }
+    ,{ name: "objects", say: (t) => ({ t: "Well done!", b: "Now make it your own! Open the Objects tab to find more pieces." }), done: () => !!(tutorial && tutorial.objClicked), target: () => (appMode === "build" ? { sel: "#modeObject" } : null) }
   ];
   window.addEventListener("click", (e) => { if (tutorial && tutorial.won && e.target.closest && e.target.closest("#modeObject")) tutorial.objClicked = true; }, true);
   function startShowMeHow() {
