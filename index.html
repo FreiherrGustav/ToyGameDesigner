@@ -11341,6 +11341,74 @@
     for (let y = 0; y < ART; y++) for (let x = 0; x < ART; x++) out[y * ART + x] = art[(ART - 1 - y) * ART + x];
     return out;
   }
+  // ---- Stand-on-actor lift (drawing only) ----
+  // An actor's picture is drawn bigger than its box, so a picture standing on a crate/stone/bomb is
+  // partly hidden by the lower picture's overhang. The upper picture is shifted away from gravity by
+  // exactly that overlap (cumulative up a stack). Never read by physics, never saved: the eased value
+  // lives in a WeakMap keyed by the actor object, and the game clock drives it so Pause freezes it.
+  const LIFT_SPEED_PX_S = 160; // ~10px in 4 frames: short and crisp
+  const liftState = new WeakMap();
+  function artEmptyEdges(art) {
+    if (!art) return { top: 0, left: 0, right: 0 };
+    let top = 8, left = 8, right = 8;
+    for (let i = 0; i < 64; i++) if (art[i]) { const y = i >> 3, x = i & 7; top = Math.min(top, y); left = Math.min(left, x); right = Math.min(right, 7 - x); }
+    return top === 8 ? { top: 0, left: 0, right: 0 } : { top, left, right };
+  }
+  // how far the picture sticks out past the box toward screen direction (dx,dy), in px
+  function pictureOverhang(actor, art, turned, gx, gy, dx, dy) {
+    const e = artEmptyEdges(art), cellPx = ACTOR_DRAW / ART, out = (ACTOR_DRAW - ACTOR_SIZE) / 2;
+    const upX = turned ? -gx : 0, upY = turned ? -gy : -1; // the picture's own "up" on the screen
+    if (dx === upX && dy === upY) return Math.max(0, ACTOR_DRAW - ACTOR_SIZE - e.top * cellPx);
+    if (dx === -upX && dy === -upY) return 0; // feet are flush with the box
+    return Math.max(0, out - Math.min(e.left, e.right) * cellPx);
+  }
+  function actorLiftShown(actor, actorsArg, now, memo) {
+    if (memo.has(actor)) return memo.get(actor);
+    memo.set(actor, 0); // also guards against a cycle
+    let target = 0;
+    const def = actorDefs[actor.defId];
+    if (gravityEnabled && viewK() === 0 && def && def.temperament !== MOVER_KIND && !actor.carried && !actor.cannonLoad && !actor.ballistic && !actor.destroyed &&
+        !(actor.bouncyCooldown > 0)) {
+      const ax = gravAxis(), sg = gravSign();
+      const gx = ax === "x" ? sg : 0, gy = ax === "y" ? sg : 0;
+      const along = ax === "x" ? actor.vx : actor.vy;
+      if (Math.abs(along) < 60) {
+        const sz = ax === "x" ? actor.w : actor.h, other = ax === "x" ? "y" : "x", osz = ax === "x" ? actor.h : actor.w;
+        let best = null, bestOv = 2;
+        for (const L of actorsArg) {
+          if (L === actor || L.carried || L.cannonLoad || L.destroyed || L.detonating || L.vortexHidden) continue;
+          const ld = actorDefs[L.defId];
+          if (!ld || !STANDABLE_OBJECT_KINDS.includes(ld.temperament)) continue;
+          const lsz = ax === "x" ? L.w : L.h;
+          const gap = sg > 0 ? L[ax] - (actor[ax] + sz) : actor[ax] - (L[ax] + lsz);
+          if (gap < -1.5 || gap > 1.5) continue;
+          const losz = ax === "x" ? L.h : L.w;
+          const ov = Math.min(actor[other] + osz, L[other] + losz) - Math.max(actor[other], L[other]);
+          if (ov > bestOv) { bestOv = ov; best = L; }
+        }
+        if (best) {
+          const turnedOf = a => { const d = actorDefs[a.defId]; return !!d && (a.isPlayer || isSteeringCharacter(d.temperament) || d.temperament === "stationary"); };
+          const artOf = a => { const d = actorDefs[a.defId]; return d.poses ? (d.poses[currentPoseFor(a)] || d.poses.stand) : d.art; };
+          target = actorLiftShown(best, actorsArg, now, memo) +
+            pictureOverhang(best, artOf(best), turnedOf(best), gx, gy, -gx, -gy) +
+            pictureOverhang(actor, artOf(actor), turnedOf(actor), gx, gy, gx, gy);
+        }
+      }
+    }
+    let st = liftState.get(actor);
+    if (!st) { st = { v: target, t: now }; liftState.set(actor, st); }
+    else {
+      const dt = Math.max(0, Math.min(100, now - st.t)) / 1000;
+      const step = LIFT_SPEED_PX_S * dt;
+      if (reducedMotion() || Math.abs(target - st.v) <= step) st.v = target;
+      else st.v += Math.sign(target - st.v) * step;
+      st.t = now;
+    }
+    const shown = Math.round(st.v);
+    memo.set(actor, shown);
+    return shown;
+  }
+
   function renderActors(ctx, actorsArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
@@ -11352,6 +11420,7 @@
     // the physical charge cue the grab/throw patch note calls for (same principle as the spawner's
     // own wind-up pulse): without it, holding the key down reads as nothing happening until the
     // object suddenly flies, which isn't discoverable by watching.
+    const liftMemo = new Map();
     const chargingPlayer = grabKeyDownAt != null ? actorsArg.find(a => a.isPlayer && a.carrying != null) : null;
     // Movers draw first (they are the "ground" under whoever rides them), then everyone else on top.
     actorsArg.forEach(actor => { if (moverDefOf(actor)) drawMover(ctx, actor, viewOffsetPx); });
@@ -11463,6 +11532,11 @@
       // Turn the view's turn back off locally: from here the axes are the screen's, so offsets, lean and squash are
       // written exactly as for ordinary gravity and the sprite is drawn upright, feet toward the screen bottom.
       if (viewAngle) ctx.rotate(-viewAngle);
+      {
+        // stand-on-actor lift: away from gravity, along screen axes (drawing only)
+        const lift = actorLiftShown(actor, actorsArg, now, liftMemo);
+        if (lift) { const lax = gravAxis(), lsg = gravSign(); ctx.translate(lax === "x" ? -lsg * lift : 0, lax === "y" ? -lsg * lift : 0); }
+      }
       ctx.translate(t.ox * TILE, t.oy * TILE);
       if (turnable) {
         // eased turn toward the wall gravity points at (shortest way round); the first draw snaps
@@ -13771,7 +13845,7 @@
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
       stepActor, tick,
-      drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors,
+      drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors, actorLiftShown, pictureOverhang, artEmptyEdges,
       currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe, actorArtNow, spawnFxGhost, renderFxGhosts, swallowIntoBlackHole,
       getAudioCtx, getMasterBus, claimVoice, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
@@ -13844,6 +13918,7 @@
       `const PUSHABLE_DEF_ID = ${JSON.stringify(PUSHABLE_DEF_ID)};`,
       `const LARGE_STONE_KIND = ${JSON.stringify(LARGE_STONE_KIND)}, LARGE_STONE_DEF_ID = ${JSON.stringify(LARGE_STONE_DEF_ID)};`,
       `const STANDABLE_OBJECT_KINDS = ${JSON.stringify(STANDABLE_OBJECT_KINDS)};`,
+      `const LIFT_SPEED_PX_S = ${LIFT_SPEED_PX_S};`,
       `const MOVER_KIND = ${JSON.stringify(MOVER_KIND)}, MOVER_SPEEDS = ${JSON.stringify(MOVER_SPEEDS)}, MOVER_DIRS = ${JSON.stringify(VIEW_BASE_TABLES.mover)}, MOVER_GHOST_COPIES = ${JSON.stringify(MOVER_GHOST_COPIES)};`,
       `const MOVING_PLATFORM_KIND = ${JSON.stringify(MOVING_PLATFORM_KIND)}, MOVING_PLATFORM_DEF_ID = ${JSON.stringify(MOVING_PLATFORM_DEF_ID)};`,
       `const MOVING_PLATFORM_RANGE_TILES = ${MOVING_PLATFORM_RANGE_TILES}, MOVING_PLATFORM_SPEED = ${MOVING_PLATFORM_SPEED};`,
@@ -14010,7 +14085,7 @@
   let cameraX = 0;
   let cameraFollowSnapNeeded = true;
   let cameraShiftSide = null;
-  let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {}, fxGhosts = []; let fxPuffs = [], bigHitTimes = [], lastPuffAt = -1e9, shakeAt = -1e9;
+  const liftState = new WeakMap(); let digProgress = {}, bombArmed = {}, tileAnimState = {}, animState = {}, fxGhosts = []; let fxPuffs = [], bigHitTimes = [], lastPuffAt = -1e9, shakeAt = -1e9;
   let actorContactCooldown = {}, dragContactCooldown = {};
   let roomTransition = null;
   let score = 0, intensity = 0;
