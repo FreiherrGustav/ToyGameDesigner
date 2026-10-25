@@ -37,7 +37,7 @@ fs.writeFileSync(tmp, src);
     const b = r.getBoundingClientRect(); const a = q('#tutLayer .tutArrow').getBoundingClientRect(); return { ring: [b.left, b.top, b.width, b.height], arrow: [a.left, a.top] };
   });
   const targetRect = (p, sel) => p.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }, sel);
-  const near = (g, t, pad = 6) => g && Math.abs(g.ring[0] - (t[0] - pad)) <= 1 && Math.abs(g.ring[1] - (t[1] - pad)) <= 1 && Math.abs(g.ring[2] - (t[2] + 2 * pad)) <= 1.5;
+  const near = (g, t, pad = 6) => { if (!g) return false; const pl = Math.max(0, Math.min(pad, t[0])), pt = Math.max(0, Math.min(pad, t[1])); return Math.abs(g.ring[0] - (t[0] - pl)) <= 1 && Math.abs(g.ring[1] - (t[1] - pt)) <= 1 && g.ring[2] >= t[2] - 1 && g.ring[2] <= t[2] + 2 * pad + 1.5; };
   const nothing = p => p.evaluate(() => !document.getElementById('tutLayer') && !document.getElementById('tutClose'));
 
   for (const [w, h] of [[1280, 590], [1366, 635], [1920, 1080]]) {

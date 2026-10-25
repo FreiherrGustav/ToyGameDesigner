@@ -46,7 +46,7 @@ async function run(name, launcher, opts) {
         ok(!(info.canScrollDown && info.fadeBot < FADE), where + ': target inside the bottom scroll fade');
       }
       ok(!info.covered, where + ': target covered by something else');
-      const t = info.r; ok(Math.abs(ring[0] - (t[0] - 6)) <= 2 && Math.abs(ring[1] - (t[1] - 6)) <= 2, where + ': ring not on target');
+      const t = info.r; ok(Math.abs(ring[0] - (t[0] - Math.min(6, Math.max(0, t[0])))) <= 2 && Math.abs(ring[1] - (t[1] - Math.min(6, Math.max(0, t[1])))) <= 2 && ring[0] >= 0 && ring[1] >= 0, where + ': ring not on target');
     };
     const cellCheck = async label => {
       const step = await p.evaluate(() => __t.stepName());

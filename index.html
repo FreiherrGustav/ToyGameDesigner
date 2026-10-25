@@ -13406,9 +13406,11 @@
     if (!layer) return;
     const dims = layer.querySelectorAll(".tutDim"), ring = layer.querySelector(".tutRing"), arrow = layer.querySelector(".tutArrow");
     if (!rect) { dims.forEach(d => d.style.display = "none"); ring.style.display = "none"; arrow.style.display = "none"; return; }
-    const pad = 6, W = innerWidth, H = innerHeight;
-    const L = Math.round(rect.left) - pad, T = Math.round(rect.top) - pad;
-    const w = Math.round(rect.width) + 2 * pad, h = Math.round(rect.height) + 2 * pad;
+    const W = innerWidth, H = innerHeight;
+    // padding shrinks near the window edge so the ring is never clipped by it
+    const rl = Math.round(rect.left), rt = Math.round(rect.top), rr = Math.round(rect.left + rect.width), rb = Math.round(rect.top + rect.height);
+    const pl = Math.max(0, Math.min(6, rl)), pt = Math.max(0, Math.min(6, rt)), pr = Math.max(0, Math.min(6, W - rr)), pb = Math.max(0, Math.min(6, H - rb));
+    const L = rl - pl, T = rt - pt, w = rr - rl + pl + pr, h = rb - rt + pt + pb;
     const set = (el, l, t, ww, hh) => { el.style.display = "block"; el.style.left = l + "px"; el.style.top = t + "px"; el.style.width = Math.max(0, ww) + "px"; el.style.height = Math.max(0, hh) + "px"; };
     dims.forEach(d => {
       const k = d.dataset.d;
@@ -13420,14 +13422,29 @@
     set(ring, L, T, w, h);
     // the arrow sits on the side with the most room and points at the hole
     const room = { up: T, down: H - (T + h), left: L, right: W - (L + w) };
-    const side = Object.keys(room).sort((a, b) => room[b] - room[a])[0];
     const A = 40, gap = 6, cx = L + w / 2, cy = T + h / 2;
-    let ax, ay, rot;
-    if (side === "up") { ax = cx - A / 2; ay = T - A - gap; rot = 0; }
-    else if (side === "down") { ax = cx - A / 2; ay = T + h + gap; rot = 180; }
-    else if (side === "left") { ax = L - A - gap; ay = cy - A / 2; rot = 270; }
-    else { ax = L + w + gap; ay = cy - A / 2; rot = 90; }
-    ax = Math.max(0, Math.min(W - A, Math.round(ax))); ay = Math.max(0, Math.min(H - A, Math.round(ay)));
+    const place = (side) => {
+      if (side === "up") return { ax: cx - A / 2, ay: T - A - gap, rot: 0 };
+      if (side === "down") return { ax: cx - A / 2, ay: T + h + gap, rot: 180 };
+      if (side === "left") return { ax: L - A - gap, ay: cy - A / 2, rot: 270 };
+      return { ax: L + w + gap, ay: cy - A / 2, rot: 90 };
+    };
+    // other controls the arrow must not cover (anything that isn't the target itself)
+    const others = [];
+    document.querySelectorAll("button, .swatch, select, input, #gameCanvas").forEach(e => {
+      if (e.closest("#tutLayer")) return;
+      const r = e.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      if (r.left < L + w && r.right > L && r.top < T + h && r.bottom > T) return;
+      others.push(r);
+    });
+    const clampXY = (p) => ({ ax: Math.max(0, Math.min(W - A, Math.round(p.ax))), ay: Math.max(0, Math.min(H - A, Math.round(p.ay))), rot: p.rot });
+    const hits = (p) => others.filter(r => p.ax < r.right && p.ax + A > r.left && p.ay < r.bottom && p.ay + A > r.top).length;
+    const sides = Object.keys(room).sort((a, b) => room[b] - room[a]);
+    let best = null;
+    sides.forEach(sd => { if (room[sd] < A + gap) return; const p = clampXY(place(sd)); const n = hits(p); if (!best || n < best.n) best = { p, n }; });
+    if (!best) best = { p: clampXY(place(sides[0])), n: 0 };
+    let { ax, ay, rot } = best.p;
     arrow.style.display = "block"; arrow.style.left = ax + "px"; arrow.style.top = ay + "px"; arrow.style.transform = "rotate(" + rot + "deg)";
   }
   function tutKeyCue(step) {
@@ -13469,6 +13486,12 @@
       else if (tutNow() - tutorial.loseAt > 1600) { tutorial.lostRun = true; tutorial.goalKey = tutGoalKey(); tutorial.loseAt = 0; exitToBuildMode(); }
     } else tutorial.loseAt = 0;
     if (tutorial.lostRun && (appMode === "play" || tutGoalKey() !== tutorial.goalKey)) tutorial.lostRun = false;
+    // latch the win; after a beat in Play, go back to Build so the Objects tab can be ringed
+    if (appMode === "play" && playSessionEnded === "win" && tutorial.steps.some(x => x.name === "objects")) {
+      tutorial.won = true;
+      if (!tutorial.winAt) tutorial.winAt = tutNow();
+      else if (tutNow() - tutorial.winAt > 1600) { tutorial.winAt = 0; exitToBuildMode(); }
+    }
     const step = tutCurrentStep();
     if (!step) {
       tutorial.finishing = true; tutDraw(null);
@@ -13638,9 +13661,9 @@
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
         : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
-    { name: "play", done: () => appMode === "play" || !!(tutorial && tutorial.lostRun), target: () => ({ sel: "#modePlayBtn" }) },
+    { name: "play", done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
-    { name: "win", done: () => appMode === "play" && playSessionEnded === "win",
+    { name: "win", done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
       target: () => {
         // a run that ended in game over: the kid is back in Build and the ring is on the goal (move it closer, then Play again)
         if (tutorial && tutorial.lostRun && appMode !== "play") { const g0 = tutGoalCell(); return g0 ? { cell: { x: g0.x, y: g0.y, w: 1, h: 1 } } : { sel: "#modePlayBtn" }; }
@@ -13649,7 +13672,10 @@
         const g = tutGoalCell();
         return g ? { cell: { x: g.x, y: g.y, w: 1, h: 1 } } : null;
       } }
+    // after the win: one last wordless ring on the Objects tab (the next place to explore), then the tutorial ends
+    ,{ name: "objects", done: () => !!(tutorial && tutorial.objClicked), target: () => (appMode === "build" ? { sel: "#modeObject" } : null) }
   ];
+  window.addEventListener("click", (e) => { if (tutorial && tutorial.won && e.target.closest && e.target.closest("#modeObject")) tutorial.objClicked = true; }, true);
   function startShowMeHow() {
     startTutorial(TUTORIAL_STEPS, { onFinish: () => { try { localStorage.setItem(TUT_DONE_KEY, "1"); } catch (e) { /* convenience only */ } } });
   }

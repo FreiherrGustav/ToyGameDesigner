@@ -23,6 +23,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   const rect = (p, sel) => p.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }, sel);
   const cellRect = (p, x, y, w = 1, h = 1) => p.evaluate(([x, y, w, h]) => { const r = document.getElementById('gameCanvas').getBoundingClientRect(), bw = __t.border(), k = (r.width - 2 * bw) / 768; return [r.left + bw + x * 32 * k, r.top + bw + y * 32 * k, w * 32 * k, h * 32 * k]; }, [x, y, w, h]);
   const onRect = (g, t, pad = 6) => g && Math.abs(g[0] - (t[0] - pad)) <= 1.5 && Math.abs(g[1] - (t[1] - pad)) <= 1.5 && Math.abs(g[2] - (t[2] + 2 * pad)) <= 2 && Math.abs(g[3] - (t[3] + 2 * pad)) <= 2;
+  const around = (g, t, vw) => g && g[0] >= 0 && g[1] >= 0 && g[0] + g[2] <= vw + 0.5 && g[0] <= t[0] + 0.5 && g[1] <= t[1] + 0.5 && g[0] + g[2] >= t[0] + t[2] - 0.5 && g[1] + g[3] >= t[1] + t[3] - 0.5 && g[0] + g[2] <= t[0] + t[2] + 6.5 && g[1] + g[3] <= t[1] + t[3] + 6.5;
   const pick = async (p, tabSel, sel) => { await p.click(tabSel); await p.click(sel); };
   const settle = p => p.waitForTimeout(350);
   const clickCell = async (p, x, y) => { const r = await cellRect(p, x, y); await p.mouse.click(r[0] + r[2] / 2, r[1] + r[3] / 2); };
@@ -72,7 +73,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await shot(p, `s2_4b_goal_cell_${w}`);
     await clickCell(p, 8, 11); await settle(p);
     // 5 play
-    ok(onRect(await ring(p), await rect(p, '#modePlayBtn')), w + ': 5 ring on Play');
+    ok(around(await ring(p), await rect(p, '#modePlayBtn'), +w), w + ': 5 ring on Play, not clipped by the window');
     await shot(p, `s2_5_play_${w}`);
     await p.click('#modePlayBtn'); await p.waitForTimeout(1500);
     // 6 reach the goal: ring on goal cell
@@ -80,7 +81,11 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await shot(p, `s2_6_win_target_${w}`);
     await p.evaluate(() => __t.teleportToGoal()); await p.waitForTimeout(500);
     await shot(p, `s2_6b_win_${w}`);
-    await p.waitForTimeout(3000);
+    await p.waitForTimeout(2600);
+    ok(await p.evaluate(() => __t.appMode()) === 'build' && await p.evaluate(() => __t.stepName()) === 'objects', w + ': after the win: back in Build, last step is objects');
+    ok(onRect(await ring(p), await rect(p, '#modeObject')) || around(await ring(p), await rect(p, '#modeObject'), +w), w + ': last ring on the Objects tab');
+    await shot(p, `s4_objects_${w}`);
+    await p.click('#modeObject'); await p.waitForTimeout(3300);
     ok(!(await p.evaluate(() => __t.active())) && await nothing(p), w + ': finished, layer gone');
     ok(await p.evaluate(() => __t.appMode()) === 'build', w + ': back in Build with the board kept');
     ok((await p.evaluate(() => __t.stuff()))[2] === true, w + ': the tutorial board is kept');
@@ -107,7 +112,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   await pick(p0, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p0, 3, 13); await p0.waitForTimeout(900);
   { const h = await p0.evaluate(() => __t.hero()); ok(h && h.grounded && h.x === h.sx && h.y === h.sy, 'hero standing on the floor: live position equals spawn ' + JSON.stringify(h)); }
   ok(await p0.evaluate(() => __t.stepName()) === 'play', 'all four pieces placed out of order -> Play is next');
-  ok(onRect(await ring(p0), await rect(p0, '#modePlayBtn')), 'ring on Play');
+  ok(around(await ring(p0), await rect(p0, '#modePlayBtn'), 1280), 'ring on Play, not clipped');
   // death path: a lost run goes back to Build and points at the goal
   await p0.click('#modePlayBtn'); await p0.waitForTimeout(1500);
   { const vis = () => p0.evaluate(() => { const e = document.querySelector('#tutLayer .tutKeys'); return !!e && getComputedStyle(e).display !== 'none'; });
