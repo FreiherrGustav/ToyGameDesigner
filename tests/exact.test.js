@@ -11,7 +11,7 @@ src = src.replace('  if (loadAutosave()) log(', `  window.__s = { press: (id, se
         actors: r.actors.map(a => a.defId), pa: actorDefs[playerDefId].art, pp: actorDefs[playerDefId].poses, defs: actorDefs, g: groundTileDefs, b: backgroundTileDefs }; } };
   if (loadAutosave()) log(`);
 const tmp = '/tmp/exact_hooked.html'; fs.writeFileSync(tmp, src);
-const FILES = { cannoncat: 'Cannon Cat', fanloop: 'Fan loop', monsterescape: 'monster escape', byebyecupcake: 'byebye cupcake', gravity1: 'gravity 1', chaos1: 'Chaos 1', stayalive: 'Stay Alive', oopscannons: 'Oops cannons', minilevel1: 'Mini Level 1' };
+const FILES = { cannoncat: 'Cannon Cat', fanloop: 'Fan loop', monsterescape: 'monster escape', byebyecupcake: 'byebye cupcake', gravity1: 'gravity 1', chaos1: 'Chaos 1', stayalive: 'Stay Alive', oopscannons: 'Oops cannons', minilevel1: 'Mini Level 1', minilevel2: 'Mini Level 2', minilevel3: 'Mini level 3', gravitytunnel: 'Gravity Tunnel' };
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   for (const id of Object.keys(FILES)) {
