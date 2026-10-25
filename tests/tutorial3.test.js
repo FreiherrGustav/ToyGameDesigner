@@ -10,7 +10,7 @@ let src = fs.readFileSync(HTML, 'utf8');
 const anchor = '  if (loadAutosave()) log(';
 src = src.replace(anchor, `  window.__t = { border: () => canvasBorderPx, appMode: () => appMode, stepName: () => { const s = tutorial && tutCurrentStep(); return s ? s.name : null; },
     active: () => !!tutorial, teleportToGoal: () => { const g = tutGoalCell(); const p = actors.find(a => a.isPlayer); p.x = g.x * TILE + 4; p.y = g.y * TILE + 4; p.vx = p.vy = 0; },
-    layout: () => tutLayout() };
+    layout: () => tutLayout(), wandererLethal: () => actorDefs[findDefaultActorDef('wanderer')].lethal };
 ` + anchor);
 fs.writeFileSync('/tmp/tut3_hooked.html', src);
 (async () => {
@@ -31,21 +31,22 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     const p = await open(w, h);
     await p.click('#landingShowBtn'); await p.waitForTimeout(900);
     const L = await p.evaluate(() => __t.layout());
-    ok(JSON.stringify(L) === JSON.stringify({ player: { x: 5, y: 13 }, floor: { x: 2, y: 14, w: 10, h: 1 }, ledge: { x: 8, y: 12, w: 4, h: 2 }, enemy: { x: 2, y: 13 }, goal: { x: 11, y: 11 } }), w + ': layout is the attached picture ' + JSON.stringify(L));
+    ok(JSON.stringify(L) === JSON.stringify({ player: { x: 6, y: 13 }, floor: { x: 2, y: 14, w: 11, h: 1 }, ledge: { x: 9, y: 12, w: 4, h: 2 }, enemy: { x: 2, y: 13 }, goal: { x: 12, y: 11 } }), w + ': layout is the attached picture ' + JSON.stringify(L));
+    ok(await p.evaluate(() => __t.wandererLethal()) === false, w + ': the tutorial wanderer is harmless');
     let n = await note(p);
     ok(n && n.on && /ground/i.test(n.text) && n.fs >= 15, w + ': ground note is on and readable ' + JSON.stringify(n && [n.text, n.fs]));
     ok(n && n.r[0] >= 0 && n.r[1] >= 0 && n.r[2] <= w && n.r[3] <= h, w + ': note inside the window');
     await p.click('#groundSwatches .swatch[title="solid"]'); await p.waitForTimeout(900);
-    ok(near(await ring(p), (await cellRect(p, 2, 14, 10, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': ring on the whole floor');
+    ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': ring on the whole floor');
     n = await note(p); ok(n && /drag/i.test(n.text), w + ': floor note says what to do');
     { const rg = await ring(p); ok(disjoint(n.r.slice(0, 2).concat([n.r[2] - n.r[0], n.r[3] - n.r[1]]), rg), w + ': note does not sit on the ring'); }
     await shot(p, `s3_floor_${w}`);
     // 9 of 10 squares: the step must NOT advance, however long we wait
-    await paint(p, 2, 10, 14); await p.waitForTimeout(3000);
-    ok(await p.evaluate(() => __t.stepName()) === 'ground', w + ': nine of ten squares: still the ground step after 3 s');
+    await paint(p, 2, 11, 14); await p.waitForTimeout(3000);
+    ok(await p.evaluate(() => __t.stepName()) === 'ground', w + ': ten of eleven squares: still the ground step after 3 s');
     ok(!(await layerOff(p)), w + ': spotlight still on while unfinished');
     // the last square
-    await clickCell(p, 11, 14); await p.waitForTimeout(300);
+    await clickCell(p, 12, 14); await p.waitForTimeout(300);
     ok(await layerOff(p), w + ': last square drawn: spotlight fades out for the beat');
     n = await note(p); ok(n && /nice/i.test(n.text), w + ': a "Nice!" beat ' + JSON.stringify(n && n.text));
     await shot(p, `s3_nice_${w}`);
@@ -60,17 +61,17 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     ok(total > 30 && Math.max(...steps) < total * 0.7, w + ': ring glides (largest hop ' + Math.round(Math.max(...steps)) + ' of ' + Math.round(total) + ' px)');
     ok(await p.evaluate(() => __t.stepName()) === 'ledge', w + ': now the ledge step');
     // ledge: swatch is picked already; paint 3 of 4 columns x 2 rows, then the rest
-    await paint(p, 8, 10, 12); await paint(p, 8, 10, 13); await p.waitForTimeout(2500);
+    await paint(p, 9, 11, 12); await paint(p, 9, 11, 13); await p.waitForTimeout(2500);
     ok(await p.evaluate(() => __t.stepName()) === 'ledge', w + ': a part-built step stays the ledge step');
-    await clickCell(p, 11, 12); await clickCell(p, 11, 13); await p.waitForTimeout(1800);
+    await clickCell(p, 12, 12); await clickCell(p, 12, 13); await p.waitForTimeout(1800);
     ok(await p.evaluate(() => __t.stepName()) === 'player', w + ': whole step drawn -> player');
-    await p.click('#playerSwatchRow .swatch[title="player"]'); await p.waitForTimeout(700); await clickCell(p, 5, 13); await p.waitForTimeout(1800);
+    await p.click('#playerSwatchRow .swatch[title="player"]'); await p.waitForTimeout(700); await clickCell(p, 6, 13); await p.waitForTimeout(1800);
     await p.click('#characterSwatches .swatch[title="wanderer"]'); await p.waitForTimeout(700);
     ok(near(await ring(p), (await cellRect(p, 2, 13)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': enemy ring at the far left of the floor');
     await clickCell(p, 2, 13); await p.waitForTimeout(1800);
     await p.click('#fixtureSwatches .swatch[title="goal"]'); await p.waitForTimeout(900);
-    ok(near(await ring(p), (await cellRect(p, 11, 11)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': goal ring on top of the step');
-    await clickCell(p, 11, 11); await p.waitForTimeout(1800);
+    ok(near(await ring(p), (await cellRect(p, 12, 11)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': goal ring on top of the step');
+    await clickCell(p, 12, 11); await p.waitForTimeout(1800);
     n = await note(p); ok(n && /play/i.test(n.text), w + ': play note');
     await p.click('#modePlayBtn'); await p.waitForTimeout(1700);
     // controls card
@@ -106,7 +107,7 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
   // reduced motion: the ring snaps, no fade
   { const p = await open(1366, 635, { reducedMotion: 'reduce' }); await p.click('#landingShowBtn'); await p.waitForTimeout(600);
     await p.click('#groundSwatches .swatch[title="solid"]'); await p.waitForTimeout(150);
-    ok(near(await ring(p), (await cellRect(p, 2, 14, 10, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), 'reduced motion: ring is on the target within 150 ms');
+    ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), 'reduced motion: ring is on the target within 150 ms');
     ok(p.errs.length === 0, 'reduced: no errors'); await p.close(); }
   await b.close();
   console.log(`tutorial3: ${pass} passed, ${fail} failed`);

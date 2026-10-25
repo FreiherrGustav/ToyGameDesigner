@@ -13689,6 +13689,8 @@
       finishDelayMs: (opts && opts.finishDelayMs != null) ? opts.finishDelayMs : 700, hadPlayerElsewhere, origPlayerRoom: playerRoomId };
     tutorialActive = true;
     pushUndoSnapshot();
+    // the tutorial's wanderer never hurts (quitting restores the snapshot, so the def goes back with it)
+    { const wid = findDefaultActorDef("wanderer"); if (wid && actorDefs[wid]) actorDefs[wid].lethal = false; }
     if (isCanvasEmpty()) {
       gravityEnabled = true; gravityDir = "down";
     } else {
@@ -13763,14 +13765,14 @@
     const sx = a.spawnX != null ? a.spawnX : a.x, sy = a.spawnY != null ? a.spawnY : a.y;
     return { x: Math.floor((sx + a.w / 2) / TILE), y: Math.floor((sy + a.h - 1) / TILE) };
   }
-  // Where the starter pieces go: relative to the player when there is one, else a default spot (the hero's square, col 5 row 13).
-  // The picture: a 10-wide floor, the hero near its left, a wanderer at the far left end, and a 4 x 2 step up at the right end with the
-  // flag on top, so the hero has to jump past the wanderer's side and climb the step.
+  // Where the starter pieces go: relative to the player when there is one, else a default spot (the hero's square, col 6 row 13).
+  // The picture: an 11-wide floor, a wanderer at its far left end, three empty squares, then the hero, and a 4 x 2 step up at the
+  // right end with the flag on top, so the hero has to climb the step. The wanderer is made harmless when the tutorial starts.
   function tutLayout() {
-    const pc = tutPlayerCell() || { x: 5, y: 13 };
-    const bx = Math.max(3, Math.min(COLS - 7, pc.x)), by = Math.max(2, Math.min(ROWS - 2, pc.y));
-    return { player: { x: bx, y: by }, floor: { x: bx - 3, y: by + 1, w: 10, h: 1 }, ledge: { x: bx + 3, y: by - 1, w: 4, h: 2 },
-      enemy: { x: bx - 3, y: by }, goal: { x: bx + 6, y: by - 2 } };
+    const pc = tutPlayerCell() || { x: 6, y: 13 };
+    const bx = Math.max(4, Math.min(COLS - 7, pc.x)), by = Math.max(2, Math.min(ROWS - 2, pc.y));
+    return { player: { x: bx, y: by }, floor: { x: bx - 4, y: by + 1, w: 11, h: 1 }, ledge: { x: bx + 3, y: by - 1, w: 4, h: 2 },
+      enemy: { x: bx - 4, y: by }, goal: { x: bx + 6, y: by - 2 } };
   }
   function tutCount(prefix) { let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith(prefix)) n++; } return n; }
   function tutGoalCell() { for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const c = board[y][x]; if (c && c.startsWith("goal:")) return { x, y }; } return null; }
