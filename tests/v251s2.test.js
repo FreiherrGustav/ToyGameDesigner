@@ -42,7 +42,7 @@ const MEASURE = async (page) => {
     await page.evaluate(() => window.__h.check()); await page.waitForTimeout(200);
     const st0 = await page.evaluate(() => window.__h.fit());
     const sizes = st0.sizes;
-    ok(Math.abs(st0.chosen - Math.max(...sizes.filter(s => s >= 1 && s <= 1.25 + 1e-9))) < 1e-9 || !sizes.length, `DPR ${dpr}: default is the largest allowed up to 1.25 (${st0.chosen})`);
+    ok(Math.abs(st0.chosen - Math.max(...sizes.filter(s => s >= 1 && s <= 2 + 1e-9))) < 1e-9 || !sizes.length, `DPR ${dpr}: default is the largest allowed up to 2 (${st0.chosen})`);
     for (const target of sizes) {
       // step to the target size with the real buttons
       for (let i = 0; i < 12; i++) { const cur = (await page.evaluate(() => window.__h.fit())).chosen; if (Math.abs(cur - target) < 1e-9) break; await page.click(cur < target ? "#sizeUpBtn" : "#sizeDownBtn"); await page.waitForTimeout(80); }
@@ -81,7 +81,7 @@ const MEASURE = async (page) => {
     ok(!info.scroll, `${w}x${h}: no page scroll`);
     if (w <= 1366) ok(info.st.free && !info.vis, `${w}x${h}: below 1.0 the free fit is kept and no stepper`);
     if (info.vis) {
-      ok(info.st.chosen <= 1.25 + 1e-9, `${w}x${h}: default capped at 1.25`);
+      ok(info.st.chosen <= 2 + 1e-9, `${w}x${h}: default capped at 2`);
       const up = info.st.sizes.filter(s => s > info.st.chosen).length, down = info.st.sizes.filter(s => s < info.st.chosen).length;
       ok((await page.evaluate(() => document.getElementById("sizeUpBtn").disabled)) === (up === 0), `${w}x${h}: + disabled only at the largest`);
       ok((await page.evaluate(() => document.getElementById("sizeDownBtn").disabled)) === (down === 0), `${w}x${h}: - disabled only at the smallest`);
