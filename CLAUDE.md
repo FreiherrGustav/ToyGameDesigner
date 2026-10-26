@@ -7130,3 +7130,11 @@ Stage 2 follow-up: the tutorial's last step (ring on the Objects tab) had no scr
 ## Aesthetics pass, stage 3: scale (presentation only)
 
 `FIT_MAX_SCALE` went 1.25 -> 2.0 (equal to `FIT_HARD_MAX`): the default is now the largest crisp scale that fits (steps of 0.25 whole at the device pixel ratio, as before; below 1.0 the free fit is kept; the size stepper and its `localStorage` pref are unchanged). 1080p only reached 125% because the rows around the board used ~50px too much, so a late `@media (min-width:1500px) and (min-height:820px)` block (placed after the base rules so it wins) tightens the comfortable tier: top bar margin 8, app padding 6, gameWrap gap 5/padding 6, toolbar/room-strip buttons 28px, Pan row buttons 22px, message line 20px. Board scale (Build) before -> after: 1920x1080 1.25 -> 1.5; 2560x1300 1.25 -> 1.75; 2560x1440 and 3440x1440 1.25 -> 2.0; 1728x1000, 1440x900, 1366x635, 1280x590 unchanged. Tests: `layout` 35, `v251` 485, `breathe` 239, `stage2` 104, `v251s2` 153 (its "default capped at 1.25" assertions now say 2). Screenshots: `prototypes/aesthetics-shots/stage3-{before,after}-{1920,2560}.png`.
+
+## Aesthetics pass, stage 4: panel order and chrome (presentation only)
+
+- **Order**: palette is now What to place (tabs) -> Game rules + Camera chip row -> caption bar -> the tab's content. Before, Game rules and Camera took ~200px above the tabs.
+- **Compact row** (`#rulesBlock`): gravity / h-wrap / v-wrap as 36px chips (40px in the comfortable tier), a thin separator, then the three camera chips; the gravity-direction arrows (only while gravity is on) are the same chips on a second line. The old 60px "big" swatches and text labels are gone for these (titles and hover captions remain; new `CAPTION_TEXT` keys `rule-gravity`, `rule-wrapH`, `rule-wrapV`). All render functions and element ids are unchanged.
+- **Camera pixel icons**: `CAMERA_ICONS` (8x8 `pat()` art): Fixed = a frame with a dot, Follow = corner brackets around a dot, Runner = a dot with a motion arrow.
+- **Toolbar**: already grouped (history | board | project, with dividers, short labels when narrow) since v2.51, so no change this stage.
+- Screenshots: `prototypes/aesthetics-shots/stage4-{before,after}-{1366,1920}-{objects,rules}.png`.
