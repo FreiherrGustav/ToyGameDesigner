@@ -7138,3 +7138,7 @@ Stage 2 follow-up: the tutorial's last step (ring on the Objects tab) had no scr
 - **Camera pixel icons**: `CAMERA_ICONS` (8x8 `pat()` art): Fixed = a frame with a dot, Follow = corner brackets around a dot, Runner = a dot with a motion arrow.
 - **Toolbar**: already grouped (history | board | project, with dividers, short labels when narrow) since v2.51, so no change this stage.
 - Screenshots: `prototypes/aesthetics-shots/stage4-{before,after}-{1366,1920}-{objects,rules}.png`.
+
+## Room rules heading and group labels (presentation only)
+
+The compact rules row (aesthetics stage 4) now has a "Room rules" section title, and each chip group a small label: "Gravity & looping" (gravity, h-wrap, v-wrap) and "Screen" (Fixed, Follow, Runner). Kid-friendly renaming of the chips themselves (e.g. wrap -> loop) was not done; titles and ids are unchanged. Screenshot: `prototypes/aesthetics-shots/stage4b-after-1366-rules.png`.

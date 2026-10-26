@@ -201,7 +201,10 @@
   }
   /* stage 4: game-rule and camera chips, one compact row */
   #rulesBlock { display: flex; flex-direction: column; gap: 4px; }
-  .rulesRow { display: flex; align-items: center; gap: 10px; }
+  .rulesRow { display: flex; align-items: flex-end; gap: 10px; }
+  .rulesGroup { display: flex; flex-direction: column; gap: 3px; flex: none; }
+  .rulesGroup .swatch-row { flex-wrap: nowrap; }
+  .rulesLbl { font-size: 10px; color: #9aa0b4; white-space: nowrap; }
   .rulesRow .swatch-row { flex: none; gap: 4px; }
   .rulesSep { width: 1px; align-self: stretch; background: #2a2c3a; }
   .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
@@ -685,10 +688,11 @@
 
     <!-- Aesthetics stage 4: Game rules + Camera collapsed into one compact row of icon chips -->
     <div id="rulesBlock">
+      <div class="section-title">Room rules</div>
       <div class="rulesRow">
-        <div class="swatch-row" id="gameRuleSwatches" aria-label="Game rules"></div>
+        <div class="rulesGroup"><div class="rulesLbl">Gravity &amp; looping</div><div class="swatch-row" id="gameRuleSwatches" aria-label="Game rules"></div></div>
         <div class="rulesSep"></div>
-        <div class="swatch-row" id="cameraSwatches" aria-label="Camera"></div>
+        <div class="rulesGroup"><div class="rulesLbl">Screen</div><div class="swatch-row" id="cameraSwatches" aria-label="Camera"></div></div>
       </div>
       <div class="swatch-row" id="gravityDirRow" style="display:none;"></div>
     </div>
