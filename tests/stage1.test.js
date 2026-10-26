@@ -38,7 +38,7 @@ const open = async (b, vp, hash) => {
     // Make one -> starter
     await page.click("#landingMakeBtn"); await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, `s1_starter_${w}x${h}.png`) });
-    const st = await ev(page, "()=>({players:actors.filter(a=>a.isPlayer).length,floor:board[ROWS-1].slice(0,roomCols()).every(c=>c==='solid:none'),goal:board[ROWS-2][roomCols()-3],g:gravityEnabled,n:actors.length,px:actors.find(a=>a.isPlayer).x})");
+    const st = await ev(page, "()=>({players:actors.filter(a=>a.isPlayer).length,floor:board[ROWS-1].slice(0,roomCols()).every(c=>c==='solid:none'),goal:board[ROWS-4][roomCols()-3],g:gravityEnabled,n:actors.length,px:actors.find(a=>a.isPlayer).x})");
     ok(st.players === 1 && st.floor && st.goal === "goal:none" && st.g && st.n === 1 && st.px < 100, `${w}x${h}: starter board ${JSON.stringify(st)}`);
     // Play to the goal
     await page.click("#modePlayBtn"); await page.waitForTimeout(1500);

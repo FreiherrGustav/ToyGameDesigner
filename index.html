@@ -981,7 +981,7 @@
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
   // Short palette names for swatch label bands; the swatch title/caption keeps the full name.
   const DISPLAY_SHORT = { "large stone": "stone", "moving platform": "platform", "trampoline": "bouncer", "locked door": "lock", "black hole": "hole",
-    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
+    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "wanderer": "wander", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
   function dispName(n) { return DISPLAY_SHORT[n] || n; }
   const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "switch", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
 
@@ -9708,6 +9708,7 @@
     // its auto-generated return door just shares this color now, no longer a special case, only
     // the first ordinary instance of the pairing rule above.
     const newRoom = createEmptyRoom("room " + (rooms.length + 1));
+    paintSkyBackdrop(newRoom.backgroundBoard, COLS);
     newRoom.board[gy][gx] = gameplayKey("door", "none");
     newRoom.colorBoard[gy][gx] = color;
     rooms.push(newRoom);
@@ -11496,6 +11497,8 @@
         // horizontal-scale channel rather than a real multi-frame sprite, squashing width down to
         // a sliver and back to fake a coin turning edge-on, the way the reference GIF's frames did.
         if (def.spin) sx *= Math.max(0.15, Math.abs(Math.cos(now / 260)));
+        // idle: a standing-still character (opt-in per def, set on the starter hero) slowly breathes - a few percent taller and back
+        if (def.idle && actor.grounded && Math.abs(sv.x) < 8 && !reducedMotion()) { const b = 0.5 + 0.5 * Math.sin(now / 380); sy *= 1 + 0.06 * b; sx *= 1 - 0.025 * b; }
         t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       }
       // v2.16: art is authored facing right by default — mirror it when the actor's last real
@@ -11837,7 +11840,7 @@
     if (actors.length > 0) return false;
     // Checks the room's whole allocated width, not just roomCols() — a Follow/Runner room with
     // something painted out past column COLS-1 still isn't "empty" even from the Fixed-width view.
-    for (let y = 0; y < ROWS; y++) for (let x = 0; x < board[0].length; x++) if (board[y][x] || backgroundBoard[y][x]) return false;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < board[0].length; x++) if (board[y][x] || isRealBackground(backgroundBoard[y][x])) return false;
     return true;
   }
   function drawEmptySocketCue(now) {
@@ -12638,7 +12641,7 @@
     snapshotCurrentRoomState();
     const room = rooms.find(r => r.id === currentRoomId);
     const occ = [];
-    for (let y = 0; y < ROWS; y++) { const row = new Array(board[0].length).fill(0); for (let x = 0; x < row.length; x++) if (board[y][x] || backgroundBoard[y][x]) row[x] = 1; occ.push(row); }
+    for (let y = 0; y < ROWS; y++) { const row = new Array(board[0].length).fill(0); for (let x = 0; x < row.length; x++) if (board[y][x] || isRealBackground(backgroundBoard[y][x])) row[x] = 1; occ.push(row); }
     let playerCell = null;
     actors.forEach(a => {
       if (a.spawnerKey) return;
@@ -13066,7 +13069,7 @@
   }
   function surpriseRoomIsEmpty(room) {
     if (room.actors.length > 0) return false;
-    for (let y = 0; y < ROWS; y++) for (let x = 0; x < room.board[0].length; x++) if (room.board[y][x] || room.backgroundBoard[y][x]) return false;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < room.board[0].length; x++) if (room.board[y][x] || isRealBackground(room.backgroundBoard[y][x])) return false;
     return true;
   }
   // Clears a rectangle of the hot room (only used by the explicit "overwrite part of this room" choice).
@@ -13414,16 +13417,39 @@
   // "Make a game" on a project with nothing in it opens a tiny starter instead of a dark empty grid: a floor,
   // the player standing on it near the left, a goal near the right, gravity on. Ordinary content (one undo
   // step, erasable, autosaved); Clear board / New project and every other entry point stay empty.
+  // Default backdrop for the starter board and rooms made by a new door: a plain sky (with a few clouds) painted on the
+  // Paint layer. It is ordinary Paint, but counts as "empty" for every is-this-room-blank check (isRealBackground).
+  const SKY_BG_ID = "bgSky", CLOUD_BG_ID = "bgCloud";
+  function isRealBackground(id) { return !!id && id !== SKY_BG_ID && id !== CLOUD_BG_ID; }
+  function ensureSkyBackdropDefs() {
+    if (!backgroundTileDefs[SKY_BG_ID]) backgroundTileDefs[SKY_BG_ID] = { name: "sky", art: pat([
+      "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4" }) };
+    if (!backgroundTileDefs[CLOUD_BG_ID]) backgroundTileDefs[CLOUD_BG_ID] = { name: "cloud", art: pat([
+      "BBBBBBBB", "BBBBBBBB", "BBWWBBBB", "BWWWWWBB", "WWWWWWWB", "BWWWWWBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4", W: "#f4fbff" }) };
+  }
+  // sky everywhere in the first COLS columns; a deterministic scatter of clouds in the upper rows (rows 1-6)
+  function paintSkyBackdrop(bgBoard, cols, rowsBelow) {
+    ensureSkyBackdropDefs();
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < cols; x++) {
+      const h = (x * 7 + y * 13 + (x * y) % 5) % 23;
+      bgBoard[y][x] = (y >= 1 && y <= 6 && h === 3 && !(bgBoard[y][x - 1] === CLOUD_BG_ID)) ? CLOUD_BG_ID : SKY_BG_ID;
+    }
+  }
   function loadStarterBoard() {
     pushUndoSnapshot();
-    const floorRow = ROWS - 1, cols = roomCols();
-    for (let x = 0; x < cols; x++) board[floorRow][x] = gameplayKey("solid", "none");
-    board[floorRow - 1][cols - 3] = gameplayKey("goal", "none");
+    const cols = roomCols(), grassRow = ROWS - 3;
+    paintSkyBackdrop(backgroundBoard, cols);
+    for (let x = 0; x < cols; x++) for (let y = grassRow; y < ROWS; y++) {
+      board[y][x] = gameplayKey("solid", "none");
+      groundSkinBoard[y][x] = y === grassRow ? "gndGrass" : "gndDirt"; groundSkinRotationBoard[y][x] = 0;
+    }
+    board[grassRow - 1][cols - 3] = gameplayKey("goal", "none");
     gravityEnabled = true; gravityDir = "down";
     const saved = selectedActorDefId;
     selectedActorDefId = playerDefId;
-    placeNewActor(2 * TILE + TILE / 2, floorRow * TILE - ACTOR_SIZE / 2);
+    placeNewActor(2 * TILE + TILE / 2, grassRow * TILE - ACTOR_SIZE / 2);
     selectedActorDefId = saved;
+    if (actorDefs[playerDefId]) actorDefs[playerDefId].idle = true; // the hero breathes while standing still (renderActors)
     snapshotCurrentRoomState();
     renderAll();
     log("Here's a little starter: walk to the flag, or change anything.");
