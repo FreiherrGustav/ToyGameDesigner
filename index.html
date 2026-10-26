@@ -13874,7 +13874,7 @@
         return g ? { cell: { x: g.x, y: g.y, w: 1, h: 1 } } : null;
       } }
     // after the win: one last wordless ring on the Objects tab (the next place to explore), then the tutorial ends
-    ,{ name: "objects", say: (t) => ({ t: "Well done!", b: "Now make it your own! Open the Objects tab to find more pieces." }), done: () => !!(tutorial && tutorial.objClicked), target: () => (appMode === "build" ? { sel: "#modeObject" } : null) }
+    ,{ name: "objects", say: (t) => ({ t: "Well done!", b: "Now make it your own! Open the Objects tab to find more pieces." }), done: () => !!(tutorial && tutorial.objClicked), target: () => (appMode === "build" ? { sel: "#modeObject", prep: () => { const e = document.getElementById("modeObject"); if (e && e.scrollIntoView) e.scrollIntoView({ block: "nearest" }); } } : null) }
   ];
   window.addEventListener("click", (e) => { if (tutorial && tutorial.won && e.target.closest && e.target.closest("#modeObject")) tutorial.objClicked = true; }, true);
   function startShowMeHow() {
