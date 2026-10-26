@@ -438,12 +438,12 @@
   #landing { display: none; position: fixed; inset: 0; z-index: 500; align-items: center; justify-content: center;
     background: rgba(12, 12, 20, 0.66); overflow-y: auto; padding: 16px; }
   body.landing #landing { display: flex; }
-  /* the real canvas becomes the backdrop: covers the viewport, 4:3 kept (cropped, never stretched) */
+  /* the real canvas becomes the backdrop: centered, 4:3 kept; 75% of full-cover zoom (never smaller than fits), cropped never stretched */
   body.landing #topBar, body.landing #paletteWrap, body.landing #gameWrap > :not(#gameCanvas) { display: none !important; }
   body.landing #app { padding: 0; }
   body.landing #gameWrap { position: fixed; inset: 0; padding: 0; background: #000; overflow: hidden; z-index: 1; }
-  body.landing #gameCanvas { position: absolute !important; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: max(100vw, 133.34vh) !important; height: auto !important; aspect-ratio: 4 / 3; border: 0 !important; border-radius: 0; }
+  body.landing #gameCanvas { position: absolute !important; left: 50%; top: 50%; transform: translate(-50%, -50%) !important;
+    width: max(min(100vw, 133.34vh), 0.75 * max(100vw, 133.34vh)) !important; height: auto !important; aspect-ratio: 4 / 3; border: 0 !important; border-radius: 0; }
   #landing { align-items: stretch; justify-content: flex-start; padding: 0;
     background: linear-gradient(90deg, rgba(10,10,18,0.9) 0%, rgba(10,10,18,0.72) 38%, rgba(10,10,18,0.15) 75%, rgba(10,10,18,0.05) 100%); }
   #landingPanel { position: relative; width: 100%; min-height: 100%; box-sizing: border-box; padding: 6vh 6vw 64px;
@@ -4542,6 +4542,7 @@
   // the board's outer edge must sit on a whole device pixel, or the nearest-neighbour scaling gives some art pixels
   // one device pixel more than others; layout centres it on fractions, so nudge the painted box (not the layout)
   function snapCanvasToDevicePixels() {
+    if (document.body.classList.contains("landing")) { gameCanvas.style.transform = ""; return; } // the backdrop is CSS-centered
     const dpr = window.devicePixelRatio || 1;
     gameCanvas.style.transform = "none";
     const r = gameCanvas.getBoundingClientRect();
@@ -8912,6 +8913,10 @@
           cameraX = Math.max(0, Math.min(maxCameraX, playerCx - viewportW / 2));
           cameraFollowSnapNeeded = false;
           cameraShiftSide = null;
+        } else if (landingActive) {
+          // the title-screen backdrop keeps the player centered, always
+          const target = Math.max(0, Math.min(maxCameraX, playerCx - viewportW / 2));
+          cameraX += (target - cameraX) * (1 - Math.exp(-CAMERA_DEADZONE_SHIFT_RATE * dt));
         } else {
           const frac = (playerCx - cameraX) / viewportW;
           if (cameraShiftSide == null) {

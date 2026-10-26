@@ -7112,3 +7112,7 @@ Feedback after playing "Show me how": place things like the attached project (`m
 ## Known limitations
 
 - **Tall stacks under a low ceiling.** A stack of 4 or more crates under a low ceiling makes a hero standing on top look like it is clipping into the ceiling, although physically it fits. The lift draws stacks as tall as full tiles while the boxes stay 22 px. The fix, if it matters in a real room, is to cap the lift so a picture never enters a solid tile above it. (Measured: 4 crates are 88 px of box but 128 px of picture; with the ceiling bottom 128 px above the floor the stack's picture touches it, and a hero on top would be drawn about 28 px into it.)
+
+## Landing backdrop: really centered, less zoomed
+
+The backdrop canvas sat in the bottom-right quarter of the screen: `snapCanvasToDevicePixels` (editor pixel snapping) wrote an inline `transform` that overrode the CSS `translate(-50%, -50%)`. It now returns early while `body.landing` is set, and the landing CSS transform is `!important`. Zoom: width is `max(contain, 0.75 * cover)` (was full cover), so more of the room shows; on very wide or tall windows black bars appear on the short axis. In Follow-camera rooms, `updateCamera` eases `cameraX` to keep the player centered while `landingActive` (Runner and Fixed rooms are unchanged; a Fixed room can't center a player who isn't mid-room). Editor only, nothing exported beyond the one shared line. Tests: landing 43, layout pass.
