@@ -199,6 +199,13 @@
     font-size: 15px; text-transform: none; letter-spacing: normal;
     color: var(--accent); font-weight: bold; margin-bottom: 8px;
   }
+  /* stage 4: game-rule and camera chips, one compact row */
+  #rulesBlock { display: flex; flex-direction: column; gap: 4px; }
+  .rulesRow { display: flex; align-items: center; gap: 10px; }
+  .rulesRow .swatch-row { flex: none; gap: 4px; }
+  .rulesSep { width: 1px; align-self: stretch; background: #2a2c3a; }
+  .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
+  .swatch.chip canvas { width: 24px; height: 24px; }
   .swatch.big { width: 60px; height: 60px; border-width: 3px; border-radius: 8px; }
   .swatch.big .lbl { font-size: 11px; bottom: 3px; }
 
@@ -359,6 +366,8 @@
     .swatch canvas { width: 40px; height: 40px; }
     .swatch .lbl { font-size: 10px; }
     .swatch.big { width: 66px; height: 66px; }
+    .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 40px; height: 40px; }
+    .swatch.chip canvas { width: 32px; height: 32px; }
     .presetSwatch { width: 44px; height: 44px; }
     .presetSwatch canvas { width: 40px; height: 40px; }
     .swatch-row { gap: 8px; }
@@ -663,19 +672,6 @@
   <!-- Palette / Authoring panel -->
   <div class="panel" id="paletteWrap">
     <h1 id="appTitle" style="display:none">TinyGameMaker</h1>
-    <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
-         used to live in this panel — see CAPTION_TEXT/wireCaption/setCaption. Updates on hover
-         (desktop) or last tap (touch) of whatever swatch has something worth saying. -->
-    <div id="captionBar">Hover (or tap) a piece to see what it does.</div>
-
-    <div>
-      <div class="section-title featured">Game rules</div>
-      <div class="swatch-row" id="gameRuleSwatches"></div>
-      <div class="swatch-row" id="gravityDirRow" style="display:none;"></div>
-      <div class="section-title" style="margin-top:10px;">Camera</div>
-      <div class="swatch-row" id="cameraSwatches"></div>
-    </div>
-
     <div>
       <div class="section-title">What to place</div>
       <div class="mode-toggle" id="placeTabs">
@@ -686,6 +682,21 @@
         <button id="modeErase">Erase</button>
       </div>
     </div>
+
+    <!-- Aesthetics stage 4: Game rules + Camera collapsed into one compact row of icon chips -->
+    <div id="rulesBlock">
+      <div class="rulesRow">
+        <div class="swatch-row" id="gameRuleSwatches" aria-label="Game rules"></div>
+        <div class="rulesSep"></div>
+        <div class="swatch-row" id="cameraSwatches" aria-label="Camera"></div>
+      </div>
+      <div class="swatch-row" id="gravityDirRow" style="display:none;"></div>
+    </div>
+
+    <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
+         used to live in this panel — see CAPTION_TEXT/wireCaption/setCaption. Updates on hover
+         (desktop) or last tap (touch) of whatever swatch has something worth saying. -->
+    <div id="captionBar">Hover (or tap) a piece to see what it does.</div>
 
     <div id="characterPropertiesBlock">
       <div class="section-title">Pick a character</div>
@@ -1362,6 +1373,9 @@
   // the "immediate and plainly visible, no decision to front-load" case the palette's own prose
   // reduction already covers by just deleting those sections' hints outright, no caption needed).
   const CAPTION_TEXT = {
+    "rule-gravity": "Things fall. Click to turn gravity on or off.",
+    "rule-wrapH": "Walk off one side, come back on the other.",
+    "rule-wrapV": "Fall off the bottom, come back at the top.",
     // Power-ups (v2.42) — keyed by their collectible defId, wired in renderCollectibleSwatches
     colHeart: "Takes a hit for you.",
     colKey: "Opens gates of its color.",
@@ -5518,19 +5532,15 @@
     GAME_RULES.forEach(rule => {
       const on = rule.get();
       const sw = document.createElement("div");
-      sw.className = "swatch big";
+      sw.className = "swatch chip" + (on ? " selected" : "");
       sw.style.background = on ? PLAYER_COLOR : "#2f3140";
       sw.title = rule.label + (on ? " (on — click to turn off)" : " (off — click to turn on)");
       const glyph = document.createElement("div");
-      glyph.style.fontSize = "24px";
+      glyph.style.fontSize = "20px";
       glyph.style.color = on ? "#222" : PLAYER_COLOR;
       glyph.textContent = rule.glyph;
       sw.appendChild(glyph);
-      const label = document.createElement("div");
-      label.className = "lbl";
-      label.style.color = on ? "#222" : "#fff";
-      label.textContent = dispName(rule.label);
-      sw.appendChild(label);
+      wireCaption(sw, CAPTION_TEXT["rule-" + rule.key]);
       sw.addEventListener("click", () => {
         rule.set(!on);
         log(rule.label + (rule.get() ? " on." : " off."));
@@ -5555,7 +5565,7 @@
     GRAVITY_DIR_BUTTONS.forEach(b => {
       const usable = GRAVITY_DIRS.includes(b.dir), on = gravityDir === b.dir;
       const sw = document.createElement("div");
-      sw.className = "swatch";
+      sw.className = "swatch chip";
       sw.dataset.dir = b.dir;
       sw.style.background = on ? PLAYER_COLOR : "#2f3140";
       sw.style.opacity = usable ? "1" : "0.35";
@@ -5615,19 +5625,28 @@
     renderCameraSwatches();
     renderCameraPanRow();
   }
+  // 8x8 pixel icons for the camera chips: a fixed frame, a frame that follows a dot, a dot running right
+  const CAMERA_ICONS = (() => {
+    const L = { W: "#ffffff", Y: "#ffd54f" };
+    return {
+      fixed:  pat(["WWWWWWWW", "W......W", "W......W", "W..YY..W", "W..YY..W", "W......W", "W......W", "WWWWWWWW"], L),
+      follow: pat(["WW....WW", "W......W", "........", "...YY...", "...YY...", "........", "W......W", "WW....WW"], L),
+      runner: pat(["........", "....Y...", "W...YY..", "WYYYYYY.", "WYYYYYY.", "W...YY..", "....Y...", "........"], L)
+    };
+  })();
   function renderCameraSwatches() {
     const container = document.getElementById("cameraSwatches");
     container.innerHTML = "";
     CAMERA_MODES.forEach(mode => {
       const isSelected = cameraMode === mode.key;
       const sw = document.createElement("div");
-      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.className = "swatch chip" + (isSelected ? " selected" : "");
       sw.style.background = mode.color;
       sw.title = mode.label;
-      const label = document.createElement("div");
-      label.className = "lbl";
-      label.textContent = dispName(mode.label);
-      sw.appendChild(label);
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), CAMERA_ICONS[mode.key], ART);
+      sw.appendChild(c);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
       wireCaption(sw, CAPTION_TEXT[mode.key]);
       container.appendChild(sw);
