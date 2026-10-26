@@ -8078,7 +8078,7 @@
     // to the spawner's launch cell, so they don't read as the spawner firing over and over.
     sounds.blackHole();
     swallowIntoBlackHole(actor, cx, cy, false);
-    if (isSteeringCharacter(temperament) && !actor.spawnerKey) {
+    if (isSteeringCharacter(temperament) && !actor.spawnerKey && appMode !== "play") {
       actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
       actor.displacedCooldown = 0;
       playRecipe(actor, "warpIn", PARTICLE_ART, { artTo: 0.2 });

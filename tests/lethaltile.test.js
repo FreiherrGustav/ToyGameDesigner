@@ -40,6 +40,23 @@ const SCENE = `(skin, mode)=>{
     const q = await run(skin, "build");
     ok(!q.gone && q.atHome, `Build, ${skin || "plain lethal"}: sent home ${JSON.stringify(q)}`);
   }
+  // black hole: placed character destroyed in Play, sent home in Build
+  const BH = `(mode)=>{
+    if (appMode === "play") exitToBuildMode();
+    suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false;
+    loadStarterBoard();
+    const id = defaultDefIdForKind("wanderer"); actorDefs[id].lethal = false;
+    selectedActorDefId = id; paintMode = "actor"; placeNewActor(4 * TILE + 16, 4 * TILE + 16);
+    let npc = actors[actors.length - 1];
+    if (mode === "play") { enterPlayMode(); playReadyUntil = null; npc = actors.find(a => !a.isPlayer && actorDefs[a.defId].temperament === "wanderer"); }
+    const home = { x: npc.spawnX, y: npc.spawnY };
+    npc.x = 12 * TILE; npc.y = 8 * TILE;
+    triggerGravityWellCapture(npc, "wanderer", 12, 8);
+    return { gone: !!npc.destroyed, atHome: Math.abs(npc.x - home.x) < 2 && Math.abs(npc.y - home.y) < 2 };
+  }`;
+  const bp = await page.evaluate(([s, m]) => window.__ev(s)(m), [BH, "play"]), bb = await page.evaluate(([s, m]) => window.__ev(s)(m), [BH, "build"]);
+  ok(bp.gone, "black hole, Play: placed character destroyed " + JSON.stringify(bp));
+  ok(!bb.gone && bb.atHome, "black hole, Build: sent home " + JSON.stringify(bb));
   ok(errors.length === 0, "no page errors " + errors.join("|"));
   console.log(pass + " passed, " + fails.length + " failed"); await b.close(); process.exit(fails.length ? 1 : 0);
 })();

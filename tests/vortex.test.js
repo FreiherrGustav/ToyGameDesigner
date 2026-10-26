@@ -56,7 +56,7 @@ const STEP = `(n)=>{ for (let i=0;i<n;i++){ tick(1/60); renderGame(); } return f
   await ev(page, `()=>{ const n = actors[actors.length-1]; window.__n = n; n.spawnX = 20*TILE; n.spawnY = 14*TILE; n.vx = 60; return 1; }`);
   let ng = 0; for (let i = 0; i < 90 && !ng; i++) ng = await step(1);
   const n = await ev(page, `()=>({ ghosts: fxGhosts.length, home: Math.abs(window.__n.x - 20*TILE) < 4, anim: animState[window.__n.id] && animState[window.__n.id].recipe, alive: actors.includes(window.__n) })`);
-  ok(n.ghosts > 0 && n.home && n.anim === "warpIn" && n.alive, "NPC: ghost sucked in, NPC at spawn with warpIn");
+  ok(n.ghosts > 0 && !n.home, "NPC (Play): ghost sucked in, placed character destroyed, not sent home");
 
   // --- player in Play: game over waits for the animation ---
   await scene("gravitywell", null);
