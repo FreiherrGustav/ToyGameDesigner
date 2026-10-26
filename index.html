@@ -565,6 +565,17 @@
     #gameWrap .roomTab button.tbtn, #gameWrap #roomTabRow button.tbtn.ghost { padding-top: 3px; padding-bottom: 3px; }
     #msgRow { height: 20px; }
   }
+  /* v2.58 Stage 3: tighter rows so a 1080p window holds the board at 150% (after the base rules so it wins) */
+  @media (min-width: 1500px) and (min-height: 820px) {
+    #topBar, #topBar.aligned { margin-top: 8px; }
+    #app { padding: 6px 28px 6px; }
+    #gameWrap { gap: 5px; padding: 6px 16px; }
+    #gameWrap #buildToolbar button.tbtn { min-height: 28px; padding-top: 4px; padding-bottom: 4px; }
+    #gameWrap #statusRow { min-height: 28px; }
+    #gameWrap #cameraPanRow button.tbtn { min-height: 22px; padding-top: 0; padding-bottom: 0; }
+    #gameWrap #statusRow button.tbtn { min-height: 28px; padding-top: 3px; padding-bottom: 3px; }
+    #msgRow { height: 20px; }
+  }
   /* ---- "Show me how" tutorial layer (editor only; never in the export) ---- */
   #tutLayer { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
   #tutLayer .tutDim { position: fixed; background: rgba(10,10,18,0.55); pointer-events: none; transition: opacity 0.35s ease; }
@@ -4396,7 +4407,7 @@
   // fits, up to FIT_MAX_SCALE (one constant); the size stepper (#sizeStepper) can go bigger, up to FIT_HARD_MAX,
   // or smaller, and is remembered per browser in localStorage ("auto" = the default). `--stageW` (the canvas
   // width) also bounds the toolbar rows in the comfortable tier.
-  const FIT_SCALE_STEP = 0.25, FIT_MAX_SCALE = 1.25, FIT_HARD_MAX = 2.0, FIT_MIN_STEP = 0.5;
+  const FIT_SCALE_STEP = 0.25, FIT_MAX_SCALE = 2.0, FIT_HARD_MAX = 2.0, FIT_MIN_STEP = 0.5;
   const SIZE_PREF_KEY = "toyGameDesigner.boardScale";
   function allowedScales(maxScale, dpr) {
     const out = [];
