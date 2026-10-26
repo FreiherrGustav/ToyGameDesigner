@@ -7142,3 +7142,7 @@ Stage 2 follow-up: the tutorial's last step (ring on the Objects tab) had no scr
 ## Room rules heading and group labels (presentation only)
 
 The compact rules row (aesthetics stage 4) now has a "Room rules" section title, and each chip group a small label: "Gravity & looping" (gravity, h-wrap, v-wrap) and "Screen" (Fixed, Follow, Runner). Kid-friendly renaming of the chips themselves (e.g. wrap -> loop) was not done; titles and ids are unchanged. Screenshot: `prototypes/aesthetics-shots/stage4b-after-1366-rules.png`.
+
+## Lethal ground for placed characters is per-tile (supersedes "placed NPCs now stay dead in lava in Play")
+
+In Play, a hand-placed character on lethal ground now depends on the tile's Ground skin: **lava swallows** it (destroyed like a spawner-made one; the level restart brings it back), while **fire, spikes, mines, custom lethals and plain `none:lethal` send it back to its start** (the original rule). Build always sends home. `LETHAL_SWALLOW_SKINS = ["lthLava"]` is the one list to extend; `checkNpcLethalContacts` reads the cell's `groundSkinBoard` entry and passes `swallow` to `triggerNpcLethalReset`. Spawner-made characters are still always destroyed. This restores Sushi Train's fire pit and Monster's Den's fire respawn while keeping Mini Level 1's lava deadly to pets. Black-hole capture of a placed character is unchanged (still sends home). Export: one `constantsSource` line. Test: `node tests/lethaltile.test.js` (11 checks).

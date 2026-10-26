@@ -7946,11 +7946,18 @@
   // reachable for a non-player actor). Mirrors triggerGravityWellCapture's own established
   // "a steering character is sent back to its own spawn point, never destroyed" convention
   // exactly, rather than inventing a second shape for the same idea.
+  // Lethal ground is per-tile for hand-placed characters in Play: lava swallows (the character is gone until the
+  // level restarts); fire, spikes, mines, custom and plain lethal tiles send it back to its start.
+  const LETHAL_SWALLOW_SKINS = ["lthLava"];
   function checkNpcLethalContacts(actor) {
     if (actor.destroyed) return;
     if (roomHasFloatingMovers() && moverFloatsUnder(actor)) return; // riding a log over lava/water
     for (const { cx, cy } of overlappedCells(actor)) {
-      if (modifierAt(cx, cy) === "lethal") { triggerNpcLethalReset(actor); return; }
+      if (modifierAt(cx, cy) === "lethal") {
+        const skin = groundSkinBoard[cy] && groundSkinBoard[cy][cx];
+        triggerNpcLethalReset(actor, LETHAL_SWALLOW_SKINS.includes(skin));
+        return;
+      }
     }
   }
   // ---- "squash works both ways": a crate or stone coming down hard on a character flattens it ----
@@ -8002,7 +8009,7 @@
     }, calm ? 0 : SQUASH_FLATTEN_MS);
   }
 
-  function triggerNpcLethalReset(actor) {
+  function triggerNpcLethalReset(actor, swallow) {
     if (actor.destroyed) return;
     // A spawner-made character has no "home" of its own — its spawn point is just the spawner's
     // launch cell. Sending it back there made a chaser that keeps running into lethal pop out of the
@@ -8010,9 +8017,9 @@
     // (a user's recording: a stream of chasers leaving the spawner while the log repeated "Caught in
     // lethal — sent back to its spawn point!"). Spawned content is disposable, so it is removed here
     // and the spawner makes a fresh one on its own schedule; hand-placed characters still go home.
-    // In Play a hand-placed character that dies in lethal stays dead too (the level restart brings it back);
-    // otherwise it walked straight back into the same lava forever. Build keeps the send-home sandbox rule.
-    if (actor.spawnerKey || appMode === "play") {
+    // In Play a hand-placed character swallowed by lava stays gone (the level restart brings it back);
+    // other lethal tiles (fire...) send it home. Build always sends home (sandbox rule).
+    if (actor.spawnerKey || (appMode === "play" && swallow)) {
       actor.destroyed = true;
       playActorSound(actor, "splat");
       playRecipe(actor, "popVanish");
@@ -14103,6 +14110,7 @@
       `const BOMB_FUSE_MS = ${BOMB_FUSE_MS}, BOMB_BLAST_KNOCKBACK_SPEED = ${BOMB_BLAST_KNOCKBACK_SPEED};`,
       `const BOMB_IMPACT_DETONATE_SPEED = ${BOMB_IMPACT_DETONATE_SPEED};`,
       `const BOMB_FALL_DETONATE_TILES = ${BOMB_FALL_DETONATE_TILES};`,
+      `const LETHAL_SWALLOW_SKINS = ${JSON.stringify(LETHAL_SWALLOW_SKINS)};`,
       `const WARP_COOLDOWN_MS = ${WARP_COOLDOWN_MS}, ROOM_TRANSITION_MS = ${ROOM_TRANSITION_MS};`,
       `const BARRIER_SLIDE_MS = ${BARRIER_SLIDE_MS};`,
       `const CARRY_MAGNET_KIND = ${JSON.stringify(CARRY_MAGNET_KIND)}, CARRY_TRAMPOLINE_KIND = ${JSON.stringify(CARRY_TRAMPOLINE_KIND)};`,
