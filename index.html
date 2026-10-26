@@ -161,7 +161,7 @@
   #placeTabs { flex-wrap: nowrap; }
   #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
-  .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .swatch-row { display: flex; flex-wrap: wrap; gap: 4px; }
   .swatch {
     width: 42px; height: 42px;
     border-radius: 6px;
@@ -177,6 +177,10 @@
   .swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
   .swatch canvas { image-rendering: pixelated; width: 32px; height: 32px; pointer-events: none; }
   .swatch .lbl { position: absolute; font-size: 9px; bottom: 1px; width: 100%; text-align: center; text-shadow: 0 0 2px #000; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 1px; }
+  /* Labelled swatches: the picture sits whole on top, the name in its own dark band underneath. */
+  .swatch:not(.big):has(> .lbl) { width: 58px; height: 70px; flex-direction: column; justify-content: flex-start; padding-top: 5px; box-sizing: border-box; background-clip: padding-box; overflow: hidden; }
+  .swatch:not(.big):has(> .lbl) canvas { width: 40px; height: 40px; flex: 0 0 auto; }
+  .swatch:not(.big):has(> .lbl) .lbl { position: absolute; left: 0; right: 0; bottom: 0; width: auto; height: 18px; line-height: 18px; box-sizing: border-box; padding: 0 2px; font-size: 11px; font-weight: bold; text-shadow: none; background: rgba(0,0,0,0.55); color: #f2f2f6; }
   /* v2.41: a color already claimed by two doors reads as full right where a kid would reach for
      it, instead of needing a sentence explaining the cap in advance — see renderColorSwatchesInto. */
   .swatch.full { opacity: 0.35; filter: grayscale(0.6); cursor: not-allowed; }
@@ -975,6 +979,10 @@
   // already know it as — see renderObjectSwatches/renderFixtureSwatches.
   // v2.33: "barrier" now reads as "Gate" — direct request, the internal id/board data stays
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
+  // Short palette names for swatch label bands; the swatch title/caption keeps the full name.
+  const DISPLAY_SHORT = { "large stone": "stone", "moving platform": "platform", "trampoline": "bouncer", "locked door": "lock", "black hole": "hole",
+    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
+  function dispName(n) { return DISPLAY_SHORT[n] || n; }
   const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "switch", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
@@ -4846,7 +4854,7 @@
       sw.title = geometry;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = geometry;
+      label.textContent = dispName(geometry);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
@@ -4909,7 +4917,7 @@
       sw.title = displayName;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = displayName;
+      label.textContent = dispName(displayName);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectSurfaceModifier(modifier));
       wireCaption(sw, CAPTION_TEXT[modifier]);
@@ -4959,7 +4967,7 @@
     sw.appendChild(c);
     const label = document.createElement("div");
     label.className = "lbl";
-    label.textContent = def.name;
+    label.textContent = dispName(def.name);
     sw.appendChild(label);
     sw.addEventListener("click", () => selectGroundSkin(id));
     // v2.41: only ever resolves to real text for the four built-in Lethal ids (lthLava/lthFire/
@@ -5020,7 +5028,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = def.name;
+      label.textContent = dispName(def.name);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectObjectActorKind(kind));
       wireCaption(sw, CAPTION_TEXT[kind]);
@@ -5051,7 +5059,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = GEOMETRY_LABELS[geometry] || geometry;
+      label.textContent = dispName(GEOMETRY_LABELS[geometry] || geometry);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
       wireCaption(sw, CAPTION_TEXT[geometry]);
@@ -5081,7 +5089,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = labelText;
+      label.textContent = dispName(labelText);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectGeometry(geometry));
       wireCaption(sw, CAPTION_TEXT[geometry]);
@@ -5124,7 +5132,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = def.name;
+      label.textContent = dispName(def.name);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCollectible(id));
       wireCaption(sw, def.moverKind === "floats" ? CAPTION_TEXT.moverFloats : CAPTION_TEXT.moverHurts);
@@ -5149,7 +5157,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = def.name;
+      label.textContent = dispName(def.name);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCollectible(id));
       wireCaption(sw, CAPTION_TEXT[id]); // only the three power-ups have entries; every other collectible stays uncaptioned
@@ -5203,7 +5211,7 @@
       sw.title = (color || "none") + (full ? " — already used by two doors" : "");
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = color || "none";
+      label.textContent = dispName(color || "none");
       sw.appendChild(label);
       if (!full) {
         sw.addEventListener("click", () => {
@@ -5286,7 +5294,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = temp;
+      label.textContent = dispName(temp);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectActorKind(temp));
       container.appendChild(sw);
@@ -5310,7 +5318,7 @@
     sw.appendChild(c);
     const label = document.createElement("div");
     label.className = "lbl";
-    label.textContent = def.name;
+    label.textContent = dispName(def.name);
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
@@ -5351,7 +5359,7 @@
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = def.name;
+      label.textContent = dispName(def.name);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCustomActor(id));
       container.appendChild(sw);
@@ -5408,7 +5416,7 @@
       sw.title = temp;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = temp;
+      label.textContent = dispName(temp);
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         if (isPlayerOption) {
@@ -5446,7 +5454,7 @@
       sw.title = opt.label;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = opt.label;
+      label.textContent = dispName(opt.label);
       sw.appendChild(label);
       wireCaption(sw, opt.tip);
       sw.addEventListener("click", () => { def.lethal = opt.lethal; renderLethalPicker(); log(def.name + " is now " + opt.label + "."); });
@@ -5473,7 +5481,7 @@
       sw.title = voice.label;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = voice.label;
+      label.textContent = dispName(voice.label);
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         def.voice = voice.id;
@@ -5510,7 +5518,7 @@
       const label = document.createElement("div");
       label.className = "lbl";
       label.style.color = on ? "#222" : "#fff";
-      label.textContent = rule.label;
+      label.textContent = dispName(rule.label);
       sw.appendChild(label);
       sw.addEventListener("click", () => {
         rule.set(!on);
@@ -5607,7 +5615,7 @@
       sw.title = mode.label;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = mode.label;
+      label.textContent = dispName(mode.label);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
       wireCaption(sw, CAPTION_TEXT[mode.key]);
