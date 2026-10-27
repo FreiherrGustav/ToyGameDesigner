@@ -34,9 +34,9 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     ok(JSON.stringify(L) === JSON.stringify({ player: { x: 6, y: 13 }, floor: { x: 2, y: 14, w: 11, h: 1 }, ledge: { x: 9, y: 12, w: 4, h: 2 }, enemy: { x: 2, y: 13 }, goal: { x: 12, y: 11 } }), w + ': layout is the attached picture ' + JSON.stringify(L));
     ok(await p.evaluate(() => __t.wandererLethal()) === false, w + ': the tutorial wanderer is harmless');
     let n = await note(p);
-    ok(n && n.on && /ground/i.test(n.text) && n.fs >= 15, w + ': ground note is on and readable ' + JSON.stringify(n && [n.text, n.fs]));
+    ok(n && n.on && /grass/i.test(n.text) && n.fs >= 15, w + ': ground note is on and readable ' + JSON.stringify(n && [n.text, n.fs]));
     ok(n && n.r[0] >= 0 && n.r[1] >= 0 && n.r[2] <= w && n.r[3] <= h, w + ': note inside the window');
-    await p.click('#groundSwatches .swatch[title="solid"]'); await p.waitForTimeout(900);
+    await p.click('#groundSwatches .swatch[title="grass"]'); await p.waitForTimeout(900);
     ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': ring on the whole floor');
     n = await note(p); ok(n && /drag/i.test(n.text), w + ': floor note says what to do');
     { const rg = await ring(p); ok(disjoint(n.r.slice(0, 2).concat([n.r[2] - n.r[0], n.r[3] - n.r[1]]), rg), w + ': note does not sit on the ring'); }
@@ -106,7 +106,7 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     ok(p.errs.length === 0, 'skip: no errors'); await p.close(); }
   // reduced motion: the ring snaps, no fade
   { const p = await open(1366, 635, { reducedMotion: 'reduce' }); await p.click('#landingShowBtn'); await p.waitForTimeout(600);
-    await p.click('#groundSwatches .swatch[title="solid"]'); await p.waitForTimeout(150);
+    await p.click('#groundSwatches .swatch[title="grass"]'); await p.waitForTimeout(150);
     ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), 'reduced motion: ring is on the target within 150 ms');
     ok(p.errs.length === 0, 'reduced: no errors'); await p.close(); }
   await b.close();

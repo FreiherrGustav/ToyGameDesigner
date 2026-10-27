@@ -33,16 +33,17 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   const nothing = p => p.evaluate(() => !document.getElementById('tutLayer') && !document.getElementById('tutClose'));
 
   // landing button is last in the row; keyboard focusable
-  for (const [w, h] of [[1280, 590], [1366, 635], [1920, 1080]]) {
+  const VPS = process.env.VPS ? JSON.parse(process.env.VPS) : [[1280, 590], [1366, 635], [1920, 1080]], MID = VPS.length > 1 ? VPS[1] : VPS[0];
+  for (const [w, h] of VPS) {
     const p = await open(w, h);
     ok(await p.evaluate(() => { const bs = [...document.querySelectorAll('#landingButtons button')]; return bs[bs.length - 1].id === 'landingShowBtn'; }), w + ': Show me how is the last button');
     const before = await p.evaluate(() => localStorage.getItem('toyGameDesigner.autosave.v1'));
     await start(p);
     ok(await p.evaluate(() => __t.active() && !document.body.classList.contains('landing')), w + ': tutorial started from landing');
     // 1 ground: swatch, then 8-cell span; drag
-    ok(onRect(await ring(p), await rect(p, '#groundSwatches .swatch[title="solid"]')), w + ': 2 ring on solid swatch');
+    ok(onRect(await ring(p), await rect(p, '#groundSwatches .swatch[title="grass"]')), w + ': 2 ring on solid swatch');
     await shot(p, `s2_2a_ground_swatch_${w}`);
-    await p.click('#groundSwatches .swatch[title="solid"]'); await settle(p);
+    await p.click('#groundSwatches .swatch[title="grass"]'); await settle(p);
     ok(onRect(await ring(p), await cellRect(p, 2, 14, 11, 1)), w + ': 2 ring on floor span');
     await shot(p, `s2_2b_ground_span_${w}`);
     { const a = await cellRect(p, 2, 14), z = await cellRect(p, 12, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); }
@@ -96,14 +97,14 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await p.close();
   }
 
-  const p0 = await open(1366, 635);
+  const p0 = await open(MID[0], MID[1]);
   // out of order: goal swatch first, then enemy before player; nothing scolds, steps follow state
   await start(p0);
   await pick(p0, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await clickCell(p0, 12, 11); await settle(p0);
   ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'goal before anything: still points at the ground step');
   await pick(p0, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p0, 2, 13); await settle(p0);
   ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'enemy before ground: ground step stays current');
-  await pick(p0, '#modeGround', '#groundSwatches .swatch[title="solid"]');
+  await pick(p0, '#modeGround', '#groundSwatches .swatch[title="grass"]');
   { const a = await cellRect(p0, 2, 14), z = await cellRect(p0, 12, 14); await p0.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p0.mouse.down(); await p0.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p0.mouse.up(); }
   await settle(p0);
   ok(await p0.evaluate(() => __t.stepName()) === 'ledge', 'ground done -> ledge');
@@ -113,7 +114,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   await pick(p0, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p0, 6, 13); await p0.waitForTimeout(900);
   { const h = await p0.evaluate(() => __t.hero()); ok(h && h.grounded && h.x === h.sx && h.y === h.sy, 'hero standing on the floor: live position equals spawn ' + JSON.stringify(h)); }
   ok(await p0.evaluate(() => __t.stepName()) === 'play', 'all four pieces placed out of order -> Play is next');
-  ok(around(await ring(p0), await rect(p0, '#modePlayBtn'), 1280), 'ring on Play, not clipped');
+  { const g_ = await ring(p0), t_ = await rect(p0, '#modePlayBtn'); ok(around(g_, t_, MID[0]), 'ring on Play, not clipped ' + JSON.stringify([g_, t_])); }
   // death path: a lost run goes back to Build and points at the goal
   await p0.click('#modePlayBtn'); await p0.waitForTimeout(1500);
   { const vis = () => p0.evaluate(() => { const e = document.querySelector('#tutLayer .tutKeys'); return !!e && getComputedStyle(e).display !== 'none'; });
@@ -143,12 +144,12 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
 
   // quit at each step with the project untouched
   for (let n = 0; n < 6; n++) {
-    const p = await open(1366, 635);
+    const p = await open(MID[0], MID[1]);
     await p.click('#landingMakeBtn'); await p.waitForTimeout(1500);
     const snap = await p.evaluate(() => __t.snap());
     await p.evaluate(() => { document.getElementById('homeLogo').click(); }); await settle(p);
     await p.click('#landingShowBtn'); await settle(p);
-    if (n >= 1) { await pick(p, '#modeGround', '#groundSwatches .swatch[title="solid"]'); const a = await cellRect(p, 2, 14), z = await cellRect(p, 12, 14); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 10 }); await p.mouse.up(); }
+    if (n >= 1) { await pick(p, '#modeGround', '#groundSwatches .swatch[title="grass"]'); const a = await cellRect(p, 2, 14), z = await cellRect(p, 12, 14); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 10 }); await p.mouse.up(); }
     if (n >= 2) { for (const row of [12, 13]) { const a = await cellRect(p, 9, row), z = await cellRect(p, 12, row); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 8 }); await p.mouse.up(); } }
     if (n >= 3) { await pick(p, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p, 6, 13); }
     if (n >= 4) { await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p, 2, 13); }

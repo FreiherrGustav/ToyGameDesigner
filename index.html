@@ -10425,7 +10425,9 @@
   });
   document.getElementById("clearAllBtn").addEventListener("click", () => {
     if (!confirm("Clear everything? This removes every room, door, tile, and actor and starts over with one empty room.")) return;
+    pushUndoSnapshot();
     initBoard();
+    paintSkyBackdrop(backgroundBoard, roomCols()); // never a black void: the default sky and clouds stay
     switchChannels = {};
     clearTransientRuntimeState();
     resetScoreAndIntensity();
@@ -10454,6 +10456,8 @@
     resetScoreAndIntensity();
     resetHistory();
     clearAutosave();
+    paintSkyBackdrop(backgroundBoard, roomCols()); // so undoing the starter lands on a sky board, never a black void
+    loadStarterBoard(); // a fresh project starts from the little starter board (one undo step takes it away)
     log("Started a new project.");
   });
 
@@ -13594,8 +13598,41 @@
     if (b) { const c = b.getContext("2d"); c.imageSmoothingEnabled = true; c.drawImage(gameCanvas, 0, 0, b.width, b.height); }
     landingBackdropRaf = requestAnimationFrame(landingBackdropLoop);
   }
+  // A project counts as empty when it is one room with no painted tiles (other than the default sky/cloud/scenery backdrop),
+  // no actors, no doors/spawner content, and no custom or edited sprites/characters. Judged by content, not by byte equality
+  // with the factory snapshot (an autosave round trip or a cleared project is rarely byte-identical).
+  function snapshotIsEmptyProject(snap) {
+    try {
+      if (!snap || !snap.rooms || snap.rooms.length !== 1) return false;
+      const r = snap.rooms[0];
+      if (r.actors && r.actors.length) return false;
+      for (const row of r.board) for (const c of row) if (c) return false;
+      for (const row of (r.backgroundBoard || [])) for (const id of row) if (isRealBackground(id)) return false;
+      if (snap.doorLinks && Object.keys(snap.doorLinks).length) return false;
+      if (snap.spawnerContents && Object.keys(snap.spawnerContents).length) return false;
+      const F = FACTORY_DEFAULT_SNAPSHOT;
+      const sig = d => JSON.stringify([d.name, d.temperament, d.art, d.poses, d.frames]);
+      for (const id of Object.keys(snap.actorDefs || {})) {
+        const f = F.actorDefs[id];
+        if (!f || sig(f) !== sig(snap.actorDefs[id])) return false; // a custom or edited character
+      }
+      for (const id of Object.keys(snap.groundTileDefs || {})) {
+        const f = F.groundTileDefs[id];
+        if (!f || sig(f) !== sig(snap.groundTileDefs[id])) return false; // a custom or edited ground texture
+      }
+      for (const id of Object.keys(snap.backgroundTileDefs || {})) {
+        if (F.backgroundTileDefs[id] || !isRealBackground(id)) continue; // factory tile, or the sky/cloud/scenery backdrop
+        return false; // a kid-made Paint tile
+      }
+      for (const k of ["customActorSlotIds", "collectibleSlotIds", "groundSlotIds", "lethalSlotIds"]) {
+        const have = snap[k] || [], base = F[k] || [];
+        if (have.some(id => !base.includes(id))) return false;
+      }
+      return true;
+    } catch (e) { return false; }
+  }
   function landingProjectHasWork(snapJSON) {
-    try { return snapJSON !== JSON.stringify(FACTORY_DEFAULT_SNAPSHOT); } catch (e) { return true; }
+    try { return !snapshotIsEmptyProject(JSON.parse(snapJSON)); } catch (e) { return true; }
   }
   function showLanding() {
     if (landingActive) return;
@@ -14004,6 +14041,7 @@
       rooms.push(room);
       activateRoom(room.id);
     }
+    paintSkyBackdrop(backgroundBoard, roomCols()); // the same default sky and clouds as the starter board
     snapshotCurrentRoomState();
     tutorial.onFinish = opts && opts.onFinish;
     paintMode = "erase";
@@ -14108,14 +14146,14 @@
     return r;
   }
   const TUTORIAL_STEPS = [
-    { name: "ground", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Drag across the glowing squares to draw the ground." } : { b: "Pick the ground tile to start building." }), done: () => tutGroundDone(),
-      target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
+    { name: "ground", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Drag across the glowing squares to draw the ground." } : { b: "Pick the grass tile to start building." }), done: () => tutGroundDone(),
+      target: () => (paintMode === "tile" && selectedGeometry === "solid")
         ? { cell: tutLayout().floor }
-        : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
-    { name: "ledge", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Now add a step up. Fill in the glowing block." } : { b: "Pick the ground tile again." }), done: () => tutLedgeDone(),
-      target: () => (paintMode === "tile" && selectedGeometry === "solid" && !selectedGroundSkinId)
+        : tutSwatchTarget('#groundSwatches .swatch[title="grass"]', "modeGround", "ground") },
+    { name: "ledge", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Now add a step up. Fill in the glowing block." } : { b: "Pick the grass tile again." }), done: () => tutLedgeDone(),
+      target: () => (paintMode === "tile" && selectedGeometry === "solid")
         ? { cell: tutLayout().ledge }
-        : tutSwatchTarget('#groundSwatches .swatch[title="solid"]', "modeGround", "ground") },
+        : tutSwatchTarget('#groundSwatches .swatch[title="grass"]', "modeGround", "ground") },
     { name: "player", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click the glowing square to put your hero there." } : { b: "Now pick your hero." }), done: () => actors.some(a => a.isPlayer),
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
