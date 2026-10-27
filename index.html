@@ -10427,7 +10427,6 @@
     if (!confirm("Clear everything? This removes every room, door, tile, and actor and starts over with one empty room.")) return;
     pushUndoSnapshot();
     initBoard();
-    paintSkyBackdrop(backgroundBoard, roomCols()); // never a black void: the default sky and clouds stay
     switchChannels = {};
     clearTransientRuntimeState();
     resetScoreAndIntensity();
@@ -13729,22 +13728,14 @@
       board[y][x] = gameplayKey("solid", "none");
       groundSkinBoard[y][x] = y === grassRow ? "gndGrass" : "gndDirt"; groundSkinRotationBoard[y][x] = 0;
     }
-    board[grassRow - 1][cols - 3] = gameplayKey("goal", "none");
     // scenery on the Paint layer (row just above the grass): a wide hill on the left, a smaller one and a bush on the right
     [[4, "bgHill1"], [5, "bgHill2"], [6, "bgHill3"], [15, "bgHill1"], [16, "bgHill3"], [12, "bgBush"], [19, "bgBush"]].forEach(([x, id]) => {
       if (x < cols && backgroundBoard[grassRow - 1]) backgroundBoard[grassRow - 1][x] = id;
     });
     gravityEnabled = true; gravityDir = "down";
-    const saved = selectedActorDefId;
-    selectedActorDefId = playerDefId;
-    placeNewActor(2 * TILE + TILE / 2, grassRow * TILE - ACTOR_SIZE / 2);
-    // a small arc of coins between the hero and the flag (ordinary collectibles: worth points, never needed to win)
-    selectedActorDefId = "colCoin";
-    [[8, 12], [9, 11], [10, 11], [11, 11], [12, 12]].forEach(([cx, cy]) => placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2));
-    selectedActorDefId = saved;
     snapshotCurrentRoomState();
     renderAll();
-    log("Here's a little starter: walk to the flag, or change anything.");
+    log("A sunny field. Place a hero to get started.");
   }
   function landingPickSample(sample) {
     if (landingHadWork && !confirmReplaceProject("Play \"" + sample.name + "\"?")) return;

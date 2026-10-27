@@ -38,16 +38,12 @@ const open = async (b, vp, hash) => {
     // Make one -> starter
     await page.click("#landingMakeBtn"); await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, `s1_starter_${w}x${h}.png`) });
-    const st = await ev(page, "()=>({players:actors.filter(a=>a.isPlayer).length,floor:board[ROWS-1].slice(0,roomCols()).every(c=>c==='solid:none'),goal:board[ROWS-4][roomCols()-3],g:gravityEnabled,n:actors.length,px:actors.find(a=>a.isPlayer).x})");
-    ok(st.players === 1 && st.floor && st.goal === "goal:none" && st.g && st.n === 6 && st.px < 100, `${w}x${h}: starter board ${JSON.stringify(st)}`);
-    // Play to the goal
-    await page.click("#modePlayBtn"); await page.waitForTimeout(1500);
-    await page.keyboard.down("ArrowRight");
-    let won = false;
-    for (let i = 0; i < 80 && !won; i++) { await page.waitForTimeout(100); won = await ev(page, "()=>playSessionEnded==='win'"); }
-    await page.keyboard.up("ArrowRight");
-    ok(won, `${w}x${h}: Play on the starter wins at the goal`);
-    await page.screenshot({ path: path.join(SHOTS, `s1_starter_win_${w}x${h}.png`) });
+    const st = await ev(page, "()=>({n:actors.length,floor:board[ROWS-1].slice(0,roomCols()).every(c=>c==='solid:none'),goal:board.some(r=>r.some(c=>c&&c.startsWith('goal'))),g:gravityEnabled,sky:backgroundBoard[0][0]})");
+    ok(st.n === 0 && st.floor && !st.goal && st.g && st.sky, `${w}x${h}: starter board is sky and grass only ${JSON.stringify(st)}`);
+    // placing a hero on it works: it stands on the grass in Play
+    await ev(page, "()=>{selectedActorDefId=playerDefId;placeNewActor(3*TILE+16,(ROWS-3)*TILE-11);}");
+    await page.click("#modePlayBtn"); await page.waitForTimeout(1800);
+    ok(await ev(page, "()=>{const p=actors.find(a=>a.isPlayer);return !!p&&p.grounded&&p.y<(ROWS-3)*TILE;}"), `${w}x${h}: a placed hero stands on the grass`);
     ok(errors.length === 0, `${w}x${h}: no errors ${errors}`);
     await ctx.close();
   }
@@ -59,7 +55,7 @@ const open = async (b, vp, hash) => {
     await page.click("#undoBtn"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "undo removes the whole starter in one step");
     await page.click("#redoBtn"); await page.waitForTimeout(200);
-    ok(await ev(page, "()=>actors.length===6"), "redo brings it back");
+    ok(await ev(page, "()=>actors.length===0&&board[ROWS-1][0]==='solid:none'"), "redo brings it back");
     await page.click("#clearAllBtn"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "Clear board stays empty");
     // Play with no player: caption, flash, no mode change
@@ -136,6 +132,7 @@ const open = async (b, vp, hash) => {
   {
     const { ctx, page } = await open(browser, { width: 1366, height: 635 }, "");
     await page.click("#landingMakeBtn"); await page.waitForTimeout(300);
+    await ev(page, "()=>{selectedActorDefId=playerDefId;placeNewActor(3*TILE+16,(ROWS-3)*TILE-11);}");
     const [d] = await Promise.all([page.waitForEvent("download"), page.click("#exportBtn")]);
     const f = path.join(os.tmpdir(), "stage1_export.html"); await d.saveAs(f);
     const q = await ctx.newPage(); const errs = []; q.on("pageerror", e => errs.push(String(e)));

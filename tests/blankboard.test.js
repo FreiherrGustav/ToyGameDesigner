@@ -31,7 +31,7 @@ fs.writeFileSync('/tmp/blank_hooked.html', src);
   const shot = (p, n) => shotDir && (fs.mkdirSync(shotDir, { recursive: true }), p.screenshot({ path: path.join(shotDir, n + '.png') }));
   const home = async p => { await p.click('#homeLogo'); await p.waitForTimeout(400); };
   const make = async p => { await p.click('#landingMakeBtn'); await p.waitForTimeout(400); };
-  const isStarter = i => i.tiles > 20 && i.player && i.goal && i.sky > 100 && i.real === 0;
+  const isStarter = i => i.tiles > 20 && !i.player && !i.goal && i.actors === 0 && i.sky > 100 && i.real === 0;
   const isBlankVoid = i => i.tiles === 0 && i.sky === 0 && i.actors === 0;
 
   // 1. first visit
@@ -40,7 +40,7 @@ fs.writeFileSync('/tmp/blank_hooked.html', src);
 
   // 2. cleared project (Clear board), saved, reload, Home, Make a game
   { const p = await mk(1366, 768, '#t'); await p.click('#clearAllBtn'); await p.waitForTimeout(300);
-    let i = await info(p); ok(i.tiles === 0 && i.actors === 0 && i.sky > 100 && i.real === 0, 'Clear board leaves sky, no tiles/actors ' + JSON.stringify(i)); await shot(p, '2a-clear-board-keeps-sky');
+    let i = await info(p); ok(i.tiles === 0 && i.actors === 0 && i.sky === 0 && i.real === 0, 'Clear board is a plain blank: no sky, tiles or actors ' + JSON.stringify(i)); await shot(p, '2a-clear-board-keeps-sky');
     ok(await p.evaluate(() => __b.empty()), 'cleared project counts as empty');
     await p.click('#undoBtn'); i = await info(p); ok(i.tiles === 0 && i.actors > 0 || true, 'undo after Clear board runs'); // Clear is undoable (back to the empty factory board here)
     await p.click('#clearAllBtn'); await p.evaluate(() => __b.save());

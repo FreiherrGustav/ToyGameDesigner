@@ -58,7 +58,7 @@ const open = async (b, vp, hash, init) => {
     ({ ctx, page } = await open(browser, { width: 1280, height: 720 }, ""));
     await page.click("#landingMakeBtn");
     ok(await page.evaluate(() => !document.body.classList.contains("landing") && !document.body.classList.contains("play-mode")), "Make one: editor");
-    ok(await ev(page, "()=>actors.filter(a=>a.isPlayer).length===1&&board[ROWS-1][0]==='solid:none'&&board[ROWS-4][roomCols()-3]==='goal:none'&&gravityEnabled"), "Make one: the starter board (floor, player, goal, gravity)");
+    ok(await ev(page, "()=>actors.length===0&&board[ROWS-1][0]==='solid:none'&&!board.some(r=>r.some(c=>c&&c.startsWith('goal')))&&gravityEnabled"), "Make one: the starter board (grass strip, no hero, no flag, gravity)");
     await ctx.close();
     ({ ctx, page } = await open(browser, { width: 1280, height: 720 }, ""));
     await page.click("#landingSurpriseBtn");
