@@ -1726,6 +1726,7 @@
   let landingActive = false, landingFrozen = false;
   const APP_NAME = "TinyGameMaker"; // the one name constant (see also the static <head> tags)
   let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false; // Play key-hint pill (drawKeyHint): fades a few seconds after the first key, stays out for the session
+  let cloudDriftT0 = 0; // gameNow() when the current Play session began (clouds drift from here)
   let playReadyUntil = null; // null = not in a Ready pause; otherwise a gameNow() timestamp
   // v2.48 Stage 3: the game clock. Everything that decides what the simulation does next (fuses, the
   // READY! beat, room transitions, crush immunity, wander headings, death resets, delayed removals) is
@@ -2056,7 +2057,7 @@
     // Direct feedback: the action used to start the instant Play was pressed, giving a kid zero
     // time to get their bearings before e.g. Runner mode's camera starts closing in — the genre-
     // standard "READY!" beat (frame()'s own gating skips tick() entirely until this elapses).
-    playReadyUntil = gameNow() + READY_DURATION_MS;
+    playReadyUntil = gameNow() + READY_DURATION_MS; cloudDriftT0 = gameNow();
     syncChannelsToHotRoom();
     setCheckpoint();
     renderAll();
@@ -2116,7 +2117,7 @@
     digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
     spawnerRuntime = {}; channelStateSince = {}; switchTouchedCells = {};
     activateRoom(cp.roomId);
-    playReadyUntil = gameNow() + READY_DURATION_MS;
+    playReadyUntil = gameNow() + READY_DURATION_MS; cloudDriftT0 = gameNow();
     syncChannelsToHotRoom();
     log("Back to the start of this room.");
     return true;
@@ -2325,6 +2326,14 @@
   function artEquals(a, b) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((c, i) => c === b[i]);
   }
+  // A save holding the pre-drift cloud tile unedited gets the current one (sky underlay + drifting overlay); it looks identical while still.
+  function migrateLegacyCloud(bgDefs) {
+    const c = bgDefs && bgDefs["bgCloud"];
+    if (c && !c.overlay && artEquals(c.art, LEGACY_CLOUD_ART)) {
+      const p = BACKGROUND_PRESETS.find(q => q.id === "bgCloud");
+      c.art = p.art.slice(); c.overlay = p.overlay.slice();
+    }
+  }
   function migrateStaleFactoryArt(actorDefs) {
     const push = actorDefs[PUSHABLE_DEF_ID];
     if (push && push.name === "pushable" && artEquals(push.art, LEGACY_PUSHABLE_ART)) {
@@ -2399,6 +2408,7 @@
     });
     nextActorDefId = snap.nextActorDefId;
     backgroundTileDefs = structuredClone(snap.backgroundTileDefs);
+    migrateLegacyCloud(backgroundTileDefs);
     nextBackgroundId = snap.nextBackgroundId;
     customActorSlotIds = snap.customActorSlotIds.slice();
     nextCustomActorLetter = snap.nextCustomActorLetter;
@@ -3396,8 +3406,26 @@
     { name: "ground", art: pat([
       "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM",
       "MMM.MMM.", "MMM.MMM.", ".MMM.MMM", ".MMM.MMM"
-    ], { M: "#616161" }) }
+    ], { M: "#616161" }) },
+    // Sky and cloud: the single source for the starter board and new-door rooms too (ensureSkyBackdropDefs). A cloud tile is a
+    // sky underlay plus a transparent-surround `overlay` that drifts in Play (drawCloudOverlays); `id` makes the preset select
+    // that Paint tile instead of overwriting the selected one.
+    { id: "bgSky", name: "sky", art: pat([
+      "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4" }) },
+    { id: "bgCloud", name: "cloud", art: pat([
+      "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4" }),
+      overlay: pat([
+      "........", "........", "..WW....", ".WWWWW..", "WWWWWWW.", ".WWWWW..", "........", "........" ], { W: "#f4fbff" }) }
   ];
+  // the pre-drift cloud tile (sky and cloud baked into one picture); a save holding it unedited is upgraded on load
+  const LEGACY_CLOUD_ART = pat([
+    "BBBBBBBB", "BBBBBBBB", "BBWWBBBB", "BWWWWWBB", "WWWWWWWB", "BWWWWWBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4", W: "#f4fbff" });
+  const CLOUD_DRIFT_PX_S = 8;
+  // what a Paint tile looks like in a swatch / the pixel editor: its picture with any cloud overlay on top
+  function bgCompositeArt(def) {
+    if (!def || !def.overlay) return def.art;
+    return def.art.map((c, i) => def.overlay[i] || c);
+  }
 
   // ============== Built-in example games (v2.8, gallery in v2.16) ==============
   // Small, hand-authored starting points a kid can open straight into Build mode and immediately
@@ -4810,12 +4838,12 @@
       sw.title = def.name;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), def.art, ART);
+      drawArtToCtx(c.getContext("2d"), bgCompositeArt(def), ART);
       sw.appendChild(c);
       sw.addEventListener("click", () => {
         selectedBackgroundId = id;
         paintMode = "background";
-        currentArt = def.art.slice();
+        currentArt = bgCompositeArt(def).slice();
         updateModeButtons();
         renderAll();
       });
@@ -5702,9 +5730,17 @@
       sw.title = preset.name;
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), preset.poses ? preset.poses.stand : preset.art, ART);
+      drawArtToCtx(c.getContext("2d"), preset.poses ? preset.poses.stand : bgCompositeArt(preset), ART);
       sw.appendChild(c);
       sw.addEventListener("click", () => {
+        if (preset.id) { // sky / cloud: pick that Paint tile (created on demand) rather than overwriting the selected one
+          ensureSkyBackdropDefs();
+          selectedBackgroundId = preset.id; paintMode = "background";
+          currentArt = bgCompositeArt(backgroundTileDefs[preset.id]).slice();
+          updateModeButtons(); renderAll();
+          log("Picked \"" + preset.name + "\" - paint it anywhere.");
+          return;
+        }
         const def = currentSelectedDef();
         if (!def) return;
         if (paintMode === "actor" && preset.poses) {
@@ -5848,7 +5884,7 @@
   document.getElementById("modePaint").addEventListener("click", () => {
     activeTab = "paint";
     paintMode = "background";
-    currentArt = backgroundTileDefs[selectedBackgroundId].art.slice();
+    currentArt = bgCompositeArt(backgroundTileDefs[selectedBackgroundId]).slice();
     updateModeButtons(); renderAll();
   });
   document.getElementById("modeErase").addEventListener("click", () => {
@@ -5898,6 +5934,7 @@
       // redrawing an animated Paint tile collapses it to the single picture just drawn (same
       // "customizing simplifies it" rule animated ground skins follow)
       delete backgroundTileDefs[selectedBackgroundId].frames; delete backgroundTileDefs[selectedBackgroundId].frameMs;
+      delete backgroundTileDefs[selectedBackgroundId].overlay; // a redrawn cloud is a plain still picture
     } else if (paintMode === "tile" && selectedGroundSkinId) {
       // drawing on it collapses an animated built-in (lava/fire) to the single frame just drawn —
       // the same "customizing simplifies it" precedent a posed actor's art already follows above
@@ -11257,6 +11294,39 @@
     }
   }
 
+  // Clouds: a Paint tile with an `overlay` (transparent-surround cloud) is drawn here, in front of the Paint layer and behind tiles
+  // and actors. Still in Build; in Play it drifts right at CLOUD_DRIFT_PX_S (whole pixels, wrapping at the room's edge, game clock so
+  // Pause freezes it, still under reduced motion). A cloud pixel is only drawn over a sky or cloud cell, never across other Paint.
+  function cloudDriftOffset() {
+    if (appMode !== "play" || reducedMotion()) return 0;
+    return Math.floor(Math.max(0, gameNow() - cloudDriftT0) / 1000 * CLOUD_DRIFT_PX_S);
+  }
+  function drawCloudOverlays(ctx, bgBoard, tileOffPx, firstCol, lastCol, cell) {
+    const W = roomCols() * TILE;
+    if (!(W > 0)) return;
+    const off = cloudDriftOffset();
+    ctx.fillStyle = "#000";
+    let lastColor = null;
+    for (let y = 0; y < ROWS; y++) {
+      const row = bgBoard[y];
+      for (let bx = 0; bx < roomCols(); bx++) {
+        const def = row[bx] && backgroundTileDefs[row[bx]];
+        if (!def || !def.overlay) continue;
+        for (let py = 0; py < ART; py++) for (let px = 0; px < ART; px++) {
+          const c = def.overlay[py * ART + px];
+          if (!c) continue;
+          const wx = ((bx * TILE + px * cell + off) % W + W) % W; // world x of this cloud pixel
+          const dc = Math.floor(wx / TILE);
+          const under = row[dc];
+          if (under !== "bgSky" && under !== "bgCloud") continue;
+          const sx = wx - tileOffPx;
+          if (sx < -cell || sx > COLS * TILE) continue;
+          if (c !== lastColor) { ctx.fillStyle = c; lastColor = c; }
+          ctx.fillRect(sx, y * TILE + py * cell, cell, cell);
+        }
+      }
+    }
+  }
   function renderRoomContents(ctx, boardArg, backgroundBoardArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
@@ -11276,16 +11346,24 @@
     const tileOffPx = Math.round(viewOffsetPx);
     const rowLen = boardArg[0] ? boardArg[0].length : 0;
 
+    // Paint layer first (all of it), then drifting clouds over sky only, then tiles and actors on top.
+    for (let y = 0; y < ROWS; y++) {
+      for (let bx = firstCol; bx <= lastCol; bx++) {
+        if (bx >= rowLen) continue;
+        const bgId = backgroundBoardArg[y][bx];
+        if (bgId && backgroundTileDefs[bgId]) {
+          const savedViewK = artViewK; artViewK = 0; // scenery turns with the room; it is only objects that stay upright
+          drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), bx * TILE - tileOffPx, y * TILE, TILE, cell);
+          artViewK = savedViewK;
+        }
+      }
+    }
+    drawCloudOverlays(ctx, backgroundBoardArg, tileOffPx, firstCol, lastCol, cell);
+
     for (let y = 0; y < ROWS; y++) {
       for (let bx = firstCol; bx <= lastCol; bx++) {
         if (bx >= rowLen) continue;
         const screenX = bx * TILE - tileOffPx;
-        const bgId = backgroundBoardArg[y][bx];
-        if (bgId && backgroundTileDefs[bgId]) {
-          const savedViewK = artViewK; artViewK = 0; // scenery turns with the room; it is only objects that stay upright
-          drawArtScaled(ctx, currentBackgroundArt(backgroundTileDefs[bgId]), screenX, y * TILE, TILE, cell);
-          artViewK = savedViewK;
-        }
 
         const key = bx + "," + y;
         const tanim = isLive ? tileAnimState[key] : null;
@@ -13463,10 +13541,11 @@
   const SKY_BG_ID = "bgSky", CLOUD_BG_ID = "bgCloud";
   function isRealBackground(id) { return !!id && id !== SKY_BG_ID && id !== CLOUD_BG_ID; }
   function ensureSkyBackdropDefs() {
-    if (!backgroundTileDefs[SKY_BG_ID]) backgroundTileDefs[SKY_BG_ID] = { name: "sky", art: pat([
-      "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4" }) };
-    if (!backgroundTileDefs[CLOUD_BG_ID]) backgroundTileDefs[CLOUD_BG_ID] = { name: "cloud", art: pat([
-      "BBBBBBBB", "BBBBBBBB", "BBWWBBBB", "BWWWWWBB", "WWWWWWWB", "BWWWWWBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4", W: "#f4fbff" }) };
+    BACKGROUND_PRESETS.forEach(p => {
+      if (!p.id || backgroundTileDefs[p.id]) return;
+      backgroundTileDefs[p.id] = { name: p.name, art: p.art.slice() };
+      if (p.overlay) backgroundTileDefs[p.id].overlay = p.overlay.slice();
+    });
   }
   // sky everywhere in the first COLS columns; a deterministic scatter of clouds in the upper rows (rows 1-6)
   function paintSkyBackdrop(bgBoard, cols, rowsBelow) {
@@ -13995,7 +14074,7 @@
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
-      currentSkinFrame, currentBackgroundArt,
+      currentSkinFrame, currentBackgroundArt, cloudDriftOffset, drawCloudOverlays,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, exchangeAlong, actorMass, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
@@ -14126,7 +14205,7 @@
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
-      `const READY_DURATION_MS = ${READY_DURATION_MS};`,
+      `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
@@ -14254,6 +14333,7 @@
   let lives = DEFAULT_LIVES;
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
+  let cloudDriftT0 = 0;
   let playReadyUntil = null;
   let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false;
   let gameClockMs = 0, gameTimers = [], gameTimerMap = new Map(), gameTimerSeq = 1, gamePaused = false, buildPausedMemory = false; // the game clock + pause (see the editor's matching block)
@@ -14282,7 +14362,7 @@
   activateRoom(playerRoomId);
   syncChannelsToHotRoom();
   setCheckpoint();
-  playReadyUntil = gameNow() + READY_DURATION_MS;
+  playReadyUntil = gameNow() + READY_DURATION_MS; cloudDriftT0 = gameNow();
   renderPlayHUD();
 
   // No Build/Play toggle exists in this standalone export, so the win/game-over overlay's
@@ -14315,7 +14395,7 @@
     clearGameTimers();
     levelResetTimer = null; levelResetPending = false;
     setGamePaused(false);
-    playReadyUntil = gameNow() + READY_DURATION_MS;
+    playReadyUntil = gameNow() + READY_DURATION_MS; cloudDriftT0 = gameNow();
     currentRoomId = null;
     grabKeyDownAt = null;
     activateRoom(playerRoomId);
