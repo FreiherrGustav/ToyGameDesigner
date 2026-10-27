@@ -168,7 +168,7 @@
     border: 2px solid transparent;
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     text-align: center;
     color: #fff;
     line-height: 1.1;
@@ -204,7 +204,7 @@
   .rulesRow { display: flex; align-items: flex-end; gap: 10px; }
   .rulesGroup { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .rulesGroup .swatch-row { flex-wrap: nowrap; }
-  .rulesLbl { font-size: 10px; color: #9aa0b4; white-space: nowrap; }
+  .rulesLbl { font-size: 11px; color: #9aa0b4; white-space: nowrap; }
   .rulesRow .swatch-row { flex: none; gap: 4px; }
   .rulesSep { width: 1px; align-self: stretch; background: #2a2c3a; }
   .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
@@ -367,7 +367,7 @@
     #placeTabs button { font-size: 12px; padding: 10px 2px; }
     .swatch { width: 52px; height: 52px; }
     .swatch canvas { width: 40px; height: 40px; }
-    .swatch .lbl { font-size: 10px; }
+    .swatch .lbl { font-size: 12px; }
     .swatch.big { width: 66px; height: 66px; }
     .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 40px; height: 40px; }
     .swatch.chip canvas { width: 32px; height: 32px; }
@@ -539,9 +539,20 @@
     #gameWrap #buildToolbar button.tbtn.quiet:hover { background: #b3261e; color: #fff; border-color: #b3261e; }
   #gameWrap #buildToolbar #exportBtn { background: transparent; color: var(--accent); border-color: var(--accent); }
   #gameWrap #buildToolbar #exportBtn:hover { background: var(--accent); color: #222; }
+  /* stage 4: pixel-style chrome icons (8x8 art as inline SVG, colour follows the button text) */
+  .ic, .pxi { display: inline-flex; vertical-align: middle; align-items: center; }
+  .ic svg, .pxi svg { width: 16px; height: 16px; shape-rendering: crispEdges; fill: currentColor; }
+  #buildToolbar .ic { margin-right: 5px; }
+  #buildToolbar.short .ic { margin-right: 3px; }
+  #buildToolbar.short .ic svg { width: 14px; height: 14px; }
+  #buildToolbar.short { gap: 6px 6px; }
+  #buildToolbar.short .tgroup { gap: 3px; }
+  #buildToolbar.short .tgroup + .tgroup { padding-left: 6px; }
+  #pauseBtn .pxi svg { width: 18px; height: 18px; }
+  #pauseBtn .pl { margin-left: 4px; }
   #buildToolbar .ls { display: none; }
-  #buildToolbar.short .ic { display: none; }
-  #buildToolbar.short .lf { display: none; } #buildToolbar.short .ls { display: inline; } #gameWrap #buildToolbar.short button.tbtn { padding: 4px 8px; }
+  #buildToolbar.short .ic { display: inline-flex; }
+  #buildToolbar.short .lf { display: none; } #buildToolbar.short .ls { display: inline; } #gameWrap #buildToolbar.short button.tbtn { padding: 4px 5px; font-size: 12px; }
   /* room strip: tabs centred over the board; a tab and its close mark are one piece; Duplicate is a ghost button */
   #gameWrap #statusRow { justify-content: center !important; width: 100%; max-width: var(--stageW, none); align-self: center; min-height: 28px; font-size: 14px; }
   #statusRow #roomTabRow { justify-content: safe center; gap: 6px; }
@@ -558,9 +569,11 @@
   body.play-mode #statusRow { justify-content: flex-start !important; }
   #gameWrap #statusRow { position: relative; }
   #statusRow.hasStepper #roomTabRow { margin: 0 100px; }
-  #sizeStepper { position: absolute; right: 0; top: 50%; transform: translateY(-50%); align-items: center; gap: 4px; font-size: 12px; color: #aab; }
+  #sizeStepper { position: absolute; right: 0; top: 50%; transform: translateY(-50%); align-items: center; gap: 4px; font-size: 13px; color: #e6e8f2; }
   #sizeStepper #sizeLabel { min-width: 34px; text-align: center; }
-  #gameWrap #sizeStepper button.tbtn { padding: 0 8px; min-height: 22px; font-size: 14px; line-height: 1; }
+  #gameWrap #sizeStepper button.tbtn { padding: 0 9px; min-height: 22px; font-size: 16px; font-weight: bold; line-height: 1; color: #fff; background: #4a4e6a; border: 1px solid #6c7194; }
+  #gameWrap #sizeStepper button.tbtn:hover:not(:disabled) { border-color: var(--accent); }
+  #gameWrap #sizeStepper button.tbtn:disabled { opacity: 0.45; }
   body.play-mode #statusRow.hasStepper #roomTabRow { margin: 0; }
   /* pan controls: a slim row under the board (Follow/Runner rooms, Build only) */
   #gameWrap #cameraPanRow { justify-content: center; gap: 10px; flex: none; }
@@ -643,7 +656,7 @@
       <button id="modePlayBtn">▶ Play</button>
     </div>
     <div id="topBarRight">
-      <button id="pauseBtn" title="Pause or resume the game (P)">⏸<span class="pl"> Pause</span></button>
+      <button id="pauseBtn" title="Pause or resume the game (P)"><span class="pxi" data-px="pause"></span><span class="pl"> Pause</span></button>
       <div id="topBarActions">
         <button id="samplesBtn" title="Browse sample games">🎮 Samples</button>
         <button id="surpriseBtn" title="Surprise me" aria-label="Surprise me">🎲</button>
@@ -811,19 +824,19 @@
     <canvas id="landingBackdrop" width="64" height="48" aria-hidden="true"></canvas>
     <div class="toolbar" id="buildToolbar">
       <div class="tgroup" id="grpHistory">
-        <button class="tbtn" id="undoBtn" title="Undo" disabled><span class="ic">↩ </span>Undo</button>
-        <button class="tbtn" id="redoBtn" title="Redo" disabled><span class="ic">↪ </span>Redo</button>
+        <button class="tbtn" id="undoBtn" title="Undo" disabled><span class="ic" data-px="undo"></span>Undo</button>
+        <button class="tbtn" id="redoBtn" title="Redo" disabled><span class="ic" data-px="redo"></span>Redo</button>
       </div>
       <div class="tgroup" id="grpBoard">
-        <button class="tbtn" id="resetBtn" title="Reset to start"><span class="ic">↺ </span><span class="lf">Reset to start</span><span class="ls">Reset</span></button>
-        <button class="tbtn quiet" id="clearAllBtn" title="Clear board"><span class="ic">🗑 </span><span class="lf">Clear board</span><span class="ls">Clear</span></button>
+        <button class="tbtn" id="resetBtn" title="Reset to start"><span class="ic" data-px="reset"></span><span class="lf">Reset to start</span><span class="ls">Reset</span></button>
+        <button class="tbtn quiet" id="clearAllBtn" title="Clear board"><span class="ic" data-px="clear"></span><span class="lf">Clear board</span><span class="ls">Clear</span></button>
       </div>
       <div class="tgroup" id="grpProject">
-        <button class="tbtn quiet" id="newProjectBtn" title="New project"><span class="ic">🆕 </span><span class="lf">New project</span><span class="ls">New</span></button>
-        <button class="tbtn" id="saveProjectBtn" title="Save project"><span class="ic">💾 </span><span class="lf">Save project</span><span class="ls">Save</span></button>
-        <button class="tbtn" id="loadProjectBtn" title="Load project"><span class="ic">📂 </span><span class="lf">Load project</span><span class="ls">Load</span></button>
+        <button class="tbtn quiet" id="newProjectBtn" title="New project"><span class="ic" data-px="new"></span><span class="lf">New project</span><span class="ls">New</span></button>
+        <button class="tbtn" id="saveProjectBtn" title="Save project"><span class="ic" data-px="save"></span><span class="lf">Save project</span><span class="ls">Save</span></button>
+        <button class="tbtn" id="loadProjectBtn" title="Load project"><span class="ic" data-px="load"></span><span class="lf">Load project</span><span class="ls">Load</span></button>
         <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
-        <button class="tbtn" id="exportBtn" title="Export game"><span class="ic">⬇ </span><span class="lf">Export game</span><span class="ls">Export</span></button>
+        <button class="tbtn" id="exportBtn" title="Export game"><span class="ic" data-px="export"></span><span class="lf">Export game</span><span class="ls">Export</span></button>
       </div>
     </div>
     <div class="toolbar" id="statusRow">
@@ -10906,11 +10919,32 @@
     document.getElementById("samplesModalOverlay").style.display = "none";
   }
   document.getElementById("samplesBtn").addEventListener("click", openSamplesModal);
+  // stage 4: pixel-style chrome icons. "#" = filled; colour comes from the button text (fill: currentColor).
+  const PX_ICON_ROWS = {
+    undo:   [".#......", "##......", "######..", "##....#.", ".#.....#", ".......#", "......#.", ".####..."],
+    reset:  ["#.....#.", "#....##.", "#...###.", "#..####.", "#...###.", "#....##.", "#.....#.", "........"],
+    clear:  ["..###...", "########", ".#####..", ".#.#.#..", ".#.#.#..", ".#.#.#..", ".#####..", "........"],
+    new:    [".#####..", ".#...##.", ".#....#.", ".#....#.", ".#....#.", ".#....#.", ".######.", "........"],
+    save:   ["#######.", "#.###.##", "#.###.##", "#.....##", "#.....##", "#.###.##", "#.###.##", "########"],
+    load:   ["###.....", "#.#.....", "########", "#......#", "#......#", "#......#", "########", "........"],
+    export: ["...##...", "...##...", ".######.", "..####..", "...##...", "........", "#......#", "########"],
+    pause:  ["........", ".##..##.", ".##..##.", ".##..##.", ".##..##.", ".##..##.", ".##..##.", "........"],
+    play:   ["........", ".#......", ".###....", ".#####..", ".#####..", ".###....", ".#......", "........"]
+  };
+  PX_ICON_ROWS.redo = PX_ICON_ROWS.undo.map(r => r.split("").reverse().join(""));
+  function pxIconSVG(name) {
+    const rows = PX_ICON_ROWS[name];
+    if (!rows) return "";
+    let r = "";
+    rows.forEach((row, y) => { for (let x = 0; x < 8; x++) if (row[x] === "#") r += "<rect x=\"" + x + "\" y=\"" + y + "\" width=\"1\" height=\"1\"/>"; });
+    return "<svg viewBox=\"0 0 8 8\" aria-hidden=\"true\">" + r + "</svg>";
+  }
+  document.querySelectorAll("[data-px]").forEach(el => { el.innerHTML = pxIconSVG(el.getAttribute("data-px")); });
   function updatePauseButton() {
     const b = document.getElementById("pauseBtn");
     if (!b) return;
     b.classList.toggle("on", gamePaused);
-    b.innerHTML = gamePaused ? "▶<span class=\"pl\"> Resume</span>" : "⏸<span class=\"pl\"> Pause</span>";
+    b.innerHTML = "<span class=\"pxi\">" + pxIconSVG(gamePaused ? "play" : "pause") + "</span><span class=\"pl\"> " + (gamePaused ? "Resume" : "Pause") + "</span>";
     b.title = (gamePaused ? "Resume the game" : "Pause the game") + " (P)";
   }
   document.getElementById("pauseBtn").addEventListener("click", () => { if (landingActive || (appMode === "play" && playSessionEnded)) return; togglePause(); });
