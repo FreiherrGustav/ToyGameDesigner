@@ -11557,6 +11557,47 @@
     return shown;
   }
 
+  // Idle life, a pure drawing rule keyed to what the actor is doing (never stored on a def, so old saves and kid-drawn art behave alike).
+  // Returns null or { stretch (extra px of height, feet fixed), sx, sy, oyPx, sparkle }.
+  const IDLE_BREATH_STEPS = [0, 1, 2, 1], IDLE_BREATH_MS = 240;
+  function idleLifeFor(actor, def, now, kLocal) {
+    if (reducedMotion() || actor.carried || actor.destroyed || actor.squashed || actor.cannonLoad) return null;
+    if (def.temperament === "collectible") {
+      const ph = actor.id * 337;
+      if (actor.defId === "colCoin") return { sx: Math.max(0.25, Math.round(Math.abs(Math.cos(now / 260)) * 4) / 4) };
+      if (actor.defId === "colGem") {
+        const q = (now + ph) % 1500;
+        return { oyPx: 0, sparkle: q < 420 ? [0, 1, 2, 1][Math.floor(q / 105)] : 0 };
+      }
+      if (actor.defId === "colHeart") return { sx: [1, 1.0625, 1.125, 1.0625][Math.floor((now + ph) / 150) % 4], sy: [1, 1.0625, 1.125, 1.0625][Math.floor((now + ph) / 150) % 4], oyPx: 0 };
+      return { oyPx: -[0, 1, 2, 1][Math.floor((now + ph) / 260) % 4] }; // anything else, kid-made included: a small float
+    }
+    if (appMode !== "play") return null; // breathing is Play only
+    const standing = actor.isPlayer || def.temperament === "stationary" || isSteeringCharacter(def.temperament);
+    if (!standing || !actor.grounded || actor.jumpCrouch > 0 || actor.displacedCooldown > 0 || impactWobbleValue(actor) !== 0) return null;
+    if (Math.hypot(actor.vx, actor.vy) >= 8) return null;
+    const step = IDLE_BREATH_STEPS[Math.floor((now + actor.id * 211) / IDLE_BREATH_MS) % 4];
+    return step ? { stretch: step } : null;
+  }
+  // Same picture as drawArtScaled but the middle row is `extra` px taller and the feet stay put (crisp whole pixels).
+  const IDLE_STRETCH_ROW = 4;
+  function drawArtStretched(ctx, art, dx, dy, cellSize, extra) {
+    for (let y = 0; y < ART; y++) {
+      const top = dy + y * cellSize - (y < IDLE_STRETCH_ROW ? extra : 0);
+      const h = cellSize + (y === IDLE_STRETCH_ROW ? extra : 0);
+      for (let x = 0; x < ART; x++) {
+        const color = art[y * ART + x];
+        if (color) { ctx.fillStyle = color; ctx.fillRect(dx + x * cellSize, top, cellSize + 0.5, h + 0.5); }
+      }
+    }
+  }
+  // a small white plus near the top right of the picture; arm length 0 draws nothing
+  function drawSparkle(ctx, arm) {
+    if (!arm) return;
+    ctx.fillStyle = "#ffffff";
+    const cx = 4, cy = -18, a = arm * 2;
+    ctx.fillRect(cx, cy, 2, 2); ctx.fillRect(cx - a, cy, a, 2); ctx.fillRect(cx + 2, cy, a, 2); ctx.fillRect(cx, cy - a, 2, a); ctx.fillRect(cx, cy + 2, 2, a);
+  }
   function renderActors(ctx, actorsArg, viewOffsetPx) {
     viewOffsetPx = viewOffsetPx || 0;
     const cell = TILE / ART;
@@ -11615,11 +11656,13 @@
         // v2.15: an idle "spin" for defs that opt in (see COIN_ART) — reuses this same continuous
         // horizontal-scale channel rather than a real multi-frame sprite, squashing width down to
         // a sliver and back to fake a coin turning edge-on, the way the reference GIF's frames did.
-        if (def.spin) sx *= Math.max(0.15, Math.abs(Math.cos(now / 260)));
-        // idle: a standing-still character (opt-in per def, set on the starter hero) slowly breathes - a few percent taller and back
-        if (def.idle && actor.grounded && Math.abs(sv.x) < 8 && !reducedMotion()) { const b = 0.5 + 0.5 * Math.sin(now / 380); sy *= 1 + 0.06 * b; sx *= 1 - 0.025 * b; }
+        // (the coin's spin and the other idle life are a render rule below, idleLifeFor, for every kind of art)
         t = { sx, sy, rot: lean, ox: 0, oy: 0, alpha: 1 };
       }
+      // Idle life (drawing only, any art, nothing stored on the def): a standing character breathes (Play), collectibles twirl,
+      // sparkle, pulse or float. Whole-pixel steps so the art stays crisp.
+      const life = idleLifeFor(actor, def, now, kLocal);
+      if (life) { if (life.sx) t.sx *= life.sx; if (life.sy) t.sy *= life.sy; t.oy += life.oyPx / TILE; }
       // v2.16: art is authored facing right by default — mirror it when the actor's last real
       // movement was leftward, so a side-facing character (hero/princess/ghost, but harmless for
       // the roughly-symmetric blob archetypes too) always faces the way it's actually going.
@@ -11708,7 +11751,9 @@
       // a full tile), drawn with its feet flush with the hitbox's feet so it never sinks into the floor.
       // That leaves it sticking out ~5px at each side and ~10px above the box; a picture resting on another
       // actor is shifted away from gravity by that overlap (actorLiftShown, applied just above), drawing only.
-      drawArtScaled(ctx, art, -ACTOR_DRAW / 2, -ACTOR_DRAW / 2 - (ACTOR_DRAW - ACTOR_SIZE) / 2, ACTOR_DRAW, ACTOR_DRAW / ART);
+      if (life && life.stretch) drawArtStretched(ctx, art, -ACTOR_DRAW / 2, -ACTOR_DRAW / 2 - (ACTOR_DRAW - ACTOR_SIZE) / 2, ACTOR_DRAW / ART, life.stretch);
+      else drawArtScaled(ctx, art, -ACTOR_DRAW / 2, -ACTOR_DRAW / 2 - (ACTOR_DRAW - ACTOR_SIZE) / 2, ACTOR_DRAW, ACTOR_DRAW / ART);
+      if (life && life.sparkle) drawSparkle(ctx, life.sparkle);
       artCacheOff--;
       artViewK = savedViewK;
       ctx.restore();
@@ -13569,7 +13614,6 @@
     selectedActorDefId = playerDefId;
     placeNewActor(2 * TILE + TILE / 2, grassRow * TILE - ACTOR_SIZE / 2);
     selectedActorDefId = saved;
-    if (actorDefs[playerDefId]) actorDefs[playerDefId].idle = true; // the hero breathes while standing still (renderActors)
     snapshotCurrentRoomState();
     renderAll();
     log("Here's a little starter: walk to the flag, or change anything.");
@@ -14074,7 +14118,7 @@
       overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
-      currentSkinFrame, currentBackgroundArt, cloudDriftOffset, drawCloudOverlays,
+      currentSkinFrame, currentBackgroundArt, cloudDriftOffset, drawCloudOverlays, idleLifeFor, drawArtStretched, drawSparkle,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, exchangeAlong, actorMass, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
@@ -14206,6 +14250,7 @@
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S};`,
+      `const IDLE_BREATH_STEPS = ${JSON.stringify(IDLE_BREATH_STEPS)}, IDLE_BREATH_MS = ${IDLE_BREATH_MS}, IDLE_STRETCH_ROW = ${IDLE_STRETCH_ROW};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
