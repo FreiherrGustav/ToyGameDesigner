@@ -15,7 +15,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
   const ev = f => page.evaluate(x => window.__ev(x), f);
   // a stage: starter board, a kid-drawn character, coin, gem, heart, a kid-made collectible
-  await ev(`(()=>{ suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false; loadStarterBoard();
+  await ev(`(()=>{ suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false; loadStarterBoard();selectedActorDefId=playerDefId;placeNewActor(2*TILE+16,(ROWS-3)*TILE-11);
     const art=new Array(64).fill(null); for(let y=1;y<8;y++)for(let x=2;x<6;x++)art[y*8+x]="#aa44cc"; art[2*8+3]="#ffffff"; art[2*8+5]="#ffffff";
     const id="kidChar"; actorDefs[id]={temperament:"wanderer",name:"kid",poses:null,art,lethal:false};
     const cart=new Array(64).fill(null); for(let y=2;y<7;y++)for(let x=2;x<6;x++)cart[y*8+x]="#33cc66"; actorDefs.kidCol={temperament:"collectible",name:"kid thing",poses:null,art:cart};

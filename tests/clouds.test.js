@@ -61,7 +61,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   // old save: legacy cloud loads, looks identical when still
   const legacy = await ev(`(()=>{
     suppressHistory=true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory=false;
-    loadStarterBoard(); const snap=captureProjectSnapshot();
+    loadStarterBoard();selectedActorDefId=playerDefId;placeNewActor(2*TILE+16,(ROWS-3)*TILE-11); const snap=captureProjectSnapshot();
     const s=structuredClone(snap); s.backgroundTileDefs.bgCloud={name:"cloud",art:LEGACY_CLOUD_ART.slice()}; delete s.backgroundTileDefs.bgCloud.overlay;
     renderGame(); const c=document.getElementById("gameCanvas"); const g=c.getContext("2d");
     const before=g.getImageData(0,0,c.width,c.height).data.slice();
@@ -79,7 +79,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   ok(same, "starter defs come from presets");
   ok(await ev(`(()=>{const b=[[ "bgSky","bgCloud",null ]]; return !isRealBackground("bgSky")&&!isRealBackground("bgCloud")&&isRealBackground("bg1")})()`), "isRealBackground unchanged");
   // export
-  await ev(`(()=>{suppressHistory=true;restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT));suppressHistory=false;loadStarterBoard();})()`);
+  await ev(`(()=>{suppressHistory=true;restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT));suppressHistory=false;loadStarterBoard();selectedActorDefId=playerDefId;placeNewActor(2*TILE+16,(ROWS-3)*TILE-11);})()`);
   const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#exportBtn")]);
   const f = path.join(os.tmpdir(), "clouds_export.html"); await dl.saveAs(f);
   const html = fs.readFileSync(f, "utf8");
