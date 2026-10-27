@@ -455,13 +455,24 @@
     background: rgba(12, 12, 20, 0.66); overflow-y: auto; padding: 16px; }
   body.landing #landing { display: flex; }
   /* the real canvas becomes the backdrop: centered, 4:3 kept; 75% of full-cover zoom (never smaller than fits), cropped never stretched */
-  body.landing #topBar, body.landing #paletteWrap, body.landing #gameWrap > :not(#gameCanvas) { display: none !important; }
+  body.landing #topBar, body.landing #paletteWrap, body.landing #gameWrap > :not(#gameCanvas):not(#landingBackdrop) { display: none !important; }
   body.landing #app { padding: 0; }
   body.landing #gameWrap { position: fixed; inset: 0; padding: 0; background: #000; overflow: hidden; z-index: 1; }
   body.landing #gameCanvas { position: absolute !important; left: 50%; top: 50%; transform: translate(-50%, -50%) !important;
-    width: max(min(100vw, 133.34vh), 0.75 * max(100vw, 133.34vh)) !important; height: auto !important; aspect-ratio: 4 / 3; border: 0 !important; border-radius: 0; }
+    width: max(min(100vw, 133.34vh), 0.75 * max(100vw, 133.34vh)) !important; height: auto !important; aspect-ratio: 4 / 3; border: 0 !important; border-radius: 0;
+    /* no hard edge: the demo fades into a blurred copy of itself (#landingBackdrop), so the window never shows black bars */
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent), linear-gradient(to bottom, transparent, #000 7%, #000 93%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent), linear-gradient(to bottom, transparent, #000 7%, #000 93%, transparent);
+    -webkit-mask-composite: source-in; mask-composite: intersect; }
+  #landingBackdrop { display: none; }
+  body.landing #landingBackdrop { display: block; position: absolute; inset: -4%; width: 108%; height: 108%; object-fit: cover; image-rendering: auto; /* 64x48 stretched with smoothing is already soft: no per-frame blur filter (slow on Chromebooks) */ }
   #landing { align-items: stretch; justify-content: flex-start; padding: 0;
-    background: linear-gradient(90deg, rgba(10,10,18,0.9) 0%, rgba(10,10,18,0.72) 38%, rgba(10,10,18,0.15) 75%, rgba(10,10,18,0.05) 100%); }
+    background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.6) 34%, rgba(10,10,18,0) 66%, rgba(10,10,18,0) 100%); }
+  /* a text-free row of sample icons (hover/focus shows the name): one click plays that sample */
+  #landingSamples { position: absolute; right: 24px; bottom: 96px; display: flex; gap: 10px; }
+  #landingSamples button { width: 64px; height: 64px; padding: 4px; border-radius: 10px; cursor: pointer; background: rgba(20,21,30,0.55); border: 2px solid rgba(255,255,255,0.45); }
+  #landingSamples button:hover, #landingSamples button:focus-visible { background: rgba(20,21,30,0.8); border-color: var(--accent); transform: translateY(-2px); }
+  #landingSamples canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; border-radius: 6px; }
   #landingPanel { position: relative; width: 100%; min-height: 100%; box-sizing: border-box; padding: 6vh 6vw 64px;
     display: flex; flex-direction: column; justify-content: center; align-items: flex-start; text-align: left; }
   #landingPanel > .top, #landingPanel > .main { max-width: 440px; width: 100%; }
@@ -492,6 +503,7 @@
     #landingPanel { padding: 72px 20px 110px; justify-content: flex-start; }
     #landingNow { top: 12px; right: 12px; left: 12px; text-align: center; }
     #landingKeys { display: none; }
+    #landingSamples { left: 20px; right: 20px; bottom: 70px; justify-content: center; flex-wrap: wrap; }
     #landingFoot { left: 20px; } #landingBest { right: 20px; }
   }
 
@@ -654,6 +666,7 @@
     <div id="landingTrust">Free. No account. Nothing leaves your browser.</div>
     </div>
     <div id="landingNow">Now playing: <span id="landingNowName"></span> · <button id="landingTakeApartBtn">Take it apart ↗</button></div>
+    <div id="landingSamples" role="group" aria-label="Play a sample game"></div>
     <div id="landingKeys">← ↑ ↓ → or WASD move · Space jump · E grab</div>
     <div id="landingFoot"><a id="landingCredits" href="#" hidden>Credits</a><a id="landingPrivacy" href="#">Privacy</a><a id="landingContact" href="#">Contact</a></div>
     <div id="landingBest">Best on a computer or Chromebook</div>
@@ -795,6 +808,7 @@
 
   <!-- Game / Editor canvas -->
   <div class="panel" id="gameWrap">
+    <canvas id="landingBackdrop" width="64" height="48" aria-hidden="true"></canvas>
     <div class="toolbar" id="buildToolbar">
       <div class="tgroup" id="grpHistory">
         <button class="tbtn" id="undoBtn" title="Undo" disabled><span class="ic">↩ </span>Undo</button>
@@ -3421,6 +3435,8 @@
   const LEGACY_CLOUD_ART = pat([
     "BBBBBBBB", "BBBBBBBB", "BBWWBBBB", "BWWWWWBB", "WWWWWWWB", "BWWWWWBB", "BBBBBBBB", "BBBBBBBB" ], { B: "#8fd3f4", W: "#f4fbff" });
   const CLOUD_DRIFT_PX_S = 8;
+  // Paint tiles a cloud may be drawn over: the plain sky, the cloud tile's own sky, and the starter board's paler horizon bands
+  const SKY_CLIP_IDS = ["bgSky", "bgCloud", "bgSky2", "bgSky3", "bgSky4"];
   // what a Paint tile looks like in a swatch / the pixel editor: its picture with any cloud overlay on top
   function bgCompositeArt(def) {
     if (!def || !def.overlay) return def.art;
@@ -11318,7 +11334,7 @@
           const wx = ((bx * TILE + px * cell + off) % W + W) % W; // world x of this cloud pixel
           const dc = Math.floor(wx / TILE);
           const under = row[dc];
-          if (under !== "bgSky" && under !== "bgCloud") continue;
+          if (!SKY_CLIP_IDS.includes(under)) continue;
           const sx = wx - tileOffPx;
           if (sx < -cell || sx > COLS * TILE) continue;
           if (c !== lastColor) { ctx.fillStyle = c; lastColor = c; }
@@ -11436,13 +11452,16 @@
     // camera that ever moved (Fixed always 0, Build's editorPanCol always a whole tile) kept the
     // grid trivially aligned; a genuinely sub-tile camera position would otherwise show the grid
     // visibly drifting out of sync with the tiles it's supposed to outline.
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.lineWidth = 1;
-    for (let bx = firstCol; bx <= lastCol; bx++) {
-      const sx = bx * TILE - Math.round(viewOffsetPx);
-      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, ROWS * TILE); ctx.stroke();
+    // (the editing grid is an editor aid: it is not drawn in Play, the landing demo or an exported game)
+    if (appMode === "build") {
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth = 1;
+      for (let bx = firstCol; bx <= lastCol; bx++) {
+        const sx = bx * TILE - Math.round(viewOffsetPx);
+        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, ROWS * TILE); ctx.stroke();
+      }
+      for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
     }
-    for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(COLS * TILE, y * TILE); ctx.stroke(); }
   }
 
   // viewOffsetPx (real board pixels, defaults to 0) is subtracted from every actor's true board
@@ -13530,6 +13549,17 @@
   const PRIVACY_URL = ""; // PLACEHOLDER: set to the privacy page before launch
   const CONTACT_URL = ""; // PLACEHOLDER: set to a mailto: or contact page before launch
   let landingSaved = null, landingHadWork = false, landingHero = null;
+  // The landing demo keeps its size but never shows black bars: a tiny canvas is refreshed from the live game every frame and
+  // stretched (blurred by CSS) over the whole window behind it, and the demo fades into it at its edges.
+  const LANDING_PICKS = ["crossing-guard", "rock-bottom", "the-gravity-switcheroo", "sushi-train-panic", "dungeon-diving", "the-world-s-worst-elevator"];
+  let landingBackdropRaf = 0;
+  function landingBackdropLoop() {
+    landingBackdropRaf = 0;
+    if (!landingActive) return;
+    const b = document.getElementById("landingBackdrop");
+    if (b) { const c = b.getContext("2d"); c.imageSmoothingEnabled = true; c.drawImage(gameCanvas, 0, 0, b.width, b.height); }
+    landingBackdropRaf = requestAnimationFrame(landingBackdropLoop);
+  }
   function landingProjectHasWork(snapJSON) {
     try { return snapJSON !== JSON.stringify(FACTORY_DEFAULT_SNAPSHOT); } catch (e) { return true; }
   }
@@ -13546,6 +13576,7 @@
     landingActive = true;
     landingFrozen = false;
     document.body.classList.add("landing");
+    if (!landingBackdropRaf) landingBackdropRaf = requestAnimationFrame(landingBackdropLoop);
     document.getElementById("landingNowName").textContent = landingHero.name;
     try {
       loadExampleGame(landingHero.builder, landingHero.name, { skipConfirm: true });
@@ -13584,20 +13615,39 @@
   // Default backdrop for the starter board and rooms made by a new door: a plain sky (with a few clouds) painted on the
   // Paint layer. It is ordinary Paint, but counts as "empty" for every is-this-room-blank check (isRealBackground).
   const SKY_BG_ID = "bgSky", CLOUD_BG_ID = "bgCloud";
-  function isRealBackground(id) { return !!id && id !== SKY_BG_ID && id !== CLOUD_BG_ID; }
+  // Starter-board scenery on the Paint layer: paler sky toward the horizon, two hills and a bush. Pure decoration, and like sky/cloud it
+  // counts as "empty" (isRealBackground), so blank-room checks, the tutorial and Surprise Me placement never see it.
+  const STARTER_SKY_BANDS = [["bgSky2", "#a6dcf6", 7, 9], ["bgSky3", "#bfe7f8", 10, 12], ["bgSky4", "#d6f0fa", 13, 14]];
+  const STARTER_HORIZON = "#d6f0fa";
+  function starterHillArt(heights) { // 8 column heights (1-8 px of green from the bottom) over the horizon sky
+    const a = new Array(64).fill(STARTER_HORIZON);
+    for (let c = 0; c < 8; c++) for (let r = 8 - heights[c]; r < 8; r++) a[r * 8 + c] = r === 8 - heights[c] ? "#9bd68f" : "#6fbf68";
+    return a;
+  }
+  const STARTER_DECOR_ART = {
+    bgHill1: starterHillArt([1, 2, 2, 3, 3, 4, 4, 5]), bgHill2: starterHillArt([5, 5, 6, 6, 6, 6, 5, 5]), bgHill3: starterHillArt([5, 4, 4, 3, 3, 2, 2, 1]),
+    bgBush: pat([
+      "SSSSSSSS", "SSSSSSSS", "SSSSSSSS", "SSBBBSSS", "SBLBBBBS", "BBBBBLBB", "BBLBBBBB", "BBBBBBBB" ], { S: STARTER_HORIZON, B: "#4fa85a", L: "#7ccb7b" })
+  };
+  const STARTER_DECOR_IDS = STARTER_SKY_BANDS.map(b => b[0]).concat(Object.keys(STARTER_DECOR_ART));
+  function isRealBackground(id) { return !!id && id !== SKY_BG_ID && id !== CLOUD_BG_ID && !STARTER_DECOR_IDS.includes(id); }
   function ensureSkyBackdropDefs() {
     BACKGROUND_PRESETS.forEach(p => {
       if (!p.id || backgroundTileDefs[p.id]) return;
       backgroundTileDefs[p.id] = { name: p.name, art: p.art.slice() };
       if (p.overlay) backgroundTileDefs[p.id].overlay = p.overlay.slice();
     });
+    STARTER_SKY_BANDS.forEach(([id, hex]) => { if (!backgroundTileDefs[id]) backgroundTileDefs[id] = { name: "sky", art: new Array(64).fill(hex) }; });
+    const names = { bgHill1: "hill", bgHill2: "hill", bgHill3: "hill", bgBush: "bush" };
+    Object.keys(STARTER_DECOR_ART).forEach(id => { if (!backgroundTileDefs[id]) backgroundTileDefs[id] = { name: names[id], art: STARTER_DECOR_ART[id].slice() }; });
   }
-  // sky everywhere in the first COLS columns; a deterministic scatter of clouds in the upper rows (rows 1-6)
+  // sky everywhere in the first COLS columns, paler toward the horizon; a deterministic scatter of clouds in the upper rows (rows 1-6)
   function paintSkyBackdrop(bgBoard, cols, rowsBelow) {
     ensureSkyBackdropDefs();
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < cols; x++) {
       const h = (x * 7 + y * 13 + (x * y) % 5) % 23;
-      bgBoard[y][x] = (y >= 1 && y <= 6 && h === 3 && !(bgBoard[y][x - 1] === CLOUD_BG_ID)) ? CLOUD_BG_ID : SKY_BG_ID;
+      const band = STARTER_SKY_BANDS.find(b => y >= b[2] && y <= b[3]);
+      bgBoard[y][x] = (y >= 1 && y <= 6 && h === 3 && !(bgBoard[y][x - 1] === CLOUD_BG_ID)) ? CLOUD_BG_ID : (band ? band[0] : SKY_BG_ID);
     }
   }
   function loadStarterBoard() {
@@ -13609,10 +13659,17 @@
       groundSkinBoard[y][x] = y === grassRow ? "gndGrass" : "gndDirt"; groundSkinRotationBoard[y][x] = 0;
     }
     board[grassRow - 1][cols - 3] = gameplayKey("goal", "none");
+    // scenery on the Paint layer (row just above the grass): a wide hill on the left, a smaller one and a bush on the right
+    [[4, "bgHill1"], [5, "bgHill2"], [6, "bgHill3"], [15, "bgHill1"], [16, "bgHill3"], [12, "bgBush"], [19, "bgBush"]].forEach(([x, id]) => {
+      if (x < cols && backgroundBoard[grassRow - 1]) backgroundBoard[grassRow - 1][x] = id;
+    });
     gravityEnabled = true; gravityDir = "down";
     const saved = selectedActorDefId;
     selectedActorDefId = playerDefId;
     placeNewActor(2 * TILE + TILE / 2, grassRow * TILE - ACTOR_SIZE / 2);
+    // a small arc of coins between the hero and the flag (ordinary collectibles: worth points, never needed to win)
+    selectedActorDefId = "colCoin";
+    [[8, 12], [9, 11], [10, 11], [11, 11], [12, 12]].forEach(([cx, cy]) => placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2));
     selectedActorDefId = saved;
     snapshotCurrentRoomState();
     renderAll();
@@ -13649,6 +13706,17 @@
       else { a.title = "Placeholder: not set yet"; a.addEventListener("click", e => e.preventDefault()); }
     });
     $("homeLogo").addEventListener("click", showLanding);
+    // text-free sample icons (name on hover / for screen readers)
+    LANDING_PICKS.forEach(id => {
+      const sample = SAMPLE_GAMES.find(g => g.id === id);
+      if (!sample) return;
+      const btn = document.createElement("button");
+      btn.title = sample.name; btn.setAttribute("aria-label", "Play " + sample.name);
+      const cv = document.createElement("canvas"); renderSampleIcon(cv, sample.draw);
+      btn.appendChild(cv);
+      btn.addEventListener("click", () => landingPickSample(sample));
+      $("landingSamples").appendChild(btn);
+    });
   })();
 
   // ============== "Show me how": optional guided tutorial (editor only, not in the export) ==============
@@ -14249,7 +14317,7 @@
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
-      `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S};`,
+      `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S}, SKY_CLIP_IDS = ${JSON.stringify(SKY_CLIP_IDS)};`,
       `const IDLE_BREATH_STEPS = ${JSON.stringify(IDLE_BREATH_STEPS)}, IDLE_BREATH_MS = ${IDLE_BREATH_MS}, IDLE_STRETCH_ROW = ${IDLE_STRETCH_ROW};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,

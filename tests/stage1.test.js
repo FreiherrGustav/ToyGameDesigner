@@ -39,7 +39,7 @@ const open = async (b, vp, hash) => {
     await page.click("#landingMakeBtn"); await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(SHOTS, `s1_starter_${w}x${h}.png`) });
     const st = await ev(page, "()=>({players:actors.filter(a=>a.isPlayer).length,floor:board[ROWS-1].slice(0,roomCols()).every(c=>c==='solid:none'),goal:board[ROWS-4][roomCols()-3],g:gravityEnabled,n:actors.length,px:actors.find(a=>a.isPlayer).x})");
-    ok(st.players === 1 && st.floor && st.goal === "goal:none" && st.g && st.n === 1 && st.px < 100, `${w}x${h}: starter board ${JSON.stringify(st)}`);
+    ok(st.players === 1 && st.floor && st.goal === "goal:none" && st.g && st.n === 6 && st.px < 100, `${w}x${h}: starter board ${JSON.stringify(st)}`);
     // Play to the goal
     await page.click("#modePlayBtn"); await page.waitForTimeout(1500);
     await page.keyboard.down("ArrowRight");
@@ -59,7 +59,7 @@ const open = async (b, vp, hash) => {
     await page.click("#undoBtn"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "undo removes the whole starter in one step");
     await page.click("#redoBtn"); await page.waitForTimeout(200);
-    ok(await ev(page, "()=>actors.length===1"), "redo brings it back");
+    ok(await ev(page, "()=>actors.length===6"), "redo brings it back");
     await page.click("#clearAllBtn"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "Clear board stays empty");
     // Play with no player: caption, flash, no mode change
