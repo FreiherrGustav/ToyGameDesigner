@@ -3337,6 +3337,18 @@
     "..ABAA..", ".AAACAC.", "ACADDADD", "AAEDFAFD",
     "GAADDADD", "GGAAEAAG", "HIHIHIHI", ".IHIHIH."
   ], { A: "#ffc0cb", B: "#e41606", C: "#feb4b4", D: "#ffffff", E: "#f2c0c0", F: "#000000", G: "#ff69b4", H: "#cb7a33", I: "#9c4f26" });
+  // Spring Buddy: a coiled toy, user-drawn (head rows 0-3, coil rows 4-7). Poses are physics-state
+  // switched like Gary's: stand = as drawn; stride (moving on the ground) = coil squeezed up one row
+  // with the head kept level, so he hops along on a shorter coil; air = coil stretched long and thin;
+  // crouch (landing impact) = fully squashed, head dropped onto a flat coil.
+  const SPRING_BUDDY_LEGEND = { A: "#c0c0c0", B: "#d3d3d3", C: "#ffffff", D: "#000000" };
+  const SPRING_BUDDY_HEAD = ["..ABBB..", ".BCDCDB.", ".BCDCDB.", "..ABBB.."];
+  const SPRING_BUDDY_POSES = {
+    stand: pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "..BBBA.."]), SPRING_BUDDY_LEGEND),
+    stride: pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "........"]), SPRING_BUDDY_LEGEND),
+    air: pat(SPRING_BUDDY_HEAD.concat(["...B.A..", "..ABBB..", "...B.A..", "..BBBA.."]), SPRING_BUDDY_LEGEND),
+    crouch: pat(["........", "........", "........"].concat(SPRING_BUDDY_HEAD, ["ABBBBBBA"]), SPRING_BUDDY_LEGEND)
+  };
   const HERO_ART = pat([
     "..ABBB..", ".BBBBAA.", ".CDEDE..", ".CDDDD.F",
     "..BBBA.F", ".AGGHGAF", "D.ABBB.D", ".II..II."
@@ -3410,6 +3422,7 @@
     { name: "Princess", art: PRINCESS_ART },
     { name: "Hero", art: HERO_ART },
     { name: "Derpy", art: CUPCAKE_ART },
+    { name: "Spring Buddy", poses: SPRING_BUDDY_POSES },
     { name: "ghost", poses: GHOST_POSES },
     { name: "monster", art: MONSTER_ART },
     { name: "skeleton", art: SKELETON_ART },
