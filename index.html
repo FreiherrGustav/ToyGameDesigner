@@ -1034,8 +1034,14 @@
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
   // Short palette names for swatch label bands; the swatch title/caption keeps the full name.
   const DISPLAY_SHORT = { "large stone": "stone", "moving platform": "platform", "trampoline": "bouncer", "locked door": "lock", "black hole": "hole",
-    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "wanderer": "wander", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
+    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "wanderer": "wander", "McDinglechud": "McDing", "Mousecop": "Mouse", "Wheebuns": "Wheebs", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
   function dispName(n) { return DISPLAY_SHORT[n] || n; }
+  // Kid-facing names of the built-in characters. Display only: behavior lives in the temperament, and a built-in
+  // def keeps def.name === temperament (findDefaultActorDef, saved projects and samples all rely on that).
+  const CHARACTER_DISPLAY_NAMES = { wanderer: "McDinglechud", chaser: "Mousecop", fleer: "Wheebuns" };
+  function temperamentDisplayName(temp) { return CHARACTER_DISPLAY_NAMES[temp] || temp; }
+  // A def's display name: a built-in one (name still equals its temperament, as in every old save) shows the new name.
+  function defDisplayName(def) { return (def && def.name === def.temperament && CHARACTER_DISPLAY_NAMES[def.name]) || (def ? def.name : ""); }
   const GEOMETRY_LABELS = { cannon2: "cannon", [BOMB2_GEOMETRY]: "bomb", [PUSH_BUTTON_GEOMETRY]: "switch", barrier: "Gate", gravitywell: "black hole", [LOCKED_DOOR_GEOMETRY]: "locked door" };
 
   // Palette-swatch colors only. In-game, "none" geometry/modifier renders as nothing (or a
@@ -3430,16 +3436,16 @@
     { name: "Hero", art: HERO_ART },
     { name: "Derpy", art: CUPCAKE_ART },
     { name: "Spring Buddy", poses: SPRING_BUDDY_POSES },
-    { name: "ghost", poses: GHOST_POSES },
-    { name: "monster", art: MONSTER_ART },
-    { name: "skeleton", art: SKELETON_ART },
-    { name: "slime", art: SLIME_ART },
+    { name: "Mrs. Pecks", poses: GHOST_POSES },
+    { name: "Grumble", art: MONSTER_ART },
+    { name: "Bonesy", art: SKELETON_ART },
+    { name: "Gloop", art: SLIME_ART },
     { name: "Thelonius", art: THELONIUS_ART },
-    { name: "wanderer", art: WANDERER_ART },
-    { name: "chaser", art: CHASER_ART },
-    { name: "fleer", art: FLEER_ART },
+    { name: "McDinglechud", art: WANDERER_ART },
+    { name: "Mousecop", art: CHASER_ART },
+    { name: "Wheebuns", art: FLEER_ART },
     { name: "crabby", art: CRABBY_ART },
-    { name: "tabby cat", art: TABBY_CAT_ART }
+    { name: "Snickers", art: TABBY_CAT_ART }
   ];
   const COLLECTIBLE_PRESETS = [
     { name: "gem", art: COLLECTIBLE_ART },
@@ -5393,14 +5399,14 @@
       const sw = document.createElement("div");
       sw.className = "swatch" + (selectedActorKind === temp ? " selected" : "");
       sw.style.background = "#111";
-      sw.title = temp;
+      sw.title = temperamentDisplayName(temp);
       const c = document.createElement("canvas");
       c.width = ART; c.height = ART;
       drawArtToCtx(c.getContext("2d"), def.art, ART);
       sw.appendChild(c);
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = dispName(temp);
+      label.textContent = dispName(temperamentDisplayName(temp));
       sw.appendChild(label);
       sw.addEventListener("click", () => selectActorKind(temp));
       container.appendChild(sw);
@@ -5548,7 +5554,7 @@
       && def && TEMPERAMENTS.includes(def.temperament);
     block.style.display = show ? "block" : "none";
     if (!show) return;
-    document.getElementById("lethalPickerName").textContent = def.name;
+    document.getElementById("lethalPickerName").textContent = defDisplayName(def);
     const container = document.getElementById("lethalPickerSwatches");
     container.innerHTML = "";
     const current = npcIsLethal(def);
@@ -5563,7 +5569,7 @@
       label.textContent = dispName(opt.label);
       sw.appendChild(label);
       wireCaption(sw, opt.tip);
-      sw.addEventListener("click", () => { def.lethal = opt.lethal; renderLethalPicker(); log(def.name + " is now " + opt.label + "."); });
+      sw.addEventListener("click", () => { def.lethal = opt.lethal; renderLethalPicker(); log(defDisplayName(def) + " is now " + opt.label + "."); });
       container.appendChild(sw);
     });
   }
@@ -13331,7 +13337,7 @@
   // A surprise that has to place the project's first player also gives it a look (seeded, so the same
   // seed gives the same player). Only when the player def is still the untouched factory one: a kid's own
   // repaint is never replaced.
-  const SURPRISE_PLAYER_LOOKS = ["Gary", "Princess", "Hero", "Derpy", "ghost", "monster", "skeleton", "slime"];
+  const SURPRISE_PLAYER_LOOKS = ["Gary", "Princess", "Hero", "Derpy", "Mrs. Pecks", "Grumble", "Bonesy", "Gloop"];
   function surpriseRandomizePlayerLook(seed) {
     const def = actorDefs[playerDefId], factory = FACTORY_DEFAULT_SNAPSHOT.actorDefs[playerDefId];
     if (!def || !factory || !artEquals(def.art, factory.art)) return;
@@ -14169,17 +14175,17 @@
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
         : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
-    { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop a wanderer. It roams around." } : { b: "Pick a wanderer to add some trouble." }), done: () => tutHasEnemy(),
+    { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop McDinglechud. It roams around." } : { b: "Pick McDinglechud to add some trouble." }), done: () => tutHasEnemy(),
       target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
-        : tutSwatchTarget('#characterSwatches .swatch[title="wanderer"]', "modeCharacter", "character") },
+        : tutSwatchTarget('#characterSwatches .swatch[title="McDinglechud"]', "modeCharacter", "character") },
     { name: "goal", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to plant the flag on top of the step." } : { b: "Pick the goal flag." }), done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
         : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
     { name: "play", say: (t) => ({ b: "All set! Press Play." }), done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
-    { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past the wanderer and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
+    { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past McDinglechud and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
       target: () => {
         // a run that ended in game over: the kid is back in Build and the ring is on the goal (move it closer, then Play again)
         if (tutorial && tutorial.lostRun && appMode !== "play") { const g0 = tutGoalCell(); return g0 ? { cell: { x: g0.x, y: g0.y, w: 1, h: 1 } } : { sel: "#modePlayBtn" }; }

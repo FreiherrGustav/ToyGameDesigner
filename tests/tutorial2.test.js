@@ -61,9 +61,9 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await shot(p, `s2_1b_player_cell_${w}`);
     await clickCell(p, 6, 13); await settle(p);
     // 3 enemy
-    ok(onRect(await ring(p), await rect(p, '#characterSwatches .swatch[title="wanderer"]')), w + ': 3 ring on enemy swatch');
+    ok(onRect(await ring(p), await rect(p, '#characterSwatches .swatch[title="McDinglechud"]')), w + ': 3 ring on enemy swatch');
     await shot(p, `s2_3a_enemy_swatch_${w}`);
-    await p.click('#characterSwatches .swatch[title="wanderer"]'); await settle(p);
+    await p.click('#characterSwatches .swatch[title="McDinglechud"]'); await settle(p);
     ok(onRect(await ring(p), await cellRect(p, 2, 13)), w + ': 3 ring on enemy cell');
     await shot(p, `s2_3b_enemy_cell_${w}`);
     await clickCell(p, 2, 13); await settle(p);
@@ -102,7 +102,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
   await start(p0);
   await pick(p0, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await clickCell(p0, 12, 11); await settle(p0);
   ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'goal before anything: still points at the ground step');
-  await pick(p0, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p0, 2, 13); await settle(p0);
+  await pick(p0, '#modeCharacter', '#characterSwatches .swatch[title="McDinglechud"]'); await clickCell(p0, 2, 13); await settle(p0);
   ok(await p0.evaluate(() => __t.stepName()) === 'ground', 'enemy before ground: ground step stays current');
   await pick(p0, '#modeGround', '#groundSwatches .swatch[title="grass"]');
   { const a = await cellRect(p0, 2, 14), z = await cellRect(p0, 12, 14); await p0.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p0.mouse.down(); await p0.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p0.mouse.up(); }
@@ -152,7 +152,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     if (n >= 1) { await pick(p, '#modeGround', '#groundSwatches .swatch[title="grass"]'); const a = await cellRect(p, 2, 14), z = await cellRect(p, 12, 14); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 10 }); await p.mouse.up(); }
     if (n >= 2) { for (const row of [12, 13]) { const a = await cellRect(p, 9, row), z = await cellRect(p, 12, row); await p.mouse.move(a[0] + 5, a[1] + 5); await p.mouse.down(); await p.mouse.move(z[0] + 5, z[1] + 5, { steps: 8 }); await p.mouse.up(); } }
     if (n >= 3) { await pick(p, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await clickCell(p, 6, 13); }
-    if (n >= 4) { await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await clickCell(p, 2, 13); }
+    if (n >= 4) { await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="McDinglechud"]'); await clickCell(p, 2, 13); }
     if (n >= 5) { await pick(p, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await clickCell(p, 12, 11); }
     await settle(p);
     await p.click('#tutClose'); await settle(p);

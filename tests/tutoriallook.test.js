@@ -47,7 +47,7 @@ const GROUND = LABEL === 'before' ? 'solid' : 'grass';
     i = await p.evaluate(() => __t.info()); ok(i.step === 'player', w + ': ledge done by skinned tiles -> player ' + i.step);
     if (LABEL !== 'before') ok(i.grass === 19, w + ': step-up block is grass too ' + i.grass);
     await pick(p, '#modeCharacter', '#playerSwatchRow .swatch[title="player"]'); await click(p, 6, 13); await settle(p);
-    await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="wanderer"]'); await click(p, 2, 13); await settle(p);
+    await pick(p, '#modeCharacter', '#characterSwatches .swatch[title="McDinglechud"]'); await click(p, 2, 13); await settle(p);
     await pick(p, '#modeObject', '#fixtureSwatches .swatch[title="goal"]'); await click(p, 12, 11); await settle(p);
     ok((await p.evaluate(() => __t.info())).step === 'play', w + ': all placed -> Play');
     await p.click('#modePlayBtn'); await p.waitForTimeout(1500); await p.evaluate(() => __t.teleportToGoal()); await p.waitForTimeout(3600);
