@@ -3276,10 +3276,13 @@
     "........", "...MMMM.", ".MMMMMM.", ".MM.MMM.",
     ".M.MM.M.", ".MMMMM..", "..MMMM..", "........"
   ], { M: "#ffca28" });
-  const CAT_ART = pat([
-    "M......M", "MM....MM", ".MMMMMM.", "MK.MM.KM",
-    "MMMMMMMM", "MM.MM.MM", ".MMMMMM.", "..M..M.."
-  ], { M: "#ef5350", K: "#2b2b2b" });
+  // Crabby replaced the original red cat look (it read as a Space Invaders character). The constant
+  // keeps the name CAT_ART because the coded samples' chaser defs and the preset point at it.
+  const CRABBY_ART = pat([
+    "..AA.AA.", "..BC.BC.", "..BB.BB.", "A.A..A.A",
+    ".AAAAAA.", ".ADAADA.", "DAAAAAAD", "D......D"
+  ], { A: "#e41606", B: "#ffffff", C: "#000000", D: "#eb370c" });
+  const CAT_ART = CRABBY_ART;
 
   // v2.24: four more "grab a sprite" presets, hand-translated from a kid-supplied reference sheet
   // (a set of ~16x16 icons, not literally 8x8 despite how the sheet itself was labeled) down to
@@ -3431,7 +3434,7 @@
     { name: "wanderer", art: WANDERER_ART },
     { name: "chaser", art: CHASER_ART },
     { name: "fleer", art: FLEER_ART },
-    { name: "cat", art: CAT_ART },
+    { name: "crabby", art: CRABBY_ART },
     { name: "tabby cat", art: TABBY_CAT_ART }
   ];
   const COLLECTIBLE_PRESETS = [
@@ -3478,7 +3481,7 @@
   const EXAMPLE_CHEESE_DEF_ID = "exCheese";
   const EXAMPLE_CAT_DEF_ID = "exCat";
   actorDefs[EXAMPLE_CHEESE_DEF_ID] = { temperament: "collectible", name: "cheese", poses: null, art: CHEESE_ART.slice() };
-  actorDefs[EXAMPLE_CAT_DEF_ID] = { temperament: "chaser", name: "cat", poses: null, art: CAT_ART.slice() };
+  actorDefs[EXAMPLE_CAT_DEF_ID] = { temperament: "chaser", name: "crabby", poses: null, art: CRABBY_ART.slice() };
 
   // Places one actor of the given def at a cell's center, the same way a kid's own click would
   // (reuses placeNewActor itself, so the player-singleton cleanup / startPos / playerRoomId
