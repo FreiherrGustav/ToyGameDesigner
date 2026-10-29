@@ -3278,6 +3278,10 @@
   ], { M: "#ffca28" });
   // Crabby replaced the original red cat look (it read as a Space Invaders character). The constant
   // keeps the name CAT_ART because the coded samples' chaser defs and the preset point at it.
+  const THELONIUS_ART = pat([
+    ".A....A.", ".BCCCCB.", "..BDDB..", "..BDEB..",
+    "BBBBBBBB", "A.BCCB.A", "..B..B..", ".AA..AA."
+  ], { A: "#7205cc", B: "#a641f9", C: "#bf71fe", D: "#ffffff", E: "#000000" });
   const CRABBY_ART = pat([
     "..AA.AA.", "..BC.BC.", "..BB.BB.", "A.A..A.A",
     ".AAAAAA.", ".ADAADA.", "DAAAAAAD", "D......D"
@@ -3430,7 +3434,7 @@
     { name: "monster", art: MONSTER_ART },
     { name: "skeleton", art: SKELETON_ART },
     { name: "slime", art: SLIME_ART },
-    { name: "blocker", art: STATIONARY_ART },
+    { name: "Thelonius", art: THELONIUS_ART },
     { name: "wanderer", art: WANDERER_ART },
     { name: "chaser", art: CHASER_ART },
     { name: "fleer", art: FLEER_ART },

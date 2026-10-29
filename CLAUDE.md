@@ -7194,3 +7194,7 @@ Tests: `node tests/blankboard.test.js [shotDir]` (33: first visit, cleared+reloa
 ## Crabby replaces the red cat look
 
 The red "cat" art (`CAT_ART`, which read as a Space Invaders character) is now the user's `CRABBY_ART`. `CAT_ART` stays as an alias so the coded samples' chaser defs (`exCat`, now named "crabby") and the preset keep working; the preset is "crabby" (tooltip only). "tabby cat" is untouched, as is the `cat` voice. Embedded sample projects (Monster's Den, Ice Cave...) carry their own defs and keep their art; already-applied cat looks in saved projects keep theirs (no stale-art migration: it is a preset, not an actorDefs factory entry). The sprite editor's snapshot is not refreshed.
+
+## Thelonius replaces the "blocker" preset
+
+The "blocker" character preset (`STATIONARY_ART`) is now **Thelonius** (`THELONIUS_ART`, user-supplied purple creature, used verbatim). Preset only, in the same slot. `STATIONARY_ART` stays because the built-in stationary character def still uses it; saved projects that applied the old blocker keep their art.
