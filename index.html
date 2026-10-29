@@ -3356,11 +3356,34 @@
   // crouch (landing impact) = fully squashed, head dropped onto a flat coil.
   const SPRING_BUDDY_LEGEND = { A: "#c0c0c0", B: "#d3d3d3", C: "#ffffff", D: "#000000" };
   const SPRING_BUDDY_HEAD = ["..ABBB..", ".BCDCDB.", ".BCDCDB.", "..ABBB.."];
+  // Rainbow body: the silver (A shade / B body) cells are recolored row by row, red at the top of the occupied
+  // rows to blue at the bottom, interpolated so it reads as one smooth gradient. Eyes (white/black) are kept.
+  const SPRING_RAINBOW_STOPS = ["#e53935", "#fb8c00", "#fdd835", "#66bb6a", "#26c6da", "#1e63d6"];
+  function springRainbowColor(t) {
+    const x = Math.max(0, Math.min(1, t)) * (SPRING_RAINBOW_STOPS.length - 1), i = Math.min(SPRING_RAINBOW_STOPS.length - 2, Math.floor(x)), f = x - i;
+    const p = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)), c0 = p(SPRING_RAINBOW_STOPS[i]), c1 = p(SPRING_RAINBOW_STOPS[i + 1]);
+    return c0.map((v, k) => Math.round(v + (c1[k] - v) * f));
+  }
+  function springRainbow(art) {
+    const rows = [];
+    for (let y = 0; y < ART; y++) if (art.slice(y * ART, y * ART + ART).some(c => c)) rows.push(y);
+    const out = art.slice();
+    rows.forEach((y, i) => {
+      const rgb = springRainbowColor(rows.length > 1 ? i / (rows.length - 1) : 0);
+      const hex = f => "#" + rgb.map(v => Math.round(f >= 0 ? v : v * (1 + f)).toString(16).padStart(2, "0")).join("");
+      for (let x = 0; x < ART; x++) {
+        const c = art[y * ART + x];
+        if (c === SPRING_BUDDY_LEGEND.B) out[y * ART + x] = hex(0);
+        else if (c === SPRING_BUDDY_LEGEND.A) out[y * ART + x] = hex(-0.16);
+      }
+    });
+    return out;
+  }
   const SPRING_BUDDY_POSES = {
-    stand: pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "..BBBA.."]), SPRING_BUDDY_LEGEND),
-    stride: pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "........"]), SPRING_BUDDY_LEGEND),
-    air: pat(SPRING_BUDDY_HEAD.concat(["...B.A..", "..ABBB..", "...B.A..", "..BBBA.."]), SPRING_BUDDY_LEGEND),
-    crouch: pat(["........", "........", "........"].concat(SPRING_BUDDY_HEAD, ["ABBBBBBA"]), SPRING_BUDDY_LEGEND)
+    stand: springRainbow(pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "..BBBA.."]), SPRING_BUDDY_LEGEND)),
+    stride: springRainbow(pat(SPRING_BUDDY_HEAD.concat(["BB....AB", "..ABBB..", "BA....AB", "........"]), SPRING_BUDDY_LEGEND)),
+    air: springRainbow(pat(SPRING_BUDDY_HEAD.concat(["...B.A..", "..ABBB..", "...B.A..", "..BBBA.."]), SPRING_BUDDY_LEGEND)),
+    crouch: springRainbow(pat(["........", "........", "........"].concat(SPRING_BUDDY_HEAD, ["ABBBBBBA"]), SPRING_BUDDY_LEGEND))
   };
   const HERO_ART = pat([
     "..ABBB..", ".BBBBAA.", ".CDEDE..", ".CDDDD.F",
