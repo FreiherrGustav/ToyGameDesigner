@@ -20,6 +20,7 @@ const DRIVER = `(() => {
   async function axisTo(axis, target, tol) {           // bang-bang: accelerate toward, brake in time, settle within tol
     const i = axis === "x" ? 0 : 1, v = axis === "x" ? "vx" : "vy", neg = axis === "x" ? "ArrowLeft" : "ArrowUp", pos = axis === "x" ? "ArrowRight" : "ArrowDown";
     for (let n = 0; n < 600; n++) {
+      if (playSessionEnded) { release(); return true; }
       if (window.__room !== undefined && currentRoomId !== window.__room) { release(); return false; }
       const d = target - hc()[i], vel = pl()[v], stop = vel * Math.abs(vel) / (2 * 1700);
       const err = d - stop; key(neg, false); key(pos, false);
@@ -49,6 +50,7 @@ const DRIVER = `(() => {
   }
   async function goCell(tx, ty, avoid) {
     for (let guard = 0; guard < 80; guard++) {
+      if (playSessionEnded) { release(); return true; }
       const me = cellOf(pl()); if (me[0] === tx && me[1] === ty) { await axisTo("x", tx * TILE + TILE / 2, 3); await axisTo("y", ty * TILE + TILE / 2, 3); return true; }
       const p = bfs(me, [tx, ty], avoid); if (!p) return false;
       // walk straight runs: move along the first leg's axis to the far end of the leg
@@ -110,7 +112,7 @@ const DRIVER = `(() => {
     const ex = await ctx.newPage(); ex.on("pageerror", e => errs.push("EXPORT " + e.message)); await ex.goto("file://" + f); await ex.waitForTimeout(800);
     // exports have no debug hook: add one by editing the exported source
     let t = fs.readFileSync(f, "utf8"); const marker = "// ===== MAIN LOOP"; 
-    if (!/window\.__ev/.test(t)) { const i = t.lastIndexOf("</script>"); t = t.slice(0, i) + "\nwindow.__ev=f=>eval('('+f+')');\n" + t.slice(i); fs.writeFileSync(f, t); await ex.goto("file://" + f); await ex.waitForTimeout(800); }
+    if (!/window\.__ev/.test(t)) { let i = t.lastIndexOf("})();"); if (i < 0) i = t.lastIndexOf("</script>"); t = t.slice(0, i) + "\nwindow.__ev=f=>eval('('+f+')');\n" + t.slice(i); fs.writeFileSync(f, t); await ex.goto("file://" + f); await ex.waitForTimeout(800); }
     target = ex;
   } else {
     await E(() => enterPlayMode()); 
