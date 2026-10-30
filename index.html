@@ -10970,7 +10970,11 @@
       flame1: "#e8fbff", flame2: "#46c8ff", pole: "#1f2438", cloth: "#2a8a8c", cloth2: "#7fe0d0", pillar: "#a9b4cc", pillarEdge: "#4a5470", pillarShade: "#7c88a6",
       accentName: "worn lane", accentRows: ["........", "........", "..a.....", ".....a..", "........", "...a....", "......a.", "........"], accentLegend: { a: "#a8b3cc" },
       extraName: "mossy flagstone", extraRows: ["........", ".mm.....", "mMmm....", ".mm...m.", ".....mMm", "......mm", "..m.....", ".mM....."], extraLegend: { m: "#5f9a63", M: "#7bbf7f" } };
-    const kits = [svKit(WARM, "W"), svKit(COOL, "C")];
+    const ROYAL = { mortar: "#2a1f45", bhi: "#8068b8", brick: "#5b4694", joint: "#4a3d78", fhi: "#7c6cae", fl: "#5f528f", fl2: "#574b86", speck: "#6c5f9e", crack: "#3a2f63",
+      flame1: "#fff3b0", flame2: "#ffb300", pole: "#2a1f45", cloth: "#c9a227", cloth2: "#fff0a0", pillar: "#b3a7dd", pillarEdge: "#3a2f63", pillarShade: "#8b7fbc",
+      accentName: "gold carpet", accentRows: ["gggggggg", "pppppppp", "pPpppPpp", "ppPpppPp", "pPpppPpp", "pppppppp", "pppppppp", "gggggggg"], accentLegend: { g: "#e0b030", p: "#7a3fb0", P: "#9a5cd0" },
+      extraName: "crystal flagstone", extraRows: ["........", "..c.....", ".cCc....", "..c.....", "......c.", ".....cCc", "......c.", "........"], extraLegend: { c: "#7fe0ff", C: "#e8fbff" } };
+    const kits = [svKit(WARM, "W"), svKit(COOL, "C"), svKit(ROYAL, "R")];
 
     const mkRoom = (name, kit) => {
       const room = createEmptyRoom(name);
@@ -11045,6 +11049,40 @@
     r2.room.startPos = { x: 1 * TILE + 5, y: 8 * TILE + 5 };
     snapshotCurrentRoomState();
 
+
+    // ---------------- Room 3: the Stonekeeper's Chamber (royal) ----------------
+    // Green: a crate on the green plate opens the green Gate. Then a lava moat cuts the chamber: a crate would burn, a Large Stone does
+    // not, so the stone is GRABBED (E) and THROWN across onto a block of purple plates, which opens the purple Gate (a push can't do it:
+    // whoever pushes a stone into the lava has to stand in it). Yellow key -> yellow locked door -> goal.
+    const r3 = mkRoom("The Stonekeeper's Chamber", kits[2]);
+    W.clear(); rim();
+    for (let y = 1; y < ROWS - 1; y++) { if (y !== 8) wall(10, y); if (y !== 14) wall(18, y); }
+    for (let y = 1; y <= 4; y++) wall(14, y);
+    for (let y = 12; y <= 16; y++) if (y !== 14) wall(14, y);
+    for (let x = 15; x <= 17; x++) wall(x, 12);                               // the plate pocket is sealed off from the corridor below it
+    wall(7, 3);                                                              // stopper behind the green plate
+    dress(kits[2], W, (x, y) => (y === 8 && x >= 1 && x <= 13) || (y === 14 && x >= 15 && x <= 22));
+    [[3, 3], [3, 14], [12, 2], [12, 15], [20, 3], [20, 10], [21, 15]].forEach(([x, y]) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = kits[2].pick("pillar"); backgroundBoard[y][x] = null; });
+    for (let y = 5; y <= 11; y++) { board[y][14] = gameplayKey("none", "lethal"); groundSkinBoard[y][14] = "lthLava"; }
+    put(7, 4, "plate", "green");
+    put(10, 8, "barrier-n", "green");
+    for (let y = 6; y <= 10; y++) for (let x = 15; x <= 17; x++) put(x, y, "plate", "purple");
+    put(14, 14, "barrier-n", "purple");
+    put(18, 14, "lockeddoor", "yellow");
+    put(21, 14, "goal");
+    put(0, 8, "door");
+    backgroundBoard[8][0] = kits[2].pick("accent");
+    placeExampleActor(PUSHABLE_DEF_ID, 7, 11);        // straight up onto the green plate
+    placeExampleActor(PUSHABLE_DEF_ID, 3, 13);        // spare
+    placeExampleActor(LARGE_STONE_DEF_ID, 12, 11);    // the thrower's stone
+    placeExampleActor(LARGE_STONE_DEF_ID, 12, 4);     // a spare stone
+    const keyActor = placeExampleActor("colKey", 16, 14); keyActor.channel = "yellow";
+    colorBoard[14][18] = "yellow";
+    r3.room.startPos = { x: 1 * TILE + 5, y: 8 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    doorLinks[roomCellKey(r2.room.id, 23, 8)] = { toRoomId: r3.room.id, toX: 0, toY: 8 };
+    doorLinks[roomCellKey(r3.room.id, 0, 8)] = { toRoomId: r2.room.id, toX: 23, toY: 8 };
     doorLinks[roomCellKey(r1.room.id, 23, 8)] = { toRoomId: r2.room.id, toX: 0, toY: 8 };
     doorLinks[roomCellKey(r2.room.id, 0, 8)] = { toRoomId: r1.room.id, toX: 23, toY: 8 };
     activateRoom(r1.room.id);
