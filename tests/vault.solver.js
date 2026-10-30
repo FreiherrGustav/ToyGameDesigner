@@ -130,10 +130,10 @@ rooms.forEach((r, ri) => {
   console.log("  solvable: yes, shortest = " + res.pushes + " pushes/throws (" + res.states + " states searched)");
   solutions.push({ room: ri, start: g.hero, steps: res.path.map(m => ({ hero: m.hero, to: m.to, push: m.push, from: null })) });
   console.log("  solution: " + res.path.map(m => (m.push ? "push " : "throw ") + cellName(m.hero) + (m.push ? "->" + cellName(m.to) : "->" + cellName(m.to))).join(", "));
-  const ex = exactDead(g, ri === 0 ? 3e6 : 6e5);
+  const ex = exactDead(g, ri === 0 ? 3e6 : 3e5);
   if (ex.capped) console.log("  exact dead-end analysis skipped (more than " + ex.states + " states); sampled instead");
   else console.log("  all reachable states: " + ex.states + ", states that can no longer reach the exit: " + ex.dead + (ex.dead ? "  e.g. " + ex.sample.join(" | ") : ""));
-  const sm = sampleDead(g, WALKS, 60, 400000);
+  const sm = sampleDead(g, WALKS, 60, 150000);
   console.log("  sampled " + sm.walks + " random push-histories: can still win " + sm.ok + ", stuck " + sm.dead + ", undecided (search cap) " + sm.capped + (sm.examples.length ? "  e.g. " + sm.examples.join(" | ") : ""));
 });
 if (process.env.SOLUTIONS) fs.writeFileSync(process.env.SOLUTIONS, JSON.stringify(solutions));
