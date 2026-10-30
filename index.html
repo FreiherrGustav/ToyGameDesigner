@@ -10925,6 +10925,143 @@
     ctx.fillStyle = "#f2d03c"; ctx.fillRect(9, 19, 3, 2);
   }
 
+  // ============== "Stonekeeper's Vault" (v2.59) — a top-down block-puzzle dungeon ==============
+  // Rooms 1 and 2 of three (room 3 and the goal come in the next stage). Gravity off, four-direction movement, crates you push
+  // onto PLATES (momentary: the crate has to stay put) to open same-colored Gates. No new pieces, sounds or rules: crates,
+  // plates, Gates, doors. Dead states are avoided by open floor around every lane, a stopper block behind each plate (a crate
+  // can't be pushed past it) and spare crates in the open; the existing Play restart is the last resort.
+  // Art is sample-scoped (added inside the builder) and deterministic: every cell is a wall skin or a floor tile.
+  function svKit(P, tag) {
+    const hash = (x, y, s) => ((x * 73856093) ^ (y * 19349663) ^ (s * 83492791)) >>> 0;
+    const over = (base, rows, legend) => {
+      const a = base.slice();
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const c = legend[rows[y][x]]; if (c) a[y * 8 + x] = c; }
+      return a;
+    };
+    const brick = pat(["mmmmmmmm", "hhhhmhhh", "bbbbmbbb", "bbbbmbbb", "mmmmmmmm", "hhhhhhmh", "bbbbbbmb", "bbbbbbmb"], { m: P.mortar, h: P.bhi, b: P.brick });
+    const flag = (f, sx, sy) => {
+      const a = pat(["jjjjjjjj", "jhhhhhhf", "jfffffff", "jfffffff", "jfffffff", "jfffffff", "jfffffff", "jfffffff"], { j: P.joint, h: P.fhi, f });
+      a[sy * 8 + sx] = P.speck; a[((sy + 3) % 7 + 1) * 8 + (sx + 4) % 7 + 1] = P.speck; return a;
+    };
+    const kit = {};
+    kit.wall = brick;
+    kit.torch = over(brick, ["........", "...Y....", "..YOY...", "..YOY...", "...p....", "...p....", "........", "........"], { Y: P.flame1, O: P.flame2, p: P.pole });
+    kit.banner = over(brick, ["..kkkk..", "..rrrr..", "..rggr..", "..rggr..", "..rrrr..", "..r..r..", "........", "........"], { k: P.pole, r: P.cloth, g: P.cloth2 });
+    kit.pillar = pat(["PPPPPPPP", "PLLLLLsP", "PLLLLLsP", "PLLLLLsP", "PLLLLLsP", "PLLLLLsP", "Psssssss", "PPPPPPPP"], { P: P.pillarEdge, L: P.pillar, s: P.pillarShade });
+    kit.floorA = flag(P.fl, 3, 2);
+    kit.floorB = flag(P.fl2, 5, 4);
+    kit.crack = over(flag(P.fl, 6, 6), ["........", "........", "..c.....", "...cc...", ".....c..", ".....cc.", "........", "........"], { c: P.crack });
+    kit.accent = over(flag(P.fl2, 1, 1), P.accentRows, P.accentLegend);
+    kit.extra = over(flag(P.fl, 2, 5), P.extraRows, P.extraLegend);
+    const wallDefs = { wall: ["wall", kit.wall], torch: ["torch wall", kit.torch], banner: ["banner wall", kit.banner], pillar: ["pillar", kit.pillar] };
+    Object.keys(wallDefs).forEach(k => { groundTileDefs["sv" + tag + k] = { name: wallDefs[k][0], frames: [wallDefs[k][1]], frameMs: 1000, geometry: "solid", modifier: "none" }; groundSlotIds.push("sv" + tag + k); });
+    const floorDefs = { floorA: "flagstone", floorB: "flagstone", crack: "cracked flagstone", accent: P.accentName, extra: P.extraName };
+    Object.keys(floorDefs).forEach(k => { backgroundTileDefs["sv" + tag + k] = { art: kit[k].slice(), name: floorDefs[k] }; });
+    kit.pick = (k) => "sv" + tag + k;
+    kit.hash = hash;
+    return kit;
+  }
+  function buildStonekeepersVaultGame() {
+    const WARM = { mortar: "#6e3f22", bhi: "#d99a62", brick: "#c27c45", joint: "#c79d63", fhi: "#efd3a3", fl: "#e3c08a", fl2: "#dcb87e", speck: "#d2ae77", crack: "#a88050",
+      flame1: "#fff3b0", flame2: "#ff8a30", pole: "#5a3a1c", cloth: "#a8282a", cloth2: "#e0b030", pillar: "#e6d3b0", pillarEdge: "#9a7448", pillarShade: "#bda47a",
+      accentName: "red carpet", accentRows: ["gggggggg", "rrrrrrrr", "rRrrrRrr", "rrRrrrRr", "rRrrrRrr", "rrrrrrrr", "rrrrrrrr", "gggggggg"], accentLegend: { g: "#e0b030", r: "#a8282a", R: "#c0383a" },
+      extraName: "flagstone pebbles", extraRows: ["........", "..pp....", "..pP....", "........", ".....pp.", "......pP", "........", "........"], extraLegend: { p: "#caa66d", P: "#b58a52" } };
+    const COOL = { mortar: "#2c3248", bhi: "#8996bb", brick: "#6a769a", joint: "#6d7894", fhi: "#a8b3cc", fl: "#8793ad", fl2: "#7f8ba8", speck: "#76829f", crack: "#4a5470",
+      flame1: "#e8fbff", flame2: "#46c8ff", pole: "#1f2438", cloth: "#2a8a8c", cloth2: "#7fe0d0", pillar: "#a9b4cc", pillarEdge: "#4a5470", pillarShade: "#7c88a6",
+      accentName: "worn lane", accentRows: ["........", "........", "..a.....", ".....a..", "........", "...a....", "......a.", "........"], accentLegend: { a: "#a8b3cc" },
+      extraName: "mossy flagstone", extraRows: ["........", ".mm.....", "mMmm....", ".mm...m.", ".....mMm", "......mm", "..m.....", ".mM....."], extraLegend: { m: "#5f9a63", M: "#7bbf7f" } };
+    const kits = [svKit(WARM, "W"), svKit(COOL, "C")];
+
+    const mkRoom = (name, kit) => {
+      const room = createEmptyRoom(name);
+      room.gravityEnabled = false; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+      rooms.push(room);
+      activateRoom(room.id);
+      const solid = (x, y, skinKey) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = kit.pick(skinKey); backgroundBoard[y][x] = null; };
+      return { room, solid };
+    };
+    // Fills the whole 24x18 room: walls with torches/banners along the top rim and plain brick elsewhere; every other cell a floor tile.
+    const dress = (kit, walls, lane, extraFn) => {
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        const h = kit.hash(x, y, 7);
+        const isWall = walls.has(x + "," + y);
+        if (isWall) {
+          let k = "wall";
+          if (y === 0 && x % 6 === 3) k = "torch";
+          else if (y === 0 && x % 6 === 0 && x > 0) k = "banner";
+          else if (x === 0 || x === COLS - 1) k = (y % 5 === 2) ? "torch" : "wall";
+          board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = kit.pick(k); backgroundBoard[y][x] = null;
+        } else {
+          let k = (x + y) % 2 ? "floorA" : "floorB";
+          if (h % 9 === 0) k = "crack"; else if (h % 13 === 1) k = "extra";
+          if (lane(x, y)) k = "accent";
+          if (extraFn) { const o = extraFn(x, y); if (o) k = o; }
+          backgroundBoard[y][x] = kit.pick(k);
+        }
+      }
+    };
+    const W = new Set();
+    const wall = (x, y) => W.add(x + "," + y);
+    const rim = () => { for (let x = 0; x < COLS; x++) { wall(x, 0); wall(x, ROWS - 1); } for (let y = 0; y < ROWS; y++) { wall(0, y); wall(COLS - 1, y); } };
+    const put = (x, y, geometry, color) => { board[y][x] = gameplayKey(geometry, "none"); if (color) colorBoard[y][x] = color; groundSkinBoard[y][x] = null; };
+
+    // ---------------- Room 1: the Entry Hall (warm) ----------------
+    const r1 = mkRoom("The Entry Hall", kits[0]);
+    W.clear(); rim();
+    for (let y = 1; y < ROWS - 1; y++) if (y !== 8) wall(14, y);          // divider with the gate at (14,8)
+    [[12, 7], [12, 8], [12, 9]].forEach(([x, y]) => wall(x, y));            // stopper behind the plate: a crate can't be pushed past it
+    const pill1 = [[3, 3], [10, 3], [3, 14], [10, 14], [18, 3], [18, 14], [21, 6], [21, 10]];
+    dress(kits[0], W, (x, y) => y === 8 && x >= 1 && x <= 22 && x !== 12);
+    pill1.forEach(([x, y]) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = kits[0].pick("pillar"); backgroundBoard[y][x] = null; });
+    put(11, 8, "plate", "red");
+    put(14, 8, "barrier-n", "red");
+    put(23, 8, "door");
+    backgroundBoard[8][23] = kits[0].pick("accent");
+    placeExampleActor(PLAYER_DEF_ID, 2, 8);
+    placeExampleActor(PUSHABLE_DEF_ID, 6, 8);
+    placeExampleActor(PUSHABLE_DEF_ID, 7, 13);       // a spare, in the open
+    r1.room.startPos = { x: 2 * TILE + 5, y: 8 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 2: the Two Plates (cool) ----------------
+    const r2 = mkRoom("The Cold Vault", kits[1]);
+    W.clear(); rim();
+    for (let y = 1; y < ROWS - 1; y++) { if (y !== 8) wall(10, y); if (y !== 8) wall(18, y); }
+    wall(7, 3); wall(15, 13);                                                 // stoppers behind the two plates
+    const pill2 = [[3, 3], [3, 14], [13, 3], [13, 14], [20, 3], [20, 14]];
+    dress(kits[1], W, (x, y) => y === 8 && x >= 1 && x <= 22);
+    pill2.forEach(([x, y]) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = kits[1].pick("pillar"); backgroundBoard[y][x] = null; });
+    put(7, 4, "plate", "red");
+    put(10, 8, "barrier-n", "red");
+    put(15, 12, "plate", "blue");
+    put(18, 8, "barrier-n", "blue");
+    put(0, 8, "door");
+    put(23, 8, "door");
+    backgroundBoard[8][0] = kits[1].pick("accent"); backgroundBoard[8][23] = kits[1].pick("accent");
+    placeExampleActor(PUSHABLE_DEF_ID, 4, 8);       // goes along the lane, through the red gate, down to the blue plate
+    placeExampleActor(PUSHABLE_DEF_ID, 7, 11);      // goes straight up onto the red plate
+    placeExampleActor(PUSHABLE_DEF_ID, 3, 14);      // spare in the first chamber
+    placeExampleActor(PUSHABLE_DEF_ID, 12, 14);     // spare past the red gate
+    r2.room.startPos = { x: 1 * TILE + 5, y: 8 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    doorLinks[roomCellKey(r1.room.id, 23, 8)] = { toRoomId: r2.room.id, toX: 0, toY: 8 };
+    doorLinks[roomCellKey(r2.room.id, 0, 8)] = { toRoomId: r1.room.id, toX: 23, toY: 8 };
+    activateRoom(r1.room.id);
+    return r1.room;
+  }
+  function drawStonekeepersVaultIcon(ctx) {
+    ctx.fillStyle = "#6a769a"; ctx.fillRect(0, 0, 24, 24);
+    ctx.fillStyle = "#2c3248"; for (let y = 0; y < 24; y += 6) ctx.fillRect(0, y, 24, 1);
+    ctx.fillStyle = "#8793ad"; ctx.fillRect(2, 5, 20, 14);
+    ctx.fillStyle = "#2c3248"; ctx.fillRect(15, 5, 2, 14);
+    ctx.fillStyle = "#e53935"; ctx.fillRect(15, 10, 2, 4);
+    ctx.fillStyle = "#e53935"; ctx.fillRect(10, 12, 4, 3);
+    ctx.fillStyle = "#b9722e"; ctx.fillRect(4, 10, 6, 6);
+    ctx.fillStyle = "#7a4a1c"; ctx.fillRect(4, 10, 6, 1); ctx.fillRect(4, 15, 6, 1); ctx.fillRect(4, 10, 1, 6); ctx.fillRect(9, 10, 1, 6);
+    ctx.fillStyle = "#ffd54f"; ctx.fillRect(18, 9, 3, 6);
+  }
+
   // Tunnel Trouble is retired from the gallery but kept (builder + icon) for reuse by Surprise Me.
   const UNLISTED_SAMPLES = [
     { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -10942,6 +11079,7 @@
     { id: "crossing-guard", name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
     { id: "rock-bottom", name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
     { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
+    { id: "stonekeepers-vault", name: "Stonekeeper's Vault", builder: buildStonekeepersVaultGame, draw: drawStonekeepersVaultIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
