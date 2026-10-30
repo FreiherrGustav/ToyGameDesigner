@@ -11099,6 +11099,75 @@
     ctx.fillStyle = "#ffd54f"; ctx.fillRect(18, 9, 3, 6);
   }
 
+  // ---------------- Cloud Hopper (v2.60): a meadow-to-sky climb in three rooms (Rooms 1 and 2 here) ----------------
+  // Only existing pieces: grass/dirt Ground textures, a sample-scoped cloud look for solid Ground (art only, ordinary solid geometry),
+  // trampolines, a Moving Platform, coins, Mousecop (the chaser, switched to harmless in the Characters tab's own picker), Wheebuns, doors.
+  // The sky, clouds, hills and bushes come from the same Paint presets and sky routine the starter board uses.
+  // Jump numbers (measured at 30 fps, the worst case; 25% margin applied): step up <= 2 tiles, flat gap <= 4 tiles, trampoline rise <= 6 tiles.
+  function buildCloudHopperGame() {
+    ensureSkyBackdropDefs();
+    const CLOUD = pat(["..WWW.W.", "WWWWWWWW", "WWWWWWWW", "WWWWWWWW", "LLWWLWWL", "LSLLLLSL", ".SSSSSS.", "..S..S.."], { W: "#ffffff", L: "#e3eefa", S: "#bcd2ea" });
+    groundTileDefs.chCloud = { name: "cloud", frames: [CLOUD], frameMs: 1000, geometry: "solid", modifier: "none" };
+    groundSlotIds.push("chCloud");
+    backgroundTileDefs.chDeep = { name: "deep earth", art: pat(["dddddddd", "dDdddddd", "dddddDdd", "dddDdddd", "ddddddDd", "dDdddddd", "ddddDddd", "dddddddd"], { d: "#6f4a2a", D: "#5c3d22" }) };
+    actorDefs[findDefaultActorDef("chaser")].lethal = false; // Mousecop and Wheebuns are gentle here: touching one is a bump, never a life lost
+    actorDefs[findDefaultActorDef("fleer")].lethal = false;
+    const mkRoom = name => {
+      const room = createEmptyRoom(name);
+      room.gravityEnabled = true; room.gravityDir = "down"; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+      rooms.push(room); activateRoom(room.id);
+      paintSkyBackdrop(backgroundBoard, COLS);
+      return room;
+    };
+    const solid = (x, y, skin) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = skin; groundSkinRotationBoard[y][x] = 0; };
+    const cloud = (x0, x1, y) => { for (let x = x0; x <= x1; x++) solid(x, y, "chCloud"); };
+    const ground = (x0, x1) => { for (let x = x0; x <= x1; x++) { solid(x, 15, "gndGrass"); solid(x, 16, "gndDirt"); solid(x, 17, "gndDirt"); } };
+    const deep = (x, y) => { backgroundBoard[y][x] = "chDeep"; };
+    const scenery = (list) => list.forEach(([x, id]) => { backgroundBoard[14][x] = id; });
+    const coins = list => list.forEach(([x, y]) => placeExampleActor("colCoin", x, y));
+
+    // ---------------- Room 1: the meadow ----------------
+    const r1 = mkRoom("The Meadow");
+    ground(0, 9); ground(13, 23);
+    for (let x = 10; x <= 12; x++) { solid(x, 17, "gndGrass"); deep(x, 15); deep(x, 16); }   // a gentle 2-tile dip: you can always jump back out
+    cloud(16, 18, 13);                                                                          // first step up (2 tiles)
+    cloud(19, 23, 11);                                                                          // second step up (2 tiles), the way on
+    board[10][23] = gameplayKey("door", "none");
+    scenery([[3, "bgHill1"], [4, "bgHill2"], [5, "bgHill3"], [7, "bgBush"], [14, "bgBush"], [20, "bgHill1"], [21, "bgHill3"]]);
+    placeExampleActor(playerDefId, 2, 14);
+    placeExampleActor(findDefaultActorDef("chaser"), 7, 14);
+    coins([[4, 14], [6, 14], [8, 14], [9, 13], [10, 12], [11, 12], [12, 13], [14, 12], [16, 11], [17, 11], [18, 10], [19, 9], [20, 9], [21, 9]]);
+    r1.startPos = { x: 2 * TILE + 5, y: 14 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 2: the climb ----------------
+    const r2 = mkRoom("The Climb");
+    ground(0, 8); ground(10, 23);
+    solid(9, 17, "gndDirt"); board[16][9] = gameplayKey("trampoline", "none"); groundSkinBoard[16][9] = null; deep(9, 15);   // drop in and spring up
+    board[14][0] = gameplayKey("door", "none");
+    cloud(13, 19, 10);                                                                          // catches the first bounce
+    cloud(20, 23, 6);                                                                           // the top ledge
+    scenery([[2, "bgHill1"], [3, "bgHill2"], [4, "bgHill3"], [6, "bgBush"], [12, "bgBush"], [18, "bgHill1"], [19, "bgHill3"]]);
+    placeExampleActor(MOVING_PLATFORM_DEF_ID, 19, 8);
+    placeExampleActor(findDefaultActorDef("fleer"), 15, 9);
+    coins([[3, 14], [5, 14], [7, 14], [9, 13], [9, 11], [10, 9], [12, 8], [14, 8], [16, 7], [18, 6], [19, 5], [21, 4], [22, 4]]);
+    r2.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    doorLinks[roomCellKey(r1.id, 23, 10)] = { toRoomId: r2.id, toX: 1, toY: 14 };
+    doorLinks[roomCellKey(r2.id, 0, 14)] = { toRoomId: r1.id, toX: 22, toY: 10 };
+    activateRoom(r1.id);
+    return r1;
+  }
+  function drawCloudHopperIcon(ctx) {
+    ctx.fillStyle = "#6fc3ff"; ctx.fillRect(0, 0, 24, 24);
+    ctx.fillStyle = "#9bd9ff"; ctx.fillRect(0, 12, 24, 12);
+    ctx.fillStyle = "#4fb34a"; ctx.fillRect(0, 20, 24, 4); ctx.fillStyle = "#7a4a1c"; ctx.fillRect(0, 22, 24, 2);
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(2, 4, 8, 3); ctx.fillRect(4, 3, 4, 1); ctx.fillRect(13, 9, 9, 3); ctx.fillRect(15, 8, 4, 1); ctx.fillRect(6, 14, 7, 3); ctx.fillRect(8, 13, 3, 1);
+    ctx.fillStyle = "#ffd54f"; ctx.fillRect(4, 18, 2, 2); ctx.fillRect(10, 11, 2, 2); ctx.fillRect(17, 5, 2, 2);
+    ctx.fillStyle = "#e53935"; ctx.fillRect(19, 2, 1, 4); ctx.fillRect(20, 2, 3, 2);
+  }
+
   // Tunnel Trouble is retired from the gallery but kept (builder + icon) for reuse by Surprise Me.
   const UNLISTED_SAMPLES = [
     { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -11117,6 +11186,7 @@
     { id: "rock-bottom", name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
     { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
     { id: "stonekeepers-vault", name: "Stonekeeper's Vault", builder: buildStonekeepersVaultGame, draw: drawStonekeepersVaultIcon },
+    { id: "cloud-hopper", name: "Cloud Hopper", builder: buildCloudHopperGame, draw: drawCloudHopperIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
