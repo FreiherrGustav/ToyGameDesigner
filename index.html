@@ -11080,10 +11080,10 @@
     r3.room.startPos = { x: 1 * TILE + 5, y: 8 * TILE + 5 };
     snapshotCurrentRoomState();
 
-    doorLinks[roomCellKey(r2.room.id, 23, 8)] = { toRoomId: r3.room.id, toX: 0, toY: 8 };
-    doorLinks[roomCellKey(r3.room.id, 0, 8)] = { toRoomId: r2.room.id, toX: 23, toY: 8 };
-    doorLinks[roomCellKey(r1.room.id, 23, 8)] = { toRoomId: r2.room.id, toX: 0, toY: 8 };
-    doorLinks[roomCellKey(r2.room.id, 0, 8)] = { toRoomId: r1.room.id, toX: 23, toY: 8 };
+    doorLinks[roomCellKey(r2.room.id, 23, 8)] = { toRoomId: r3.room.id, toX: 1, toY: 8 };
+    doorLinks[roomCellKey(r3.room.id, 0, 8)] = { toRoomId: r2.room.id, toX: 22, toY: 8 };
+    doorLinks[roomCellKey(r1.room.id, 23, 8)] = { toRoomId: r2.room.id, toX: 1, toY: 8 };
+    doorLinks[roomCellKey(r2.room.id, 0, 8)] = { toRoomId: r1.room.id, toX: 22, toY: 8 };
     activateRoom(r1.room.id);
     return r1.room;
   }

@@ -30,7 +30,7 @@ function build(r, ri) {
     else if (a.def === "largestone") g.objs.push({ kind: "s", at: i });
     else if (a.def === "colKey") g.key = i;
   });
-  g.hero = ri === 0 ? 8 * W + 2 : 8 * W + 0;                         // room 1 start; rooms 2/3 arrive on the west door
+  g.hero = ri === 0 ? 8 * W + 2 : 8 * W + 1;                         // room 1 start; rooms 2/3 arrive on the west door
   if (ri === 2) { g.throwRows = [7, 8, 9]; g.throwCol = 13; }
   return g;
 }

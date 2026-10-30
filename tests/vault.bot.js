@@ -8,7 +8,7 @@ const shotDir = process.argv[4] && process.argv[4] !== "-" ? process.argv[4] : n
 const doExport = process.argv[5] === "export";
 const DRIVER = `(() => {
   const W = 24, H = 18;
-  const sleepFrames = n => new Promise(r => { let i = 0; const f = () => (++i >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+  const sleepFrames0 = 0; const sleepFrames = n => new Promise(r => { let i = 0; const f = () => (++i >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
   const key = (k, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: k, bubbles: true }));
   const KEY = { "1,0": "ArrowRight", "-1,0": "ArrowLeft", "0,1": "ArrowDown", "0,-1": "ArrowUp" };
   const pl = () => actors.find(a => a.isPlayer);
@@ -20,6 +20,7 @@ const DRIVER = `(() => {
   async function axisTo(axis, target, tol) {           // bang-bang: accelerate toward, brake in time, settle within tol
     const i = axis === "x" ? 0 : 1, v = axis === "x" ? "vx" : "vy", neg = axis === "x" ? "ArrowLeft" : "ArrowUp", pos = axis === "x" ? "ArrowRight" : "ArrowDown";
     for (let n = 0; n < 600; n++) {
+      if (window.__room !== undefined && currentRoomId !== window.__room) { release(); return false; }
       const d = target - hc()[i], vel = pl()[v], stop = vel * Math.abs(vel) / (2 * 1700);
       const err = d - stop; key(neg, false); key(pos, false);
       if (Math.abs(d) <= tol && Math.abs(vel) < 25) { release(); return true; }
@@ -53,10 +54,10 @@ const DRIVER = `(() => {
       // walk straight runs: move along the first leg's axis to the far end of the leg
       let e = 1; const dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1];
       while (e + 1 < p.length && p[e + 1][0] - p[e][0] === dx && p[e + 1][1] - p[e][1] === dy) e++;
-      const ax = dx ? "x" : "y", other = dx ? "y" : "x";
+      console.log('goCell', tx, ty, 'me', me, 'leg', JSON.stringify(p.slice(0, e + 1)), 'room', currentRoomId, window.__room); const ax = dx ? "x" : "y", other = dx ? "y" : "x";
       await axisTo(other, p[0][dx ? 1 : 0] * TILE + TILE / 2, 3);
       if (!(await axisTo(ax, p[e][dx ? 0 : 1] * TILE + TILE / 2, 3))) { if (cellOf(pl()).join() === p[e].join()) continue; }
-      if (currentRoomId !== window.__room) return "room";
+      if (currentRoomId !== window.__room) { release(); return "room"; }
     }
     return false;
   }
@@ -64,7 +65,7 @@ const DRIVER = `(() => {
     const dx = Math.sign(to[0] - from[0]), dy = Math.sign(to[1] - from[1]); const k = KEY[dx + "," + dy];
     const behind = [from[0] - dx, from[1] - dy];
     const ok = await goCell(behind[0], behind[1], (cx, cy) => cx === from[0] && cy === from[1]); if (!ok) return "no path to " + behind;
-    const o = objAt(from[0], from[1]); if (!o) return "no object at " + from;
+    const o = objAt(from[0], from[1]); if (!o) return "no object at " + from + "; objects at " + JSON.stringify(objs().map(a => [a.x, a.y, ...cellOf(a)])) + " hero " + JSON.stringify([pl().x, pl().y, pl().vx]);
     const tx = to[0] * TILE + TILE / 2, ty = to[1] * TILE + TILE / 2;
     key(k, true);
     for (let n = 0; n < 600; n++) { await sleepFrames(1);
@@ -94,7 +95,7 @@ const DRIVER = `(() => {
   let src = fs.readFileSync(html, "utf8"); let page;
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const ctx = await b.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true });
-  page = await ctx.newPage(); const errs = []; page.on("pageerror", e => errs.push(e.message)); page.on("dialog", d => d.accept());
+  page = await ctx.newPage(); page.on("console", m => { if (process.env.DEBUG) console.log("   [page] " + m.text()); }); const errs = []; page.on("pageerror", e => errs.push(e.message)); page.on("dialog", d => d.accept());
   const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
   const hooked = path.join(os.tmpdir(), "vault_bot_" + process.pid + ".html");
   fs.writeFileSync(hooked, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")");\n'));
@@ -114,7 +115,7 @@ const DRIVER = `(() => {
   } else {
     await E(() => enterPlayMode()); 
   }
-  const T = (f) => target.evaluate(x => window.__ev(x)(), f.toString());
+  const T = (f) => target.evaluate(x => window.__ev('()=>{const pl_=()=>actors.find(a=>a.isPlayer);return (' + x + ')()}')(), f.toString());
   await target.evaluate(DRIVER.startsWith("(") ? `window.__ev(()=>${DRIVER})()` : DRIVER);
   await target.waitForTimeout(1600);
   const exitCells = [[23, 8], [23, 8], null];
@@ -143,8 +144,8 @@ const DRIVER = `(() => {
     }
     if (!ok) break;
     if (ri === 2) { // key and the goal
-      const g = await target.evaluate(async () => { const k = actors.find(a => a.defId === "colKey"); let r = await window.__bot.goCell(...window.__bot.cellOf(k)); if (r !== true) return "key " + r; await window.__bot.sleepFrames(10);
-        r = await window.__bot.goCell(21, 14); return r === true ? true : "goal path " + r; });
+      const g = await target.evaluate(x => window.__ev(x)(), (async () => { const k = actors.find(a => a.defId === "colKey"); let r = await window.__bot.goCell(...window.__bot.cellOf(k)); if (r !== true) return "key " + r; await window.__bot.sleepFrames(10);
+        r = await window.__bot.goCell(21, 14); return r === true ? true : "goal path " + r; }).toString());
       console.log("   key and goal: " + (g === true ? "ok" : "FAIL " + g)); if (g !== true) { ok = false; break; }
       await target.waitForTimeout(600);
     } else {
@@ -152,7 +153,8 @@ const DRIVER = `(() => {
       await target.waitForTimeout(1200);
       const now = await T(() => currentRoomId); console.log("   walked to the exit door: room " + room + " -> " + now);
       if (now === room) { ok = false; break; }
-      await target.evaluate(() => { window.__room = currentRoomId; });
+      await target.evaluate(r => { window.__room = r; }, now);
+      console.log("   arrived: " + JSON.stringify(await T(() => ({ room: currentRoomId, hero: [pl_().x, pl_().y], keys: Object.keys(keys).filter(k => keys[k]) }))));
     }
     if (shotDir) await target.screenshot({ path: path.join(shotDir, "bot-room" + (ri + 1) + ".png") });
   }
