@@ -11134,6 +11134,9 @@
     const mood = {
       orbit: { sky: "#070a26", sky2: "#0d1140", star: ["#ffffff", "#bcd2ff", "#ffe9a8"], neb: "#2a2f8f", hull: ["#5b6b8c", "#46546f", "#8fa3c8", "#2c3650"], lamp: "#7fe3ff" },
       sling: { sky: "#0a1a1f", sky2: "#0e2a2c", star: ["#ffffff", "#c8fff0", "#ffe9a8"], neb: "#1f7a6a", hull: ["#7a6a58", "#5e5042", "#a89a82", "#3a3028"], lamp: "#ffb347" },
+      tug:   { sky: "#1a0a14", sky2: "#2a0e22", star: ["#ffffff", "#ffd0e8", "#ffe9a8"], neb: "#8f2a5f", hull: ["#8c5b5b", "#6f4646", "#c89090", "#3a2020"], lamp: "#ff8ad0" },
+      pull:  { sky: "#0a1a0c", sky2: "#102a14", star: ["#ffffff", "#d0ffd0", "#fff3a8"], neb: "#2a8f3c", hull: ["#6b8c5b", "#546f46", "#a8c88f", "#203a24"], lamp: "#d8ff6a" },
+      flip:  { sky: "#06061a", sky2: "#0c0c34", star: ["#ffffff", "#ffffff", "#9ff3ff"], neb: "#5a3fd0", hull: ["#7a7aa0", "#5a5a82", "#c0c0f0", "#2a2a50"], lamp: "#9ff3ff" },
     };
     const skyTile = (m, band, v) => {
       const r = rnd(77 + v * 131 + band * 17), art = new Array(64).fill(m.sky);
@@ -11170,7 +11173,7 @@
       for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
         let dmin = 99; hole.forEach(([hx, hy]) => { dmin = Math.min(dmin, Math.hypot(x - hx, y - hy)); });
         let band = 0; EH_BANDS.forEach((b, i) => { if (dmin <= b) band = i + 1; });
-        const r = rnd(x * 7919 + y * 104729 + (key === "orbit" ? 1 : 2))();
+        const r = rnd(x * 7919 + y * 104729 + key.length * 3 + key.charCodeAt(0))();
         backgroundBoard[y][x] = "eh" + key + band + (r < 0.62 ? 0 : r < 0.9 ? 1 : 2);
       }
       if (planetCells) { const art = planet(planetId, ...planetCells.colors);
@@ -11190,7 +11193,7 @@
       rooms.push(room); activateRoom(room.id);
       return room;
     };
-    ["orbit", "sling"].forEach(k => { mkSkin("eh" + k + "Metal", "hull", metal(mood[k], false)); mkSkin("ehT" + k + "Metal", "hull (in the pull)", metal(mood[k], true)); });
+    ["orbit", "sling", "tug", "pull", "flip"].forEach(k => { mkSkin("eh" + k + "Metal", "hull", metal(mood[k], false)); mkSkin("ehT" + k + "Metal", "hull (in the pull)", metal(mood[k], true)); });
     const lamps = (key, list) => list.forEach(([x, y]) => { const m = mood[key], a = skyTile(m, 0, 0); a[27] = a[28] = a[35] = a[36] = m.lamp; a[19] = a[20] = blend(m.lamp, m.sky, 0.6); mkBg("ehLamp" + key + x + y, "beacon", a); backgroundBoard[y][x] = "ehLamp" + key + x + y; });
 
     // ---------------- Room 1: Orbit ----------------
@@ -11224,8 +11227,69 @@
     r2.startPos = { x: 1 * TILE + 5, y: 5 * TILE + 5 };
     snapshotCurrentRoomState();
 
+    // ---------------- Room 3: Tug (the magnet beats the shelf: it catches a crate in mid-air on a plate that opens the gate) ----------------
+    // A crate on the shelf below would lie still and trigger nothing; a crate the magnet catches hangs over the plate. The stuck crate is out of
+    // jump reach (a held crate is not a floor: standing on it pushes it out of the magnet's grip), so the hero never touches the machine.
+    hole.length = 0; hole.push([14, 14]);
+    const r3 = mkRoom("Tug");
+    dressRoom("tug", { x: 19, y: 1, colors: ["#e86aa8", "#b84682", "#ffc2e0"] }, "ehPlanetC");
+    plat("tug", 0, 11, 17); plat("tug", 20, 23, 17);                              // floors; the middle is open, the hole drains it
+    plat("tug", 2, 4, 15); plat("tug", 5, 7, 13); plat("tug", 8, 23, 11);         // stairs up to the long walkway
+    plat("tug", 0, 23, 0);
+    plat("tug", 9, 12, 7);                                                        // the shelf: crates that the magnet misses come to rest here
+    for (let y = 1; y <= 8; y++) solidAt("tug", 14, y);                           // the shelf's end wall
+    solidAt("tug", 13, 8); board[7][13] = gameplayKey("none", "lethal"); groundSkinBoard[7][13] = "lthLava"; groundSkinRotationBoard[7][13] = 0;   // a lava pit swallows the extra crates
+    for (let y = 1; y <= 5; y++) solidAt("tug", 16, y);                           // the wall above the gate
+    board[5][9] = gameplayKey("spawner-e", "none");                               // drops a crate eastward, every 2.5 s
+    spawnerContents[roomCellKey(r3.id, 9, 5)] = PUSHABLE_DEF_ID;
+    board[5][12] = gameplayKey("magnet", "none");                                 // the catcher
+    board[5][11] = gameplayKey("plate", "none"); colorBoard[5][11] = "red";       // in mid-air: only a crate the magnet holds reaches it
+    for (let y = 6; y <= 10; y++) { board[y][16] = gameplayKey("barrier-n", "none"); colorBoard[y][16] = "red"; }
+    board[13][14] = gameplayKey("gravitywell", "none");
+    board[16][0] = gameplayKey("door", "none");
+    board[10][22] = gameplayKey("door", "none");
+    lamps("tug", [[3, 14], [6, 9], [18, 7], [21, 7]]);
+    r3.startPos = { x: 1 * TILE + 5, y: 16 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 4: Two pulls (Orbit's climb with a hole on each side) ----------------
+    hole.length = 0; hole.push([6, 16], [17, 16]);
+    const r4 = mkRoom("Two pulls");
+    dressRoom("pull", { x: 19, y: 1, colors: ["#8fd04a", "#5fa02a", "#e0ff9a"] }, "ehPlanetD");
+    plat("pull", 0, 23, 17);                                                      // a floor under both holes: a miss drains, never strands
+    plat("pull", 0, 2, 15); plat("pull", 3, 5, 13); plat("pull", 6, 8, 11); plat("pull", 9, 11, 9); plat("pull", 12, 14, 7);
+    plat("pull", 15, 17, 9); plat("pull", 18, 20, 11); plat("pull", 21, 23, 13);
+    plat("pull", 0, 23, 0);
+    board[16][6] = gameplayKey("gravitywell", "none"); board[16][17] = gameplayKey("gravitywell", "none");
+    board[14][0] = gameplayKey("door", "none");
+    board[12][23] = gameplayKey("door", "none");
+    lamps("pull", [[1, 14], [8, 10], [13, 6], [20, 10]]);
+    r4.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 5: Flip side (Orbit turned a half turn, gravity up; the flag is where the door was) ----------------
+    hole.length = 0; hole.push([11, 3]);
+    const r5 = mkRoom("Flip side");
+    r5.gravityDir = "up"; gravityDir = "up";
+    dressRoom("flip", { x: 19, y: 12, colors: ["#6a8cff", "#4a5fd0", "#c0ceff"] }, "ehPlanetE");
+    const R5 = (x0, x1, y) => plat("flip", 23 - x1, 23 - x0, 17 - y);
+    R5(0, 8, 17); R5(16, 23, 17); R5(0, 2, 15); R5(3, 5, 13); R5(6, 8, 11); R5(9, 11, 9); R5(12, 14, 7); R5(15, 17, 9); R5(18, 20, 11); R5(21, 23, 13);
+    plat("flip", 0, 23, 17);
+    board[3][11] = gameplayKey("gravitywell", "none");
+    board[3][23] = gameplayKey("door", "none");
+    board[5][0] = gameplayKey("goal", "none");
+    lamps("flip", [[22, 3], [15, 7], [10, 11], [3, 7]]);
+    r5.startPos = { x: 22 * TILE + 5, y: 3 * TILE + 5 };
+    snapshotCurrentRoomState();
+
     doorLinks[roomCellKey(r1.id, 23, 12)] = { toRoomId: r2.id, toX: 1, toY: 5 };
     doorLinks[roomCellKey(r2.id, 0, 5)] = { toRoomId: r1.id, toX: 22, toY: 12 };
+    doorLinks[roomCellKey(r2.id, 23, 10)] = { toRoomId: r3.id, toX: 1, toY: 16 };
+    doorLinks[roomCellKey(r3.id, 0, 16)] = { toRoomId: r2.id, toX: 22, toY: 10 };
+    doorLinks[roomCellKey(r3.id, 22, 10)] = { toRoomId: r4.id, toX: 1, toY: 14 };
+    doorLinks[roomCellKey(r4.id, 0, 14)] = { toRoomId: r3.id, toX: 21, toY: 10 };
+    doorLinks[roomCellKey(r4.id, 23, 12)] = { toRoomId: r5.id, toX: 22, toY: 3 };
+    doorLinks[roomCellKey(r5.id, 23, 3)] = { toRoomId: r4.id, toX: 22, toY: 12 };
     activateRoom(r1.id);
     return r1;
   }
