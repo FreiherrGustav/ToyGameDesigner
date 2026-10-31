@@ -82,7 +82,7 @@ const RUNSC = `(spec, frames)=>{
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   // ---------------- A: no regression at "down" ----------------
   if (OLD && !process.env.SKIP_A) {
-    const probe = await open(browser, NEW); const n = await ev(probe.page, "()=>SAMPLE_GAMES.length"); await probe.ctx.close();
+    const probe = await open(browser, NEW); const n = process.env.NS ? +process.env.NS : await ev(probe.page, "()=>SAMPLE_GAMES.length"); await probe.ctx.close();
     let framesTotal = 0;
     for (let i = 0; i < n; i++) {
       const res = [];
