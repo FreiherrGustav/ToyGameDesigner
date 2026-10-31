@@ -730,20 +730,23 @@
 
     <div id="characterPropertiesBlock">
       <div class="section-title">Pick a character</div>
-      <div class="swatch-row" id="characterSwatches"></div>
       <div class="section-title" style="margin-top:10px;">The player (only one)</div>
       <div class="swatch-row" id="playerSwatchRow"></div>
-      <div class="section-title" style="margin-top:10px;">Custom characters</div>
-      <div class="swatch-row" id="customActorSwatches"></div>
-      <div id="temperamentPickerBlock" style="display:none;">
-        <div class="section-title" style="margin-top:10px;">How it acts — <span id="customActorEditingName"></span></div>
+      <div class="section-title" style="margin-top:10px;">Enemies</div>
+      <div class="swatch-row" id="characterSwatches"></div>
+      <div id="behaviorPickerBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Behavior<span id="customActorEditingName"></span></div>
         <div class="swatch-row" id="temperamentPickerSwatches"></div>
-        <div class="section-title" style="margin-top:10px;">Voice (optional)</div>
-        <div class="swatch-row" id="voicePickerSwatches"></div>
       </div>
       <div id="lethalPickerBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">If it touches you — <span id="lethalPickerName"></span></div>
         <div class="swatch-row" id="lethalPickerSwatches"></div>
+      </div>
+      <div class="section-title" style="margin-top:10px;">Custom characters</div>
+      <div class="swatch-row" id="customActorSwatches"></div>
+      <div id="temperamentPickerBlock" style="display:none;">
+        <div class="section-title" style="margin-top:10px;">Voice (optional)</div>
+        <div class="swatch-row" id="voicePickerSwatches"></div>
       </div>
     </div>
 
@@ -1039,6 +1042,7 @@
   // Kid-facing names of the built-in characters. Display only: behavior lives in the temperament, and a built-in
   // def keeps def.name === temperament (findDefaultActorDef, saved projects and samples all rely on that).
   const CHARACTER_DISPLAY_NAMES = { wanderer: "McDinglechud", chaser: "Mousecop", fleer: "Wheebuns" };
+  const BEHAVIOR_LABELS = { stationary: "Statue", wanderer: "Wanderer", chaser: "Chaser", fleer: "Fleer" };
   function temperamentDisplayName(temp) { return CHARACTER_DISPLAY_NAMES[temp] || temp; }
   // A def's display name: a built-in one (name still equals its temperament, as in every old save) shows the new name.
   function defDisplayName(def) { return (def && def.name === def.temperament && CHARACTER_DISPLAY_NAMES[def.name]) || (def ? def.name : ""); }
@@ -5417,23 +5421,32 @@
   function renderCharacterSwatches() {
     const container = document.getElementById("characterSwatches");
     container.innerHTML = "";
-    TEMPERAMENTS.forEach(temp => {
-      const def = actorDefs[findDefaultActorDef(temp)];
-      const sw = document.createElement("div");
-      sw.className = "swatch" + (selectedActorKind === temp ? " selected" : "");
-      sw.style.background = "#111";
-      sw.title = temperamentDisplayName(temp);
-      const c = document.createElement("canvas");
-      c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), def.art, ART);
-      sw.appendChild(c);
-      const label = document.createElement("div");
-      label.className = "lbl";
-      label.textContent = dispName(temperamentDisplayName(temp));
-      sw.appendChild(label);
-      sw.addEventListener("click", () => selectActorKind(temp));
-      container.appendChild(sw);
-    });
+    // One default enemy (it shows whichever built-in behavior is selected; the wanderer when none is) plus a "+" for more.
+    const enemySelected = paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind);
+    const shownTemp = enemySelected ? selectedActorKind : "wanderer";
+    const def = actorDefs[findDefaultActorDef(shownTemp)];
+    const sw = document.createElement("div");
+    sw.className = "swatch" + (enemySelected ? " selected" : "");
+    sw.style.background = "#111";
+    sw.title = "Enemy";
+    const c = document.createElement("canvas");
+    c.width = ART; c.height = ART;
+    drawArtToCtx(c.getContext("2d"), def.art, ART);
+    sw.appendChild(c);
+    const label = document.createElement("div");
+    label.className = "lbl";
+    label.textContent = "Enemy";
+    sw.appendChild(label);
+    sw.addEventListener("click", () => selectActorKind(enemySelected ? selectedActorKind : "wanderer"));
+    container.appendChild(sw);
+    const plus = document.createElement("div");
+    plus.className = "swatch";
+    plus.title = "Add another enemy";
+    plus.style.fontSize = "22px";
+    plus.style.fontWeight = "bold";
+    plus.textContent = "+";
+    plus.addEventListener("click", addCustomActor);
+    container.appendChild(plus);
   }
 
   // Shows whichever def currently backs the player — the built-in stick figure by default, or a
@@ -5478,6 +5491,15 @@
   // v2.9: extends the same reusable-tile "+" kit pattern v2.3 gave backgrounds to actors — each
   // custom slot gets its own name, art, and (via renderTemperamentPicker) assigned temperament,
   // rather than sharing one built-in look per temperament.
+  function addCustomActor() {
+    const letter = String.fromCharCode(65 + nextCustomActorLetter++);
+    const id = "custom" + letter;
+    const name = "Actor " + letter;
+    actorDefs[id] = { temperament: "wanderer", art: new Array(ART * ART).fill(null), poses: null, name, voice: "", lethal: true };
+    customActorSlotIds.push(id);
+    selectCustomActor(id);
+    log("New enemy \"" + name + "\" added — draw it below and pick its behavior.");
+  }
   function renderCustomActorSwatches() {
     const container = document.getElementById("customActorSwatches");
     container.innerHTML = "";
@@ -5505,15 +5527,7 @@
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
-    plus.addEventListener("click", () => {
-      const letter = String.fromCharCode(65 + nextCustomActorLetter++);
-      const id = "custom" + letter;
-      const name = "Actor " + letter;
-      actorDefs[id] = { temperament: "stationary", art: new Array(ART * ART).fill(null), poses: null, name, voice: "", lethal: true };
-      customActorSlotIds.push(id);
-      selectCustomActor(id);
-      log("New custom actor \"" + name + "\" added — draw it below and pick its temperament.");
-    });
+    plus.addEventListener("click", addCustomActor);
     container.appendChild(plus);
   }
 
@@ -5534,26 +5548,33 @@
   // currently the player hands the role back to the built-in stick figure and returns to editing
   // this slot as an ordinary character (see selectCustomActor).
   function renderTemperamentPicker() {
-    const block = document.getElementById("temperamentPickerBlock");
+    const block = document.getElementById("behaviorPickerBlock");
+    const voiceBlock = document.getElementById("temperamentPickerBlock");
     const isCustom = paintMode === "actor" && customActorSlotIds.includes(selectedActorDefId);
-    block.style.display = isCustom ? "block" : "none";
-    if (!isCustom) return;
-    document.getElementById("customActorEditingName").textContent = actorDefs[selectedActorDefId].name;
+    const isBuiltIn = paintMode === "actor" && !isCustom && TEMPERAMENTS.includes(selectedActorKind) && selectedActorDefId !== playerDefId;
+    block.style.display = (isCustom || isBuiltIn) ? "block" : "none";
+    voiceBlock.style.display = isCustom ? "block" : "none";
+    if (!isCustom && !isBuiltIn) return;
+    document.getElementById("customActorEditingName").textContent = isCustom ? " — " + actorDefs[selectedActorDefId].name : "";
     const container = document.getElementById("temperamentPickerSwatches");
     container.innerHTML = "";
-    const isThePlayer = playerDefId === selectedActorDefId;
-    TEMPERAMENTS.concat(["player"]).forEach(temp => {
+    const isThePlayer = isCustom && playerDefId === selectedActorDefId;
+    // Chaser / Wanderer / Fleer / Statue. For a built-in enemy a click picks that built-in look+behavior; for a custom
+    // character it sets that character's own behavior (and "player" hands it the player role).
+    ["chaser", "wanderer", "fleer", "stationary"].concat(isCustom ? ["player"] : []).forEach(temp => {
       const isPlayerOption = temp === "player";
       const sw = document.createElement("div");
-      const isSelected = isPlayerOption ? isThePlayer : (!isThePlayer && actorDefs[selectedActorDefId].temperament === temp);
+      const isSelected = isPlayerOption ? isThePlayer : (isCustom ? (!isThePlayer && actorDefs[selectedActorDefId].temperament === temp) : selectedActorKind === temp);
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = isPlayerOption ? PLAYER_COLOR : TEMPERAMENT_COLORS[temp];
-      sw.title = temp;
+      const name = isPlayerOption ? "Player" : BEHAVIOR_LABELS[temp];
+      sw.title = name;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = dispName(temp);
+      label.textContent = name;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
+        if (!isCustom) { selectActorKind(temp); return; }
         if (isPlayerOption) {
           makeCustomActorThePlayer(selectedActorDefId);
           selectActorKind("player");
@@ -5565,7 +5586,7 @@
       });
       container.appendChild(sw);
     });
-    renderVoicePicker();
+    if (isCustom) renderVoicePicker();
   }
 
   // Every NPC character (not the player) picks what touching it does: lethal (costs a life, the chaser's "caught") or
@@ -14580,17 +14601,17 @@
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
         : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
-    { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop McDinglechud. It roams around." } : { b: "Pick McDinglechud to add some trouble." }), done: () => tutHasEnemy(),
+    { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop an enemy. It roams around." } : { b: "Pick the Enemy to add some trouble." }), done: () => tutHasEnemy(),
       target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
-        : tutSwatchTarget('#characterSwatches .swatch[title="McDinglechud"]', "modeCharacter", "character") },
+        : tutSwatchTarget('#characterSwatches .swatch[title="Enemy"]', "modeCharacter", "character") },
     { name: "goal", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to plant the flag on top of the step." } : { b: "Pick the goal flag." }), done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
         : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
     { name: "play", say: (t) => ({ b: "All set! Press Play." }), done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
-    { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past McDinglechud and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
+    { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past the enemy and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
       target: () => {
         // a run that ended in game over: the kid is back in Build and the ring is on the goal (move it closer, then Play again)
         if (tutorial && tutorial.lostRun && appMode !== "play") { const g0 = tutGoalCell(); return g0 ? { cell: { x: g0.x, y: g0.y, w: 1, h: 1 } } : { sel: "#modePlayBtn" }; }

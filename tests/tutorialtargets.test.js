@@ -62,7 +62,7 @@ async function run(name, launcher, opts) {
     };
     const cellRect = (x, y) => p.evaluate(([x, y]) => { const r = document.getElementById('gameCanvas').getBoundingClientRect(), bw = __t.border(), k = (r.width - 2 * bw) / 768; return [r.left + bw + x * 32 * k, r.top + bw + y * 32 * k, 32 * k, 32 * k]; }, [x, y]);
     const clickCell = async (x, y) => { const r = await cellRect(x, y); await p.mouse.click(r[0] + r[2] / 2, r[1] + r[3] / 2); await p.waitForTimeout(350); };
-    const S = { player: '#playerSwatchRow .swatch[title="player"]', ground: '#groundSwatches .swatch[title="grass"]', enemy: '#characterSwatches .swatch[title="McDinglechud"]', goal: '#fixtureSwatches .swatch[title="goal"]' };
+    const S = { player: '#playerSwatchRow .swatch[title="player"]', ground: '#groundSwatches .swatch[title="grass"]', enemy: '#characterSwatches .swatch[title="Enemy"]', goal: '#fixtureSwatches .swatch[title="goal"]' };
     await check('swatch', S.ground); await p.click(S.ground); await p.waitForTimeout(350); await cellCheck('floor');
     { const a = await cellRect(2, 14), z = await cellRect(12, 14); await p.mouse.move(a[0] + a[2] / 2, a[1] + a[3] / 2); await p.mouse.down(); await p.mouse.move(z[0] + z[2] / 2, z[1] + z[3] / 2, { steps: 12 }); await p.mouse.up(); await p.waitForTimeout(350); }
     await cellCheck('ledge');
