@@ -66,7 +66,7 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     await clickCell(p, 12, 12); await clickCell(p, 12, 13); await p.waitForTimeout(1800);
     ok(await p.evaluate(() => __t.stepName()) === 'player', w + ': whole step drawn -> player');
     await p.click('#playerSwatchRow .swatch[title="player"]'); await p.waitForTimeout(700); await clickCell(p, 6, 13); await p.waitForTimeout(1800);
-    await p.click('#characterSwatches .swatch[title="Enemy"]'); await p.waitForTimeout(700);
+    await p.click('#characterSwatches .swatch:first-child'); await p.waitForTimeout(700);
     ok(near(await ring(p), (await cellRect(p, 2, 13)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': enemy ring at the far left of the floor');
     await clickCell(p, 2, 13); await p.waitForTimeout(1800);
     await p.click('#fixtureSwatches .swatch[title="goal"]'); await p.waitForTimeout(900);

@@ -1043,6 +1043,15 @@
   // def keeps def.name === temperament (findDefaultActorDef, saved projects and samples all rely on that).
   const CHARACTER_DISPLAY_NAMES = { wanderer: "McDinglechud", chaser: "Mousecop", fleer: "Wheebuns" };
   const BEHAVIOR_LABELS = { stationary: "Statue", wanderer: "Wanderer", chaser: "Chaser", fleer: "Fleer" };
+  // An added enemy is called by the name of the look it wears (its behavior's built-in character) until it is redrawn.
+  const ENEMY_LOOK_NAMES = { wanderer: "McDinglechud", chaser: "Mousecop", fleer: "Wheebuns", stationary: "Thelonius" };
+  function enemyLookName(d) {
+    if (!d) return "";
+    const base = actorDefs[findDefaultActorDef(d.temperament)];
+    if (!d.enemyType) return d.name;
+    if (base && JSON.stringify(d.art) === JSON.stringify(base.art)) return ENEMY_LOOK_NAMES[d.temperament] || d.name;
+    return d.name;
+  }
   function temperamentDisplayName(temp) { return CHARACTER_DISPLAY_NAMES[temp] || temp; }
   // A def's display name: a built-in one (name still equals its temperament, as in every old save) shows the new name.
   function defDisplayName(def) { return (def && def.name === def.temperament && CHARACTER_DISPLAY_NAMES[def.name]) || (def ? def.name : ""); }
@@ -5421,24 +5430,8 @@
   function renderCharacterSwatches() {
     const container = document.getElementById("characterSwatches");
     container.innerHTML = "";
-    // One default enemy (it shows whichever built-in behavior is selected; the wanderer when none is) plus a "+" for more.
-    const enemySelected = paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind);
-    const shownTemp = enemySelected ? selectedActorKind : "wanderer";
-    const def = actorDefs[findDefaultActorDef(shownTemp)];
-    const sw = document.createElement("div");
-    sw.className = "swatch" + (enemySelected ? " selected" : "");
-    sw.style.background = "#111";
-    sw.title = "Enemy";
-    const c = document.createElement("canvas");
-    c.width = ART; c.height = ART;
-    drawArtToCtx(c.getContext("2d"), def.art, ART);
-    sw.appendChild(c);
-    const label = document.createElement("div");
-    label.className = "lbl";
-    label.textContent = "Enemy";
-    sw.appendChild(label);
-    sw.addEventListener("click", () => selectActorKind(enemySelected ? selectedActorKind : "wanderer"));
-    container.appendChild(sw);
+    // Every enemy is its own slot with its own behavior and look; the row starts with one (shown as a stand-in until it is
+    // first used, so an untouched project stays "empty") and the "+" keeps adding more. Labels are the enemy's name.
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Add another enemy";
@@ -5446,24 +5439,30 @@
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
     plus.addEventListener("click", addEnemyType);
-    // enemies the kid added with the "+": same look as the built-in enemy of their behavior
-    customActorSlotIds.forEach(id => {
-      const d = actorDefs[id];
-      if (!d || !d.enemyType) return;
+    const addSlot = (d, selected, title, onClick, art) => {
       const e = document.createElement("div");
-      e.className = "swatch" + (selectedActorKind === id && paintMode === "actor" ? " selected" : "");
+      e.className = "swatch" + (selected ? " selected" : "");
       e.style.background = "#111";
-      e.title = d.name;
+      e.title = title;
       const ec = document.createElement("canvas");
       ec.width = ART; ec.height = ART;
-      drawArtToCtx(ec.getContext("2d"), activeArtFor(d), ART);
+      drawArtToCtx(ec.getContext("2d"), art, ART);
       e.appendChild(ec);
       const el = document.createElement("div");
       el.className = "lbl";
-      el.textContent = dispName(d.name);
+      el.textContent = dispName(title);
       e.appendChild(el);
-      e.addEventListener("click", () => selectCustomActor(id));
+      e.addEventListener("click", onClick);
       container.appendChild(e);
+    };
+    const enemyIds = customActorSlotIds.filter(id => actorDefs[id] && actorDefs[id].enemyType);
+    if (!enemyIds.length) {
+      const base = actorDefs[findDefaultActorDef("wanderer")];
+      addSlot(base, false, ENEMY_LOOK_NAMES.wanderer, () => addEnemyType(true), base.art);
+    }
+    enemyIds.forEach(id => {
+      const d = actorDefs[id];
+      addSlot(d, selectedActorKind === id && paintMode === "actor", enemyLookName(d), () => selectCustomActor(id), activeArtFor(d));
     });
     container.appendChild(plus);
   }
@@ -5513,17 +5512,16 @@
   // The Enemy row's "+": another enemy using the existing look of whichever behavior it is given (no new sprite is
   // drawn here; only the custom-character "+" below creates blank art). It lives in customActorSlotIds like any other
   // character but is flagged enemyType, so it shows in the Enemy row instead of the custom row.
-  function addEnemyType() {
+  function addEnemyType(first) {
     const base = actorDefs[findDefaultActorDef("wanderer")];
-    const n = customActorSlotIds.filter(i => actorDefs[i] && actorDefs[i].enemyType).length + 2;
     const letter = String.fromCharCode(65 + nextCustomActorLetter++);
     const id = "custom" + letter;
     const def = structuredClone(base);
-    def.name = "Enemy " + n; def.lethal = true; def.enemyType = true;
+    def.name = enemyLookName(base); def.lethal = npcIsLethal(base); def.enemyType = true;
     actorDefs[id] = def;
     customActorSlotIds.push(id);
     selectCustomActor(id);
-    log("Another enemy added. Pick its behavior below.");
+    log(first === true ? "Enemy ready. Pick its behavior below." : "Another enemy added. Pick its behavior below.");
   }
   function addCustomActor() {
     const letter = String.fromCharCode(65 + nextCustomActorLetter++);
@@ -14529,9 +14527,9 @@
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
         : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
     { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop an enemy. It roams around." } : { b: "Pick the Enemy to add some trouble." }), done: () => tutHasEnemy(),
-      target: () => (paintMode === "actor" && TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary")
+      target: () => (paintMode === "actor" && ((TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary") || (actorDefs[selectedActorKind] && actorDefs[selectedActorKind].enemyType && actorDefs[selectedActorKind].temperament !== "stationary")))
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
-        : tutSwatchTarget('#characterSwatches .swatch[title="Enemy"]', "modeCharacter", "character") },
+        : tutSwatchTarget('#characterSwatches .swatch:first-child', "modeCharacter", "character") },
     { name: "goal", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to plant the flag on top of the step." } : { b: "Pick the goal flag." }), done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
