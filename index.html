@@ -11147,15 +11147,34 @@
     board[14][0] = gameplayKey("door", "none");
     cloud(13, 19, 10);                                                                          // catches the first bounce
     cloud(20, 23, 6);                                                                           // the top ledge
+    board[5][23] = gameplayKey("door", "none");                                                 // on to the sky island
+    cloud(18, 20, 13); cloud(21, 23, 11);                                                       // optional low route up the right side (older kids): 2 up, 2 up, away from the main jump space
     scenery([[2, "bgHill1"], [3, "bgHill2"], [4, "bgHill3"], [6, "bgBush"], [12, "bgBush"], [18, "bgHill1"], [19, "bgHill3"]]);
     placeExampleActor(MOVING_PLATFORM_DEF_ID, 19, 8);
     placeExampleActor(findDefaultActorDef("fleer"), 15, 9);
-    coins([[3, 14], [5, 14], [7, 14], [9, 13], [9, 11], [10, 9], [12, 8], [14, 8], [16, 7], [18, 6], [19, 5], [21, 4], [22, 4]]);
+    coins([[3, 14], [5, 14], [7, 14], [9, 13], [9, 11], [10, 9], [12, 8], [14, 8], [16, 7], [18, 6], [19, 5], [21, 4], [22, 4], [18, 12], [19, 12], [20, 12], [21, 10], [22, 10], [23, 10]]);
+    placeExampleActor("colHeart", 22, 9);
     r2.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 3: the sky island ----------------
+    const r3 = mkRoom("The Sky Island");
+    for (let x = 0; x < COLS; x++) { solid(x, 16, "chCloud"); solid(x, 17, "chCloud"); }         // a sea of cloud: any fall lands here, never at the start
+    board[15][0] = gameplayKey("door", "none");
+    cloud(4, 6, 14); cloud(9, 11, 12); cloud(14, 16, 10); cloud(18, 20, 8); cloud(21, 23, 6);   // the way up: 2 up each, gaps of 1-2
+    board[5][22] = gameplayKey("goal", "none");
+    cloud(21, 23, 14); cloud(17, 19, 12);                                                       // optional low route off the cloud sea (kept clear of the main route's jump space)
+    placeExampleActor(findDefaultActorDef("fleer"), 12, 15);
+    placeExampleActor("colHeart", 18, 10);
+    coins([[5, 13], [7, 12], [8, 12], [10, 11], [12, 10], [13, 10], [15, 9], [17, 8], [19, 7], [21, 4],
+           [21, 13], [22, 13], [23, 13], [17, 11], [18, 11], [19, 11]]);
+    r3.startPos = { x: 1 * TILE + 5, y: 15 * TILE + 5 };
     snapshotCurrentRoomState();
 
     doorLinks[roomCellKey(r1.id, 23, 10)] = { toRoomId: r2.id, toX: 1, toY: 14 };
     doorLinks[roomCellKey(r2.id, 0, 14)] = { toRoomId: r1.id, toX: 22, toY: 10 };
+    doorLinks[roomCellKey(r2.id, 23, 5)] = { toRoomId: r3.id, toX: 1, toY: 15 };
+    doorLinks[roomCellKey(r3.id, 0, 15)] = { toRoomId: r2.id, toX: 22, toY: 5 };
     activateRoom(r1.id);
     return r1;
   }
