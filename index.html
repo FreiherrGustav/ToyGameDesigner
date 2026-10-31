@@ -11192,6 +11192,7 @@
     { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
   ];
   const SAMPLE_GAMES = [
+    { id: "cloud-hopper", name: "Cloud Hopper", builder: buildCloudHopperGame, draw: drawCloudHopperIcon },
     { id: "the-cheese-heist", name: "The Cheese Heist", builder: buildCheeseHeistGame, draw: drawCheeseHeistIcon },
     { id: "crystal-cave-runner", name: "Crystal Cave Runner", builder: buildCrystalCaveRunnerGame, draw: drawCrystalCaveIcon },
     { id: "dungeon-diving", name: "Dungeon Diving", builder: buildDungeonDivingGame, draw: drawDungeonDivingIcon },
@@ -11205,7 +11206,6 @@
     { id: "rock-bottom", name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
     { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
     { id: "stonekeepers-vault", name: "Stonekeeper's Vault", builder: buildStonekeepersVaultGame, draw: drawStonekeepersVaultIcon },
-    { id: "cloud-hopper", name: "Cloud Hopper", builder: buildCloudHopperGame, draw: drawCloudHopperIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
@@ -13895,13 +13895,13 @@
   // and sound are all off while it is up (landingActive).
   // Only samples that do something on their own and can't kill the player in the first minute
   // (see CLAUDE.md for the 20-second no-input runs that chose them).
-  const LANDING_HEROES = ["crossing-guard", "the-gravity-switcheroo", "dungeon-diving"];
+  const LANDING_HEROES = ["cloud-hopper"];
   const PRIVACY_URL = ""; // PLACEHOLDER: set to the privacy page before launch
   const CONTACT_URL = ""; // PLACEHOLDER: set to a mailto: or contact page before launch
   let landingSaved = null, landingHadWork = false, landingHero = null;
   // The landing demo keeps its size but never shows black bars: a tiny canvas is refreshed from the live game every frame and
   // stretched (blurred by CSS) over the whole window behind it, and the demo fades into it at its edges.
-  const LANDING_PICKS = ["crossing-guard", "rock-bottom", "the-gravity-switcheroo", "sushi-train-panic", "dungeon-diving", "the-world-s-worst-elevator"];
+  const LANDING_PICKS = ["cloud-hopper", "crossing-guard", "rock-bottom", "the-gravity-switcheroo", "sushi-train-panic", "dungeon-diving"];
   let landingBackdropRaf = 0;
   function landingBackdropLoop() {
     landingBackdropRaf = 0;
