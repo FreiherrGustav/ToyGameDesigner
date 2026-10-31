@@ -11187,6 +11187,74 @@
     ctx.fillStyle = "#e53935"; ctx.fillRect(19, 2, 1, 4); ctx.fillRect(20, 2, 3, 2);
   }
 
+  // ============== Mousecop's Garden (v2.61): a wrap-around garden chase ==============
+  // One 24x18 room, gravity off, wrap on both axes. Stage 1: the hedges, lawn, paths and flowers only.
+  // Hedge blocks are small and isolated with 3-wide lanes between them (a chaser steers straight at the hero and
+  // gets pinned behind long walls); the outermost row and column stay open so every seam crossing is clear.
+  const MG_BLOCK_ROWS = [[3, 5], [9, 11], [15, 16]], MG_BLOCK_COLS = [[3, 5], [9, 11], [15, 17], [21, 22]];
+  const MG_PATH_ROWS = [1, 7, 13], MG_PATH_COLS = [1, 7, 13, 19];
+  function buildMousecopsGardenGame() {
+    const hash = (x, y, k) => ((x * 73 + y * 151 + k * 31 + ((x * y) % 7) * 17) >>> 0) % 100;
+    // hedge skins: solid Ground textures, art only (a kid can repaint with them like any other texture)
+    const HL = { D: "#2e7d32", M: "#43a047", L: "#66bb6a", K: "#1b5e20", R: "#e53935", P: "#f48fb1", Y: "#fff59d" };
+    const hedge = rows => ({ name: "hedge", frames: [pat(rows, HL)], frameMs: 1000, geometry: "solid", modifier: "none" });
+    groundTileDefs.mgHedgeA = hedge(["MMLMMDMM", "MDMMMLMM", "LMMDMMML", "MMMLMMDM", "MDMMLMMM", "MMLMMDMM", "DMMMMMLM", "MLMDMMMM"]);
+    groundTileDefs.mgHedgeB = hedge(["MLMMDMMM", "MMMLMMMD", "DMMMMLMM", "MMLMDMMM", "MMMMMMLM", "LMDMMMMM", "MMMMLMDM", "MDMMMLMM"]);
+    groundTileDefs.mgHedgeBerry = hedge(["MMLMMDMM", "MDMRMLMM", "LMMDMMML", "MMMLMMRM", "MDMMLMMM", "MRLMMDMM", "DMMMMMLM", "MLMDMMMM"]);
+    groundTileDefs.mgHedgeBloom = hedge(["MMLMMDMM", "MDMMPLMM", "LMPYMMML", "MMMLMMDM", "MDMMLPMM", "MMLMPYDM", "DMMMMMLM", "MLMDMMMM"]);
+    groundTileDefs.mgHedgeTop = hedge(["LLLLLLLL", "LMLLMLLM", "MMMMMMMM", "MDMMMLMM", "LMMDMMML", "MMMLMMDM", "MDMMLMMM", "MMLMMDMM"]);
+    groundTileDefs.mgHedgeBase = hedge(["MMLMMDMM", "MDMMMLMM", "LMMDMMML", "MMMLMMDM", "DMDDMDDM", "DDKDDDKD", "KKKKKKKK", "KKKKKKKK"]);
+    ["mgHedgeA", "mgHedgeB", "mgHedgeBerry", "mgHedgeBloom", "mgHedgeTop", "mgHedgeBase"].forEach(id => groundSlotIds.push(id));
+    // lawn and path tiles on the Paint layer; the greens and browns are the Ground grass/dirt textures' own colours
+    const GRASS = { g: "#8bc34a", G: "#689f38", d: "#558b2f", w: "#ffffff", r: "#ef5350", y: "#ffd54f", p: "#f06292", s: "#7cb342" };
+    const lawn = rows => ({ name: "lawn", art: pat(rows, GRASS) });
+    backgroundTileDefs.mgLawnA = lawn(["ssssssss", "ssgsssss", "ssssGsss", "sssssssg", "sGssssss", "ssssgsss", "ssssssGs", "gsssssss"]);
+    backgroundTileDefs.mgLawnB = lawn(["sssGssss", "ssssssgs", "gsssssss", "ssssGsss", "sssssssg", "ssgsssss", "sssssGss", "ssssssss"]);
+    backgroundTileDefs.mgLawnC = lawn(["ssssssss", "sGssssgs", "ssssssss", "sssgsssG", "ssssssss", "sgssssss", "ssssGsss", "sssssgss"]);
+    backgroundTileDefs.mgLawnShade = lawn(["GGGGGGGG", "GsGGGsGG", "sGsssGss", "ssssssss", "ssgsssss", "ssssGsss", "sssssssg", "ssssssss"]);
+    backgroundTileDefs.mgFlowerRed = lawn(["ssssssss", "sssrssss", "ssrwrsss", "sssrssss", "ssssssss", "sssssysw", "ssssswyw", "sssssswy"]);
+    backgroundTileDefs.mgFlowerPink = lawn(["ssssssss", "ssssssss", "spssssss", "pwpsssss", "spssssss", "ssssspss", "sssspwps", "ssssspss"]);
+    backgroundTileDefs.mgFlowerYellow = lawn(["ssssssss", "ssyssssy", "sywsssyw", "ssyssssy", "ssssssss", "ssssysss", "sssywsss", "ssssysss"]);
+    const PATH = { t: "#d7c29a", b: "#bfa77a", h: "#efe3c4" };
+    backgroundTileDefs.mgPath = { name: "path", art: pat(["tttttttt", "tbtttttt", "ttttthtt", "tttttttt", "ttbtttbt", "tttttttt", "thttttbt", "tttttttt"], PATH) };
+    backgroundTileDefs.mgPathB = { name: "path", art: pat(["tttttttt", "tttttbtt", "tthttttt", "tttttttt", "tbtttttt", "tttthttt", "tttttttt", "ttbtttbt"], PATH) };
+    backgroundTileDefs.mgStones = { name: "stepping stones", art: pat(["tbbbbbbt", "bhhhhhhb", "bhhthhhb", "bhhhhhhb", "bhhhhhhb", "bhhhthhb", "bhhhhhhb", "tbbbbbbt"], PATH) };
+    const room = createEmptyRoom("Mousecop's Garden");
+    room.gravityEnabled = false; room.gravityDir = "down"; room.wrapHEnabled = true; room.wrapVEnabled = true; room.cameraMode = "fixed";
+    rooms.push(room); activateRoom(room.id);
+    const isHedge = (x, y) => MG_BLOCK_ROWS.some(([r0, r1]) => y >= r0 && y <= r1) && MG_BLOCK_COLS.some(([c0, c1]) => x >= c0 && x <= c1);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const h = hash(x, y, 1);
+      if (isHedge(x, y)) {
+        backgroundBoard[y][x] = "mgLawnA";
+        board[y][x] = gameplayKey("solid", "none");
+        groundSkinBoard[y][x] = !isHedge(x, y + 1) ? "mgHedgeBase" : !isHedge(x, y - 1) ? "mgHedgeTop" : h < 15 ? "mgHedgeBerry" : h < 30 ? "mgHedgeBloom" : h < 65 ? "mgHedgeA" : "mgHedgeB";
+        groundSkinRotationBoard[y][x] = 0;
+        continue;
+      }
+      const onRow = MG_PATH_ROWS.includes(y), onCol = MG_PATH_COLS.includes(x);
+      let id;
+      if (onRow && onCol) id = "mgStones";
+      else if (onRow || onCol) id = h < 50 ? "mgPath" : "mgPathB";
+      else if (isHedge(x, y - 1)) id = "mgLawnShade";
+      else if (isHedge(x - 1, y) || isHedge(x + 1, y) || isHedge(x, y + 1)) id = h < 30 ? "mgFlowerRed" : h < 55 ? "mgFlowerPink" : h < 75 ? "mgFlowerYellow" : h < 88 ? "mgLawnB" : "mgLawnC";
+      else id = h < 55 ? "mgLawnA" : h < 80 ? "mgLawnB" : "mgLawnC";
+      backgroundBoard[y][x] = id;
+    }
+    snapshotCurrentRoomState();
+    activateRoom(room.id);
+    return room;
+  }
+  function drawMousecopsGardenIcon(ctx) {
+    ctx.fillStyle = "#7cb342"; ctx.fillRect(0, 0, 24, 24);
+    ctx.fillStyle = "#d7c29a"; ctx.fillRect(0, 7, 24, 3); ctx.fillRect(0, 16, 24, 3); ctx.fillRect(7, 0, 3, 24); ctx.fillRect(16, 0, 3, 24);
+    ctx.fillStyle = "#2e7d32"; [[1, 1], [12, 1], [1, 12], [12, 12]].forEach(([x, y]) => ctx.fillRect(x, y, 5, 5));
+    ctx.fillStyle = "#66bb6a"; [[1, 1], [12, 1], [1, 12], [12, 12]].forEach(([x, y]) => ctx.fillRect(x, y, 5, 1));
+    ctx.fillStyle = "#1b5e20"; [[1, 5], [12, 5], [1, 16], [12, 16]].forEach(([x, y]) => ctx.fillRect(x, y, 5, 1));
+    ctx.fillStyle = "#f06292"; ctx.fillRect(20, 3, 2, 2); ctx.fillStyle = "#ffd54f"; ctx.fillRect(4, 20, 2, 2); ctx.fillRect(20, 20, 2, 2);
+    ctx.fillStyle = "#ef5350"; ctx.fillRect(10, 10, 4, 4); ctx.fillStyle = "#ffffff"; ctx.fillRect(11, 11, 2, 2);
+  }
+
   // Tunnel Trouble is retired from the gallery but kept (builder + icon) for reuse by Surprise Me.
   const UNLISTED_SAMPLES = [
     { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -11206,6 +11274,7 @@
     { id: "rock-bottom", name: "Rock Bottom", builder: buildRockBottomGame, draw: drawRockBottomIcon },
     { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
     { id: "stonekeepers-vault", name: "Stonekeeper's Vault", builder: buildStonekeepersVaultGame, draw: drawStonekeepersVaultIcon },
+    { id: "mousecops-garden", name: "Mousecop's Garden", builder: buildMousecopsGardenGame, draw: drawMousecopsGardenIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
