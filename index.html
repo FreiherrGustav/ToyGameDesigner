@@ -7145,12 +7145,17 @@
     // Lives remain: after the hit animation plays out, the whole level goes back to its starting
     // conditions (not just the player), keeping only the reduced life count. Only one reset can be
     // pending, and any manual restart/exit cancels it (clearTransientRuntimeState).
+    scheduleLevelRetry();
+    return false;
+  }
+  // Puts the current room back to its starting conditions after the hit animation, keeping the lives as they are.
+  // Shared by a death with lives left and by a black-hole capture (which costs nothing).
+  function scheduleLevelRetry() {
     levelResetPending = true;
     levelResetTimer = gameSetTimeout(() => {
       levelResetTimer = null; levelResetPending = false;
       if (appMode === "play" && !playSessionEnded) restartLevelKeepingLives();
     }, LEVEL_RESET_DELAY_MS);
-    return false;
   }
 
   // Star = ghost mode: nothing can hurt the player (except lethal tiles, which also ignore it —
@@ -7556,18 +7561,17 @@
   }
 
   function triggerPlayerGravityWellCapture(player, cx, cy) {
-    if (player.hazardCooldown > 0) return;
+    if (player.hazardCooldown > 0 || levelResetPending) return;
     player.hazardCooldown = HAZARD_COOLDOWN_MS;
     sounds.blackHole();
-    swallowIntoBlackHole(player, cx, cy, true);
+    const inPlay = appMode === "play" && !playSessionEnded;
+    swallowIntoBlackHole(player, cx, cy, false);
     player.vx = 0; player.vy = 0;
-    const causedGameOver = appMode === "play" && !playSessionEnded;
-    if (causedGameOver) {
-      lives = 0;
-      player.vortexHidden = true;
-      triggerGameOver(true);
-      gameSetTimeout(() => { sounds.gameOver(); log("Game over!"); }, RECIPES.blackHoleSuck.duration);
-      log("Pulled into the black hole — instant game over!");
+    if (inPlay) {
+      // Being pulled in costs no life: the room just starts over (same retry a death with lives left uses).
+      player.vortexHidden = true; // hidden for the swallow; resetActorsToSpawn clears it when the room restarts
+      scheduleLevelRetry();
+      log("Pulled into the black hole — back to the start of the room!");
     } else {
       player.x = startPos.x; player.y = startPos.y;
       playRecipe(player, "warpIn", PARTICLE_ART, { artTo: 0.2 });
@@ -10234,7 +10238,7 @@
       actor.ridingMover = null; actor.lastDryX = null; actor.lastDryY = null;
       actor.vx = 0; actor.vy = 0;
       actor.fallStartY = null; actor.lastY = null; actor.ballistic = false;
-      actor.cannonLoad = null; actor.cannonExit = null;
+      actor.cannonLoad = null; actor.cannonExit = null; actor.vortexHidden = false;
     });
   }
 
@@ -14500,7 +14504,7 @@
       triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
-      steeringAccelFor, consumeLifeIfPlaying, triggerGameOver, triggerWin,
+      steeringAccelFor, consumeLifeIfPlaying, scheduleLevelRetry, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
       stepActor, tick,
