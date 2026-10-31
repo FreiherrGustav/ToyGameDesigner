@@ -11196,91 +11196,40 @@
     ["orbit", "sling", "tug", "pull", "flip"].forEach(k => { mkSkin("eh" + k + "Metal", "hull", metal(mood[k], false)); mkSkin("ehT" + k + "Metal", "hull (in the pull)", metal(mood[k], true)); });
     const lamps = (key, list) => list.forEach(([x, y]) => { const m = mood[key], a = skyTile(m, 0, 0); a[27] = a[28] = a[35] = a[36] = m.lamp; a[19] = a[20] = blend(m.lamp, m.sky, 0.6); mkBg("ehLamp" + key + x + y, "beacon", a); backgroundBoard[y][x] = "ehLamp" + key + x + y; });
 
-    // ---------------- Room 1: Orbit ----------------
-    hole.length = 0; hole.push([12, 14]);
-    const r1 = mkRoom("Orbit");
-    dressRoom("orbit", { x: 1, y: 1, colors: ["#e8a55a", "#c27a3c", "#f4d9a0"] }, "ehPlanetA");
-    plat("orbit", 0, 8, 17); plat("orbit", 16, 23, 17);                            // floor either side; the middle is open, the hole drains it
-    plat("orbit", 0, 2, 15); plat("orbit", 3, 5, 13); plat("orbit", 6, 8, 11); plat("orbit", 9, 11, 9);
-    plat("orbit", 12, 14, 7);
-    plat("orbit", 15, 17, 9); plat("orbit", 18, 20, 11); plat("orbit", 21, 23, 13);
-    plat("orbit", 0, 23, 0);                                                      // ceiling trim
-    board[14][12] = gameplayKey("gravitywell", "none");
-    board[12][23] = gameplayKey("door", "none");
-    lamps("orbit", [[1, 14], [8, 10], [13, 6], [20, 10]]);
-    placeExampleActor(playerDefId, 1, 14);
-    r1.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
-    snapshotCurrentRoomState();
-
-    // ---------------- Room 2: Slingshot ----------------
-    hole.length = 0; hole.push([12, 9], [1, 17]);
-    const r2 = mkRoom("Slingshot");
-    dressRoom("sling", { x: 19, y: 1, colors: ["#3fbf9a", "#2b8f78", "#a6f0d6"] }, "ehPlanetB");
-    plat("sling", 0, 6, 6);                                                       // the start ledge
-    plat("sling", 9, 23, 17); plat("sling", 9, 16, 15); plat("sling", 17, 19, 13); plat("sling", 20, 23, 11);
-    plat("sling", 0, 23, 0);
-    board[9][12] = gameplayKey("gravitywell", "none");                            // the big hole: walk off the ledge and let it swing you
-    board[17][1] = gameplayKey("gravitywell", "none");                            // the drain: a miss is a free retry, never a stuck hero
-    board[5][0] = gameplayKey("door", "none");
-    board[10][23] = gameplayKey("door", "none");
-    lamps("sling", [[5, 5], [10, 14], [18, 12], [22, 10]]);
-    r2.startPos = { x: 1 * TILE + 5, y: 5 * TILE + 5 };
-    snapshotCurrentRoomState();
-
-    // ---------------- Room 3: Tug (the magnet beats the shelf: it catches a crate in mid-air on a plate that opens the gate) ----------------
-    // A crate on the shelf below would lie still and trigger nothing; a crate the magnet catches hangs over the plate. The stuck crate is out of
-    // jump reach (a held crate is not a floor: standing on it pushes it out of the magnet's grip), so the hero never touches the machine.
-    hole.length = 0; hole.push([14, 14]);
-    const r3 = mkRoom("Tug");
-    dressRoom("tug", { x: 19, y: 1, colors: ["#e86aa8", "#b84682", "#ffc2e0"] }, "ehPlanetC");
-    plat("tug", 0, 11, 17); plat("tug", 20, 23, 17);                              // floors; the middle is open, the hole drains it
-    plat("tug", 2, 4, 15); plat("tug", 5, 7, 13); plat("tug", 8, 23, 11);         // stairs up to the long walkway
-    plat("tug", 0, 23, 0);
-    plat("tug", 9, 12, 7);                                                        // the shelf: crates that the magnet misses come to rest here
-    for (let y = 1; y <= 8; y++) solidAt("tug", 14, y);                           // the shelf's end wall
-    solidAt("tug", 13, 8); board[7][13] = gameplayKey("none", "lethal"); groundSkinBoard[7][13] = "lthLava"; groundSkinRotationBoard[7][13] = 0;   // a lava pit swallows the extra crates
-    for (let y = 1; y <= 5; y++) solidAt("tug", 16, y);                           // the wall above the gate
-    board[5][9] = gameplayKey("spawner-e", "none");                               // drops a crate eastward, every 2.5 s
-    spawnerContents[roomCellKey(r3.id, 9, 5)] = PUSHABLE_DEF_ID;
-    board[5][12] = gameplayKey("magnet", "none");                                 // the catcher
-    board[5][11] = gameplayKey("plate", "none"); colorBoard[5][11] = "red";       // in mid-air: only a crate the magnet holds reaches it
-    for (let y = 6; y <= 10; y++) { board[y][16] = gameplayKey("barrier-n", "none"); colorBoard[y][16] = "red"; }
-    board[13][14] = gameplayKey("gravitywell", "none");
-    board[16][0] = gameplayKey("door", "none");
-    board[10][22] = gameplayKey("door", "none");
-    lamps("tug", [[3, 14], [6, 9], [18, 7], [21, 7]]);
-    r3.startPos = { x: 1 * TILE + 5, y: 16 * TILE + 5 };
-    snapshotCurrentRoomState();
-
-    // ---------------- Room 4: Two pulls (Orbit's climb with a hole on each side) ----------------
-    hole.length = 0; hole.push([6, 16], [17, 16]);
-    const r4 = mkRoom("Two pulls");
-    dressRoom("pull", { x: 19, y: 1, colors: ["#8fd04a", "#5fa02a", "#e0ff9a"] }, "ehPlanetD");
-    plat("pull", 0, 23, 17);                                                      // a floor under both holes: a miss drains, never strands
-    plat("pull", 0, 2, 15); plat("pull", 3, 5, 13); plat("pull", 6, 8, 11); plat("pull", 9, 11, 9); plat("pull", 12, 14, 7);
-    plat("pull", 15, 17, 9); plat("pull", 18, 20, 11); plat("pull", 21, 23, 13);
-    plat("pull", 0, 23, 0);
-    board[16][6] = gameplayKey("gravitywell", "none"); board[16][17] = gameplayKey("gravitywell", "none");
-    board[14][0] = gameplayKey("door", "none");
-    board[12][23] = gameplayKey("door", "none");
-    lamps("pull", [[1, 14], [8, 10], [13, 6], [20, 10]]);
-    r4.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
-    snapshotCurrentRoomState();
-
-    // ---------------- Room 5: Flip side (Orbit turned a half turn, gravity up; the flag is where the door was) ----------------
-    hole.length = 0; hole.push([11, 3]);
-    const r5 = mkRoom("Flip side");
-    r5.gravityDir = "up"; gravityDir = "up";
-    dressRoom("flip", { x: 19, y: 12, colors: ["#6a8cff", "#4a5fd0", "#c0ceff"] }, "ehPlanetE");
-    const R5 = (x0, x1, y) => plat("flip", 23 - x1, 23 - x0, 17 - y);
-    R5(0, 8, 17); R5(16, 23, 17); R5(0, 2, 15); R5(3, 5, 13); R5(6, 8, 11); R5(9, 11, 9); R5(12, 14, 7); R5(15, 17, 9); R5(18, 20, 11); R5(21, 23, 13);
-    plat("flip", 0, 23, 17);
-    board[3][11] = gameplayKey("gravitywell", "none");
-    board[3][23] = gameplayKey("door", "none");
-    board[5][0] = gameplayKey("goal", "none");
-    lamps("flip", [[22, 3], [15, 7], [10, 11], [3, 7]]);
-    r5.startPos = { x: 22 * TILE + 5, y: 3 * TILE + 5 };
-    snapshotCurrentRoomState();
+    // ---------------- The five rooms: the user's own layouts (EH_LAYOUT), dressed by the same art pass as before ----------------
+    // Boards, channel colours, crates and the hero come from the hand-edited project; every Paint tile, pull ring, hull skin and lamp is
+    // regenerated from where the holes really are, so edits can never leave the colours or rings out of date.
+    const EH_LAYOUT = [{"rows":["solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","||||||||||||solid:none|solid:none|solid:none|||||||||","|||||||||||||||||||||||","|||||||||solid:none|solid:none|solid:none||||solid:none|solid:none|solid:none||||||","|||||||||||||||||||||||","||||||solid:none|solid:none|solid:none||||||||||solid:none|solid:none|solid:none|||","|||||||||||||||||||||||door:none","|||solid:none|solid:none|solid:none||||||||||||||||solid:none|solid:none|solid:none","||||||||||||gravitywell:none|||||||||||","solid:none|solid:none|solid:none|||||||||||||||||||||","|||||||||||||||||||||||","solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none||||||||solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none"],"color":[],"lamps":[[13,6],[8,10],[20,10],[1,14]],"planet":[1,1],"actors":[],"player":[0,14],"start":[0,14],"dir":"down"},{"rows":["solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||gravitywell:none|||||gravitywell:none||||solid:none|||||||","||||||||||||||||solid:none|||||||","door:none||||||||||||||||solid:none|||||||","solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none||||||||||solid:none|||||||","||||||solid:none|solid:none|||||||||solid:none|||||||","|||||||solid:none|||||||||solid:none|||||||","|||||||solid:none|||||gravitywell:none||||solid:none|||||||","|||||||solid:none|solid:none|||||||solid:none|solid:none|||||||door:none","||||||||solid:none||||||solid:none|solid:none|||||solid:none|solid:none|solid:none|solid:none","||||||||solid:none|solid:none|||||solid:none|||||||||","|||||||||solid:none|||||solid:none|||solid:none|solid:none|solid:none||||","||||||||||||||solid:none||||||||gravitywell:none|","||||||||solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|||||||","|||||||||||||||||||||||","|gravitywell:none|||||||solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none"],"color":[],"lamps":[[5,5],[22,10],[18,12],[10,14]],"planet":[19,1],"actors":[],"player":null,"start":[2,5],"dir":"down"},{"rows":["solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","||||||||||||||||solid:none|||||||","|||||||||||plate:none|plate:none|plate:none|||solid:none|||||||","||||||gravitywell:none|||||plate:none|gravitywell:none|plate:none|||solid:none|||||||","|||||||||||plate:none|plate:none|plate:none|||solid:none|||||||","||spawner-e:none||||||||||||||solid:none|||||||","||||||||||||||||barrier-n:none|||||||","||||||||||||||||barrier-n:none|||||||","||||||||||||||||barrier-n:none|||||||","||||||||||||||||barrier-n:none|||||||","||||||||||||||||barrier-n:none||||||door:none|","||||||||solid:none|solid:none|solid:none|solid:none||||solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","|||||||||||||||||||||||","|||||solid:none|solid:none|solid:none|||||||gravitywell:none|||||||||","|||||||||||||||||||||||","||solid:none|solid:none|solid:none|||||||||||||||||||","door:none|||||||||||||||||||||||","solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|||||||||solid:none|solid:none|solid:none|solid:none"],"color":[[11,2,"red"],[12,2,"red"],[13,2,"red"],[11,3,"red"],[13,3,"red"],[11,4,"red"],[12,4,"red"],[13,4,"red"],[16,6,"red"],[16,7,"red"],[16,8,"red"],[16,9,"red"],[16,10,"red"]],"lamps":[[18,7],[21,7],[6,9],[3,14]],"planet":[19,1],"actors":[["pushable",4,12],["pushable",5,11],["pushable",5,12],["pushable",7,4]],"player":null,"start":[2,13],"dir":"down"},{"rows":["solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","|||||||||||||||||||||||","|||||||||||||gravitywell:none||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||gravitywell:none||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||solid:none|solid:none|||||||||","|||||||||||||||||||||||","|||||||||||solid:none|solid:none|||solid:none|solid:none|solid:none||||||","|||||||||||||||||||||||","||||||||solid:none|solid:none|||||||||solid:none|solid:none|solid:none|||","|||||||||||||||||||||||door:none","|||||solid:none|solid:none|solid:none||||||||||||||solid:none|solid:none|solid:none","door:none|||||||||||||||||||||||","solid:none|solid:none|solid:none|||||||||||||||||||||","||||||gravitywell:none|||||||||||gravitywell:none||||||","solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none"],"color":[],"lamps":[[13,6],[8,10],[20,10],[1,14]],"planet":[19,1],"actors":[],"player":null,"start":[1,14],"dir":"down"},{"rows":["solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none||||||||solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none","|||||||||||||||||||||||","|||||||||||||||||||||solid:none|solid:none|solid:none","|||||||||||gravitywell:none||||||||||||door:none","solid:none|solid:none|solid:none||||||||||||||||solid:none|solid:none|solid:none|||","goal:none|||||||||||||||||||||||","|||solid:none|solid:none|solid:none||||||||||solid:none|solid:none|solid:none||||||","|||||||||||||||||||||||","||||||solid:none|solid:none|solid:none||||solid:none|solid:none|solid:none|||||||||","|||||||||||||||||||||||","|||||||||solid:none|solid:none|solid:none||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","|||||||||||||||||||||||","solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none|solid:none"],"color":[],"lamps":[[22,3],[3,7],[15,7],[10,11]],"planet":[19,12],"actors":[],"player":null,"start":[0,0],"dir":"up"}];
+    const EH_ROOMS = [
+      { key: "orbit", name: "Orbit", planet: "ehPlanetA", colors: ["#e8a55a", "#c27a3c", "#f4d9a0"] },
+      { key: "sling", name: "Vortex", planet: "ehPlanetB", colors: ["#3fbf9a", "#2b8f78", "#a6f0d6"] },
+      { key: "tug", name: "Slingshot", planet: "ehPlanetC", colors: ["#e86aa8", "#b84682", "#ffc2e0"] },
+      { key: "pull", name: "Quad Pulls", planet: "ehPlanetD", colors: ["#8fd04a", "#5fa02a", "#e0ff9a"] },
+      { key: "flip", name: "Flip side", planet: "ehPlanetE", colors: ["#6a8cff", "#4a5fd0", "#c0ceff"] },
+    ];
+    const built = EH_ROOMS.map((def, i) => {
+      const lay = EH_LAYOUT[i];
+      hole.length = 0;
+      lay.rows.forEach((row, y) => row.split("|").forEach((g, x) => { if (g && g.indexOf("gravitywell") === 0) hole.push([x, y]); }));
+      const room = mkRoom(def.name);
+      room.gravityDir = lay.dir; gravityDir = lay.dir;
+      dressRoom(def.key, { x: lay.planet[0], y: lay.planet[1], colors: def.colors }, def.planet);
+      lay.rows.forEach((row, y) => row.split("|").forEach((g, x) => {
+        if (!g) return;
+        board[y][x] = g;
+        if (g === gameplayKey("solid", "none")) solidAt(def.key, x, y);
+      }));
+      lay.color.forEach(([x, y, c]) => { colorBoard[y][x] = c; });
+      lamps(def.key, lay.lamps);
+      lay.actors.forEach(([d, x, y]) => placeExampleActor(d === "player" ? playerDefId : d, x, y));
+      if (lay.player) placeExampleActor(playerDefId, lay.player[0], lay.player[1]);
+      lay.rows.forEach((row, y) => row.split("|").forEach((g, x) => { if (g && g.indexOf("spawner") === 0) spawnerContents[roomCellKey(room.id, x, y)] = PUSHABLE_DEF_ID; }));
+      const sp = i === 4 ? [22, 3] : lay.start;                                   // the flipped room is entered by its door
+      room.startPos = { x: sp[0] * TILE + 5, y: sp[1] * TILE + 5 };
+      snapshotCurrentRoomState();
+      return room;
+    });
+    const [r1, r2, r3, r4, r5] = built;
 
     doorLinks[roomCellKey(r1.id, 23, 12)] = { toRoomId: r2.id, toX: 1, toY: 5 };
     doorLinks[roomCellKey(r2.id, 0, 5)] = { toRoomId: r1.id, toX: 22, toY: 12 };

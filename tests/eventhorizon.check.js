@@ -29,7 +29,7 @@ let pass = 0, fail = 0; const ok = (c, m) => { c ? pass++ : fail++; console.log(
   const s1 = await pn.locator("#gameCanvas").screenshot(); const el = Date.now() - t0;
   await pn.waitForTimeout(300); const s2 = await pn.locator("#gameCanvas").screenshot();
   const rooms = await pn.evaluate(() => window.__e("()=>rooms.map(r=>r.name)")());
-  ok(JSON.stringify(rooms) === JSON.stringify(["Orbit", "Slingshot", "Tug", "Two pulls", "Flip side"]), "the sample opened from the gallery has 5 rooms: " + rooms.join(", "));
+  ok(JSON.stringify(rooms) === JSON.stringify(["Orbit", "Vortex", "Slingshot", "Quad Pulls", "Flip side"]), "the sample opened from the gallery has 5 rooms: " + rooms.join(", "));
   const cmp = await pn.evaluate(async ([a, c]) => {
     const load = async b64 => { const im = new Image(); im.src = "data:image/png;base64," + b64; await im.decode(); const cv = document.createElement("canvas"); cv.width = im.width; cv.height = im.height; const x = cv.getContext("2d"); x.drawImage(im, 0, 0); return x.getImageData(0, 0, im.width, im.height).data; };
     const A = await load(a), C = await load(c); let diff = 0, black = 0, violet = 0, n = A.length / 4;
