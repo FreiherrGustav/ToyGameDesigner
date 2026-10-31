@@ -11241,6 +11241,24 @@
       else id = h < 55 ? "mgLawnA" : h < 80 ? "mgLawnB" : "mgLawnC";
       backgroundBoard[y][x] = id;
     }
+    // ---- the cast (Stage 2) ----
+    // Mrs. Pecks is the hero (the Characters-tab preset, copied onto the player def the way the swatch does it).
+    const pecks = CHARACTER_PRESETS.find(pr => pr.name === "Mrs. Pecks");
+    const pdef = actorDefs[playerDefId];
+    pdef.poses = { stand: pecks.poses.stand.slice(), stride: pecks.poses.stride.slice(), air: pecks.poses.air.slice(), crouch: pecks.poses.crouch.slice() };
+    pdef.art = pdef.poses.stand.slice();
+    const chaserId = findDefaultActorDef("chaser"), fleerId = findDefaultActorDef("fleer");
+    actorDefs[chaserId].lethal = true;   // Mousecop is the danger: a catch costs a life
+    actorDefs[fleerId].lethal = false;   // Wheebuns is the comic relief: touching him just pops him
+    const HERO = [1, 16], MOUSECOP = [22, 1], WHEEBUNS = [13, 7];
+    placeExampleActor(playerDefId, HERO[0], HERO[1]);
+    placeExampleActor(chaserId, MOUSECOP[0], MOUSECOP[1]);
+    placeExampleActor(fleerId, WHEEBUNS[0], WHEEBUNS[1]);
+    room.startPos = { x: HERO[0] * TILE + 5, y: HERO[1] * TILE + 5 };
+    // sixteen coins along the paths; collecting them all wins (there is no goal tile). The coin trail is the only instruction.
+    [[4, 1], [10, 1], [16, 1], [4, 7], [10, 7], [16, 7], [22, 7], [4, 13], [10, 13], [16, 13], [22, 13],
+     [7, 4], [7, 10], [13, 4], [13, 10], [19, 10]].forEach(([x, y]) => placeExampleActor("colCoin", x, y));
+    placeExampleActor("colHeart", 1, 13);   // a spare hit just up the lane from the start, optional
     snapshotCurrentRoomState();
     activateRoom(room.id);
     return room;
