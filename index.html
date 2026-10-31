@@ -11121,6 +11121,123 @@
     ctx.fillStyle = "#ef5350"; ctx.fillRect(10, 10, 4, 4); ctx.fillStyle = "#ffffff"; ctx.fillRect(11, 11, 2, 2);
   }
 
+  // ============== Event Horizon (v2.62): a black hole and magnet puzzle-platformer ==============
+  // Stage 1: Room 1 "Orbit" and Room 2 "Slingshot". Existing pieces only (Black Hole, solid ground, doors); the space look is sample-scoped art.
+  // The pull rings are Paint tiles banded by distance from the hole: faint = pulls at all (7 tiles), mid = stronger than the walk can
+  // fight (4.5), deep = no way back (3.3). Platforms inside the field wear a violet-tinted skin so a kid can see what the hole reaches.
+  const EH_BANDS = [7, 5.5, 4.5, 3.3];
+  function buildEventHorizonGame() {
+    const rnd = (n => () => { n = (n * 1664525 + 1013904223) >>> 0; return n / 4294967296; });
+    const blend = (a, b, t) => { const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16)); return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, "0")).join(""); };
+    const RING = ["#9b4dff", "#a23cf0", "#c42fd0", "#e0245e"];
+    const ringT = [0, 0.12, 0.22, 0.34, 0.5];                                  // tint strength per band (0 = outside the field)
+    const mood = {
+      orbit: { sky: "#070a26", sky2: "#0d1140", star: ["#ffffff", "#bcd2ff", "#ffe9a8"], neb: "#2a2f8f", hull: ["#5b6b8c", "#46546f", "#8fa3c8", "#2c3650"], lamp: "#7fe3ff" },
+      sling: { sky: "#0a1a1f", sky2: "#0e2a2c", star: ["#ffffff", "#c8fff0", "#ffe9a8"], neb: "#1f7a6a", hull: ["#7a6a58", "#5e5042", "#a89a82", "#3a3028"], lamp: "#ffb347" },
+    };
+    const skyTile = (m, band, v) => {
+      const r = rnd(77 + v * 131 + band * 17), art = new Array(64).fill(m.sky);
+      if (v === 2) for (let i = 0; i < 64; i++) if (((i % 8) + Math.floor(i / 8)) % 3 === 0) art[i] = blend(m.sky, m.neb, 0.55);
+      if (v === 2) for (let i = 0; i < 64; i++) if (r() < 0.25) art[i] = m.sky2;
+      if (v >= 1) { const n = 1 + Math.floor(r() * 3); for (let k = 0; k < n; k++) art[Math.floor(r() * 64)] = m.star[Math.floor(r() * 3)]; }
+      if (band > 0) for (let i = 0; i < 64; i++) art[i] = blend(art[i], RING[band - 1], ringT[band]);
+      return art;
+    };
+    const metal = (m, tint) => {
+      const [base, dark, light, edge] = m.hull, art = new Array(64).fill(base);
+      for (let i = 0; i < 8; i++) { art[i] = light; art[56 + i] = edge; art[i * 8] = edge; art[i * 8 + 7] = dark; }
+      art[9] = art[14] = art[49] = art[54] = dark;
+      return tint ? art.map(c => blend(c, "#8a3cff", 0.28)) : art;
+    };
+    const mkSkin = (id, name, art) => { groundTileDefs[id] = { name, frames: [art], frameMs: 1000, geometry: "solid", modifier: "none" }; if (!groundSlotIds.includes(id)) groundSlotIds.push(id); };
+    const mkBg = (id, name, art) => { backgroundTileDefs[id] = { name, art }; };
+    // one 24x24 planet picture cut into nine Paint tiles
+    const planet = (id, c1, c2, c3) => {
+      const g = [];
+      for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+        const dx = x - 11.5, dy = y - 11.5, d = Math.hypot(dx, dy);
+        let c = null;
+        if (d <= 9.5) { const band = Math.floor((y + 3) / 4) % 3; c = [c1, c2, c3][band]; if (dx * 0.5 + dy * 0.5 > 4) c = blend(c, "#000000", 0.45); else if (dx + dy < -6) c = blend(c, "#ffffff", 0.25); }
+        if (Math.abs(dy + dx * 0.25) < 1.1 && d > 8.5 && d < 12) c = "#e8d8ff";
+        g.push(c);
+      }
+      return g;
+    };
+    const hole = [];                                                              // the holes of the current room (for the rings)
+    const dressRoom = (key, planetCells, planetId) => {
+      const m = mood[key];
+      for (let band = 0; band <= 4; band++) for (let v = 0; v < 3; v++) mkBg("eh" + key + band + v, "space", skyTile(m, band, v));
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        let dmin = 99; hole.forEach(([hx, hy]) => { dmin = Math.min(dmin, Math.hypot(x - hx, y - hy)); });
+        let band = 0; EH_BANDS.forEach((b, i) => { if (dmin <= b) band = i + 1; });
+        const r = rnd(x * 7919 + y * 104729 + (key === "orbit" ? 1 : 2))();
+        backgroundBoard[y][x] = "eh" + key + band + (r < 0.62 ? 0 : r < 0.9 ? 1 : 2);
+      }
+      if (planetCells) { const art = planet(planetId, ...planetCells.colors);
+        for (let ty = 0; ty < 3; ty++) for (let tx = 0; tx < 3; tx++) {
+          const tile = new Array(64).fill(null); for (let py = 0; py < 8; py++) for (let px = 0; px < 8; px++) tile[py * 8 + px] = art[(ty * 8 + py) * 24 + tx * 8 + px];
+          const base = skyTile(m, 0, 0); for (let i = 0; i < 64; i++) if (!tile[i]) tile[i] = base[i];
+          const id = planetId + ty + tx; mkBg(id, "planet", tile); backgroundBoard[planetCells.y + ty][planetCells.x + tx] = id; } }
+    };
+    const solidAt = (key, x, y) => {
+      let dmin = 99; hole.forEach(([hx, hy]) => { dmin = Math.min(dmin, Math.hypot(x - hx, y - hy)); });
+      board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = "eh" + (dmin <= EH_BANDS[0] ? "T" : "") + key + "Metal"; groundSkinRotationBoard[y][x] = 0;
+    };
+    const plat = (key, x0, x1, y) => { for (let x = x0; x <= x1; x++) solidAt(key, x, y); };
+    const mkRoom = name => {
+      const room = createEmptyRoom(name);
+      room.gravityEnabled = true; room.gravityDir = "down"; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+      rooms.push(room); activateRoom(room.id);
+      return room;
+    };
+    ["orbit", "sling"].forEach(k => { mkSkin("eh" + k + "Metal", "hull", metal(mood[k], false)); mkSkin("ehT" + k + "Metal", "hull (in the pull)", metal(mood[k], true)); });
+    const lamps = (key, list) => list.forEach(([x, y]) => { const m = mood[key], a = skyTile(m, 0, 0); a[27] = a[28] = a[35] = a[36] = m.lamp; a[19] = a[20] = blend(m.lamp, m.sky, 0.6); mkBg("ehLamp" + key + x + y, "beacon", a); backgroundBoard[y][x] = "ehLamp" + key + x + y; });
+
+    // ---------------- Room 1: Orbit ----------------
+    hole.length = 0; hole.push([12, 14]);
+    const r1 = mkRoom("Orbit");
+    dressRoom("orbit", { x: 1, y: 1, colors: ["#e8a55a", "#c27a3c", "#f4d9a0"] }, "ehPlanetA");
+    plat("orbit", 0, 8, 17); plat("orbit", 16, 23, 17);                            // floor either side; the middle is open, the hole drains it
+    plat("orbit", 0, 2, 15); plat("orbit", 3, 5, 13); plat("orbit", 6, 8, 11); plat("orbit", 9, 11, 9);
+    plat("orbit", 12, 14, 7);
+    plat("orbit", 15, 17, 9); plat("orbit", 18, 20, 11); plat("orbit", 21, 23, 13);
+    plat("orbit", 0, 23, 0);                                                      // ceiling trim
+    board[14][12] = gameplayKey("gravitywell", "none");
+    board[12][23] = gameplayKey("door", "none");
+    lamps("orbit", [[1, 14], [8, 10], [13, 6], [20, 10]]);
+    placeExampleActor(playerDefId, 1, 14);
+    r1.startPos = { x: 1 * TILE + 5, y: 14 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    // ---------------- Room 2: Slingshot ----------------
+    hole.length = 0; hole.push([12, 9], [1, 17]);
+    const r2 = mkRoom("Slingshot");
+    dressRoom("sling", { x: 19, y: 1, colors: ["#3fbf9a", "#2b8f78", "#a6f0d6"] }, "ehPlanetB");
+    plat("sling", 0, 6, 6);                                                       // the start ledge
+    plat("sling", 9, 23, 17); plat("sling", 9, 16, 15); plat("sling", 17, 19, 13); plat("sling", 20, 23, 11);
+    plat("sling", 0, 23, 0);
+    board[9][12] = gameplayKey("gravitywell", "none");                            // the big hole: walk off the ledge and let it swing you
+    board[17][1] = gameplayKey("gravitywell", "none");                            // the drain: a miss is a free retry, never a stuck hero
+    board[5][0] = gameplayKey("door", "none");
+    board[10][23] = gameplayKey("door", "none");
+    lamps("sling", [[5, 5], [10, 14], [18, 12], [22, 10]]);
+    r2.startPos = { x: 1 * TILE + 5, y: 5 * TILE + 5 };
+    snapshotCurrentRoomState();
+
+    doorLinks[roomCellKey(r1.id, 23, 12)] = { toRoomId: r2.id, toX: 1, toY: 5 };
+    doorLinks[roomCellKey(r2.id, 0, 5)] = { toRoomId: r1.id, toX: 22, toY: 12 };
+    activateRoom(r1.id);
+    return r1;
+  }
+  function drawEventHorizonIcon(ctx) {
+    ctx.fillStyle = "#070a26"; ctx.fillRect(0, 0, 24, 24);
+    ctx.fillStyle = "#ffffff"; [[3, 3], [19, 4], [8, 18], [21, 15], [5, 10]].forEach(([x, y]) => ctx.fillRect(x, y, 1, 1));
+    ctx.fillStyle = "#3a1060"; ctx.beginPath(); ctx.arc(12, 12, 9, 0, 7); ctx.fill();
+    ctx.fillStyle = "#7b2fd0"; ctx.beginPath(); ctx.arc(12, 12, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = "#000000"; ctx.beginPath(); ctx.arc(12, 12, 3.2, 0, 7); ctx.fill();
+    ctx.fillStyle = "#8fa3c8"; ctx.fillRect(0, 21, 7, 3); ctx.fillRect(17, 21, 7, 3); ctx.fillRect(2, 14, 4, 2);
+  }
+
   // Tunnel Trouble is retired from the gallery but kept (builder + icon) for reuse by Surprise Me.
   const UNLISTED_SAMPLES = [
     { id: "tunnel-trouble", name: "Tunnel Trouble", builder: buildTunnelTroubleGame, draw: drawTunnelTroubleIcon },
@@ -11141,6 +11258,7 @@
     { id: "sushi-train-panic", name: "Sushi Train Panic", builder: buildSushiTrainGame, draw: drawSushiTrainIcon },
     { id: "crossing-guard", name: "Crossing Guard", builder: buildCrossingGuardGame, draw: drawCrossingGuardIcon },
     { id: "the-over-engineered-escape", name: "The Over-Engineered Escape", builder: buildOverEngineeredEscapeGame, draw: drawOverEngineeredIcon },
+    { id: "event-horizon", name: "Event Horizon", builder: buildEventHorizonGame, draw: drawEventHorizonIcon },
   ];
   function renderSamplesModal() {
     const grid = document.getElementById("samplesGrid");
