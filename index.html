@@ -808,6 +808,11 @@
       </div>
     </div>
 
+    <div id="mySpritesBlock" style="display:none;">
+      <div class="section-title">My sprites</div>
+      <div class="swatch-row" id="mySpriteSwatches"></div>
+    </div>
+
     <div id="pixelEditorBlock">
       <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">player</span></div>
       <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
@@ -1054,7 +1059,7 @@
     const key = JSON.stringify(d.art);
     for (const t of Object.keys(ENEMY_LOOK_NAMES)) { const b = actorDefs[findDefaultActorDef(t)]; if (b && JSON.stringify(b.art) === key) return ENEMY_LOOK_NAMES[t]; }
     const p = CHARACTER_PRESETS.find(p => JSON.stringify(p.poses ? p.poses.stand : p.art) === key);
-    return p ? p.name : (d.name && !/^(enemy|actor)/i.test(d.name) ? d.name : "Wheebuns");
+    return p ? p.name : (d.name && !/^enemy/i.test(d.name) ? d.name : "Wheebuns");
   }
   // The player's label is the name of the look it wears (Gary, Princess, ...); the stored name "hero" is only the old default.
   function playerLookName(d) {
@@ -5877,6 +5882,47 @@
     return null; // tile (geometry/modifier) mode has no editable art at all
   }
 
+  // "My sprites": the characters a kid drew with the custom-character "+" (any with a non-empty picture), offered as
+  // looks for the selected player or enemy exactly like the built-in shelf above. Applying one copies its picture
+  // (and poses) onto the selected character; drawing over a sprite still edits that character only.
+  function renderMySpriteSwatches() {
+    const block = document.getElementById("mySpritesBlock");
+    const container = document.getElementById("mySpriteSwatches");
+    container.innerHTML = "";
+    const sel = paintMode === "actor" ? currentSelectedDef() : null;
+    const forPlayerOrEnemy = !!sel && (selectedActorDefId === playerDefId || sel.enemyType);
+    const mine = forPlayerOrEnemy ? customActorSlotIds.filter(id => id !== selectedActorDefId && id !== playerDefId && actorDefs[id] && !actorDefs[id].enemyType &&
+      (actorDefs[id].poses ? actorDefs[id].poses.stand : actorDefs[id].art).some(c => c)) : [];
+    block.style.display = mine.length ? "block" : "none";
+    mine.forEach(id => {
+      const src = actorDefs[id];
+      const sw = document.createElement("div");
+      sw.className = "presetSwatch";
+      sw.title = src.name;
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), src.poses ? src.poses.stand : src.art, ART);
+      sw.appendChild(c);
+      sw.addEventListener("click", () => {
+        const def = currentSelectedDef();
+        if (!def) return;
+        if (src.poses) {
+          def.poses = { stand: src.poses.stand.slice(), stride: src.poses.stride.slice(), air: src.poses.air.slice(), crouch: src.poses.crouch.slice() };
+          def.art = def.poses.stand.slice();
+          selectedPoseKey = "stand";
+        } else {
+          def.poses = null;
+          def.art = src.art.slice();
+        }
+        def.name = src.name;
+        currentArt = activeArtFor(def).slice();
+        renderPixelCanvas();
+        renderAll();
+        log("Using your sprite \"" + src.name + "\" — keep editing it, or place it as-is.");
+      });
+      container.appendChild(sw);
+    });
+  }
   function renderPresetSwatches() {
     const container = document.getElementById("presetSwatches");
     container.innerHTML = "";
@@ -12671,6 +12717,7 @@
     renderCameraSwatches();
     renderCameraPanRow();
     renderPresetSwatches();
+    renderMySpriteSwatches();
     renderPoseTabs();
     renderPixelCanvas();
     renderRoomTabs();
