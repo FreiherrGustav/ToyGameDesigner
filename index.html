@@ -8793,7 +8793,7 @@
   // clears an overlap in 1-2 frames) -> put the player back at the last spot it was cleanly inside the room and
   // clear of solids (same room only), else the room's start. Velocity is zeroed. Cheap: one AABB tile scan.
   const PLAYER_BOARD_MARGIN = 6, PLAYER_EMBED_FRAMES = 12;
-  function keepPlayerOnBoard(p) {
+  function keepPlayerOnBoard(p, dt) {
     if (!p.isPlayer || p.carried || p.cannonLoad || p.dragging) return;
     const W = roomCols() * TILE, H = ROWS * TILE;
     const finite = Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.vx) && Number.isFinite(p.vy);
@@ -8803,7 +8803,8 @@
       || p.x < -W || p.x > 2 * W || p.y < -H || p.y > 2 * H;
     let stuck = false;
     if (!out) {
-      if (actorBlockedByTiles(p)) { p.embedFrames = (p.embedFrames || 0) + 1; stuck = p.embedFrames >= PLAYER_EMBED_FRAMES; }
+      // counted in 60 fps frames of TIME (dt * 60), not real frames: at 240 fps twelve real frames were 50 ms, less than a cannon shot needs to leave its own cell, and the guard teleported the player back
+      if (actorBlockedByTiles(p)) { p.embedFrames = (p.embedFrames || 0) + (dt > 0 ? Math.min(2, dt * 60) : 1); stuck = p.embedFrames >= PLAYER_EMBED_FRAMES; }
       else {
         // decay, not reset: a player flickering in and out of solid every other frame (a crate
         // jammed on top of them) used to zero the count each clean frame and never trip the guard
@@ -9645,7 +9646,7 @@
       if (roomTransition) break;
       stepActor(actor, dt, player);
       recoverStrayActor(actor);
-      keepPlayerOnBoard(actor);
+      keepPlayerOnBoard(actor, dt);
     }
     for (const link of rideLinks) {
       const platform = actors.find(a => a.id === link.platformId);
