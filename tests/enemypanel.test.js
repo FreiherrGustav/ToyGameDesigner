@@ -47,6 +47,13 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   ok(await p.$eval('#playerSwatchRow .lbl',e=>e.textContent)==='Grumble','player renamed by sprite');
   await p.click('#characterSwatches .swatch:first-child');
   ok(!/enemy/i.test(await p.$eval('#customActorEditingName',e=>e.textContent)),'behavior header has no "Enemy N"');
+  // slot look order, on a fresh page
+  const p2 = await b.newPage({ viewport: { width: 1366, height: 768 } }); p2.on('dialog', d => d.accept());
+  await p2.goto('file://'+tmp+'#t'); await p2.click('#modeCharacter');
+  await p2.evaluate(()=>{ for(let i=0;i<10;i++) __t.add(); });
+  const names = await p2.evaluate(()=>__t.ids.filter(i=>__t.d[i].enemyType).map(i=>__t.d[i].name));
+  ok(JSON.stringify(names.slice(0,8))===JSON.stringify(['Wheebuns','Gloop','Mousecop','McDinglechud','crabby','Thelonius','Bonesy','crabby']),'slots 1-8 fixed looks: '+names.slice(0,8));
+  ok(names.length===10 && names.slice(8).every(n=>typeof n==='string'&&n.length>0),'9th+ random preset names: '+names.slice(8));
   ok(!errs.length, 'no errors ' + errs);
   await b.close(); process.exit(f ? 1 : 0);
 })();

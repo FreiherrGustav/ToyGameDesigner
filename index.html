@@ -5524,14 +5524,19 @@
   // The Enemy row's "+": another enemy using the existing look of whichever behavior it is given (no new sprite is
   // drawn here; only the custom-character "+" below creates blank art). It lives in customActorSlotIds like any other
   // character but is flagged enemyType, so it shows in the Enemy row instead of the custom row.
+  // The nth enemy slot wears a fixed look (the 1st is Wheebuns); from the 9th on it is a random preset.
+  const ENEMY_SLOT_LOOKS = ["Wheebuns", "Gloop", "Mousecop", "McDinglechud", "crabby", "Thelonius", "Bonesy", "crabby"];
   function addEnemyType(first) {
-    // New enemies wear the Wheebuns look and start as wanderers (lethal setting copied from the built-in wanderer).
-    const base = actorDefs[findDefaultActorDef("fleer")];
     const behaviorBase = actorDefs[findDefaultActorDef("wanderer")];
+    const n = customActorSlotIds.filter(i => actorDefs[i] && actorDefs[i].enemyType).length;
+    const lookName = n < ENEMY_SLOT_LOOKS.length ? ENEMY_SLOT_LOOKS[n] : CHARACTER_PRESETS[Math.floor(Math.random() * CHARACTER_PRESETS.length)].name;
+    const preset = CHARACTER_PRESETS.find(p => p.name === lookName) || CHARACTER_PRESETS.find(p => p.name === "Wheebuns");
     const letter = String.fromCharCode(65 + nextCustomActorLetter++);
     const id = "custom" + letter;
-    const def = structuredClone(base);
-    def.temperament = "wanderer"; def.name = ENEMY_LOOK_NAMES.fleer; def.lethal = npcIsLethal(behaviorBase); def.enemyType = true;
+    const def = structuredClone(behaviorBase);
+    def.art = preset.poses ? preset.poses.stand.slice() : preset.art.slice();
+    def.poses = preset.poses ? { stand: preset.poses.stand.slice(), stride: preset.poses.stride.slice(), air: preset.poses.air.slice(), crouch: preset.poses.crouch.slice() } : null;
+    def.temperament = "wanderer"; def.name = preset.name; def.lethal = npcIsLethal(behaviorBase); def.enemyType = true;
     actorDefs[id] = def;
     customActorSlotIds.push(id);
     selectCustomActor(id);
