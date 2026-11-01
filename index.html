@@ -5525,7 +5525,7 @@
   // drawn here; only the custom-character "+" below creates blank art). It lives in customActorSlotIds like any other
   // character but is flagged enemyType, so it shows in the Enemy row instead of the custom row.
   // The nth enemy slot wears a fixed look (the 1st is Wheebuns); from the 9th on it is a random preset.
-  const ENEMY_SLOT_LOOKS = ["Wheebuns", "Gloop", "Mousecop", "McDinglechud", "crabby", "Thelonius", "Bonesy", "crabby"];
+  const ENEMY_SLOT_LOOKS = ["Wheebuns", "Gloop", "Mousecop", "McDinglechud", "crabby", "Thelonius", "Bonesy", "Grumble"];
   function addEnemyType(first) {
     const behaviorBase = actorDefs[findDefaultActorDef("wanderer")];
     const n = customActorSlotIds.filter(i => actorDefs[i] && actorDefs[i].enemyType).length;

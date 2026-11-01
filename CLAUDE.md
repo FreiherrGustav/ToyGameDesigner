@@ -7399,3 +7399,5 @@ The first (stand-in) enemy slot and every "+" slot wear the **Wheebuns** look (f
 ## Enemy slot looks are a fixed sequence
 
 `ENEMY_SLOT_LOOKS` decides what the nth enemy slot wears when "+" (or the stand-in click) creates it: Wheebuns, Gloop, Mousecop, McDinglechud, crabby, Thelonius, Bonesy (skeleton), crabby; the 9th and later get a random `CHARACTER_PRESETS` entry (so it can be Gary, Princess, Hero... too). The count is the number of existing enemy slots, so deleting is not a concern (there is no delete). Behavior still starts as wanderer, lethal copied from the built-in wanderer. The request listed crabby twice (5th and 8th); built as written. Test: `tests/enemypanel.test.js` (fresh-page order check).
+
+**Update:** the 8th slot is Grumble (the monster preset), not a second crabby. Slot 7 is the skeleton and stays named Bonesy (shown as such in the Enemy row and its tooltip). From the 9th on, the look is a random `CHARACTER_PRESETS` entry, hero-style presets included (accepted).
