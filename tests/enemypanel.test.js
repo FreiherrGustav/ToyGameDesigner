@@ -1,0 +1,25 @@
+const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+(async () => {
+  const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+  const p = await b.newPage({ viewport: { width: 1366, height: 768 } });
+  p.on('dialog', d => d.accept()); const errs = []; p.on('pageerror', e => errs.push(e.message));
+  let h=fs.readFileSync('index.html','utf8').replace('  const bootHash = location.hash;','window.__t={get d(){return actorDefs},get ids(){return customActorSlotIds},get sel(){return selectedActorDefId},add:()=>addEnemyType()};\n  const bootHash = location.hash;');
+  const tmp=require('os').tmpdir()+'/enemypanel.html';fs.writeFileSync(tmp,h);
+  await p.goto('file://'+tmp+'#t');
+  await p.click('#modeCharacter');
+  const labels = () => p.$$eval('#characterSwatches .swatch .lbl', l => l.map(x => x.textContent));
+  let f = 0; const ok = (c, m) => { console.log(c ? 'ok  ' : 'FAIL', m); if (!c) f++; };
+  ok((await labels()).includes('McDing') || (await labels()).some(x => /McDing/.test(x)), 'first slot named by name: ' + (await labels()));
+  await p.click('#characterSwatches .swatch:first-child');
+  const art0 = await p.evaluate(() => JSON.stringify(__t.d[__t.sel].art));
+  for (const t of ['Chaser', 'Fleer', 'Statue']) await p.click('#temperamentPickerSwatches .swatch[title="' + t + '"]');
+  ok(await p.evaluate(a => JSON.stringify(__t.d[__t.sel].art) === a && __t.d[__t.sel].temperament === 'stationary', art0), 'behavior keeps sprite');
+  await p.evaluate(() => __t.add());
+  await p.click('#temperamentPickerSwatches .swatch[title="Chaser"]');
+  await p.click('#lethalPickerSwatches .swatch:last-child');
+  const s = await p.evaluate(() => __t.ids.map(i => [__t.d[i].name, __t.d[i].temperament, __t.d[i].lethal]));
+  ok(s.length === 2 && s[0][1] === 'stationary' && s[1][1] === 'chaser', 'slots independent ' + JSON.stringify(s));
+  ok(!(await labels()).some(x => /enemy/i.test(x)), 'no "Enemy N" labels: ' + (await labels()));
+  ok(!errs.length, 'no errors ' + errs);
+  await b.close(); process.exit(f ? 1 : 0);
+})();

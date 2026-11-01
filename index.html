@@ -1045,12 +1045,16 @@
   const BEHAVIOR_LABELS = { stationary: "Statue", wanderer: "Wanderer", chaser: "Chaser", fleer: "Fleer" };
   // An added enemy is called by the name of the look it wears (its behavior's built-in character) until it is redrawn.
   const ENEMY_LOOK_NAMES = { wanderer: "McDinglechud", chaser: "Mousecop", fleer: "Wheebuns", stationary: "Thelonius" };
+  // An enemy slot's name belongs to its sprite, never its behavior: stored on the def, set when a sprite is picked.
+  // A generic stored name (old saves: "wanderer", "Enemy 2", "Actor B") is resolved from the art it wears.
   function enemyLookName(d) {
     if (!d) return "";
-    const base = actorDefs[findDefaultActorDef(d.temperament)];
     if (!d.enemyType) return d.name;
-    if (base && JSON.stringify(d.art) === JSON.stringify(base.art)) return ENEMY_LOOK_NAMES[d.temperament] || d.name;
-    return d.name;
+    if (d.name && !/^(enemy \d*|actor \w|stationary|wanderer|chaser|fleer)$/i.test(d.name.trim())) return d.name;
+    const key = JSON.stringify(d.art);
+    for (const t of Object.keys(ENEMY_LOOK_NAMES)) { const b = actorDefs[findDefaultActorDef(t)]; if (b && JSON.stringify(b.art) === key) return ENEMY_LOOK_NAMES[t]; }
+    const p = CHARACTER_PRESETS.find(p => JSON.stringify(p.poses ? p.poses.stand : p.art) === key);
+    return p ? p.name : (d.name && !/^(enemy|actor)/i.test(d.name) ? d.name : "McDinglechud");
   }
   function temperamentDisplayName(temp) { return CHARACTER_DISPLAY_NAMES[temp] || temp; }
   // A def's display name: a built-in one (name still equals its temperament, as in every old save) shows the new name.
@@ -5613,11 +5617,7 @@
           return;
         }
         const cd = actorDefs[selectedActorDefId];
-        if (cd.enemyType) {
-          // still wearing the built-in look of its old behavior? then it takes the new behavior's built-in look
-          const oldBase = actorDefs[findDefaultActorDef(cd.temperament)], newBase = actorDefs[findDefaultActorDef(temp)];
-          if (oldBase && newBase && JSON.stringify(cd.art) === JSON.stringify(oldBase.art)) { cd.art = newBase.art.slice(); cd.poses = newBase.poses ? structuredClone(newBase.poses) : null; }
-        }
+        if (cd.enemyType) cd.name = enemyLookName(cd); // freeze the name; behavior never touches sprite or name
         cd.temperament = temp;
         if (isThePlayer) { playerDefId = PLAYER_DEF_ID; selectCustomActor(selectedActorDefId); return; }
         renderAll();
@@ -5888,6 +5888,7 @@
           if (paintMode === "actor") def.poses = null; // revert a previously-posed def to simple mode
           def.art = preset.art.slice();
         }
+        if (def.enemyType) def.name = preset.name;
         currentArt = activeArtFor(def).slice();
         renderPixelCanvas();
         renderAll();
