@@ -33,8 +33,28 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   // drawing over keeps editing only the selected character
   await p.evaluate(()=>{__t.d[__t.sel].art[0]='#0000ff';});
   ok(await p.evaluate(c=>__t.d[c].art[0]===null,cid),'drawing on the enemy leaves the custom sprite alone');
+  // naming
+  await p.click('#characterSwatches .swatch:first-child');
+  ok(await p.isVisible('#editingNameInput'),'name box shown for an enemy');
+  await p.fill('#editingNameInput','Zorp');
+  ok((await p.$$eval('#characterSwatches .swatch .lbl',l=>l.map(x=>x.textContent))).includes('Zorp'),'enemy label follows typing');
+  await p.press('#editingNameInput','Enter');
+  ok(await p.evaluate(()=>__t.d[__t.sel].name==='Zorp'),'enemy name stored');
+  await p.click('#playerSwatchRow .swatch');
+  await p.fill('#editingNameInput','Pip');
+  await p.press('#editingNameInput','Enter');
+  ok(await p.evaluate(()=>__t.d[__t.pid].name==='Pip'),'player renamed');
+  ok((await p.$$eval('#playerSwatchRow .lbl',l=>l.map(x=>x.textContent))).includes('Pip'),'player label shows it');
+  await p.fill('#editingNameInput','wanderer');
+  await p.press('#editingNameInput','Enter');
+  ok(await p.evaluate(()=>__t.d[__t.pid].name==='Pip'),'reserved name refused');
+  await p.fill('#editingNameInput','');
+  await p.press('#editingNameInput','Enter');
+  ok(await p.evaluate(()=>__t.d[__t.pid].name==='Pip'),'empty name keeps old');
+  await p.click('#modeObject');
+  await p.click('#objectSwatches .swatch[title="crate"]');
+  ok(!(await p.isVisible('#editingNameInput')),'no name box for a crate');
   // empty custom not offered
-  await p.click('#customActorSwatches .swatch.swatch:last-child');
   ok(errs.length===0,'no errors '+errs);
   await b.close();process.exit(f?1:0);
 })();

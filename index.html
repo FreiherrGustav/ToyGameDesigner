@@ -160,6 +160,9 @@
   }
   #placeTabs { flex-wrap: nowrap; }
   #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
+  #editingNameInput { width: 130px; margin-left: 4px; padding: 2px 6px; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; font: inherit; text-transform: none; letter-spacing: normal; }
+  #editingNameInput:focus { outline: none; border-color: var(--accent, #ffd23f); }
+  .roomNameInput { width: 110px; padding: 2px 6px; background: #111; color: #fff; border: 1px solid var(--accent, #ffd23f); border-radius: 4px; font: inherit; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
   .swatch-row { display: flex; flex-wrap: wrap; gap: 4px; }
   .swatch {
@@ -814,7 +817,7 @@
     </div>
 
     <div id="pixelEditorBlock">
-      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">player</span></div>
+      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">player</span><input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Name this character" style="display:none;"></div>
       <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
       <div id="pixelEditor">
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
@@ -6060,8 +6063,31 @@
       document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind)
         : editingGroundSkin ? (groundDef ? groundDef.name : selectedGroundSkinId)
         : "background";
+      // The player, enemy slots and "+" characters can be renamed right here; built-in objects keep their fixed names.
+      const nameInput = document.getElementById("editingNameInput");
+      const renamable = paintMode === "actor" && !!actorDef && (selectedActorDefId === playerDefId || customActorSlotIds.includes(selectedActorDefId));
+      nameInput.style.display = renamable ? "inline-block" : "none";
+      document.getElementById("editingLabel").style.display = renamable ? "none" : "";
+      if (renamable && document.activeElement !== nameInput) nameInput.value = selectedActorDefId === playerDefId ? playerLookName(actorDef) : enemyLookName(actorDef);
     }
   }
+  // Names that equal a behavior word would make findDefaultActorDef mistake a renamed character for a built-in one.
+  const RESERVED_DEF_NAMES = ["stationary", "wanderer", "chaser", "fleer", "pushable", "collectible", "player"];
+  (function wireNameInput() {
+    const input = document.getElementById("editingNameInput");
+    const refreshNames = () => { renderCharacterSwatches(); renderPlayerSwatch(); renderCustomActorSwatches(); renderMySpriteSwatches(); };
+    input.addEventListener("input", () => {
+      const def = actorDefs[selectedActorDefId];
+      const v = input.value.trim();
+      if (!def || !v || RESERVED_DEF_NAMES.includes(v.toLowerCase())) return;
+      def.name = v;
+      refreshNames();
+    });
+    input.addEventListener("change", () => { input.blur(); renderAll(); });
+    input.addEventListener("blur", () => { renderAll(); });
+    input.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") input.blur(); });
+    input.addEventListener("keyup", e => e.stopPropagation());
+  })();
 
   document.getElementById("modeBuildBtn").addEventListener("click", () => {
     if (appMode === "build") return;
@@ -12630,6 +12656,35 @@
     const strip = document.getElementById("roomTabRow");
     strip.addEventListener("wheel", e => { if (strip.scrollWidth > strip.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { strip.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
   })();
+  // Double-click a room tab to name the room: the tab turns into a text box (Enter or clicking away keeps the name,
+  // Escape cancels, an empty name keeps the old one). The name is plain room data, so undo, saves and exports carry it.
+  function startRoomRename(room, btn) {
+    if (btn.dataset.renaming) return;
+    btn.dataset.renaming = "1";
+    const input = document.createElement("input");
+    input.type = "text"; input.maxLength = 24; input.spellcheck = false;
+    input.className = "roomNameInput";
+    input.value = room.name;
+    input.title = "Room name";
+    btn.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const finish = (keep) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      if (keep && v && v !== room.name) { pushUndoSnapshot(); room.name = v; saveAutosave(); }
+      renderRoomTabs();
+      renderAll();
+    };
+    input.addEventListener("keydown", e => {
+      e.stopPropagation();
+      if (e.key === "Enter") finish(true);
+      else if (e.key === "Escape") finish(false);
+    });
+    input.addEventListener("keyup", e => e.stopPropagation());
+    input.addEventListener("blur", () => finish(true));
+  }
   function renderRoomTabs() {
     const container = document.getElementById("roomTabRow");
     container.innerHTML = "";
@@ -12646,6 +12701,7 @@
         renderRoomTabs();
         renderAll();
       });
+      btn.addEventListener("dblclick", () => startRoomRename(room, btn));
       wrap.appendChild(btn);
       if (rooms.length > 1) {
         const del = document.createElement("button");

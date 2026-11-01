@@ -7409,3 +7409,11 @@ Cloud Hopper: the Meadow's Mousecop starts at col 9 (was 7, hero at 2). The Clim
 ## "My sprites": drawn custom characters become looks for the player and enemies
 
 A new block (`#mySpritesBlock`, `renderMySpriteSwatches`, right under "Grab a sprite") lists every custom character made with the custom-character "+" whose picture is not empty. It shows only while the selected character is the player or an enemy slot, never for the custom character itself, and stays hidden when there is nothing to offer. Clicking one copies its picture (and poses) onto the selected character and takes its name, exactly like a built-in look from the shelf; drawing over a sprite still edits only the selected character, and the custom original is never changed. No new behavior or selection mode and no saved-data change (custom characters were already saved and exported). `enemyLookName` now returns a stored "Actor A"-style name when the art matches nothing, instead of falling back to "Wheebuns". Only characters from the "+" count, not sprites drawn on the player or an enemy slot. Test: `node tests/mysprites.test.js` (10 checks); enemypanel and stage1 still pass. There is no rename for custom characters yet, so they read "Actor A", "Actor B"...
+
+## Naming characters and rooms
+
+**Characters.** The "Pixel art (8×8) — editing: ..." heading is now a text box (`#editingNameInput`) whenever the selected character is the player, an enemy slot or a custom "+" character; built-in objects and Paint/Ground tiles keep a plain label. Typing renames live (the swatch labels follow), Enter or clicking away finishes, an empty name keeps the old one, and the behavior words (`wanderer`, `chaser`, ...) are refused because `findDefaultActorDef` matches built-in defs by name. The name travels with a "My sprites" look when it is applied.
+
+**Rooms.** Double-click a room tab to turn it into a text box (`startRoomRename`): Enter or clicking away keeps the name (24 characters max, one undo step, autosaved), Escape cancels, an empty name keeps the old one. The name is plain room data, so saves, exports and samples carry it. Editor only.
+
+Tests: `tests/mysprites.test.js` (names, 16 checks), `tests/roomname.test.js` (9 checks); stage1, enemypanel and the v2.51 layout suite still pass.
