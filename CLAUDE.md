@@ -7417,3 +7417,5 @@ A new block (`#mySpritesBlock`, `renderMySpriteSwatches`, right under "Grab a sp
 **Rooms.** Double-click a room tab to turn it into a text box (`startRoomRename`): Enter or clicking away keeps the name (24 characters max, one undo step, autosaved), Escape cancels, an empty name keeps the old one. The name is plain room data, so saves, exports and samples carry it. Editor only.
 
 Tests: `tests/mysprites.test.js` (names, 16 checks), `tests/roomname.test.js` (9 checks); stage1, enemypanel and the v2.51 layout suite still pass.
+
+The character name box now sits centered directly above the pixel canvas (inside `#pixelEditor`, same width as the canvas) instead of in the heading; while it is shown the heading reads just "Pixel art (8×8)".

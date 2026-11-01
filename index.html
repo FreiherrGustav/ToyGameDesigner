@@ -160,7 +160,7 @@
   }
   #placeTabs { flex-wrap: nowrap; }
   #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
-  #editingNameInput { width: 130px; margin-left: 4px; padding: 2px 6px; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; font: inherit; text-transform: none; letter-spacing: normal; }
+  #editingNameInput { width: 128px; box-sizing: border-box; text-align: center; padding: 3px 6px; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; font: inherit; text-transform: none; letter-spacing: normal; }
   #editingNameInput:focus { outline: none; border-color: var(--accent, #ffd23f); }
   .roomNameInput { width: 110px; padding: 2px 6px; background: #111; color: #fff; border: 1px solid var(--accent, #ffd23f); border-radius: 4px; font: inherit; }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
@@ -817,9 +817,10 @@
     </div>
 
     <div id="pixelEditorBlock">
-      <div class="section-title">Pixel art (8×8) — editing: <span id="editingLabel">player</span><input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Name this character" style="display:none;"></div>
+      <div class="section-title">Pixel art (8×8)<span id="editingPrefix"> — editing: </span><span id="editingLabel">player</span></div>
       <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
       <div id="pixelEditor">
+        <input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Name this character" style="display:none;">
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
         <div id="colorRow"></div>
         <input type="color" id="customColorPicker" style="display:none;">
@@ -6066,8 +6067,9 @@
       // The player, enemy slots and "+" characters can be renamed right here; built-in objects keep their fixed names.
       const nameInput = document.getElementById("editingNameInput");
       const renamable = paintMode === "actor" && !!actorDef && (selectedActorDefId === playerDefId || customActorSlotIds.includes(selectedActorDefId));
-      nameInput.style.display = renamable ? "inline-block" : "none";
+      nameInput.style.display = renamable ? "block" : "none";
       document.getElementById("editingLabel").style.display = renamable ? "none" : "";
+      document.getElementById("editingPrefix").style.display = renamable ? "none" : "";
       if (renamable && document.activeElement !== nameInput) nameInput.value = selectedActorDefId === playerDefId ? playerLookName(actorDef) : enemyLookName(actorDef);
     }
   }
