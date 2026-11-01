@@ -7419,3 +7419,5 @@ A new block (`#mySpritesBlock`, `renderMySpriteSwatches`, right under "Grab a sp
 Tests: `tests/mysprites.test.js` (names, 16 checks), `tests/roomname.test.js` (9 checks); stage1, enemypanel and the v2.51 layout suite still pass.
 
 The character name box now sits centered directly above the pixel canvas (inside `#pixelEditor`, same width as the canvas) instead of in the heading; while it is shown the heading reads just "Pixel art (8×8)".
+
+**Name box, round two.** Only custom "+" characters can be renamed (the player, enemy slots and every built-in object/tile keep their names; an enemy or player wearing a "My sprites" look takes that sprite's name but isn't editable). The box now updates whenever the selection or look changes: the label/box sync lives in `updateEditingLabel()`, called from `updateModeButtons` and the end of `renderAll` (before, a sprite grab only called `renderAll`, so the box kept the old name). Look: it is styled as a title, not a field (bold centered text, a dashed underline that turns solid accent on focus, a small ✎ at the right, transparent background). `tests/mysprites.test.js` updated.

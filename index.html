@@ -160,9 +160,12 @@
   }
   #placeTabs { flex-wrap: nowrap; }
   #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
-  #editingNameInput { width: 128px; box-sizing: border-box; text-align: center; padding: 3px 6px; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; font: inherit; text-transform: none; letter-spacing: normal; }
-  #editingNameInput:focus { outline: none; border-color: var(--accent, #ffd23f); }
-  .roomNameInput { width: 110px; padding: 2px 6px; background: #111; color: #fff; border: 1px solid var(--accent, #ffd23f); border-radius: 4px; font: inherit; }
+  #editingNameRow { position: relative; width: 128px; }
+  #editingNameInput { width: 100%; box-sizing: border-box; text-align: center; padding: 3px 20px 3px 20px; background: transparent; color: #fff; border: 0; border-bottom: 2px dashed #555; border-radius: 0; font-family: inherit; font-size: 15px; font-weight: bold; text-transform: none; letter-spacing: normal; cursor: text; transition: background .15s, border-color .15s; }
+  #editingNameRow:hover #editingNameInput { border-bottom-color: #888; }
+  #editingNameInput:focus { outline: none; background: rgba(255,255,255,0.07); border-bottom: 2px solid var(--accent, #ffd23f); }
+  #editingNameRow .nameEditIcon { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #777; pointer-events: none; }
+  #editingNameRow:hover .nameEditIcon, #editingNameRow:focus-within .nameEditIcon { color: var(--accent, #ffd23f); }
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
   .swatch-row { display: flex; flex-wrap: wrap; gap: 4px; }
   .swatch {
@@ -820,7 +823,7 @@
       <div class="section-title">Pixel art (8×8)<span id="editingPrefix"> — editing: </span><span id="editingLabel">player</span></div>
       <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
       <div id="pixelEditor">
-        <input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Name this character" style="display:none;">
+        <div id="editingNameRow" style="display:none;"><input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Click to name your character"><span class="nameEditIcon">✎</span></div>
         <canvas id="pixelCanvas" width="128" height="128"></canvas>
         <div id="colorRow"></div>
         <input type="color" id="customColorPicker" style="display:none;">
@@ -6058,19 +6061,24 @@
     const editingArt = editingActorOrBg || editingGroundSkin;
     document.getElementById("pixelEditorBlock").style.display = editingArt ? "block" : "none";
     document.getElementById("presetsBlock").style.display = editingActorOrBg ? "block" : "none";
-    if (editingArt) {
+    updateEditingLabel();
+  }
+  // Heading/name box above the pixel canvas. Only custom "+" characters can be renamed here; everything built in keeps its name.
+  function updateEditingLabel() {
+    const editingActorOrBg = paintMode === "background" || paintMode === "actor";
+    const editingGroundSkin = paintMode === "tile" && !!selectedGroundSkinId;
+    if (editingActorOrBg || editingGroundSkin) {
       const actorDef = actorDefs[selectedActorDefId];
       const groundDef = groundTileDefs[selectedGroundSkinId];
       document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind)
         : editingGroundSkin ? (groundDef ? groundDef.name : selectedGroundSkinId)
         : "background";
-      // The player, enemy slots and "+" characters can be renamed right here; built-in objects keep their fixed names.
       const nameInput = document.getElementById("editingNameInput");
-      const renamable = paintMode === "actor" && !!actorDef && (selectedActorDefId === playerDefId || customActorSlotIds.includes(selectedActorDefId));
-      nameInput.style.display = renamable ? "block" : "none";
+      const renamable = paintMode === "actor" && !!actorDef && customActorSlotIds.includes(selectedActorDefId) && !actorDef.enemyType && selectedActorDefId !== playerDefId;
+      document.getElementById("editingNameRow").style.display = renamable ? "block" : "none";
       document.getElementById("editingLabel").style.display = renamable ? "none" : "";
       document.getElementById("editingPrefix").style.display = renamable ? "none" : "";
-      if (renamable && document.activeElement !== nameInput) nameInput.value = selectedActorDefId === playerDefId ? playerLookName(actorDef) : enemyLookName(actorDef);
+      if (renamable && document.activeElement !== nameInput) nameInput.value = actorDef.name;
     }
   }
   // Names that equal a behavior word would make findDefaultActorDef mistake a renamed character for a built-in one.
@@ -12778,6 +12786,7 @@
     renderMySpriteSwatches();
     renderPoseTabs();
     renderPixelCanvas();
+    updateEditingLabel();
     renderRoomTabs();
     renderPlayHUD();
   }
