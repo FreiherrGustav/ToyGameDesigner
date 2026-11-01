@@ -1054,7 +1054,15 @@
     const key = JSON.stringify(d.art);
     for (const t of Object.keys(ENEMY_LOOK_NAMES)) { const b = actorDefs[findDefaultActorDef(t)]; if (b && JSON.stringify(b.art) === key) return ENEMY_LOOK_NAMES[t]; }
     const p = CHARACTER_PRESETS.find(p => JSON.stringify(p.poses ? p.poses.stand : p.art) === key);
-    return p ? p.name : (d.name && !/^(enemy|actor)/i.test(d.name) ? d.name : "McDinglechud");
+    return p ? p.name : (d.name && !/^(enemy|actor)/i.test(d.name) ? d.name : "Wheebuns");
+  }
+  // The player's label is the name of the look it wears (Gary, Princess, ...); the stored name "hero" is only the old default.
+  function playerLookName(d) {
+    if (!d) return "";
+    if (d.name && !/^(hero|player)$/i.test(d.name.trim())) return d.name;
+    const key = JSON.stringify(d.poses ? d.poses.stand : d.art);
+    const p = CHARACTER_PRESETS.find(p => JSON.stringify(p.poses ? p.poses.stand : p.art) === key);
+    return p ? p.name : (d.name || "hero");
   }
   function temperamentDisplayName(temp) { return CHARACTER_DISPLAY_NAMES[temp] || temp; }
   // A def's display name: a built-in one (name still equals its temperament, as in every old save) shows the new name.
@@ -5461,8 +5469,8 @@
     };
     const enemyIds = customActorSlotIds.filter(id => actorDefs[id] && actorDefs[id].enemyType);
     if (!enemyIds.length) {
-      const base = actorDefs[findDefaultActorDef("wanderer")];
-      addSlot(base, false, ENEMY_LOOK_NAMES.wanderer, () => addEnemyType(true), base.art);
+      const base = actorDefs[findDefaultActorDef("fleer")];
+      addSlot(base, false, ENEMY_LOOK_NAMES.fleer, () => addEnemyType(true), base.art);
     }
     enemyIds.forEach(id => {
       const d = actorDefs[id];
@@ -5488,7 +5496,7 @@
     sw.appendChild(c);
     const label = document.createElement("div");
     label.className = "lbl";
-    label.textContent = dispName(def.name);
+    label.textContent = dispName(playerLookName(def));
     sw.appendChild(label);
     sw.addEventListener("click", () => selectActorKind("player"));
     container.appendChild(sw);
@@ -5517,11 +5525,13 @@
   // drawn here; only the custom-character "+" below creates blank art). It lives in customActorSlotIds like any other
   // character but is flagged enemyType, so it shows in the Enemy row instead of the custom row.
   function addEnemyType(first) {
-    const base = actorDefs[findDefaultActorDef("wanderer")];
+    // New enemies wear the Wheebuns look and start as wanderers (lethal setting copied from the built-in wanderer).
+    const base = actorDefs[findDefaultActorDef("fleer")];
+    const behaviorBase = actorDefs[findDefaultActorDef("wanderer")];
     const letter = String.fromCharCode(65 + nextCustomActorLetter++);
     const id = "custom" + letter;
     const def = structuredClone(base);
-    def.name = enemyLookName(base); def.lethal = npcIsLethal(base); def.enemyType = true;
+    def.temperament = "wanderer"; def.name = ENEMY_LOOK_NAMES.fleer; def.lethal = npcIsLethal(behaviorBase); def.enemyType = true;
     actorDefs[id] = def;
     customActorSlotIds.push(id);
     selectCustomActor(id);
@@ -5589,15 +5599,15 @@
     const isCustom = paintMode === "actor" && customActorSlotIds.includes(selectedActorDefId);
     const isBuiltIn = paintMode === "actor" && !isCustom && TEMPERAMENTS.includes(selectedActorKind) && selectedActorDefId !== playerDefId;
     block.style.display = (isCustom || isBuiltIn) ? "block" : "none";
-    voiceBlock.style.display = isCustom ? "block" : "none";
+    voiceBlock.style.display = "none"; // voices are not offered at this iteration; the picker code and def.voice stay for later
     if (!isCustom && !isBuiltIn) return;
-    document.getElementById("customActorEditingName").textContent = isCustom ? " — " + actorDefs[selectedActorDefId].name : "";
+    document.getElementById("customActorEditingName").textContent = isCustom ? " — " + enemyLookName(actorDefs[selectedActorDefId]) : "";
     const container = document.getElementById("temperamentPickerSwatches");
     container.innerHTML = "";
     const isThePlayer = isCustom && playerDefId === selectedActorDefId;
     // Chaser / Wanderer / Fleer / Statue. For a built-in enemy a click picks that built-in look+behavior; for a custom
     // character it sets that character's own behavior (and "player" hands it the player role).
-    ["chaser", "wanderer", "fleer", "stationary"].concat(isCustom ? ["player"] : []).forEach(temp => {
+    ["chaser", "wanderer", "fleer", "stationary"].forEach(temp => {
       const isPlayerOption = temp === "player";
       const sw = document.createElement("div");
       const isSelected = isPlayerOption ? isThePlayer : (isCustom ? (!isThePlayer && actorDefs[selectedActorDefId].temperament === temp) : selectedActorKind === temp);
@@ -5898,7 +5908,7 @@
           if (paintMode === "actor") def.poses = null; // revert a previously-posed def to simple mode
           def.art = preset.art.slice();
         }
-        if (def.enemyType) def.name = preset.name;
+        if (def.enemyType || selectedActorDefId === playerDefId) def.name = preset.name;
         currentArt = activeArtFor(def).slice();
         renderPixelCanvas();
         renderAll();
