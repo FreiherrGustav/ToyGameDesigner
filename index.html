@@ -5610,7 +5610,17 @@
       label.textContent = name;
       sw.appendChild(label);
       sw.addEventListener("click", () => {
-        if (!isCustom) { selectActorKind(temp); return; }
+        if (!isCustom) {
+          // A built-in enemy (old selection state) must not "revert" to another built-in look: the pick becomes
+          // its own enemy slot that keeps this sprite and lethal setting and takes the chosen behavior.
+          const b = actorDefs[selectedActorDefId];
+          if (b && b.temperament !== temp) {
+            const letter = String.fromCharCode(65 + nextCustomActorLetter++), id = "custom" + letter;
+            const d = structuredClone(b); d.temperament = temp; d.enemyType = true; d.name = ENEMY_LOOK_NAMES[b.temperament] || b.name;
+            d.lethal = npcIsLethal(b); actorDefs[id] = d; customActorSlotIds.push(id); selectCustomActor(id);
+          }
+          return;
+        }
         if (isPlayerOption) {
           makeCustomActorThePlayer(selectedActorDefId);
           selectActorKind("player");

@@ -3,7 +3,7 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   const p = await b.newPage({ viewport: { width: 1366, height: 768 } });
   p.on('dialog', d => d.accept()); const errs = []; p.on('pageerror', e => errs.push(e.message));
-  let h=fs.readFileSync('index.html','utf8').replace('  const bootHash = location.hash;','window.__t={get d(){return actorDefs},get ids(){return customActorSlotIds},get sel(){return selectedActorDefId},add:()=>addEnemyType()};\n  const bootHash = location.hash;');
+  let h=fs.readFileSync('index.html','utf8').replace('  const bootHash = location.hash;','window.__t={get d(){return actorDefs},get ids(){return customActorSlotIds},get sel(){return selectedActorDefId},add:()=>addEnemyType(),look:d=>enemyLookName(d),snap:()=>captureProjectSnapshot(),rest:s=>restoreProjectSnapshot(s),pick:k=>selectActorKind(k),preset:()=>CHARACTER_PRESETS};\n  const bootHash = location.hash;');
   const tmp=require('os').tmpdir()+'/enemypanel.html';fs.writeFileSync(tmp,h);
   await p.goto('file://'+tmp+'#t');
   await p.click('#modeCharacter');
@@ -20,6 +20,22 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   const s = await p.evaluate(() => __t.ids.map(i => [__t.d[i].name, __t.d[i].temperament, __t.d[i].lethal]));
   ok(s.length === 2 && s[0][1] === 'stationary' && s[1][1] === 'chaser', 'slots independent ' + JSON.stringify(s));
   ok(!(await labels()).some(x => /enemy/i.test(x)), 'no "Enemy N" labels: ' + (await labels()));
+  // preset applies to the selected slot only, name follows the sprite
+  await p.evaluate(()=>{const ids=__t.ids; const sel=__t.sel; });
+  await p.click('#presetSwatches .presetSwatch[title="Grumble"]');
+  const s2 = await p.evaluate(() => __t.ids.map(i => [__t.d[i].name, __t.d[i].temperament, __t.d[i].lethal]));
+  ok(s2[1][0]==='Grumble' && s2[1][1]==='chaser' && s2[0][0]==='McDinglechud', 'preset renames only selected slot ' + JSON.stringify(s2));
+  // behavior + lethal survive a snapshot round trip and an old-name migration
+  const rt = await p.evaluate(() => { const sn = JSON.parse(JSON.stringify(__t.snap())); __t.rest(sn); return __t.ids.map(i => [__t.d[i].name, __t.d[i].temperament, __t.d[i].lethal]); });
+  ok(JSON.stringify(rt)===JSON.stringify(s2), 'snapshot round trip keeps triples');
+  const legacy = await p.evaluate(() => { const i=__t.ids[0]; __t.d[i].name='Enemy 2'; return __t.look(__t.d[i]); });
+  ok(legacy==='McDinglechud', 'legacy "Enemy 2" resolves to sprite name: '+legacy);
+  // a built-in enemy selection (old state) does not revert on behavior click
+  await p.evaluate(() => __t.pick('wanderer'));
+  const before = await p.evaluate(() => JSON.stringify(__t.d[__t.sel].art));
+  await p.click('#temperamentPickerSwatches .swatch[title="Fleer"]');
+  const aft = await p.evaluate(() => [JSON.stringify(__t.d[__t.sel].art), __t.d[__t.sel].temperament, __t.d[__t.sel].enemyType, __t.d.a2.temperament]);
+  ok(aft[0]===before && aft[1]==='fleer' && aft[2] && aft[3]==='wanderer', 'built-in selection becomes own slot, built-in untouched');
   ok(!errs.length, 'no errors ' + errs);
   await b.close(); process.exit(f ? 1 : 0);
 })();
