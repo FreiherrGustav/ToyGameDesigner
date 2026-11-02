@@ -48,12 +48,11 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
     await sleep(2600); await ev(p, "()=>finishTutorial()"); await p.waitForTimeout(1500); // tutorial_finished (no close click for >2.5 s)
     await p.click("#homeLogo"); await p.waitForTimeout(800);
     await p.click("#landingPlayBtn"); await p.waitForTimeout(500);                    // landing_choice samples
-    await p.locator("#samplesModalCard .sample-card, #samplesModalCard [class*=card], #samplesModalCard button").first().click().catch(() => {});
-    await p.waitForTimeout(800);
-    await ev(p, "()=>{ if (landingActive) endLanding(false); if (appMode==='play') exitToBuildMode(); }"); await p.waitForTimeout(500);
-    await p.click("#landingMakeBtn").catch(() => {});
-    await ev(p, "()=>{ if (landingActive) endLanding(true); }"); await p.waitForTimeout(500);
-    await ev(p, "()=>{ if (!rooms.length) {} }");
+    await p.locator(".sampleTile").first().click(); await p.waitForTimeout(1500);   // sample_opened + play (landing pick)
+    await p.click("#modeBuildBtn"); await p.waitForTimeout(500);
+    await p.click("#homeLogo"); await p.waitForTimeout(800);
+    await p.click("#landingMakeBtn"); await p.waitForTimeout(800);
+    await p.click("#clearAllBtn"); await p.waitForTimeout(400);                       // empty board: next placement is the first
     // place a hero with the real palette and canvas
     await p.click("#modeCharacter").catch(() => {});
     await p.locator("#playerSwatchRow .swatch, #playerSwatchRow canvas").first().click().catch(() => {});
@@ -66,9 +65,9 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
     await ev(p, "()=>restartPlaySessionFromSnapshot()"); await p.waitForTimeout(1300); // restart (after a finished session)
     await p.click("#modePlayBtn"); await p.waitForTimeout(500);                       // restart (button during play)
     await p.click("#modeBuildBtn"); await p.waitForTimeout(500);
+    await p.click("#saveProjectBtn"); await p.waitForTimeout(500);                   // save_used
+    await p.click("#exportBtn"); await p.waitForTimeout(800);                        // share_used
     await p.click("#surpriseBtn"); await p.waitForTimeout(800);                       // surprise_me_used
-    await p.click("#saveProjectBtn").catch(() => {}); await p.waitForTimeout(500);   // save_used
-    await p.click("#exportBtn").catch(() => {}); await p.waitForTimeout(800);        // share_used
     await p.evaluate(() => { setTimeout(() => { throw new TypeError("SECRET message text 12345"); }, 0); }); await p.waitForTimeout(500);
     await p.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
     await p.waitForTimeout(1500);
@@ -80,7 +79,8 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
     const seen = new Set(events.map(e => e.split("/")[0]));
     const want = ["visitor_new","viewport_class","browser_family","touch_present","landing_choice","tutorial_started","tutorial_step_reached","tutorial_quit","tutorial_finished","first_play","play_started","death","win","restart","surprise_me_used","save_used","share_used","session_length","error_class","first_placement"];
     for (const w of want) ok(seen.has(w), "A: event seen: " + w);
-    ok(events.includes("sample_opened/" + events.find(e => e.startsWith("sample_opened/"))?.split("/")[1]) || !seen.has("sample_opened") || true, "A: (sample_opened shown below)");
+    ok(events.includes("sample_opened/" + events.find(e => e.startsWith("sample_opened/"))?.split("/")[1]) || !seen.has("sample_opened") || true, "A: -");
+    ok(events.some(e => e.startsWith("sample_opened/")), "A: event seen: sample_opened");
     console.log("sample_opened seen:", seen.has("sample_opened"));
     ok(o.reqs.every(r => r.method === "GET" && !r.body), "A: only body-less GETs");
     ok(o.reqs.every(r => !("cookie" in r.h) && !("referer" in r.h) && !("authorization" in r.h)), "A: no cookie, referer or auth header");
@@ -201,6 +201,7 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
       await o.ctx.close(); return { snap: snap.replace(/"(id|spawnX|spawnY|x|y|vx|vy)":-?[0-9.e-]+/g, ""), auto, t };
     };
     const a = await run(HOOKED, "?study=1"), c = await run(OFF, "?study=1");
+    if (a.snap !== c.snap) { let i = 0; while (a.snap[i] === c.snap[i]) i++; console.log("DIFF at", i, a.snap.slice(i - 80, i + 80), "|||", c.snap.slice(i - 80, i + 80)); }
     ok(a.snap === c.snap, "F: project snapshot identical with counters on and off (ignoring live positions)");
     ok(a.auto == null || c.auto == null || a.auto.length === c.auto.length || true, "F: (autosave length " + (a.auto && a.auto.length) + " vs " + (c.auto && c.auto.length) + ")");
     console.log("     tick ms/frame: on", a.t.toFixed(3), "off", c.t.toFixed(3));
