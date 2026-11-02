@@ -7441,3 +7441,41 @@ The landing backdrop (Cloud Hopper) used to run with no input, so the harmless c
 ## Player landing thud only after a big fall
 
 `triggerImpact` no longer plays the landing thud for the player on ordinary landings: it needs an impact speed of `PLAYER_THUD_MIN_SPEED` (735, just under terminal fall speed `MAX_FALL` 750, reached after about 6 tiles of fall). Checked on a flat floor: drops of 1, 3 and 5 tiles are silent, 7 and 10 tiles thud once. The squash/wobble animation is unchanged, and objects (crates, bombs...) keep their old thud rule; contact sounds with objects, bounces, hazards etc. are untouched. Export: one `constantsSource` line.
+
+## Anonymous usage counters (v2.63; removable, off unless `?study=1`)
+
+Added for a one-off classroom study (first-graders, no way to ask them anything) to see where children get stuck.
+**Counters only**: named events with coarse values, no id of any kind, no cookie, no text, drawing, coordinates, url or error message.
+Everything lives in ONE block in `index.html`, `// ===== TELEMETRY (removable) =====` to `// ===== END TELEMETRY =====`
+(just before the Boot section). The rest of the game never calls anything but `tele(name, value)`.
+
+- **Switch**: `TELEMETRY_MODE` = `"off"` | `"flag"` (ships as this: active only when the url has `?study=1`) | `"on"`.
+  Opt-outs, always honored: `?nostats`, Do Not Track, Global Privacy Control. Mode off or opted out = `tele` is a no-op:
+  no listeners, no timers, no requests, no stored flag.
+- **Transport**: one plain GET per event to `TELEMETRY_ENDPOINT` (GoatCounter, site `tinygamemaker`), `/count?e=true&p=/e/<event>[/<value>]`,
+  `fetch` with `keepalive`, `credentials: "omit"`, `referrerPolicy: "no-referrer"`. Events wait in memory and go out every 8 s and when the
+  page is hidden; no retry, nothing persisted. Caps: 25 per event name, 150 per page. The browser unavoidably sends IP and user-agent
+  headers to any server; our code puts neither in the address (GoatCounter says it does not store raw IPs: verify its privacy page).
+- **Events** (the only ones): `visitor_new`/`visitor_returning` (one stored boolean `toyGameDesigner.seen`, same value for everyone; blocked
+  storage sends neither), `landing_choice/<make|samples|tutorial|surprise>`, `sample_opened/<sample id>`, `surprise_me_used`, `first_placement`,
+  `first_play`, `play_started`, `win`, `death/<0|1|2-3|4+>` (once, when the page is hidden), `restart`, `tutorial_started`,
+  `tutorial_step_reached/<n>`, `tutorial_finished`, `tutorial_quit`, `save_used`, `share_used` (the Share button, formerly "Export game"),
+  `session_length/<bucket>` (when hidden), `error_class/<type name>`, `viewport_class`, `browser_family`, `touch_present`.
+  Values are checked against fixed lists in `tele`; anything else is dropped.
+- **How it observes**: passively. A delegated click listener on button ids, a `pointerdown/up` pair on the canvas, `visibilitychange`, and one
+  1-second `setInterval` reading `appMode`, `playSessionEnded`, `lives`, `tutorialActive`, `tutorial.curName`. Nothing per frame. Gameplay
+  events are ignored while `landingActive` (the landing demo plays itself) and `first_placement` while a tutorial runs. The only tagged
+  call sites outside the block are the two `tele("sample_opened", sample.id) // TELEMETRY` lines (sample gallery card, `landingPickSample`).
+- **Never in exports**: nothing is in `runtimeFunctions`/`constantsSource`; verified an exported file contains none of it.
+- **Reading the counts**: the GoatCounter dashboard (`tinygamemaker.goatcounter.com`), one row per event path per day.
+- **Parent-readable line**: `#teleNote` in the landing footer, shown only while counting is active.
+- **Disable**: set `TELEMETRY_MODE = "off"` (or just never use `?study=1`).
+- **Remove entirely (about 5 minutes; rehearsed, 169 changed lines, game otherwise unchanged)**: (1) delete the block between the two
+  `TELEMETRY` marker comments; (2) in the sample gallery tile click handler replace `{ closeSamplesModal(); tele("sample_opened", sample.id); } // TELEMETRY`
+  with `closeSamplesModal();`; (3) delete the `tele("sample_opened", sample.id); // TELEMETRY` line in `landingPickSample`; (4) delete the
+  `<div id="teleNote" ...>` line and the two `#teleNote` CSS lines; (5) delete `tests/telemetry.test.js`. Then `grep -n -i "tele(\|telemetry\|teleNote\|goatcounter" index.html` must print nothing.
+  The Share rename of the toolbar button is not part of telemetry and stays.
+- **Test**: `node tests/telemetry.test.js` (not shipped; network capture of a full session, kill switch, opt-outs, collector down/slow/blocked/500/offline,
+  blocked storage, save comparison, tick time). Test traps: the sample cards are `.sampleTile`; after Surprise Me a dialog can block later clicks;
+  a live `impactWobbleT` makes two snapshots differ. Failed collector requests print "Failed to load resource" lines in the browser console (Chrome's own
+  log, not page errors, not suppressible).
