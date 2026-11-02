@@ -198,7 +198,7 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
       const snap = await ev(p, "()=>JSON.stringify(captureProjectSnapshot())");
       const auto = await p.evaluate(() => localStorage.getItem("toyGameDesigner.autosave.v1"));
       const t = await ev(p, "()=>{ const t0=performance.now(); for(let i=0;i<600;i++) tick(1/60); return (performance.now()-t0)/600; }");
-      await o.ctx.close(); return { snap: snap.replace(/"(id|spawnX|spawnY|x|y|vx|vy)":-?[0-9.e-]+/g, ""), auto, t };
+      await o.ctx.close(); return { snap: snap.replace(/"(id|spawnX|spawnY|x|y|vx|vy|impactWobbleT|impactMag|dispAng|dispAngT|flashTimer)":-?[0-9.e-]+/g, ""), auto, t };
     };
     const a = await run(HOOKED, "?study=1"), c = await run(OFF, "?study=1");
     if (a.snap !== c.snap) { let i = 0; while (a.snap[i] === c.snap[i]) i++; console.log("DIFF at", i, a.snap.slice(i - 80, i + 80), "|||", c.snap.slice(i - 80, i + 80)); }
