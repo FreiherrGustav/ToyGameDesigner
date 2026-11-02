@@ -132,7 +132,7 @@ const open = async (b, vp, hash, init) => {
         if (s.nan) nan = true; if (s.m) moved++;
       }
       const end = await ev(page, "()=>({lives,ended:playSessionEnded,landing:landingActive,pl:actors.some(a=>a.isPlayer)})");
-      ok(errors.length === 0 && !nan && end.ended == null && end.lives === 3 && end.pl && end.landing, `hero ${id}: 20 s, no input: no exception, no NaN, player alive (${JSON.stringify(end)}, ${moved}/20 s with motion)`);
+      ok(errors.length === 0 && !nan && (end.ended == null || end.ended === "win") && end.lives === 3 && end.pl && end.landing, `hero ${id}: 20 s, autopilot: no exception, no NaN, player alive (${JSON.stringify(end)}, ${moved}/20 s with motion)`);
       ok(moved >= 10, `hero ${id}: something moves on its own (${moved}/20 s)`);
       await ctx.close();
     }));

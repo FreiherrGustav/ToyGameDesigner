@@ -12352,7 +12352,7 @@
     const scPlayer = actors.find(a => a.isPlayer);
     const midSplat = (scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate") ||
       fxGhosts.some(g => g.recipe === "blackHoleSuck" && g.holdOverlay);
-    if (appMode === "play" && playSessionEnded && !midSplat) drawPlaySessionEndOverlay();
+    if (appMode === "play" && playSessionEnded && !midSplat && !landingActive) drawPlaySessionEndOverlay();
     else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
     if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
     else if (appMode === "build" && !landingActive) drawKeyHint();
@@ -14119,6 +14119,119 @@
     if (b) { const c = b.getContext("2d"); c.imageSmoothingEnabled = true; c.drawImage(gameCanvas, 0, 0, b.width, b.height); }
     landingBackdropRaf = requestAnimationFrame(landingBackdropLoop);
   }
+
+  // ---- Landing autopilot: the backdrop plays Cloud Hopper by itself (a per-frame port of tests/cloudhopper.bot.js).
+  // It only sets the same key state the keyboard sets; positions decide what to do next, so a miss just means trying again.
+  let landingBotQ = [], landingBotCur = null, landingBotEndT = 0, landingBotMpTries = 0;
+  function landingBotRelease() { keys.ArrowLeft = false; keys.ArrowRight = false; keys[" "] = false; }
+  function landingBotReset() { landingBotQ = []; landingBotCur = null; landingBotEndT = 0; landingBotMpTries = 0; landingBotRelease(); }
+  function landingBotWalk(px) {
+    let t = 0;
+    return (P, dt) => {
+      t += dt; const d = px - P.x, vel = P.vx, err = d - vel * Math.abs(vel) / (2 * 1700);
+      keys.ArrowLeft = false; keys.ArrowRight = false;
+      if ((Math.abs(d) <= 3 && Math.abs(vel) < 25) || t > 12 || !P.grounded) { landingBotRelease(); return true; }
+      if (err > 1.5) keys.ArrowRight = true; else if (err < -1.5) keys.ArrowLeft = true;
+      return false;
+    };
+  }
+  function landingBotHop(dir, until) {
+    let t = 0, air = false, settle = 0;
+    const key = dir > 0 ? "ArrowRight" : "ArrowLeft";
+    return (P, dt) => {
+      t += dt;
+      if (t < 0.034) { keys[key] = true; keys[" "] = true; return false; }
+      keys[" "] = false;
+      if (settle > 0) { settle -= dt; if (settle <= 0) { landingBotRelease(); return true; } return false; }
+      if (until(P)) keys[key] = false;
+      if (!P.grounded) air = true;
+      if ((air && P.grounded) || t > 2) { landingBotRelease(); settle = 0.25; }
+      return false;
+    };
+  }
+  function landingBotHold(key, sec) {
+    let t = 0;
+    return (P, dt) => { t += dt; keys[key] = t < sec; if (t >= sec) { landingBotRelease(); return true; } return false; };
+  }
+  // jump into the pit's bounce and steer onto the big cloud
+  function landingBotPit(fromRight) {
+    let t = 0, air = false;
+    return (P, dt) => {
+      t += dt;
+      if (!air) { keys[fromRight ? "ArrowLeft" : "ArrowRight"] = true; if (!P.grounded) air = true; if (t > 3) { landingBotRelease(); return true; } return false; }
+      if (fromRight) {
+        if (P.x >= 14.2 * 32 || P.vy < -400) keys.ArrowLeft = false;
+        if (P.vy < -300) keys.ArrowRight = true;
+        if (P.x >= 14.2 * 32) keys.ArrowRight = false;
+      } else if (P.x >= 14.2 * 32) keys.ArrowRight = false;
+      if ((P.grounded && t > 0.1 && P.y < 12 * 32) || t > 6) { landingBotRelease(); return true; }
+      return false;
+    };
+  }
+  function landingBotMpHop() {
+    let t = 0; const m = () => actors.find(a => a.defId === MOVING_PLATFORM_DEF_ID);
+    return (P, dt) => {
+      t += dt; const mp = m(); if (!mp || t > 12) return true;
+      const lo = 40 + (landingBotMpTries % 5) * 12, dx = mp.x - P.x;
+      if (dx > lo && dx < lo + 60) { landingBotMpTries++; const k = landingBotMpTries; landingBotCur = landingBotHop(1, q => Math.abs((mp.x + 11) - (q.x + 11)) < 10 + (k % 3) * 6); }
+      return false;
+    };
+  }
+  function landingBotRide() {
+    let t = 0;
+    return (P, dt) => {
+      t += dt; const mp = actors.find(a => a.defId === MOVING_PLATFORM_DEF_ID); if (!mp || t > 12) return true;
+      if (mp.x <= 19.2 * 32 && mp.x >= 16 * 32) { landingBotCur = landingBotHop(1, q => q.x >= 21.2 * 32); }
+      return false;
+    };
+  }
+  function landingBotDecide(P) {
+    const room = rooms.findIndex(r => r.id === currentRoomId);
+    const y = Math.round(P.y / 32 * 100) / 100, x = P.x / 32, near = (a, b) => Math.abs(a - b) < 0.2;
+    const W = landingBotWalk, H = landingBotHop;
+    if (room === 0) {
+      if (near(y, 14.31) && x < 10) return [W(8.3 * 32), H(1, q => q.x >= 13.2 * 32)];
+      if (y > 15.5) return [W(12 * 32), H(1, q => q.x >= 13.2 * 32)];
+      if (near(y, 14.31) && x < 16) return [W(14.2 * 32), H(1, q => q.x >= 16.4 * 32)];
+      if (near(y, 14.31)) return [W(14.2 * 32)];
+      if (near(y, 12.31)) return [W(17.2 * 32), H(1, q => q.x >= 19.5 * 32)];
+      if (near(y, 10.31)) return [landingBotHold("ArrowRight", 0.6)];
+    } else if (room === 1) {
+      if (near(y, 14.31) && x < 9) return [landingBotPit(false)];
+      if (near(y, 14.31) && x >= 10.2) return [landingBotPit(true)];
+      if (near(y, 9.31) && x >= 12.6) return [W(17.6 * 32), landingBotMpHop()];
+      if (y > 7.2 && y < 7.8) return [landingBotRide()];
+      if (near(y, 5.31) && x >= 19.2) return [landingBotHold("ArrowRight", 0.8)];
+      if (near(y, 12.31) || near(y, 10.31)) return [landingBotHold("ArrowLeft", 1.2)];
+      if (near(y, 14.31)) return [landingBotHold("ArrowLeft", 0.5)];
+    } else {
+      if (near(y, 15.31)) return [...(x < 3 || x > 3.6 ? [W(3.2 * 32)] : []), H(1, q => q.x >= 4.5 * 32)];
+      if (near(y, 13.31) && x < 8) return [W(6 * 32), H(1, q => q.x >= 8.7 * 32)];
+      if (near(y, 11.31) && x < 13) return [W(10.4 * 32), H(1, q => q.x >= 14.2 * 32)];
+      if (near(y, 9.31) && x < 18) return [W(16 * 32), H(1, q => q.x >= 18.2 * 32)];
+      if (near(y, 7.31) && x < 21.4) return [W(20 * 32), H(1, q => q.x >= 21.3 * 32)];
+      if (near(y, 5.31)) return [x > 22.8 ? W(22.2 * 32) : landingBotHold("ArrowRight", 0.8)];
+      if (near(y, 13.31) || near(y, 11.31)) return [landingBotHold("ArrowLeft", 1.5)];
+    }
+    return null;
+  }
+  function landingAutoplay(dt) {
+    if (!landingActive || appMode !== "play" || !landingHero || landingHero.id !== "cloud-hopper") return;
+    if (playSessionEnded) { // finished (or lost): let the beat play, then start over
+      landingBotRelease(); landingBotEndT += dt;
+      if (landingBotEndT > 2) { landingBotReset(); restartPlaySessionFromSnapshot(); playReadyUntil = null; }
+      return;
+    }
+    const P = actors.find(a => a.isPlayer);
+    if (roomTransition || !P) { landingBotQ = []; landingBotCur = null; landingBotRelease(); return; }
+    if (!landingBotCur && landingBotQ.length) landingBotCur = landingBotQ.shift();
+    if (!landingBotCur) {
+      if (P.grounded) { const a = landingBotDecide(P); if (a) { landingBotQ = a; landingBotCur = landingBotQ.shift(); } }
+      else if (rooms.findIndex(r => r.id === currentRoomId) === 1 && P.x / 32 > 8.4 && P.x / 32 < 14.2) keys.ArrowRight = true; // bouncing out of the pit
+      else landingBotRelease();
+    }
+    if (landingBotCur && landingBotCur(P, dt)) landingBotCur = null;
+  }
   // A project counts as empty when it is one room with no painted tiles (other than the default sky/cloud/scenery backdrop),
   // no actors, no doors/spawner content, and no custom or edited sprites/characters. Judged by content, not by byte equality
   // with the factory snapshot (an autosave round trip or a cleared project is rarely byte-identical).
@@ -14174,6 +14287,7 @@
       loadExampleGame(landingHero.builder, landingHero.name, { skipConfirm: true });
       enterPlayMode();
       playReadyUntil = null; // no READY! pause behind a title screen
+      landingBotReset();
     } catch (err) { endLanding(true); throw err; }
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       requestAnimationFrame(() => requestAnimationFrame(() => { landingFrozen = true; }));
@@ -14195,6 +14309,7 @@
     } else {
       resetHistory();
     }
+    landingBotReset();
     landingActive = false; landingFrozen = false; landingSaved = null;
     document.body.classList.remove("landing");
     document.getElementById("log").textContent = "";
@@ -15177,6 +15292,7 @@
         if (gameNow() - roomTransition.startedAt >= ROOM_TRANSITION_MS) roomTransition = null;
       } else if (appMode === "play" && playSessionEnded) {
         advanceGameClock(dt); // frozen simulation, but delayed reactions (a game-over stinger, a pop) still finish
+        if (landingActive) landingAutoplay(dt);
       } else if (landingActive && landingFrozen) {
         // prefers-reduced-motion: the landing backdrop stays on its first frame
       } else if (appMode === "play" && playReadyUntil != null && gameNow() < playReadyUntil) {
@@ -15189,6 +15305,7 @@
         // shows the kid their starting position and a plain, genre-standard "READY!" beat.
       } else {
         if (playReadyUntil != null) playReadyUntil = null; // the Ready window just elapsed this frame
+        if (landingActive) landingAutoplay(dt);
         tick(dt);
         tickDragCooldowns(dt);
       }
