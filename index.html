@@ -7164,6 +7164,9 @@
   // own math, forever, for as long as anything sits on a floor under gravity. Below this floor
   // it's equilibrium noise, not a hit worth a sound or a fresh wobble; a genuine landing (even
   // a light one) clears it easily, since a mere one-tile fall already saturates mag toward 1.
+  // The player's landing thud is reserved for big falls: terminal fall speed (MAX_FALL 750) is reached after ~6 tiles, so only a landing at
+  // nearly that speed (a fall of about 6+ tiles) thuds. Everything else (objects, bounces) keeps its old rule.
+  const PLAYER_THUD_MIN_SPEED = 735;
   const IMPACT_NOISE_FLOOR = 0.4; // ~100px/s: a resting object that skips one long frame (gravity x2 frames) isn't a landing
   function impactWobbleValue(actor) {
     if (!actor.impactMag) return 0;
@@ -7188,6 +7191,7 @@
     if (idef && idef.temperament === "collectible") return; // collectibles never make impact sounds
     // enemies/characters walking around (and balls rolling) never thud on landing — crowds made a constant clutter
     if (!actor.isPlayer && idef && (isSteeringCharacter(idef.temperament) || idef.temperament === "stationary" || idef.temperament === HAZARD_BALL_KIND)) return;
+    if (actor.isPlayer && Math.abs(incomingSpeed) < PLAYER_THUD_MIN_SPEED) return; // ordinary landings are silent
     if (axis === gravAxis() && incomingSpeed > 0 && !isBounce) sounds.thud(mag);
   }
 
@@ -15013,6 +15017,7 @@
       `const THROW_MIN_SPEED = ${THROW_MIN_SPEED}, THROW_MAX_SPEED = ${THROW_MAX_SPEED}, THROW_UPWARD_SPEED = ${THROW_UPWARD_SPEED};`,
       `const IMPACT_WOBBLE_FREQ = ${IMPACT_WOBBLE_FREQ}, IMPACT_WOBBLE_DECAY = ${IMPACT_WOBBLE_DECAY};`,
       `const IMPACT_NOISE_FLOOR = ${IMPACT_NOISE_FLOOR};`,
+      `const PLAYER_THUD_MIN_SPEED = ${PLAYER_THUD_MIN_SPEED};`,
       `const MASS_LIGHT = ${MASS_LIGHT}, MASS_MEDIUM = ${MASS_MEDIUM}, MASS_HEAVY = ${MASS_HEAVY}, MASS_ANCHORED = ${MASS_ANCHORED}, COLLISION_SLIVER_PX = ${COLLISION_SLIVER_PX}, CANNON_CORNER_SLACK_PX = ${CANNON_CORNER_SLACK_PX}, MASS_RESTITUTION = ${MASS_RESTITUTION}, MASS_MIN_SEPARATION = ${MASS_MIN_SEPARATION}, MASS_MAX_SPEED = ${MASS_MAX_SPEED}, HIT_THUD_FULL_SPEED = ${HIT_THUD_FULL_SPEED}, MASS_TRANSFER_MIN_SPEED = ${MASS_TRANSFER_MIN_SPEED}, MASS_LAND_THUD_MIN_SPEED = ${MASS_LAND_THUD_MIN_SPEED};`,
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
