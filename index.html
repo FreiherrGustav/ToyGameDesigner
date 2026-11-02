@@ -501,6 +501,8 @@
   #landingTrust { margin-top: 16px; font-size: 13px; color: #fff; text-shadow: 0 1px 4px #000; }
   #landingKeys { position: absolute; right: 24px; bottom: 56px; padding: 6px 12px; border-radius: 8px; font-size: 12px; color: #dde;
     background: rgba(20,21,30,0.75); border: 1px solid rgba(255,255,255,0.25); }
+  #teleNote { position: absolute; left: 6vw; bottom: 46px; max-width: 420px; font-size: 11px; color: #9aa; text-shadow: 0 1px 4px #000; }
+  @media (max-width: 700px) { #teleNote { left: 20px; } }
   #landingFoot { position: absolute; left: 6vw; bottom: 20px; font-size: 12px; color: #aaa; text-shadow: 0 1px 4px #000; }
   #landingFoot a { color: #cfd2e0; margin-right: 18px; }
   #landingBest { position: absolute; right: 24px; bottom: 20px; font-size: 11px; color: #b4b9cc; text-shadow: 0 1px 4px #000; }
@@ -688,6 +690,7 @@
     <div id="landingSamples" role="group" aria-label="Play a sample game"></div>
     <div id="landingKeys">← ↑ ↓ → or WASD move · Space jump · E grab</div>
     <div id="landingFoot"><a id="landingCredits" href="#" hidden>Credits</a><a id="landingPrivacy" href="#">Privacy</a><a id="landingContact" href="#">Contact</a></div>
+    <div id="teleNote" hidden>This test counts anonymous clicks, such as which buttons get pressed. It never records names, drawings or anything personal. Add ?nostats to the web address to turn it off.</div>
     <div id="landingBest">Best on a computer or Chromebook</div>
   </div>
 </div>
@@ -851,7 +854,7 @@
         <button class="tbtn" id="saveProjectBtn" title="Save project"><span class="ic" data-px="save"></span><span class="lf">Save project</span><span class="ls">Save</span></button>
         <button class="tbtn" id="loadProjectBtn" title="Load project"><span class="ic" data-px="load"></span><span class="lf">Load project</span><span class="ls">Load</span></button>
         <input type="file" id="loadProjectInput" accept="application/json,.json" style="display:none;">
-        <button class="tbtn" id="exportBtn" title="Export game"><span class="ic" data-px="export"></span><span class="lf">Export game</span><span class="ls">Export</span></button>
+        <button class="tbtn" id="exportBtn" title="Share game"><span class="ic" data-px="export"></span><span class="lf">Share game</span><span class="ls">Share</span></button>
       </div>
     </div>
     <div class="toolbar" id="statusRow">
@@ -11403,7 +11406,7 @@
       tile.appendChild(name);
       tile.addEventListener("click", () => {
         if (landingActive) { landingPickSample(sample); return; }
-        if (loadExampleGame(sample.builder, sample.name)) closeSamplesModal();
+        if (loadExampleGame(sample.builder, sample.name)) { closeSamplesModal(); tele("sample_opened", sample.id); } // TELEMETRY
       });
       grid.appendChild(tile);
     });
@@ -14381,6 +14384,7 @@
   function landingPickSample(sample) {
     if (landingHadWork && !confirmReplaceProject("Play \"" + sample.name + "\"?")) return;
     loadExampleGame(sample.builder, sample.name, { skipConfirm: true });
+    tele("sample_opened", sample.id); // TELEMETRY
     closeSamplesModal();
     endLanding(false);
     enterPlayMode();
@@ -14817,6 +14821,147 @@
     startTutorial(TUTORIAL_STEPS, { onFinish: () => { try { localStorage.setItem(TUT_DONE_KEY, "1"); } catch (e) { /* convenience only */ } } });
   }
   window.addEventListener("keydown", (e) => { if (tutorial && e.key === "Escape") { e.preventDefault(); quitTutorial(); } });
+
+  // ===== TELEMETRY (removable) =====
+  // Anonymous, coarse usage counters for a small study. Counters only: named events, no id of any kind, no cookie,
+  // nothing typed, drawn or placed, no coordinates, no urls, no error text. Never in exports (not in runtimeFunctions).
+  // To remove: see CLAUDE.md "Anonymous usage counters". The rest of the game only ever calls tele(name, value).
+  const TELEMETRY_MODE = "flag"; // "off" | "flag" (only with ?study=1 in the url) | "on"
+  const tele = (function () {
+    const NOOP = function () {}; NOOP.dump = function () { return []; }; NOOP.active = false;
+    try {
+      const q = new URLSearchParams(location.search);
+      if (TELEMETRY_MODE === "off") return NOOP;
+      if (TELEMETRY_MODE === "flag" && q.get("study") !== "1") return NOOP;
+      if (q.has("nostats")) return NOOP;
+      if (navigator.doNotTrack === "1" || window.doNotTrack === "1" || navigator.globalPrivacyControl === true) return NOOP;
+    } catch (e) { return NOOP; }
+    const NAMES = ["visitor_new", "visitor_returning", "landing_choice", "sample_opened", "surprise_me_used", "first_placement",
+      "first_play", "play_started", "win", "death", "restart", "tutorial_started", "tutorial_step_reached", "tutorial_finished",
+      "tutorial_quit", "save_used", "share_used", "session_length", "error_class", "viewport_class", "browser_family", "touch_present"];
+    // every value is checked against a fixed list or number range; anything else is dropped
+    const ENUMS = {
+      landing_choice: ["make", "samples", "tutorial", "surprise"],
+      session_length: ["<30s", "30-60s", "1-5m", ">5m"],
+      death: ["0", "1", "2-3", "4+"],
+      viewport_class: ["small", "medium", "large"],
+      browser_family: ["chrome", "firefox", "safari", "other"],
+      touch_present: ["yes", "no"],
+      error_class: ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "other"]
+    };
+    const MAX_PER_NAME = 25, MAX_TOTAL = 150;
+    const log = [], counts = {}; let total = 0, pageStart = performance.now(), deaths = 0, gotHidden = false;
+    const once = {};
+    function valueOk(name, v) {
+      if (v == null) return true;
+      if (name === "sample_opened") return typeof SAMPLE_GAMES !== "undefined" && SAMPLE_GAMES.some(g => g.id === v);
+      if (name === "tutorial_step_reached") return Number.isInteger(v) && v >= 0 && v < 30;
+      return !!ENUMS[name] && ENUMS[name].indexOf(String(v)) >= 0;
+    }
+    function t(name, value) {
+      try {
+        if (NAMES.indexOf(name) < 0 || !valueOk(name, value)) return;
+        if (total >= MAX_TOTAL || (counts[name] || 0) >= MAX_PER_NAME) return;
+        counts[name] = (counts[name] || 0) + 1; total++;
+        const ev = value == null ? name : name + ":" + value;
+        log.push(ev);
+        queueSend(ev);
+        if (new URLSearchParams(location.search).has("telelog")) console.log("[tele]", ev);
+      } catch (e) { /* never throws */ }
+    }
+    // Stage 1: no network. Stage 2 replaces this with a batched, fire-and-forget send.
+    function queueSend(ev) {}
+    t.dump = function () { return log.slice(); };
+    t.active = true;
+    // ---- passive observers (read existing state; never change it) ----
+    function bucketSession(ms) { return ms < 30000 ? "<30s" : ms < 60000 ? "30-60s" : ms < 300000 ? "1-5m" : ">5m"; }
+    function once1(name, value) { if (!once[name]) { once[name] = 1; t(name, value); } }
+    function bucketDeaths(n) { return n === 0 ? "0" : n === 1 ? "1" : n <= 3 ? "2-3" : "4+"; }
+    function init() {
+      try {
+        // newness flag: one boolean, identical for everyone; blocked storage => say nothing about newness
+        try {
+          const KEY = "toyGameDesigner.seen";
+          if (localStorage.getItem(KEY)) t("visitor_returning");
+          else { t("visitor_new"); localStorage.setItem(KEY, "1"); }
+        } catch (e) { /* storage blocked: send nothing about newness */ }
+        const w = innerWidth;
+        t("viewport_class", w < 900 ? "small" : w < 1400 ? "medium" : "large");
+        const ua = navigator.userAgent || "";
+        t("browser_family", /Firefox\//.test(ua) ? "firefox" : /Chrome\/|Chromium\/|Edg\//.test(ua) ? "chrome" : /Safari\//.test(ua) ? "safari" : "other");
+        t("touch_present", (navigator.maxTouchPoints || 0) > 0 ? "yes" : "no");
+        const note = document.getElementById("teleNote"); if (note) note.hidden = false;
+        document.addEventListener("click", (e) => {
+          try {
+            const b = e.target && e.target.closest && e.target.closest("button");
+            if (!b) return;
+            const id = b.id;
+            if (id === "landingMakeBtn") t("landing_choice", "make");
+            else if (id === "landingPlayBtn") t("landing_choice", "samples");
+            else if (id === "landingShowBtn") t("landing_choice", "tutorial");
+            else if (id === "landingSurpriseBtn") { t("landing_choice", "surprise"); t("surprise_me_used"); }
+            else if (id === "surpriseBtn") t("surprise_me_used");
+            else if (id === "saveProjectBtn") t("save_used");
+            else if (id === "exportBtn") t("share_used");
+            else if (id === "modePlayBtn" && appMode === "play" && !landingActive) t("restart");
+            else if (id === "tutClose") tutQuitSeen = performance.now();
+          } catch (err) {}
+        }, true);
+        document.addEventListener("keydown", (e) => { if (e.key === "Escape") tutQuitSeen = performance.now(); }, true);
+        // first placement: a press on the board that leaves more actors/painted cells than it started with
+        const cv = document.getElementById("gameCanvas");
+        if (cv) {
+          cv.addEventListener("pointerdown", () => { try { boardCount0 = boardCountNow(); } catch (err) {} }, true);
+          cv.addEventListener("pointerup", () => { setTimeout(() => { try { if (!landingActive && !tutorialActive && appMode === "build" && !once.first_placement && boardCountNow() > boardCount0) { once.first_placement = 1; t("first_placement"); } } catch (err) {} }, 0); }, true);
+        }
+        document.addEventListener("visibilitychange", () => {
+          try {
+            if (!document.hidden || gotHidden) return;
+            gotHidden = true; // one summary per page; never retried
+            t("session_length", bucketSession(performance.now() - pageStart));
+            t("death", bucketDeaths(deaths));
+          } catch (err) {}
+        });
+        window.addEventListener("error", (e) => {
+          try { const n = e && e.error && e.error.name; t("error_class", ENUMS.error_class.indexOf(n) >= 0 ? n : "other"); } catch (err) {}
+        });
+        window.addEventListener("unhandledrejection", () => t("error_class", "other"));
+        // one cheap read of existing state per second (no per-frame work)
+        let prevMode = appMode, prevEnded = null, prevLives = lives, prevTut = false, prevStep = null;
+        setInterval(() => {
+          try {
+            if (document.hidden) return;
+            const demo = landingActive;
+            if (!demo) {
+              if (appMode === "play" && prevMode !== "play") { once1("first_play"); t("play_started"); }
+              if (appMode === "play" && playSessionEnded === "win" && prevEnded !== "win") t("win");
+              if (appMode === "play" && prevEnded && !playSessionEnded) t("restart");
+              if (appMode === "play" && lives < prevLives) deaths += prevLives - lives;
+            }
+            prevMode = demo ? prevMode : appMode; prevEnded = demo ? null : playSessionEnded; prevLives = lives;
+            if (tutorialActive && !prevTut) { t("tutorial_started"); prevStep = null; }
+            if (tutorialActive && tutorial) {
+              const idx = tutorial.steps.findIndex(s => s.name === tutorial.curName);
+              if (idx >= 0 && idx !== prevStep) { prevStep = idx; t("tutorial_step_reached", idx); }
+            }
+            if (!tutorialActive && prevTut) t(performance.now() - tutQuitSeen < 2500 ? "tutorial_quit" : "tutorial_finished");
+            prevTut = tutorialActive;
+          } catch (err) {}
+        }, 1000);
+      } catch (e) {}
+    }
+    let tutQuitSeen = -1e9, boardCount0 = 0;
+    function boardCountNow() {
+      let n = actors.length;
+      for (let y = 0; y < board.length; y++) for (let x = 0; x < board[y].length; x++) if (board[y][x]) n++;
+      return n;
+    }
+    // start after the app has finished booting (the boot code below runs first)
+    setTimeout(init, 0);
+    return t;
+  })();
+  try { window.tele = tele; } catch (e) {} // console view: tele.dump() lists what would be sent
+  // ===== END TELEMETRY =====
 
   // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
   // Captured now — after every built-in actor/background def above has been seeded and the
