@@ -7483,5 +7483,5 @@ Everything lives in ONE block in `index.html`, `// ===== TELEMETRY (removable) =
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
-`surprise-sources/` (the author's original `*surprise me*.json` project files, formerly in the repo root; earlier sections that say
+`examples/` (loadable sample projects, e.g. `wind-spiral.json`), `surprise-sources/` (the author's original `*surprise me*.json` project files, formerly in the repo root; earlier sections that say
 "kept in the repo root" mean this folder; `tests/exact.test.js` reads them) and `docs/` (longer design notes, formerly in the root).
