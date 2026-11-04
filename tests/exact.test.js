@@ -15,8 +15,8 @@ const FILES = { cannoncat: 'Cannon Cat', fanloop: 'Fan loop', monsterescape: 'mo
 (async () => {
   const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   for (const id of Object.keys(FILES)) {
-    const f = fs.readdirSync(ROOT).find(n => n.startsWith(FILES[id]) && n.endsWith('.json'));
-    const d = JSON.parse(fs.readFileSync(path.join(ROOT, f))).data, room = d.rooms[0];
+    const f = fs.readdirSync(path.join(ROOT, 'surprise-sources')).find(n => n.startsWith(FILES[id]) && n.endsWith('.json'));
+    const d = JSON.parse(fs.readFileSync(path.join(ROOT, 'surprise-sources', f))).data, room = d.rooms[0];
     const p = await b.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('dialog', x => x.accept());
     await p.goto('file://' + tmp + '#t'); await p.waitForTimeout(300);
     // three different seeds: the skins never change (no random wall textures), the characters are the author's

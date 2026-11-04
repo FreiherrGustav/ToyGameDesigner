@@ -6016,7 +6016,7 @@ The coded Catapult Factory sample (`buildCatapultFactoryGame`, its factory-panel
 ## Movers (traffic and floaters): lanes of things that carry you or hurt you (v2.46)
 
 Shipped from the Crossing Guard Phase 0/1 work (`prototypes/crossing-guard-test.html` for the
-measurements, `toy-game-maker-v2.46-patch-notes.md` for the full design and risks). **Option B for
+measurements, `docs/toy-game-maker-v2.46-patch-notes.md` for the full design and risks). **Option B for
 wrapping** was chosen: only an actor currently riding a mover wraps by exactly one room length; everyone
 else keeps the original `applyWorldWrap` reset-to-edge rule, so no existing wrap room changes. (Label is
 informal; v2.45 is Surprise Me.) The Crossing Guard sample itself (Phase 2) is NOT built yet.
@@ -7479,3 +7479,9 @@ Everything lives in ONE block in `index.html`, `// ===== TELEMETRY (removable) =
   blocked storage, save comparison, tick time). Test traps: the sample cards are `.sampleTile`; after Surprise Me a dialog can block later clicks;
   a live `impactWobbleT` makes two snapshots differ. Failed collector requests print "Failed to load resource" lines in the browser console (Chrome's own
   log, not page errors, not suppressible).
+
+## Repo layout
+
+`index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
+`surprise-sources/` (the author's original `*surprise me*.json` project files, formerly in the repo root; earlier sections that say
+"kept in the repo root" mean this folder; `tests/exact.test.js` reads them) and `docs/` (longer design notes, formerly in the root).
