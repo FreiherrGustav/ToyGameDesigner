@@ -12101,7 +12101,8 @@
     else {
       const dt = Math.max(0, Math.min(100, now - st.t)) / 1000;
       const step = LIFT_SPEED_PX_S * dt;
-      if (reducedMotion() || Math.abs(target - st.v) <= step) st.v = target;
+      // rising is instant (a stone landing on a stone must not look sunk into it while the picture catches up); only a drop eases
+      if (reducedMotion() || target > st.v || Math.abs(target - st.v) <= step) st.v = target;
       else st.v += Math.sign(target - st.v) * step;
       st.t = now;
     }
@@ -13873,11 +13874,18 @@
   }
   // The author's own hero look. Like the random look, only over the factory look or a look a surprise gave earlier,
   // never over a kid's own drawing.
+  // A look that came with the game (factory hero, a preset, a surprise's own) may be replaced by the author's; a kid's own drawing never.
+  function surpriseLookIsStock(def, factory) {
+    const sg = JSON.stringify(def.art);
+    if (artEquals(def.art, factory.art) || def.surpriseLookSig === sg) return true;
+    if (CHARACTER_PRESETS.some(p => JSON.stringify(p.poses ? p.poses.stand : p.art) === sg)) return true;
+    return SURPRISE_TEMPLATES.some(t => t.exact && t.exact.playerLook && JSON.stringify(t.exact.playerLook.art) === sg);
+  }
   function surpriseApplyExactLook(tid) {
     const t = surpriseTemplateById(tid), L = t && t.exact && t.exact.playerLook;
     const def = actorDefs[playerDefId], factory = FACTORY_DEFAULT_SNAPSHOT.actorDefs[playerDefId];
     if (!L || !def || !factory) return;
-    if (!(artEquals(def.art, factory.art) || (def.surpriseLookSig && JSON.stringify(def.art) === def.surpriseLookSig))) return;
+    if (!surpriseLookIsStock(def, factory)) return;
     def.poses = L.poses ? structuredClone(L.poses) : null;
     def.art = L.art.slice();
     def.surpriseLookSig = JSON.stringify(def.art);
@@ -13894,7 +13902,7 @@
     }
     spec.tiles.forEach(t => {
       board[t.y][t.x] = t.key;
-      if (t.color) colorBoard[t.y][t.x] = t.color;
+      if (t.color) { colorBoard[t.y][t.x] = t.color; delete switchChannels[t.color]; } // a new arrangement opens with its gates shut: a colour left on by an earlier room must not leak in
       if (t.skin) { groundSkinBoard[t.y][t.x] = t.skin; groundSkinRotationBoard[t.y][t.x] = t.skinRot || 0; }
       if (GAMEPLAY_TILE_DEFS[t.key].geometry === PUSH_BUTTON_GEOMETRY && !t.color) { // an uncolored Button: its gravity option (none = toggle)
         const hotRoom = rooms.find(r => r.id === currentRoomId); hotRoom.gravButtons = hotRoom.gravButtons || {};
@@ -13998,8 +14006,12 @@
     if (!playerPlaced && playerRoomId !== currentRoomId) extra += " (your player lives in another room — drag them over to join in)";
     if (gravityEnabled !== wasGravity) extra += " — gravity is now " + (gravityEnabled ? "on" : "off");
     if ((spec.fillers || []).length) extra += " + " + spec.fillers.map(f => f.name).join(", ");
+    const freezeIt = spec.category === "room" || spec.authored;
+    if (freezeIt) extra += " — ready, press P to start it";
     log(caption + extra);
     try { playChip("pop"); } catch (e) { /* audio can be unavailable */ }
+    // a whole room opens frozen at its starting layout; P or the Resume button (or Play) starts it
+    if (freezeIt) setGamePaused(true);
     return { seed, templateId: spec.templateId, category: spec.category, name: spec.name, attempts: spec.attempts, variant: spec.variant, ops: spec.ops, playerPlaced, roomId: room.id, roomIds: partRooms, rect,
       fillers: (spec.fillers || []).map(f => ({ templateId: f.templateId, name: f.name, rect: { x: f.ox, y: f.oy, w: f.w, h: f.h } })),
       gravity: spec.gravity, gravityFlipped: spec.gravityFlipped, wrapH: spec.wrapH, wrapV: spec.wrapV,

@@ -7486,6 +7486,14 @@ A whole-room entry that is 72 columns wide with a Follow camera: four lanes of `
 
 Engine support added: `room.camera: "follow"` marks a wide entry (`surpriseIsWide`): it only fits an empty room or goes into a new room tab, gets the full 72-column context, sets `cameraMode = "follow"`, no fillers. `exact.backRows`/`backLegend` paint a Paint-layer picture from rows; `actor|@id` pieces resolve to the entry's own namespaced actors; `exact.wallSkin`. `tests/scenes.test.js` was told to accept `actor|@` and `sx~` ids.
 
+## Surprise rooms open at their starting layout; stacked pictures no longer sink
+
+Reported: whole-room surprises (Mini Level 1 / #9437, Bye Bye Cupcake) opened "already partly run": bombs off their magnets, gates open, and the hero not the cupcake. **Cause of the open gates:** channel state is project-wide by colour (`switchChannels`), so a Button an earlier room's pet or player had flipped stayed on for every later surprise using that colour. Fix: `surpriseApplySpec` deletes `switchChannels[color]` for every coloured tile it places, so a new arrangement starts with its gates shut. **Hero look:** `surpriseApplyExactLook` only replaced the factory/surprise-given look, so after loading a sample or picking any preset the author's hero (the cupcake) was skipped; `surpriseLookIsStock` now also accepts any `CHARACTER_PRESETS` look or any template's `playerLook`, still never a kid's own drawing (tested with a one-pixel edit). **Frozen start:** a press whose template is `category: "room"` or `authored` opens with Build paused (`setGamePaused(true)`, log says "ready, press P to start it"); P or Resume starts it, Play always starts running as before. This is a deliberate exception to "always live" for whole-room events (flag if unwanted); smaller surprises still run at once. `tests/pause.test.js` uses a non-room template for "Surprise Me resumes" and checks the room freeze; new `tests/lockedin.test.js` (5 checks).
+
+**Stacked actors sink (drawing only):** the stand-on lift (`actorLiftShown`) eased at 160 px/s, so a stone landing on a stone, or the hero landing on a stone, was drawn 10 to 30 px inside it for several frames before the picture caught up (cumulative up a stack). Rising is now instant (`target > st.v`), only a drop eases. Boxes and physics are untouched (a 40 s Mini Level 3 run shows zero stone-stone box overlap; the effect was purely the 32 px picture on a 22 px box). The pre-contact picture overlap of a falling stone (up to 10 px at touchdown) is still there.
+
+**The Great Tailwind Derby is ~3.5% of presses**, so 50 presses can miss it (about 17% of the time). `surpriseMe(7)` or `#surprise=7` (also 64, 72) builds it.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),

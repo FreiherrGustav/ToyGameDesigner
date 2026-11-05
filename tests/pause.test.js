@@ -142,8 +142,12 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   await ev(page, `()=>{ const g=SAMPLE_GAMES[0]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); }`);
   ok(!(await ev(page, "()=>gamePaused")), "loading a sample resumes");
   await page.click("#pauseBtn"); ok(await ev(page, "()=>gamePaused"), "paused again");
-  await page.click("#surpriseBtn").catch(async () => { await ev(page, "()=>surpriseMe(4821)"); }); await page.evaluate(() => window.__sim(5));
+  await ev(page, "()=>surpriseMe(4821,{templateIds:['plinko']})"); await page.evaluate(() => window.__sim(5));
   ok(!(await ev(page, "()=>gamePaused")), "Surprise Me resumes");
+  // a whole-room surprise opens frozen at its starting layout (a press resumes first, then freezes)
+  await ev(page, "()=>surpriseMe(7,{templateIds:['byebyecupcake']})");
+  ok(await ev(page, "()=>gamePaused"), "a whole-room surprise opens paused at its start");
+  await page.click("#pauseBtn"); ok(!(await ev(page, "()=>gamePaused")), "and Resume starts it");
 
   // ---- 5. hidden tab auto-pauses in Play, not in Build ----
   const hide = v => page.evaluate(v => { Object.defineProperty(document, "hidden", { configurable: true, get: () => v }); document.dispatchEvent(new Event("visibilitychange")); }, v);
