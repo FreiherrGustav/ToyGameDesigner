@@ -7480,6 +7480,12 @@ Everything lives in ONE block in `index.html`, `// ===== TELEMETRY (removable) =
   a live `impactWobbleT` makes two snapshots differ. Failed collector requests print "Failed to load resource" lines in the browser console (Chrome's own
   log, not page errors, not suppressible).
 
+## Surprise Me: "The Great Tailwind Derby" (`windrally`), the first wide Follow-camera entry
+
+A whole-room entry that is 72 columns wide with a Follow camera: four lanes of `gust:e` wind carry the player and three different harmless chasers (slime, mouse, skeleton looks, `sx~windrally~*` defs) to a chequered finish at column 67. Wind cells hold one direction each, so paths cannot truly cross; the crossovers are cannons (`k`/`K`, fixed diagonal, a speed boost and mid-air collisions) that fire racers into a neighbouring lane, plus opened wall rows with cross-wind `s`/`n` cells that dump racers into a lane. Nobody needs input: it plays itself out (traced at 30/60/144 fps; the player wins at about 5.3 s from a 5-tile handicap start, chasers finish 6.8 to 7.6 s; the game ends on the player's win). Row 17 is an open grass strip (Paint only) so the room is not "closed".
+
+Engine support added: `room.camera: "follow"` marks a wide entry (`surpriseIsWide`): it only fits an empty room or goes into a new room tab, gets the full 72-column context, sets `cameraMode = "follow"`, no fillers. `exact.backRows`/`backLegend` paint a Paint-layer picture from rows; `actor|@id` pieces resolve to the entry's own namespaced actors; `exact.wallSkin`. `tests/scenes.test.js` was told to accept `actor|@` and `sx~` ids.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
