@@ -7517,6 +7517,16 @@ and the pile self-limits at 2 high. Sliding crates stop about 2 tiles past where
 The payload swap is the pen's pets (`softchaser` or `walker`); a stone payload was not used (stone is not pulled, so the chain would break). Names: Everything Goes Down The Drain, The Great Plughole, Flush Hour, Swirl Of Events.
 `tests/machines.activity.js` now follows the LONGEST cause path to the final event type (a stream of repeated final events used to pick a later, shorter path). `examples/drain.json` is the loadable project, filmstrip in `prototypes/machines-shots/drain-film-*.png`.
 
+## v2.64 Stage 3: "Stone Cold Domino" (`stonedomino`), a whole-room machine starring the Large Stone
+
+`stonedomino` (category `room`, `ext: true`, 24x18, gravity down) joins `SURPRISE_ROOMS`. Existing pieces only, no engine change. A stone spawner (`spawners:s`) drops stones onto a west belt that ends in a black hole (a drain, so the room never clogs);
+the first stone rolls over a red Button (stones flip Buttons like any physics object), the red gate under a second stone opens like a trapdoor (the gate is a floor), the stone falls 6 rows onto a bomb actor (a stone falling 2+ tiles sets a bomb off by impact),
+the blast clears the support of a third stone, which falls down a one-wide shaft onto the pet standing in it (squash).
+Declared chain: `spawn, beltCarry, buttonPress, gateOpen, fall, impact, detonate, blastClear, fall, squash`; completes 30/30 at 30, 60 and 144 fps, squash at about 6.4 s, 11 chain events and 7 movers in 10 s, box 100%, hero in a walled pocket far from the blast and the hole.
+**Facts found by tracing / choices:** a stone's horizontal speed is capped near the belt's 160 px/s, so a stone-shoved crate leaves at about 180 (under the 240 needed to detonate a bomb): the bomb is set off by the stone FALLING, not by a shove. Crates preloaded on the belt must be downstream (west) of the Button or they flip it first.
+The Button is a toggle, so later stones alternately close and reopen the gate (visible activity, nothing falls after the first run); the room keeps running (a stone every 2.5 s rides the belt and is drained), but the big chain happens once per Play or Reset: that is the "resettable" part, there is no automatic second run.
+Payload swap: the belt crate for a pet (`crate`/`pet`). Names: Stone Cold Domino, The Heavyweight Chain, Rock Paper Boom, Somebody Dropped A Rock. `examples/stone-domino.json`, filmstrip `prototypes/machines-shots/stonedomino-film-*.png`.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
