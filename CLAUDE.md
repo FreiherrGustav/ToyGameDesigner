@@ -7506,6 +7506,17 @@ one relay crate; hold cell = the cell before the magnet; the pen colour must be 
 **Harness:** `tests/causal.hook.js` gained a `handoff` event (magnet-to-magnet), `tests/machines.activity.js` measures activity (chain events in 10 s, moving things, box %), `node tests/machines.rel.js index magnetmile 20 30,60,144 40`.
 Result: chain completes 20/20 at 30, 60 and 144 fps (about 20 s), activity OK (19 chain events and 7-8 movers in 10 s, box 94%). `examples/magnet-mile.json` is the loadable project. Filmstrip: `prototypes/machines-shots/`.
 
+## v2.64 Stage 2: "Everything Goes Down The Drain" (`drain`), a whole-room machine starring the black hole
+
+`drain` (category `room`, `ext: true`, 24x18, gravity down) joins `SURPRISE_ROOMS`. Existing pieces only, no engine change. A crate spawner drops crates onto an east belt; at the belt end the black hole (16,8) pulls the crate
+into a swing that drops it on a red plate (chain beltCarry, pull, plateOn); the plate opens the red gate of a pen at the upper right (gateOpen, released), the hole's pull drags the released pets off the pen ledge and eats them
+(capture). A pet spawner inside the pen (`spawnerp:s`, drops pets straight down so they don't fly past the hole) keeps feeding the drain: one capture about every 2.5 s, so it runs for as long as the room does.
+Declared chain: `beltCarry, pull, plateOn, gateOpen, released, capture`; completes 30/30 at 30, 60 and 144 fps, first capture about 4.6 s, 7 chain events and 11 movers in 10 s, box 100%, hero 14 tiles from the hole in a walled pocket (never pulled).
+**Facts found by tracing:** a thing falling or flying past the hole faster than 240 px/s is redirected, not eaten, so wave-2 pets that fell from a high ledge missed it; things that WALK off a ledge at hole height are eaten. A crate resting within about 4.6 tiles of the hole is lifted (pull beats gravity), so the plate sits 6+ tiles below it
+and the pile self-limits at 2 high. Sliding crates stop about 2 tiles past where they land, so the plate is 3 wide there. A pet standing on the plate region would trigger the gate before the first crate (cause null), so the stooge walker is inside the pen instead.
+The payload swap is the pen's pets (`softchaser` or `walker`); a stone payload was not used (stone is not pulled, so the chain would break). Names: Everything Goes Down The Drain, The Great Plughole, Flush Hour, Swirl Of Events.
+`tests/machines.activity.js` now follows the LONGEST cause path to the final event type (a stream of repeated final events used to pick a later, shorter path). `examples/drain.json` is the loadable project, filmstrip in `prototypes/machines-shots/drain-film-*.png`.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),

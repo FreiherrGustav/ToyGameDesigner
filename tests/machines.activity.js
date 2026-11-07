@@ -40,8 +40,10 @@ const tmp = path.join(os.tmpdir(), "machines_act.html"); fs.writeFileSync(tmp, s
     const r = await p.evaluate(([i, s, f, sf]) => window.__a.run(i, s, f, sf), [id, seed, fps, shotFrames]);
     if (!r.gen) { out.push({ seed, why: r.why }); await ctx.close(); continue; }
     const byId = new Map(r.events.map(e => [e.id, e])); // the path to the LAST event of the declared chain's final type
-    const last = r.events.filter(e => e.type === r.chain[r.chain.length - 1]).pop() || r.events.filter(e => e.type === "plateOn").pop();
-    const pathEv = []; let c = last, n = 0; while (c && n++ < 800) { pathEv.push(c); c = c.cause != null ? byId.get(c.cause) : null; }
+    // the cause path to the final-type event with the longest path (streams of repeated events keep later, shorter ones)
+    const finals = r.events.filter(e => e.type === r.chain[r.chain.length - 1]); if (!finals.length) finals.push(r.events.filter(e => e.type === "plateOn").pop());
+    let pathEv = [];
+    finals.forEach(f0 => { const pe2 = []; let c = f0, n = 0; while (c && n++ < 800) { pe2.push(c); c = c.cause != null ? byId.get(c.cause) : null; } if (pe2.filter(e => e.f / fps <= 10).length > pathEv.filter(e => e.f / fps <= 10).length) pathEv = pe2; });
     const within = pathEv.filter(e => e.f / fps <= 10);
     out.push({ seed, variant: r.variant, chainEvents10s: within.length, distinctTypes10s: new Set(within.map(e => e.type)).size, allEvents10s: r.events.length, movers: r.movers, bboxPct: Math.round(100 * r.bbox), nearPct: Math.round(100 * r.nearShare), heroAlive: r.heroAlive, err: r.err || pe });
     if (SHOTS && r.shots && r.shots.length) { fs.mkdirSync(SHOTS, { recursive: true }); r.shots.forEach((d, k) => fs.writeFileSync(path.join(SHOTS, id + "-film-" + (k + 1) + ".png"), Buffer.from(d.split(",")[1], "base64"))); }
