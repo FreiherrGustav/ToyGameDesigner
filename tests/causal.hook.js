@@ -70,6 +70,23 @@ module.exports = function hook() { return `
     for (const id in __pull) if (!__prevPull[id] && byId[id]) __emit("pull", byId[id]);
     __prevPull = Object.assign({}, __pull); for (const k in __pull) delete __pull[k];
     __prevFan = Object.assign({}, __fan); __prevBelt = Object.assign({}, __belt); for (const k in __fan) delete __fan[k]; for (const k in __belt) delete __belt[k];
+    // v2.64: a magnet handoff = the nearest LIVE magnet within pull reach changed for a physics object (a relay passes a crate from
+    // one magnet to the next). Pushed straight onto the event list (not through __emit), so successive handoffs of one crate stay
+    // separate links instead of collapsing into one.
+    actors.forEach(a => {
+      if (a.isPlayer || a.carried || a.cannonLoad) return;
+      const d = actorDefs[a.defId]; if (!d || !isForceSusceptible(d.temperament)) return;
+      const cx0 = Math.floor((a.x + a.w / 2) / TILE), cy0 = Math.floor((a.y + a.h / 2) / TILE);
+      let best = null, bd = 1e9;
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const mx = cx0 + dx, my = cy0 + dy;
+        if (geometryAt(mx, my) !== "magnet" || !magnetActiveAt(mx, my)) continue;
+        const dist = Math.hypot((mx + 0.5) * TILE - (a.x + a.w / 2), (my + 0.5) * TILE - (a.y + a.h / 2));
+        if (dist < 4 * TILE && dist < bd) { bd = dist; best = mx + "," + my; }
+      }
+      if (best && a.__mag !== best) { const hid = ++z.n; z.events.push({ id: hid, f: z.frame, type: "handoff", cause: a.__cause == null ? null : a.__cause, subj: a.id, char: false }); a.__cause = hid; }
+      a.__mag = best;
+    });
     // bounces and falls from velocity / grounded edges
     actors.forEach(a => {
       if (a.carried || a.detonating || a.cannonLoad || a.isMover) return;

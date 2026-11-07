@@ -7494,6 +7494,18 @@ Reported: whole-room surprises (Mini Level 1 / #9437, Bye Bye Cupcake) opened "a
 
 **The Great Tailwind Derby is ~3.5% of presses**, so 50 presses can miss it (about 17% of the time). `surpriseMe(7)` or `#surprise=7` (also 64, 72) builds it.
 
+## v2.64 Stage 1: "Magnet Mile", a whole-room relay machine starring the magnet (Surprise Me; Stages 2-3 not done)
+
+`magnetmile` (category `room`, `ext: true`, whole 24x18 room) joins `SURPRISE_ROOMS`. Existing pieces only, no engine change. A crate is handed along a floor of
+eight magnets (period-4 colours red/orange/yellow/green, plates under each hold cell light the next magnet), is fired by a cannon over a sticky floor, drops a bomb
+onto a pile, a brown gate opens, a Large Stone and crates fall into a one-wide shaft and squash the stooge (`expect.chain` declared in the entry).
+**Seed split:** `SURPRISE_EXT_SEED_MIN` (10000): templates flagged `ext` are only in the pool for seeds >= 10000 (the dice now draws 5-digit seeds), so every existing seed 1..9999
+still builds exactly what it did. Explicit `templateId(s)` ignores the filter. Not asked for by the user; chosen to keep old seeds stable (flag it).
+**Design rules found by tracing:** colours are global to the room (every lit colour lights every magnet of that colour), so the cycle must be period 4 (period 3 leaves a backwards-pulling magnet in range);
+one relay crate; hold cell = the cell before the magnet; the pen colour must be unique; the stooge shaft must be one tile wide (a two-wide one let the pet walk out from under the falling crate).
+**Harness:** `tests/causal.hook.js` gained a `handoff` event (magnet-to-magnet), `tests/machines.activity.js` measures activity (chain events in 10 s, moving things, box %), `node tests/machines.rel.js index magnetmile 20 30,60,144 40`.
+Result: chain completes 20/20 at 30, 60 and 144 fps (about 20 s), activity OK (19 chain events and 7-8 movers in 10 s, box 94%). `examples/magnet-mile.json` is the loadable project. Filmstrip: `prototypes/machines-shots/`.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
