@@ -7527,6 +7527,14 @@ Declared chain: `spawn, beltCarry, buttonPress, gateOpen, fall, impact, detonate
 The Button is a toggle, so later stones alternately close and reopen the gate (visible activity, nothing falls after the first run); the room keeps running (a stone every 2.5 s rides the belt and is drained), but the big chain happens once per Play or Reset: that is the "resettable" part, there is no automatic second run.
 Payload swap: the belt crate for a pet (`crate`/`pet`). Names: Stone Cold Domino, The Heavyweight Chain, Rock Paper Boom, Somebody Dropped A Rock. `examples/stone-domino.json`, filmstrip `prototypes/machines-shots/stonedomino-film-*.png`.
 
+## v2.64 Stage 4: proof and integration of the three new machines
+
+- **Reliability** (`node tests/machines.rel.js index <id> 100 30,60,144 40`): Magnet Mile, Everything Goes Down The Drain and Stone Cold Domino each complete their declared chain in order 100/100 at 30, 60 and 144 fps (about 20.0 s, 4.6 s and 6.4 s), 0 errors.
+- **Variation fuzz** (`TEMPLATE=<id> VARY='{"payload":true,"mirror":true}' node tests/causal.test.js 60 index.html /dev/null 900`, chaos on, forced mirror and payload swap): honest chain 100%, box >= 94%, all three pass. Gravity directions are not applicable (fixed "on", down).
+- **Nothing existing changed:** every sample is frame-identical to the pre-v2.64 build (`node tests/gravdir.test.js <pre-v2.64 index.html>`, 91/0); seeds 1..3000 build the identical Surprise spec in the old and new builds (`node tests/seedstable.test.js <pre-v2.64 index.html>`, 3000/3000, because `ext` templates are only in the pool for seeds >= 10000);
+  surprise5, surprise2, scenes and exact suites pass; an autosave written by the pre-v2.64 build opens in the new build with the same boards as in the old build, and a machine can be pressed on top of it (`node tests/machines.final.js <pre-v2.64 index.html> <dir>`, which also writes the 1366x635 and 1920x1080 screenshots in `prototypes/machines-shots/final-*.png`; board inside the window, no scroll, no errors).
+- **Share of machines:** among dice presses (seeds 10000+, 4000 presses) templates with a declared chain were 6.5% (3 templates) and are now 17.5% (6 templates). The new machines weigh 2 each (3 was tried: 5.5% each, too dominant): Magnet Mile 4.2%, Stone Cold Domino 4.0%, Drain 3.9% of presses. Retune `weight` in the entries.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
