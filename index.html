@@ -1122,7 +1122,7 @@
   const WIND_DIRECTIONS = {
     "wind-n": { x: 0, y: -1 }, "wind-e": { x: 1, y: 0 }, "wind-s": { x: 0, y: 1 }, "wind-w": { x: -1, y: 0 }
   };
-  const WIND_RUN_STEP = 700, WIND_RUN_MAX = 6; // cumulative wind: +700 px/s^2 per extra tile in line (3 tiles beat walking)
+  const WIND_RUN_STEP = 900, WIND_RUN_MAX = 6; // cumulative wind against you: +900 px/s^2 per extra tile in line (3 tiles beat walking)
   const WIND_FORCE = 1000; // px/s^2, continuous — comparable to MOVE_ACCEL so a kid can still fight against it
   // v2.19: same cardinal vectors as wind, keyed by the fan's own geometry values instead — a fan
   // is wind's existing force calculation projected outward from a placed Object rather than
@@ -6500,24 +6500,29 @@
     }
     return Math.min(n, WIND_RUN_MAX);
   }
-  // Cumulative wind: one direction pushes with WIND_FORCE for a lone tile and WIND_RUN_STEP more
-  // for every extra tile in its line, once per direction (not once per cell the body overlaps,
-  // which made the strength depend on where the feet happened to straddle). Walking (2200) beats
-  // 1-2 tiles and loses to 3 or more, so a stretch of wind is something to push on and find out.
-  function windAccelFor(actor, conveyorOnly) {
-    const runs = {}; // wind modifier -> longest run among the cells touching the actor
-    const note = (cx, cy) => {
-      const mod = modifierAt(cx, cy);
-      if (!WIND_DIRECTIONS[mod]) return;
-      runs[mod] = Math.max(runs[mod] || 0, windRunLength(cx, cy));
-    };
-    for (const { cx, cy } of (conveyorOnly ? [] : overlappedCells(actor))) note(cx, cy);
+  // Cumulative wind, but only against you. Wind that carries you (or that you are not pushing against)
+  // keeps the old flat push per overlapped tile, so everything tuned to it is unchanged. When the player
+  // holds a direction against a wind, that wind pushes back with WIND_FORCE for a lone tile and
+  // WIND_RUN_STEP more for every extra tile in its line (never less than the old push). Walking (2200)
+  // beats 1-2 tiles and loses to 3 or more, so a stretch of wind is something to push on and find out.
+  // `heading` is the screen-space walking direction {x, y} the player is holding (null = no one pushing).
+  function windAccelFor(actor, conveyorOnly, heading) {
+    const old = {}, runs = {}; // wind modifier -> old flat sum / longest run among the cells touching the actor
+    if (!conveyorOnly) {
+      for (const { cx, cy } of overlappedCells(actor)) {
+        const mod = modifierAt(cx, cy);
+        if (!WIND_DIRECTIONS[mod]) continue;
+        old[mod] = (old[mod] || 0) + WIND_FORCE;
+        if (heading) runs[mod] = Math.max(runs[mod] || 0, windRunLength(cx, cy));
+      }
+    }
     let ax = 0, ay = 0;
-    for (const mod in runs) {
-      const dir = WIND_DIRECTIONS[mod], f = WIND_FORCE + WIND_RUN_STEP * (runs[mod] - 1);
+    for (const mod in old) {
+      const dir = WIND_DIRECTIONS[mod];
+      let f = old[mod];
+      if (heading && dir.x * heading.x + dir.y * heading.y < 0) f = Math.max(f, WIND_FORCE + WIND_RUN_STEP * (runs[mod] - 1));
       ax += dir.x * f; ay += dir.y * f;
     }
-    // Belts (wind on a floor you stand on) keep the old flat push per tile: puzzles are tuned to it.
     if (actor.grounded) {
       for (const { cx, cy } of cellsUnderneath(actor)) {
         if (!isCellBlocking(cx, cy, actor)) continue;
@@ -8994,7 +8999,20 @@
       // already applied to literally every other actor by position alone — so this is a narrow
       // subtraction for the one exception, not a new default-in check.
       // too heavy for air currents, but a conveyor belt under it still carries it
-      const windAccel = windAccelFor(actor, isLargeStone);
+      // which way the player is pushing (screen space), so wind can push back harder only against that
+      let windHeading = null;
+      if (actor.isPlayer && !actor.digLock) {
+        const hl = keys["ArrowLeft"] || keys["a"] || keys["A"], hr = keys["ArrowRight"] || keys["d"] || keys["D"];
+        const hu = keys["ArrowUp"] || keys["w"] || keys["W"], hd = keys["ArrowDown"] || keys["s"] || keys["S"];
+        if (inGravity) {
+          const sg = (hr && !hl ? 1 : hl && !hr ? -1 : 0) * rightSign();
+          if (sg) windHeading = cAx === "x" ? { x: sg, y: 0 } : { x: 0, y: sg };
+        } else {
+          const hx = (hr ? 1 : 0) - (hl ? 1 : 0), hy = (hd ? 1 : 0) - (hu ? 1 : 0);
+          if (hx || hy) windHeading = { x: hx, y: hy };
+        }
+      }
+      const windAccel = windAccelFor(actor, isLargeStone, windHeading);
       checkWhooshSurface(actor, windAccel);
       const radialAccel = radialForceAccelFor(actor, player);
       const fanAccel = isLargeStone ? { ax: 0, ay: 0, near: false } : fanAccelFor(actor);
