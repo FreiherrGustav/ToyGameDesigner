@@ -7063,6 +7063,15 @@
         const v = actor[vk];
         if (v > 0) { seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
         else if (v < 0) { seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
+        else if (axis !== ga) {
+          // The platform slid sideways into somebody who is standing still (e.g. a player pinned at a wall beside it): with no velocity
+          // of their own nothing resolved the overlap, and the next time gravity pulled them they were snapped on top of the platform in
+          // one frame. Ease them out to the nearer side instead (seat() refuses if that spot is inside a tile). Only when the overlap
+          // along gravity is deep, so a rider resting on top is never shoved sideways.
+          const ak = ga, ask = ga === "x" ? "w" : "h";
+          const deep = Math.min(actor[ak] + actor[ask], other[ak] + other[ask]) - Math.max(actor[ak], other[ak]) > 6;
+          if (deep) seat(actor[pk] + actor[sk] / 2 < other[pk] + other[sk] / 2 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+        }
         continue;
       }
       const blocked = () => actorBlockedByTiles(other) || actorBlockedByOtherPushables(other, other.id, actor.id);
@@ -9666,7 +9675,16 @@
           // carried along by the platform, but never into a wall: a crate riding a shoved crate used to be dragged into the side wall
           const ox = rider.x, oy = rider.y;
           rider.x += dx; rider.y += dy;
-          if (!rider.isPlayer && actorBlockedByTiles(rider)) { rider.x = ox; rider.y = oy; }
+          // The platform itself ignores tiles, so it can slide into a wall or ceiling while carrying someone. Never carry anybody
+          // (the player included) INTO a tile: keep the part of the move that fits and leave the rest, so a rider is held at the wall
+          // while the platform slides underneath, instead of being embedded and then thrown out the far side next frame.
+          if (actorBlockedByTiles(rider)) {
+            rider.x = ox + dx; rider.y = oy;
+            if (actorBlockedByTiles(rider)) {
+              rider.x = ox; rider.y = oy + dy;
+              if (actorBlockedByTiles(rider)) { rider.x = ox; rider.y = oy; }
+            }
+          }
         }
       }
     }

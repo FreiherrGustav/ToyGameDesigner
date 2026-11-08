@@ -7535,6 +7535,14 @@ Payload swap: the belt crate for a pet (`crate`/`pet`). Names: Stone Cold Domino
   surprise5, surprise2, scenes and exact suites pass; an autosave written by the pre-v2.64 build opens in the new build with the same boards as in the old build, and a machine can be pressed on top of it (`node tests/machines.final.js <pre-v2.64 index.html> <dir>`, which also writes the 1366x635 and 1920x1080 screenshots in `prototypes/machines-shots/final-*.png`; board inside the window, no scroll, no errors).
 - **Share of machines:** among dice presses (seeds 10000+, 4000 presses) templates with a declared chain were 6.5% (3 templates) and are now 17.5% (6 templates). The new machines weigh 2 each (3 was tried: 5.5% each, too dominant): Magnet Mile 4.2%, Stone Cold Domino 4.0%, Drain 3.9% of presses. Retune `weight` in the entries.
 
+## Moving Platform: a rider is never carried into a wall; Moving Platform Maze example replaced
+
+`examples/moving-platform-maze.json` is now the user's new mini level (`moving-platform_mini_level.json`, room "Moving Platform Maze"; the old example is in git history).
+
+**Bug reported with it: the player "jumps or warps" when riding a Moving Platform next to a wall.** Reproduced (`node tests/platformrider.test.js`): a platform ignores tiles (its position is a formula), so it slides into a wall carrying its rider; the riding step in `tick()` skipped the wall check for the player (`!rider.isPlayer && ...`), embedded the player in the wall, and next frame `resolveAxis` threw them out the far side: up onto the top of the wall (37px in one frame). Fix: the carry now applies to every rider but never INTO a tile (try the full move, then x only, then y only, else none), so a rider is held at the wall while the platform slides underneath and is carried again when it comes back. Second fix in `shovePushables`' platform branch: a platform sliding sideways into a standing-still actor (v = 0) used to leave the overlap unresolved until gravity snapped them on top in one frame; they are now eased to the nearer side (only when the overlap along gravity is over 6px, so a rider on top is never shoved sideways).
+
+**Still possible (not fixed):** a player sandwiched between a platform and a wall at the same height (both on the floor) can still be lifted onto the platform in one frame (28px) when the side push is blocked by the wall; found by `node tests/platformfuzz.js` (random-input fuzz of the new example; 12 runs, ~32,000 frames, 3 such snaps, 0 embedded frames; the old build had 4). Verified: all 15 samples frame-identical (`gravdir.test.js`), Cloud Hopper's bot still wins at 30 and 60 fps.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
