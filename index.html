@@ -1122,6 +1122,7 @@
   const WIND_DIRECTIONS = {
     "wind-n": { x: 0, y: -1 }, "wind-e": { x: 1, y: 0 }, "wind-s": { x: 0, y: 1 }, "wind-w": { x: -1, y: 0 }
   };
+  const WIND_RUN_STEP = 700, WIND_RUN_MAX = 6; // cumulative wind: +700 px/s^2 per extra tile in line (3 tiles beat walking)
   const WIND_FORCE = 1000; // px/s^2, continuous — comparable to MOVE_ACCEL so a kid can still fight against it
   // v2.19: same cardinal vectors as wind, keyed by the fan's own geometry values instead — a fan
   // is wind's existing force calculation projected outward from a placed Object rather than
@@ -6484,12 +6485,39 @@
   // a "solid" conveyor's own surface has to be read from cellsUnderneath() instead, gated on
   // actually resting there (grounded + genuinely blocking), or every solid tile in the level
   // would double as a conveyor the moment anything so much as brushed past its top edge.
-  function windAccelFor(actor, conveyorOnly) {
-    let ax = 0, ay = 0;
-    for (const { cx, cy } of (conveyorOnly ? [] : overlappedCells(actor))) {
-      const dir = windAt(cx, cy);
-      if (dir) { ax += dir.x * WIND_FORCE; ay += dir.y * WIND_FORCE; }
+  // How many wind tiles of the same direction line up with this one along the wind's own axis
+  // (the tile itself included), capped at WIND_RUN_MAX. A longer stretch pushes harder: see
+  // windAccelFor. Reads the board only, so it is the same in Build, Play and an export.
+  function windRunLength(cx, cy) {
+    const mod = modifierAt(cx, cy), dir = WIND_DIRECTIONS[mod];
+    if (!dir) return 0;
+    let n = 1;
+    for (const s of [1, -1]) {
+      for (let k = 1; n < WIND_RUN_MAX; k++) {
+        if (modifierAt(cx + dir.x * k * s, cy + dir.y * k * s) !== mod) break;
+        n++;
+      }
     }
+    return Math.min(n, WIND_RUN_MAX);
+  }
+  // Cumulative wind: one direction pushes with WIND_FORCE for a lone tile and WIND_RUN_STEP more
+  // for every extra tile in its line, once per direction (not once per cell the body overlaps,
+  // which made the strength depend on where the feet happened to straddle). Walking (2200) beats
+  // 1-2 tiles and loses to 3 or more, so a stretch of wind is something to push on and find out.
+  function windAccelFor(actor, conveyorOnly) {
+    const runs = {}; // wind modifier -> longest run among the cells touching the actor
+    const note = (cx, cy) => {
+      const mod = modifierAt(cx, cy);
+      if (!WIND_DIRECTIONS[mod]) return;
+      runs[mod] = Math.max(runs[mod] || 0, windRunLength(cx, cy));
+    };
+    for (const { cx, cy } of (conveyorOnly ? [] : overlappedCells(actor))) note(cx, cy);
+    let ax = 0, ay = 0;
+    for (const mod in runs) {
+      const dir = WIND_DIRECTIONS[mod], f = WIND_FORCE + WIND_RUN_STEP * (runs[mod] - 1);
+      ax += dir.x * f; ay += dir.y * f;
+    }
+    // Belts (wind on a floor you stand on) keep the old flat push per tile: puzzles are tuned to it.
     if (actor.grounded) {
       for (const { cx, cy } of cellsUnderneath(actor)) {
         if (!isCellBlocking(cx, cy, actor)) continue;
@@ -15141,7 +15169,7 @@
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
-      overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windAccelFor,
+      overlappedCells, cellsUnderneath, frictionMultiplierFor, applyAxisFriction, windAt, windRunLength, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
       resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame, currentBackgroundArt, cloudDriftOffset, drawCloudOverlays, idleLifeFor, drawArtStretched, drawSparkle,
@@ -15203,6 +15231,7 @@
       `const WIND_ORDER = ${JSON.stringify(WIND_ORDER)};`,
       `const WIND_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.wind)};`,
       `const WIND_FORCE = ${WIND_FORCE};`,
+      `const WIND_RUN_STEP = ${WIND_RUN_STEP}, WIND_RUN_MAX = ${WIND_RUN_MAX};`,
       `const FAN_ORDER = ${JSON.stringify(FAN_ORDER)};`,
       `const FAN_DIRECTIONS = ${JSON.stringify(VIEW_BASE_TABLES.fan)};`,
       `const BARRIER_ORDER = ${JSON.stringify(BARRIER_ORDER)};`,
