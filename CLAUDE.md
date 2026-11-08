@@ -7552,6 +7552,10 @@ Payload swap: the belt crate for a pet (`crate`/`pet`). Names: Stone Cold Domino
 - **Proof.** `node tests/mousetrap.bot.js [fps] [secs]` (hook-injected temp copy, manual ticking): the machine alone closes the gates at 20.23-20.31 s; a bot that jumps over Mousecop when he gets within a gap and runs left through the cage `tau` seconds before the close ends with Mousecop caged and the player outside, 0 lives lost: 6 working parameter sets at 30 fps, 10 at 60 fps. At 144 fps the machine is the same but the bot's tau window shifts (Mousecop was outside the gate at the close with the tried values); a human timing window was not measured. The bot's first version recomputed the jump direction every frame and died; the direction must be fixed at jump start.
 - **Not done:** not added to `SURPRISE_ROOMS`/the dice pool (say if wanted), no playtest by a person.
 
+## Only the player wins at a goal tile (supersedes the Catapult Factory object-reaches-goal rule)
+
+`checkPhysicsObjectGoalContacts` and its `stepActor` call are removed: a bomb, crate, stone or any other object touching a `goal` tile no longer wins the game (reported: bombs landing on the flag ended a level). Only `checkPlayerTileContacts` triggers the goal. The old Catapult Factory sections that describe a crate winning are history (that sample was replaced). Verified in a hooked copy on the user's `magnet mile - mini level.json` upload: a bomb placed on the flag for 20 ticks leaves `playSessionEnded` null, the player on the flag wins; all samples frame-identical to the previous build (`gravdir.test.js`, 91/0). Note: that upload actually contained the Moving Platform Maze (no magnets, cannon or brown plates), so the "box stopped cycling past the two brown plates" report could not be checked against it.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),

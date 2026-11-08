@@ -8214,24 +8214,9 @@
     switchTouchedCells[actor.id] = touchedSwitchKeys;
   }
 
-  // The Catapult Factory (v2.44): the premise is "get an object — or yourself — to the goal," but
-  // goal has only ever fired on the PLAYER's own touch (checkPlayerTileContacts) since it was
-  // added — nothing established a pushed/thrown block itself reaching a goal tile as a win
-  // condition. Checked rather than assumed: triggerGoal(player) only reads player.goalCooldown (a
-  // plain per-actor field every actor already carries) before calling roundComplete(), which
-  // re-finds the REAL player itself via actors.find(a => a.isPlayer) rather than using whatever was
-  // passed in — so calling triggerGoal with a non-player actor is already safe, no changes needed
-  // there. Same small, narrow-function shape as checkPhysicsObjectSwitchContacts/
-  // checkPhysicsObjectLethalContacts above (not folded into checkPlayerTileContacts, which is
-  // explicitly player-only) and the same CARRYABLE_KINDS scope checkPhysicsObjectSwitchContacts
-  // already uses — "any actor" (what a pressure plate accepts) is wider than this toy's own "guide
-  // blocks through the machine" premise calls for; a wandering/chasing NPC reaching a goal tile by
-  // its own steering was never the ask.
-  function checkPhysicsObjectGoalContacts(actor) {
-    for (const { cx, cy } of overlappedCells(actor)) {
-      if (geometryAt(cx, cy) === "goal") { triggerGoal(actor); return; }
-    }
-  }
+  // Only the PLAYER wins at a goal tile (checkPlayerTileContacts). An earlier patch let a pushed/thrown
+  // object trigger it too (the Catapult Factory premise); removed on request: bombs and crates touching
+  // the flag must never win the game.
 
   // v2.34: direct request — "Crates should be destroyed when they touch lethal (lava, fire,
   // etc). Not all objects should, though." Originally scoped to PUSHABLE_KIND specifically.
@@ -9178,11 +9163,8 @@
       // specifically to carve Large Stone OUT of optional forces, and a Large Stone resting on a
       // Button should absolutely trip it (confirmed already working before this patch, since
       // Large Stone was already in CARRYABLE_KINDS — this widening only ADDS hazard ball/NPC, it
-      // never narrows anything). Goal's own gate stays CARRYABLE_KINDS-only and untouched — see
-      // checkPhysicsObjectGoalContacts' own comment: a wandering NPC winning the game by its own
-      // steering was never the ask (the Catapult Factory sample's whole premise depends on this).
+      // never narrows anything). Only the player triggers a goal.
       if (temperament && (PHYSICS_OBJECT_KINDS.includes(temperament) || isSteeringCharacter(temperament))) checkPhysicsObjectSwitchContacts(actor);
-      if (def && CARRYABLE_KINDS.includes(temperament)) checkPhysicsObjectGoalContacts(actor);
       // v2.34: "crates should be destroyed when they touch lethal" — originally PUSHABLE_KIND
       // only. Object-to-object interaction matrix: investigation found NO lethal reaction existed
       // anywhere for a hazard ball, a bomb actor, or an NPC despite several matrix cells assuming
@@ -15136,7 +15118,7 @@
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
       reflectActorsApart, exchangeAlong, actorMass, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
-      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectGoalContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
+      checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
       steeringAccelFor, consumeLifeIfPlaying, scheduleLevelRetry, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
