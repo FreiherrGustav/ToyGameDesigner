@@ -7561,3 +7561,7 @@ Payload swap: the belt crate for a pet (`crate`/`pet`). Names: Stone Cold Domino
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
 `examples/` (loadable sample projects, e.g. `wind-spiral.json`), `surprise-sources/` (the author's original `*surprise me*.json` project files, formerly in the repo root; earlier sections that say
 "kept in the repo root" mean this folder; `tests/exact.test.js` reads them) and `docs/` (longer design notes, formerly in the root).
+
+## Magnet Mile example: bombs sealed off from the crate path (data only)
+
+`examples/magnet-mile.json`: a brown magnet at (21,10) pulls the crate off the east end of the brown plates, but the four bomb spawners shared the brown Gates' shelf with the crates, so when the Gates opened bombs and crates fell together and the blasts smashed every crate within about 15 s. Fix (no engine change): only the two spawners at (22,0) and (23,0) remain, an indestructible wall runs down column 21 (rows 6-9) so bombs stay in the 22-23 shaft, and only two crates wait above the Gates (columns 19-20) beside the starting crate. Traced 150 s at 60 fps and 100 s at 30 fps: all three crates stay alive and keep circulating, bombs pile up harmlessly in columns 22-23. Not played by a person.
