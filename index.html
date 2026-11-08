@@ -1492,7 +1492,7 @@
     lethal: "That's it, game over.",
     sticky: "Slows you to a crawl.",
     diggable: "Dig in. Hold on.",
-    trap: "Looks solid. Gives way when stepped on or hit hard.",
+    trap: "Looks solid. Crumbles a moment after you step on it.",
     indestructible: "Bombs can't touch it.",
     wind: "Pushes you along.",
     // Lethals row — only the four built-in groundTileDefs ids; a kid's own custom Lethal (drawn by
@@ -1928,6 +1928,9 @@
   // pressure plate currently has something on it — see isChannelOn(). Unlike switchChannels,
   // this is fully recomputed every tick (updatePressurePlates()), never persisted.
   let plateChannelsActive = {};
+  // trap tiles: roomCellKey -> game-clock ms of first touch by the player or an object; the tile crumbles TRAP_CRUMBLE_MS later
+  let trapTimers = {};
+  const TRAP_CRUMBLE_MS = 350;
   // v2.31.2: actor.id -> array of "cx,cy" switch-cell keys that actor was overlapping as of the
   // last checkPlayerTileContacts/checkPhysicsObjectSwitchContacts call — see those functions' own
   // comments for the real bug this fixes (a switch re-flipping itself every flipCooldown window
@@ -2071,7 +2074,7 @@
   // "try again" clicks always restart from the true original build, not accumulated play state.
   function clearTransientRuntimeState() {
     animState = {}; tileAnimState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9; actorContactCooldown = {}; dragContactCooldown = {};
-    digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
+    digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {}; trapTimers = {};
     spawnerRuntime = {}; channelStateSince = {};
     switchTouchedCells = {};
     gravRandomCount = 0;
@@ -2188,7 +2191,7 @@
     score = cp.score; intensity = 0;
     const scoreEl = document.getElementById("scoreVal"); if (scoreEl) scoreEl.textContent = score;
     animState = {}; tileAnimState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9; actorContactCooldown = {}; dragContactCooldown = {};
-    digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {};
+    digProgress = {}; bombArmed = {}; roomTransition = null; plateChannelsActive = {}; trapTimers = {};
     spawnerRuntime = {}; channelStateSince = {}; switchTouchedCells = {};
     activateRoom(cp.roomId);
     playReadyUntil = gameNow() + READY_DURATION_MS; cloudDriftT0 = gameNow();
@@ -6248,12 +6251,9 @@
   }
 
   // A cell blocks THIS actor's movement (participates in AABB resolution) if:
-  //  - the "trap" modifier is present — EXCEPT for the player, who always slips straight through
-  //    instantly regardless of what's underneath (same as the old dedicated "trap" geometry did;
-  //    v2.22 moved it onto the modifier axis — see MODIFIERS — so it now works over ANY base
-  //    geometry, not just its own). NPCs get the base geometry's normal blocking (a trap over
-  //    solid still blocks them like a wall) until the player's touch destroys the tile for
-  //    everyone — see checkPlayerTileContacts/triggerTrap.
+  //  - a "trap" tile blocks like its base geometry for everyone, the player included: the player or an object
+  //    that touches it starts a TRAP_CRUMBLE_MS countdown (tickTraps) and the tile then gives way; a hard
+  //    landing (CRUSH_MIN_VY) breaks it at once. Only a non-blocking base (none:trap) is crumbled by plain overlap.
   //  - geometry is solid or barrier (both block everyone) — UNLESS tagged with a channel color
   //    that's currently on, in which case it's a gate standing open (see isCellBlocking(), which
   //    layers that check on top of this — this function alone doesn't know about colors; see also
@@ -6266,7 +6266,6 @@
   // collision, handled inside resolveAxis() (blocking geometry) or checkPlayerTileContacts()
   // (non-blocking).
   function isBlockingGeometry(geometry, actor, modifier) {
-    if (modifier === "trap" && actor.isPlayer) return false;
     if (geometry === "solid") return true;
     // v2.23: barrier is a real, sprite-bearing Object version of the same "channel-gated wall"
     // idea solid already has — see isChannelGateGeometry(), "Barrier: a moveable wall/door" below.
@@ -6829,8 +6828,15 @@
         // (~2 tiles of fall) breaks it and keeps falling through the hole; slower contact just rests on it.
         if (modifier === "trap" && !actor.isPlayer && axis === gravAxis() && gravityOn() && def && CARRYABLE_KINDS.includes(def.temperament)
             && actor[vk] * gs > CRUSH_MIN_VY) {
+          delete trapTimers[roomCellKey(currentRoomId, cx, cy)];
           triggerTrap(cx, cy);
           return;
+        }
+        // Anything softer that touches a trap (the player, or a crate/stone/bomb/carried piece) starts a short
+        // crumble countdown (tickTraps): the tile holds for TRAP_CRUMBLE_MS, then gives way.
+        if (modifier === "trap" && (actor.isPlayer || (def && CARRYABLE_KINDS.includes(def.temperament)))) {
+          const tk = roomCellKey(currentRoomId, cx, cy);
+          if (trapTimers[tk] == null) { trapTimers[tk] = gameNow(); sounds.doorCreak(); }
         }
         if (axis !== gravAxis()) {
           // across gravity (or any axis in a gravity-free room's x): a plain wall, or a bouncy one with its wall kick
@@ -7773,6 +7779,17 @@
     tileAnimState[gx + "," + gy] = { recipe: "crumbleFade", t: gameNow(), geometry: tile.geometry, modifier: tile.modifier };
     board[gy][gx] = null;
     log("Crumble!");
+  }
+
+  // Trap tiles crumble TRAP_CRUMBLE_MS after something first touched them (resolveAxis starts the timer).
+  function tickTraps() {
+    for (const k in trapTimers) {
+      const m = k.match(/^(.*):(\d+),(\d+)$/);
+      if (!m || m[1] !== String(currentRoomId)) continue;
+      const cx = +m[2], cy = +m[3];
+      if (!board[cy] || modifierAt(cx, cy) !== "trap") { delete trapTimers[k]; continue; }
+      if (gameNow() - trapTimers[k] >= TRAP_CRUMBLE_MS) { delete trapTimers[k]; triggerTrap(cx, cy); }
+    }
   }
 
   function triggerGoal(player) {
@@ -9609,6 +9626,7 @@
     }
     updatePressurePlates();
     updateChannelTransitions();
+    tickTraps();
     if (gravityOn()) convertBombTilesToActors();
     const player = actors.find(a => a.isPlayer);
     // v2.21: the carried object's position is driven directly here, every frame, rather than
@@ -12008,7 +12026,12 @@
             const skinId = groundSkinBoard[y][bx];
             if (skinId && groundTileDefs[skinId]) extra = Object.assign({}, extra, { skinDef: groundTileDefs[skinId], skinRotation: groundSkinRotationBoard[y][bx] || 0 });
           }
-          drawGameplayTile(ctx, screenX, y * TILE, tile, extra);
+          let shakeX = 0;
+          if (isLive && tile.modifier === "trap") {
+            const t0 = trapTimers[roomCellKey(currentRoomId, bx, y)];
+            if (t0 != null) shakeX = Math.floor((gameNow() - t0) / 45) % 2 ? 1 : -1;
+          }
+          drawGameplayTile(ctx, screenX + shakeX, y * TILE, tile, extra);
         }
       }
     }
@@ -15126,7 +15149,7 @@
       reflectActorsApart, exchangeAlong, actorMass, pushApart, triggerHazard, triggerLethalHazard, triggerBouncyLaunch, triggerTrap,
       triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
-      updatePressurePlates, updateChannelTransitions, syncChannelsToHotRoom,
+      updatePressurePlates, updateChannelTransitions, tickTraps, syncChannelsToHotRoom,
       steeringAccelFor, consumeLifeIfPlaying, scheduleLevelRetry, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
@@ -15255,6 +15278,7 @@
       `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S}, SKY_CLIP_IDS = ${JSON.stringify(SKY_CLIP_IDS)};`,
       `const IDLE_BREATH_STEPS = ${JSON.stringify(IDLE_BREATH_STEPS)}, IDLE_BREATH_MS = ${IDLE_BREATH_MS}, IDLE_STRETCH_ROW = ${IDLE_STRETCH_ROW};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
+      `const TRAP_CRUMBLE_MS = ${TRAP_CRUMBLE_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
       `const BIG_HIT_FX = ${BIG_HIT_FX}, BIG_HIT_MIN_SPEED = ${BIG_HIT_MIN_SPEED}, BIG_HIT_PUFF_MS = ${BIG_HIT_PUFF_MS}, BIG_HIT_PUFF_GAP_MS = ${BIG_HIT_PUFF_GAP_MS}, BIG_HIT_PUFF_MAX = ${BIG_HIT_PUFF_MAX}, BIG_HIT_SHAKE_PX = ${BIG_HIT_SHAKE_PX}, BIG_HIT_SHAKE_MS = ${BIG_HIT_SHAKE_MS}, BIG_HIT_SHAKE_PER_SEC = ${BIG_HIT_SHAKE_PER_SEC};`,
@@ -15356,6 +15380,7 @@
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
   let plateChannelsActive = {};
+  let trapTimers = {};
   let switchTouchedCells = {}; // v2.31.2, edge-trigger bookkeeping — see checkPlayerTileContacts
   let gravRandomCount = 0;
   let channelStateSince = {}; // v2.23, Barrier's slide-animation timing — see updateChannelTransitions
@@ -15431,7 +15456,7 @@
     spawnerContents = JSON.parse(JSON.stringify(initialGameData.spawnerContents));
     spawnerRuntime = {};
     switchChannels = JSON.parse(JSON.stringify(initialGameData.switchChannels));
-    plateChannelsActive = {}; channelStateSince = {};
+    plateChannelsActive = {}; channelStateSince = {}; trapTimers = {};
     switchTouchedCells = {}; gravRandomCount = 0;
     playerRoomId = initialGameData.playerRoomId;
     digProgress = {}; bombArmed = {}; tileAnimState = {}; animState = {}; fxGhosts = []; fxPuffs = []; bigHitTimes = []; shakeAt = -1e9;
