@@ -7583,6 +7583,10 @@ pushed against (holding Down) can exceed gravity. **The World's Worst Elevator s
 Test trace (gravity on or off, walking west into 0..4 east-wind tiles from full speed): 0/1/2 tiles walked through (10.7/11.7/12.7 tiles
 travelled), 3 and 4 stop (3.7/3.0); walking east with the wind identical to before (16.9).
 
+### The World's Worst Elevator, room 1 re-tuned for cumulative wind
+
+Traced by best-first search over the physics (hold left/right/jump in 8-frame steps, state dedup, a flood-fill distance to the door as heuristic; scratch scripts, not committed). On the build before the against-wind rule the Lobby's exit was found in 1093 nodes (59 actions); with the rule and the user's layout it took 49,285 nodes (125 actions), because the route fights two west/east wind stretches: the `<<<` pocket at cols 10-12 rows 5-6 (pushing right) and the `>>>>` run at cols 5-8 rows 5-8 (pushing left), each 3-4 tiles. Fix (data only, room 1 board, six cells): the leftmost tile of the first stretch (10,5),(10,6) and the third tile of the second (7,5)..(7,8) were removed, so every stretch the route fights is now at most 2 tiles. Result on the new rule: found in 991 nodes (48 actions), easier than before. Other candidate fixes (removing col 11, or col 6) were slower or failed within 80k nodes. Room 2 was not touched; a scripted sweep (start x 40-240 px on the floor, jump timing 0-0.8 s, Right held for 0-10 s, 9 s at 60 fps) wins 158 combinations in both the old and the new build, identical lists (the best-first search is inconclusive for it: its route is a cannon shot that needs finer jump timing than the 8-frame steps). Not done: a full door-to-goal human-style run through both rooms in one go, and frame rates other than 60 for room 2.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
