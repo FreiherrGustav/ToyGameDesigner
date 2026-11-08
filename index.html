@@ -1800,6 +1800,7 @@
   const APP_NAME = "TinyGameMaker"; // the one name constant (see also the static <head> tags)
   let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false; // Play key-hint pill (drawKeyHint): fades a few seconds after the first key, stays out for the session
   let cloudDriftT0 = 0; // gameNow() when the current Play session began (clouds drift from here)
+  let tickFrameCounter = 0; // counts tick() calls (used to tell "this frame" apart; never saved)
   let playReadyUntil = null; // null = not in a Ready pause; otherwise a gameNow() timestamp
   // v2.48 Stage 3: the game clock. Everything that decides what the simulation does next (fuses, the
   // READY! beat, room transitions, crush immunity, wander headings, death resets, delayed removals) is
@@ -7061,8 +7062,26 @@
       // of trying to displace the platform first and revert on failure.
       if (def.temperament === MOVING_PLATFORM_KIND) {
         const v = actor[vk];
-        if (v > 0) { seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
-        else if (v < 0) { seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
+        if (axis === ga && actor.platSqueezeFrame === tickFrameCounter) { continue; }
+        if (axis === ga && v !== 0) {
+          // A real landing is only a frame's worth of fall deep. A mover that is much deeper than that merely grazes the platform's
+          // SIDE (a sliver of overlap across) and used to be snapped on top of it in one frame, up to a whole body-height: ease it out
+          // sideways instead, or leave it if that spot is blocked.
+          const ok = ga === "x" ? "y" : "x", osk = ok === "x" ? "w" : "h";
+          const depth = v * gs > 0 ? (gs > 0 ? actor[pk] + actor[sk] - other[pk] : other[pk] + other[sk] - actor[pk]) : 0;
+          if (depth > Math.abs(v) * 0.05 + 4) {
+            const o = actor[ok];
+            const side = actor[ok] + actor[osk] / 2 < other[ok] + other[osk] / 2 ? other[ok] - actor[osk] : other[ok] + other[osk];
+            actor[ok] = side; if (actorBlockedByTiles(actor)) actor[ok] = o;
+            continue;
+          }
+        }
+        // Along the walking axis, "moving into the platform" means moving toward its centre from the near side. Someone overlapping its
+        // far half and moving AWAY (e.g. pressing Left with the platform's edge just grazing their right side) used to be seated on
+        // the platform's other side, a teleport of a whole platform width; they now take the nearest-side path below instead.
+        const movingAway = axis !== ga && ((v > 0 && actor[pk] + actor[sk] / 2 > other[pk] + other[sk] / 2) || (v < 0 && actor[pk] + actor[sk] / 2 < other[pk] + other[sk] / 2));
+        if (v > 0 && !movingAway) { seat(other[pk] - actor[sk]); actor[vk] = 0; if (axis === ga && gs > 0) actor.grounded = true; }
+        else if (v < 0 && !movingAway) { seat(other[pk] + other[sk]); actor[vk] = 0; if (axis === ga && gs < 0) actor.grounded = true; }
         else if (axis !== ga) {
           // The platform slid sideways into somebody who is standing still (e.g. a player pinned at a wall beside it): with no velocity
           // of their own nothing resolved the overlap, and the next time gravity pulled them they were snapped on top of the platform in
@@ -7070,7 +7089,14 @@
           // along gravity is deep, so a rider resting on top is never shoved sideways.
           const ak = ga, ask = ga === "x" ? "w" : "h";
           const deep = Math.min(actor[ak] + actor[ask], other[ak] + other[ask]) - Math.max(actor[ak], other[ak]) > 6;
-          if (deep) seat(actor[pk] + actor[sk] / 2 < other[pk] + other[sk] / 2 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+          if (deep) {
+            const before = actor[pk];
+            seat(actor[pk] + actor[sk] / 2 < other[pk] + other[sk] / 2 ? other[pk] - actor[sk] : other[pk] + other[sk]);
+            // Squeezed against a wall: the side push could not happen. Remember it for this frame so the landing branch below does not
+            // read the deep overlap as "arrived from above" and snap the actor up onto the platform in one frame; the platform just
+            // slides through them and they are free again once it has passed.
+            if (actor[pk] === before) actor.platSqueezeFrame = tickFrameCounter;
+          }
         }
         continue;
       }
@@ -9585,6 +9611,7 @@
   }
 
   function tick(dt) {
+    tickFrameCounter++;
     syncViewTables();
     advanceGameClock(dt);
     if (starTimer > 0) {
@@ -15366,6 +15393,7 @@
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
   let cloudDriftT0 = 0;
+  let tickFrameCounter = 0;
   let playReadyUntil = null;
   let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false;
   let gameClockMs = 0, gameTimers = [], gameTimerMap = new Map(), gameTimerSeq = 1, gamePaused = false, buildPausedMemory = false; // the game clock + pause (see the editor's matching block)

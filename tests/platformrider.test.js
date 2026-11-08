@@ -23,7 +23,7 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")
       const pl = actors.find(a => a.isPlayer);
       const plat = placeCarryableActor(MOVING_PLATFORM_DEF_ID, opts.px, opts.py);
       plat.platformAxis = opts.axis || "x"; plat.platformT = opts.t0 || 0;
-      pl.x = plat.x + 0; pl.y = plat.y - pl.h - 0.5; pl.vx = 0; pl.vy = 0;
+      if (opts.place) opts.place(pl, plat); else { pl.x = plat.x + 0; pl.y = plat.y - pl.h - 0.5; } pl.vx = 0; pl.vy = 0;
       keys.ArrowRight = false; keys.ArrowLeft = false; keys[" "] = false;
       const trace = []; let maxUp = 0, maxJump = 0, embedded = 0;
       let prev = { x: pl.x, y: pl.y };
@@ -47,6 +47,9 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")
     // vertical platform rising into a ceiling at row 9 (wall = ceiling row), player riding
     out.ceiling = (() => { const o = { wallCol: 99, wallTop: 99, px: 8 * TILE + 16, py: 13 * TILE + 16, frames: 900, axis: 'y' };
       const r0 = run(o); return r0; })();
+    // sandwich: platform on the floor sliding into a standing player who is against a wall (no riding)
+    out.sandwich = (() => { const o = { wallCol: 12, wallTop: 14, px: 8 * TILE + 16, py: 16 * TILE + 5, frames: 900 };
+      return run(Object.assign(o, { place: (pl, plat) => { pl.x = 11 * TILE - 24 + 10; pl.y = 17 * TILE - pl.h; plat.platformT = 0; } })); })();
     out.wallLeft = run({ wallCol: 3, wallTop: 8, px: 8 * TILE + 16, py: 13 * TILE + 16, frames: 900 });
     out.wallLow = run({ wallCol: 13, wallTop: 13, px: 8 * TILE + 16, py: 13 * TILE + 16, frames: 900 });
     return out;
