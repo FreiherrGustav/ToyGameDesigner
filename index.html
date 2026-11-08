@@ -1492,7 +1492,7 @@
     lethal: "That's it, game over.",
     sticky: "Slows you to a crawl.",
     diggable: "Dig in. Hold on.",
-    trap: "Looks safe. Isn't.",
+    trap: "Looks solid. Gives way when stepped on or hit hard.",
     indestructible: "Bombs can't touch it.",
     wind: "Pushes you along.",
     // Lethals row — only the four built-in groundTileDefs ids; a kid's own custom Lethal (drawn by
@@ -6825,6 +6825,13 @@
         const jumpHeldForBounce = keys[" "] || keys["ArrowUp"] || keys["w"] || keys["W"];
         const gs = gravSign();
         const vk = axis === "x" ? "vx" : "vy", sk = axis === "x" ? "w" : "h", cc = axis === "x" ? cx : cy;
+        // A heavy thing (crate, Large Stone, bomb, any carried piece) landing on a trap tile at crush speed
+        // (~2 tiles of fall) breaks it and keeps falling through the hole; slower contact just rests on it.
+        if (modifier === "trap" && !actor.isPlayer && axis === gravAxis() && gravityOn() && def && CARRYABLE_KINDS.includes(def.temperament)
+            && actor[vk] * gs > CRUSH_MIN_VY) {
+          triggerTrap(cx, cy);
+          return;
+        }
         if (axis !== gravAxis()) {
           // across gravity (or any axis in a gravity-free room's x): a plain wall, or a bouncy one with its wall kick
           if (actor[vk] > 0) {
