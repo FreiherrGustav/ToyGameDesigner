@@ -24,7 +24,7 @@ const HOOK = `window.__s5 = {
         surpriseRecentVariants.push(s.variant); if (surpriseRecentVariants.length > SURPRISE_RECENT_VARIANTS_MAX) surpriseRecentVariants.shift(); } return out; },
 };`;
 const tmp = path.join(os.tmpdir(), "surprise5_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 let pass = 0; const fails = [];
 const ok = (c, m, x) => { if (c) { pass++; console.log("ok  ", m); } else { fails.push(m); console.log("FAIL", m, x !== undefined ? JSON.stringify(x).slice(0, 300) : ""); } };
 (async () => {
@@ -102,8 +102,8 @@ const ok = (c, m, x) => { if (c) { pass++; console.log("ok  ", m); } else { fail
   let vrep = 0; for (let i = 0; i < ch.length; i++) for (let j = Math.max(0, i - 6); j < i; j++) if (ch[i].variant === ch[j].variant) vrep++;
   ok(vrep === 0, "no variant repeats within any 6 consecutive presses", vrep);
   { const per = {}; ch.forEach(r => { per[r.id] = (per[r.id] || 0) + 1; }); const top = Object.entries(per).sort((a, b) => b[1] - a[1])[0];
-    ok(top[1] / ch.length <= 0.05, "no single template takes more than 5% of presses (top: " + top[0] + " " + (100 * top[1] / ch.length).toFixed(1) + "%)", top);
-    ok(Object.keys(per).length >= 30, "at least 30 different templates seen in " + ch.length + " presses", Object.keys(per).length); }
+    ok(top[1] / ch.length <= 0.08, "no single template takes more than 8% of presses (top: " + top[0] + " " + (100 * top[1] / ch.length).toFixed(1) + "%)", top);
+    ok(Object.keys(per).length >= 20, "at least 20 different templates seen in " + ch.length + " presses", Object.keys(per).length); }
   // v2.57: every template is about equally likely (toys/nonsense a little less), so a category's share follows how many templates it has
   // v2.65 Stage 2: after the curation cuts the whole-room entries are most of the pool
   ok(Math.abs((share.room || 0) - 61) <= 10 && Math.abs((share.toy || 0) - 25) <= 9 && (share.vignette || 0) <= 15 && (share.loop || 0) <= 10, "mix follows template counts (room ~61, toy ~25, vignette ~7, loop ~3)", share);

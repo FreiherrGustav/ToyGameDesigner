@@ -21,7 +21,7 @@ window.__p = { ids: () => SURPRISE_TEMPLATES.map(t => t.id),
     enterPlayMode(); tick(1 / 60); window.__czStart(); let err = null; try { for (let i = 0; i < 600; i++) { window.__cz.frame++; tick(1 / 60); window.__czPoll(); } } catch (e) { err = String(e); }
     const z = window.__czStop(); const types = {}; z.events.forEach(e => { if (e.type !== "spawn") types[e.type] = (types[e.type] || 0) + 1; });
     return { gen: true, n, types, total: z.events.filter(e => e.type !== "spawn").length, err }; } };`;
-const tmp = path.join(os.tmpdir(), "poke_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+const tmp = path.join(os.tmpdir(), "poke_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const boot = await b.newPage(); await boot.goto("file://" + tmp + "#t"); await boot.waitForFunction(() => window.__p); let ids = await boot.evaluate(() => window.__p.ids()); await boot.close(); if (ONLY) ids = ids.filter(i => ONLY.includes(i));

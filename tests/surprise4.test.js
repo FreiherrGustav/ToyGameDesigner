@@ -21,7 +21,7 @@ const HOOK = require("./surprise.hook.js")() + `
     shot: seed => { surpriseRecent.length = 0; const r = surpriseMe(seed); enterPlayMode(); tick(1/60); for (let i = 0; i < 120; i++) tick(1/60); return r && r.templateId; } };
 `;
 const tmp = path.join(os.tmpdir(), "surprise4_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 (async () => {
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const rows = []; let errs = 0;

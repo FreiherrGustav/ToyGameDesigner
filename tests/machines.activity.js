@@ -29,7 +29,7 @@ window.__a = { ev: s => eval(s), list: (id, seed) => { surpriseRecent.length = 0
   } } catch (e) { err = String(e); }
   const z = window.__czStop(); const hero = actors.find(a => a.isPlayer);
   return { gen: true, events: z.events, err, moved: moved.size, bbox, nearShare, lives: typeof lives === "number" ? lives : null, heroAlive: !!hero && playSessionEnded !== "lose", chain: t.expect.chain, variant: r.variant, shots, movers: [...moved].length }; } };`;
-const tmp = path.join(os.tmpdir(), "machines_act.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+const tmp = path.join(os.tmpdir(), "machines_act.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); const fps = Number(FPS); const out = [];
   for (let seed = 1; seed <= Number(SEEDS); seed++) {

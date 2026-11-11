@@ -16,7 +16,7 @@ const HOOK = require("./causal.hook.js")() + `
       const z = window.__czStop(); return { events: z.events, err }; } };
 `;
 const tmp = path.join(os.tmpdir(), "reliab_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon", bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 const EFFECT = new Set(["gate", "cannon", "bomb", "fan", "trampoline", "gravity"]);
 function steps(path) { const st = []; for (const e of path) { const m = MECH[e.type]; if (!m) continue; if (st.length && st[st.length - 1] === m) continue; if (st.includes(m)) break; st.push(m); } return st; }

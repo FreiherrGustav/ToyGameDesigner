@@ -13,7 +13,7 @@ window.__r = { run: (def, id, seed, fps, secs) => { if (def) SURPRISE_TEMPLATES.
   enterPlayMode(); tick(1 / fps); window.__czStart(); const frames = Math.ceil(secs * fps); let err = null;
   try { for (let i = 0; i < frames; i++) { window.__cz.frame++; tick(1 / fps); window.__czPoll(); } } catch (e) { err = String(e); }
   const z = window.__czStop(); return { gen: true, chain: t.expect.chain, events: z.events, err, variant: r.variant, ops: r.ops, fps }; } };`;
-const tmp = path.join(os.tmpdir(), "machines_rel.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+const tmp = path.join(os.tmpdir(), "machines_rel.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 function chainDone(events, chain) {
   const byId = new Map(events.map(e => [e.id, e])); let best = null;
   for (const e of events) { // walk each event's cause path to the root; the types must appear in order along it

@@ -30,7 +30,7 @@ const HOOK = require("./causal.hook.js")() + `
   };
 `;
 const tmp = path.join(os.tmpdir(), "scenes_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 let pass = 0; const fails = [];
 const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.push(m); console.log("FAIL", m); } };
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon", bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };

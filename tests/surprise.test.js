@@ -31,7 +31,7 @@ const HOOK = `
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 const results = { fail: [], notes: [] };
 const fail = (m) => { results.fail.push(m); console.log("FAIL:", m); };
 const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsatisfied: 0, flipped: 0 });

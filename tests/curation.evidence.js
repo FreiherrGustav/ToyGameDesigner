@@ -28,7 +28,7 @@ window.__e = {
     const z = window.__czStop(); const hero = actors.find(a => a.isPlayer);
     return { gen: true, events: z.events, err, moved: moved.size, bbox, lives: typeof lives === "number" ? lives : null, heroAlive: !!hero && playSessionEnded !== "lose", end: playSessionEnded || null, first };
   } };`;
-const tmp = path.join(os.tmpdir(), "curation_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+const tmp = path.join(os.tmpdir(), "curation_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon", bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 const EFFECT = new Set(["gate", "cannon", "bomb", "fan", "trampoline", "gravity"]);
 function steps(p) { const st = []; for (const e of p) { const m = MECH[e.type]; if (!m) continue; if (st.length && st[st.length - 1] === m) continue; if (st.includes(m)) break; st.push(m); } return st; }

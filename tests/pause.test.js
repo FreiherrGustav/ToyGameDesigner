@@ -142,12 +142,12 @@ const RUN = `(sample, pauseAt, pauseLen, pauses)=>{
   await ev(page, `()=>{ const g=SAMPLE_GAMES[0]; loadExampleGame(g.builder,g.name,{skipConfirm:true}); }`);
   ok(!(await ev(page, "()=>gamePaused")), "loading a sample resumes");
   await page.click("#pauseBtn"); ok(await ev(page, "()=>gamePaused"), "paused again");
-  await ev(page, "()=>surpriseMe(4821,{templateIds:['plinko']})"); await page.evaluate(() => window.__sim(5));
-  ok(!(await ev(page, "()=>gamePaused")), "Surprise Me resumes");
+  await ev(page, "()=>surpriseMe(4821,{templateIds:['plinko'],full:'new'})"); await page.evaluate(() => window.__sim(5));
+  ok(await ev(page, "()=>gamePaused"), "Surprise Me opens every room frozen at its start");
   // a whole-room surprise opens frozen at its starting layout (a press resumes first, then freezes)
-  await ev(page, "()=>surpriseMe(7,{templateIds:['byebyecupcake']})");
+  await ev(page, "()=>surpriseMe(7,{templateIds:['byebyecupcake'],full:'new'})");
   ok(await ev(page, "()=>gamePaused"), "a whole-room surprise opens paused at its start");
-  await page.click("#pauseBtn"); ok(!(await ev(page, "()=>gamePaused")), "and Resume starts it");
+  await ev(page, "()=>setGamePaused(false)"); ok(!(await ev(page, "()=>gamePaused")), "and Resume starts it");
 
   // ---- 5. hidden tab auto-pauses in Play, not in Build ----
   const hide = v => page.evaluate(v => { Object.defineProperty(document, "hidden", { configurable: true, get: () => v }); document.dispatchEvent(new Event("visibilitychange")); }, v);

@@ -27,7 +27,7 @@ const HOOK = require("./causal.hook.js")() + `
       const z = window.__czStop(); return { id: r.templateId, category: t.category, authored: !!t.authored, geo, events: z.events, err, ops: r.ops, variant: r.variant }; } };
 `;
 const tmp = path.join(os.tmpdir(), "causal_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon",
   bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 function honestPath(path) { // path: events root -> leaf. Returns the loop-free mechanism prefix.

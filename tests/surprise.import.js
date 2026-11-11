@@ -24,13 +24,13 @@ const custom = [...used].filter(id => !builtinActor(id) && proj.actorDefs[id] &&
   await p.goto("file://" + tmp + "#t"); await p.waitForFunction(() => window.__imp);
   const e = await p.evaluate(([s, r, t]) => window.__imp.run(s, r, t), [proj, roomId, custom]);
   await b.close();
-  const X = { actors: {}, grounds: {}, bgs: {}, skins: [], backs: [], pet: null, chaser: null, reward: null, playerLook: null };
+  const X = { actors: {}, grounds: {}, bgs: {}, skins: [], backs: [], colors: [], pet: null, chaser: null, reward: null, playerLook: null };
   // rewrite the custom-character pieces
   Object.keys(e.legend).forEach(ch => {
     e.legend[ch] = e.legend[ch].split("&").map(n => {
       if (!n.startsWith("actor|")) return n;
       const id = n.slice(6);
-      if (id.startsWith("sp~pet~")) return "softchaser";
+      if (id.startsWith("sp~pet~") && !flags.includes("--keeppets")) return "softchaser";
       X.actors[id] = JSON.parse(JSON.stringify(proj.actorDefs[id]));
       return "actor|@" + id;
     }).join("&");
@@ -42,6 +42,7 @@ const custom = [...used].filter(id => !builtinActor(id) && proj.actorDefs[id] &&
       X.skins.push([x, y, s, (room.groundSkinRotationBoard && room.groundSkinRotationBoard[y][x]) || 0]);
       if (!builtinGround.has(s) && proj.groundTileDefs[s]) X.grounds[s] = JSON.parse(JSON.stringify(proj.groundTileDefs[s]));
     }
+    if (room.colorBoard && room.colorBoard[y][x] && room.board[y][x]) X.colors.push([x, y, room.colorBoard[y][x]]);
     const g = room.backgroundBoard[y][x]; if (g) { X.backs.push([x, y, g]); if (proj.backgroundTileDefs[g]) X.bgs[g] = JSON.parse(JSON.stringify(proj.backgroundTileDefs[g])); }
   }
   const petFlag = flags.find(f => f.startsWith("--pet=")); if (petFlag) { const id = petFlag.slice(6); X.actors[id] = JSON.parse(JSON.stringify(proj.actorDefs[id])); X.pet = id; }

@@ -15,7 +15,7 @@ const HOOK = `window.__p = { facts: () => { const res = [];
     res.push({ id: t.id, cat: t.category, closed: !!t.closed, w: s.w, h: s.h, perimSolid: +(sol / per).toFixed(2), wrapH: s.wrapH, wrapV: s.wrapV, grav: s.gravity, dir: s.dir });
   } return res; } };`;
 const tmp = path.join(os.tmpdir(), "templates_probe.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK + "\n"));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK + "\n"));
 (async () => { const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); const p = await b.newPage(); p.on("dialog", d => d.accept());
   await p.addInitScript(() => { window.requestAnimationFrame = () => 0; }); await p.goto("file://" + tmp + "#t"); await p.waitForFunction(() => window.__p);
   (await p.evaluate(() => window.__p.facts())).forEach(r => console.log(JSON.stringify(r))); await b.close(); })();

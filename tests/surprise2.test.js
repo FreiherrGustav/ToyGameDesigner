@@ -32,7 +32,7 @@ const HOOK = require("./surprise.hook.js")() + `
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise2_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
 // a second copy with no function wrappers (an export serializes engine functions by source text, so the counting wrappers would break it)
 const tmpMini = path.join(os.tmpdir(), "surprise2_mini.html");
 fs.writeFileSync(tmpMini, src.replace(anchor, anchor + "\n  window.__mini = { make: (id) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; return surpriseMe(77, { templateId: id, chaos: false, canonical: true }); } };\n"));
@@ -106,7 +106,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   ok(mix.fails === 0, "no generator failures in the mix run (" + mix.fails + ")");
   // small pool: with 3 eligible templates the OLDEST is the only one allowed to repeat
   const small = await page.evaluate(() => {
-    const ids = ["pinball", "fanclub", "magnet"], seq = [], recent = [];
+    const ids = ["plinko", "catcannon", "elevator"], seq = [], recent = [];
     for (let i = 0; i < 30; i++) { const g = __st.gen(900 + i, { templateIds: ids, avoid: recent.slice() }); seq.push(g.templateId); recent.push(g.templateId); if (recent.length > 5) recent.shift(); }
     let bad = 0; for (let i = 3; i < seq.length; i++) if (seq[i] !== seq[i - 3]) bad++; // round-robin: each one repeats only after the other two
     return { seq: seq.slice(0, 9), bad };
@@ -214,7 +214,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   }
 
   // ---- F. Stage 2 templates: expectation within 10 simulated seconds, canonical and chaotic, fresh page per run ----
-  const STAGE2 = { rink: ["cannon", 1], pinballroom: ["wrap", 1], catcannon: ["cannon", 1], trampit: ["bounce", 3], bigrink: ["cannon", 1], slipgauntlet: ["cannon", 1], elevator: ["wrap", 1], warploop: ["warp", 1] };
+  const STAGE2 = { catcannon: ["cannon", 1], trampit: ["bounce", 3], elevator: ["wrap", 1], warploop: ["warp", 1] };
   for (const [id, [type, min]] of Object.entries(STAGE2)) {
     ok(T.some(t => t.id === id) && !elig.skipped.some(k => k.id === id), id + ": template exists and is eligible");
     for (const mode of ["canonical", "chaos"]) {
@@ -238,16 +238,16 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
 
   // ---- G. Stage 3: room events, the authoring helper, Tunnel Trouble ----
   {
-    const ROOM_IDS = ["pinballroom", "catcannon", "elevator", "trampit", "bigrink", "slipgauntlet", "popcorn", "minefield", "warploop", "tunneltrouble"];
+    const ROOM_IDS = ["catcannon", "elevator", "trampit", "popcorn", "warploop", "tunneltrouble"];
     ok(ROOM_IDS.every(id => T.some(t => t.id === id)), "all 10 room events are in the table");
     // placement: an empty room takes the event in place, a room with anything in it gets a new tab and is left alone
     const pl = await page.evaluate(() => {
-      __st.reset(); const r1 = __st.press(1234, { templateId: "bigrink", chaos: false });
+      __st.reset(); const r1 = __st.press(1234, { templateId: "trampit", chaos: false });
       const st1 = __st.state(); const n1 = st1.rooms.length;
       __st.reset(); __st.state().board[17][0] = "solid:none"; const before = JSON.stringify(__st.state().board);
-      const r2 = __st.press(1234, { templateId: "bigrink", chaos: false }); const st2 = __st.state();
+      const r2 = __st.press(1234, { templateId: "trampit", chaos: false }); const st2 = __st.state();
       const first = st2.rooms[0];
-      return { inPlace: n1 === 1 && r1 && r1.templateId === "bigrink", newTab: st2.rooms.length === 2, kept: JSON.stringify(first.board) === before };
+      return { inPlace: n1 === 1 && r1 && r1.templateId === "trampit", newTab: st2.rooms.length === 2, kept: JSON.stringify(first.board) === before };
     });
     ok(pl.inPlace, "an empty room takes a room event in place");
     ok(pl.newTab && pl.kept, "a room that holds anything gets a new tab and is left untouched");
