@@ -7616,7 +7616,7 @@ Seeds 10000+ moved relative to the old review build because the first-half curat
 
 ## Review links for retired seed numbers: `#surprise=SEED:templateid`
 
-The hash form `#surprise=10002:rink` builds that template at that seed (forces the pick, everything else seeded as usual). It exists so seeds from before the curation can be reviewed one by one: `docs/surprise-review-10000-10051.md` lists the 50 old seeds with their old template (fanclub and treadmill, removed on purpose, have no link). The primary room and its name match the old build; scene fillers can differ because the filler pool changed. The pool itself is unchanged, so no current seed moved.
+The hash form `#surprise=10002:rink` builds that template at that seed (forces the pick, everything else seeded as usual). It exists so seeds from before the curation can be reviewed one by one: `docs/surprise-review-10000-10051.html` lists the 50 old seeds with their old template (fanclub and treadmill, removed on purpose, have no link). The primary room and its name match the old build; scene fillers can differ because the filler pool changed. The pool itself is unchanged, so no current seed moved.
 
 ## Repo layout
 
