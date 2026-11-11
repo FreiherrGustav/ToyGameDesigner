@@ -7592,6 +7592,21 @@ Traced by best-first search over the physics (hold left/right/jump in 8-frame st
 From the user's `Wind spiral - surprise me.json` (kept in `surprise-sources/`; `examples/wind-spiral.json` is now this version). Whole 24x18 room, gravity off, no wrap, serialized with `surpriseSerialize("all")`; stock pieces only (air wind in four directions, solid walls, two `solid:trap` tiles, a goal flag, the player at the start), so no `exact` block and the walls take a random wall texture like any soft slot. Category `toy` (no cause-and-effect chain), `ext: true` (only for seeds >= 10000, so old seeds are unchanged), weight 2.
 **Traced:** with no input the wind carries the player round the spiral and around the whole room again and again (about 15 s per lap at 30, 60 and 144 fps, 90 s without a win, no errors), so it is not `selfStart` in the counter's sense (open-air wind raises no counted event) and `needsInput` is true: to win, steer off the loop at (8,10): hold Left for 0.8 s into the `GG` pocket under the flag, then Left+Up; this wins at 30, 60 and 144 fps. 40 runs of random keys for 2 simulated minutes never won, so the flag takes deliberate steering. Suites: surprise2 900/0, scenes 37/0, surprise5 188/0.
 
+## v2.65 Stage 2: Surprise Me curation, first half of the user's list (63 -> 40 templates)
+
+Removed by id (the user's list, from the review seeds): chaserparade, alltramps, fanclub, pinball, moat, lemmings, sticky, bombdrop, orchestra, roulette, bombrow, dominodig, conveyor, spawnerwar, bombcarousel, upsidedown, conga, roulette2, treadmill, slippery, blackholewall, craterain, stonepets, tornado, fallforever, plus the old `plinko` (replaced). Plain deletion, so **old `#surprise=` seeds now build different things** (the weighted walk shifts); no tombstones were chosen. The second half of the user's list is still to come.
+
+**Added (all `authored`, `ext`, whole-room, weight 2, from the user's projects via `tests/surprise.import.js`, which serializes a room of a saved project into an entry with an `exact` block):**
+- `trafficjam` ("The Traffic Jam"; replaces tornado): room 1 of `Traffic_jam.json`, gravity off, wrap both ways, wind lanes with crates and nine characters; the author's own looks and lethal flags kept (Gloop stays lethal).
+- `oopstramps` ("Oops All Trampolines"; replaces fallforever): **room 3 of `oops_all_trampolines.json` (the one named "surprise #10248") was assumed to be the intended room**. It is a sealed trampoline box with random gravity buttons, so it is a `toy` and `closed`; the hero was moved from inside the top wall to (1,1) because the validator refuses a player inside a solid.
+- `plinko` ("Plinko"; same id): the user's `Plinko.json` (bouncy pegs, two fans, a pet spawner, their ground/Paint art).
+
+**Fixes found on the way:** (1) an `exact.skins`/`backs` entry was namespaced even when the template had no matching `exact.grounds`/`bgs` def, so stonedomino's lava vanished and its rubble loaded as plain solid; the raw built-in id is now kept in that case (`tests/exactdefs.test.js` checks every authored room paints only ids that have defs). (2) The Ground Effect tint over a skinned tile filled the whole cell (plinko pegs sat in brown squares); in Play and exports it is now masked to the skin's own pixels (`drawEffectTint`, Build keeps the whole-cell wash).
+
+**Popcorn Box** is now a bouncy maze (two shelves with offset gaps, posts, three rewards, one wanderer). **Engine change, flagged:** a wanderer/chaser/fleer landing on a plain `bouncy` floor in a gravity room springs back at least `NPC_BOUNCY_LAUNCH_SPEED` (560), like the player's guaranteed launch, and gets only a 100 ms steering lockout on a plain bouncy hit (it kept being locked out in a short gap). Objects and hazard balls are unchanged. All 16 samples stay frame-identical (`gravdir.test.js`, 91/0).
+
+**Crate Carousel**: a bomb spawner above the gate (bombs hit the closed gate from 7 tiles and go off there, so crates survive), a `gust:e` at the belt end that pulls arriving crates fully into the fan column (the belt-end tile overhung the lift and jammed them under it), and a `gust:n` above the fan so a hovering crate rises to the west gust rows. Traced 120 s: no permanent jam.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),

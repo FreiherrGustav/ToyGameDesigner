@@ -103,9 +103,10 @@ const ok = (c, m, x) => { if (c) { pass++; console.log("ok  ", m); } else { fail
   ok(vrep === 0, "no variant repeats within any 6 consecutive presses", vrep);
   { const per = {}; ch.forEach(r => { per[r.id] = (per[r.id] || 0) + 1; }); const top = Object.entries(per).sort((a, b) => b[1] - a[1])[0];
     ok(top[1] / ch.length <= 0.05, "no single template takes more than 5% of presses (top: " + top[0] + " " + (100 * top[1] / ch.length).toFixed(1) + "%)", top);
-    ok(Object.keys(per).length >= 50, "at least 50 different templates seen in " + ch.length + " presses", Object.keys(per).length); }
+    ok(Object.keys(per).length >= 30, "at least 30 different templates seen in " + ch.length + " presses", Object.keys(per).length); }
   // v2.57: every template is about equally likely (toys/nonsense a little less), so a category's share follows how many templates it has
-  ok(Math.abs((share.room || 0) - 31) <= 9 && Math.abs((share.toy || 0) - 28) <= 9 && Math.abs((share.vignette || 0) - 19) <= 7 && Math.abs((share.loop || 0) - 12) <= 6, "mix follows template counts (room ~31, toy ~28, vignette ~19, loop ~12)", share);
+  // v2.65 Stage 2: after the curation cuts the whole-room entries are most of the pool
+  ok(Math.abs((share.room || 0) - 61) <= 10 && Math.abs((share.toy || 0) - 25) <= 9 && (share.vignette || 0) <= 15 && (share.loop || 0) <= 10, "mix follows template counts (room ~61, toy ~25, vignette ~7, loop ~3)", share);
   // variant recency on one template: chained presses of the same template keep changing variant
   await E("reset"); await E("push", Object.assign({}, machine, { category: "loop" }));
   const same = await E("chain", 40, ["opTest"]);
