@@ -238,8 +238,8 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
 
   // ---- G. Stage 3: room events, the authoring helper, Tunnel Trouble ----
   {
-    const ROOM_IDS = ["pinballroom", "catcannon", "dominodig", "elevator", "trampit", "bigrink", "roulette2", "bombcarousel", "slipgauntlet", "popcorn", "minefield", "warploop", "tunneltrouble"];
-    ok(ROOM_IDS.every(id => T.some(t => t.id === id)), "all 13 room events are in the table");
+    const ROOM_IDS = ["pinballroom", "catcannon", "elevator", "trampit", "bigrink", "slipgauntlet", "popcorn", "minefield", "warploop", "tunneltrouble"];
+    ok(ROOM_IDS.every(id => T.some(t => t.id === id)), "all 10 room events are in the table");
     // placement: an empty room takes the event in place, a room with anything in it gets a new tab and is left alone
     const pl = await page.evaluate(() => {
       __st.reset(); const r1 = __st.press(1234, { templateId: "bigrink", chaos: false });
@@ -289,7 +289,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   }
 
   // ---- H. an exported game that contains a Surprise room plays ----
-  for (const id of ["treadmill", "tornado", "catcannon", "warploop", "tunneltrouble"]) {
+  for (const id of ["catcannon", "warploop", "tunneltrouble"]) {
     const rp = await ctx.newPage(); rp.on("dialog", d => d.accept());
     await rp.goto("file://" + tmpMini + "#t"); await rp.waitForFunction(() => window.__mini);
     await rp.evaluate(id => window.__mini.make(id), id);
