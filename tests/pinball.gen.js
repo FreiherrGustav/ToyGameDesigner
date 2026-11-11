@@ -30,7 +30,7 @@ set(9, 17, "none:lethal"); r.groundSkinBoard[17][9] = "lthLava"; set(13, 17, "no
 [[5, 11], [6, 12], [7, 13], [8, 14]].forEach(([x, y]) => set(x, y, "none:wind-e")); [[17, 11], [16, 12], [15, 13], [14, 14]].forEach(([x, y]) => set(x, y, "none:wind-w"));
 // ---- pop bumpers (trampoline tiles) and posts
 const T = [[8, 4], [12, 3], [16, 4], [10, 7], [14, 7]]; T.forEach(([x, y]) => set(x, y, "trampoline:none"));
-[[6, 8], [17, 8]].forEach(([x, y]) => set(x, y, "solid:bouncy"));
+// (posts removed: balls rested on their top corners)
 // ---- cannons
 const C = {};
 C[ "17,1" ] = "cannon2-sw:none"; C["6,2"] = "cannon2-se:none"; C["4,10"] = "cannon2-ne:none"; C["18,10"] = "cannon2-nw:none";
