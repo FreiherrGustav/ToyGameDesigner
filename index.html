@@ -8503,6 +8503,29 @@
   // at a max speed — not a discrete per-tick grid direction. A wandering actor picks a lazily
   // drifting heading instead of true randomness, so it doesn't jitter frame to frame.
   const wanderHeadings = {}; // actorId -> {angle, until}
+  // Chasers and fleers: a small seeded wobble on their heading, a soft push away from close neighbours so
+  // they never pile up, and (fleers) a committed escape toward the roomiest direction when pinned.
+  const STEER_WOBBLE_RAD = 0.5, STEER_SEPARATION_PX = 30, STEER_SEPARATION_ACCEL = 2600;
+  const STEER_ESCAPE_NEAR_TILES = 9, STEER_ESCAPE_SCAN_TILES = 5, STEER_ESCAPE_COMMIT_MS = 800, STEER_ESCAPE_COOLDOWN_MS = 300;
+  const steerState = {}; // actorId -> {dx, dy, until, cool}
+  // Characters keep out of each other's space: a soft push away from any close neighbour character.
+  function steerSeparation(actor, acx, acy) {
+    let ax = 0, ay = 0;
+    const R = STEER_SEPARATION_PX;
+    for (const o of actors) {
+      if (o === actor || o.isPlayer || o.carried || o.cannonLoad) continue;
+      const ox = acx - (o.x + o.w / 2), oy = acy - (o.y + o.h / 2);
+      if (ox > R || ox < -R || oy > R || oy < -R) continue;
+      const od = Math.hypot(ox, oy);
+      if (od >= R) continue;
+      const od2 = actorDefs[o.defId];
+      if (!od2 || !isSteeringCharacter(od2.temperament)) continue;
+      const w = (1 - od / R) * STEER_SEPARATION_ACCEL;
+      if (od < 0.5) { const t = (actor.id % 8) * Math.PI / 4; ax += Math.cos(t) * w; ay += Math.sin(t) * w; }
+      else { ax += (ox / od) * w; ay += (oy / od) * w; }
+    }
+    return { ax, ay };
+  }
   function steeringAccelFor(actor, player) {
     const def = actorDefs[actor.defId];
     if (!def) return { ax: 0, ay: 0 };
@@ -8515,15 +8538,53 @@
         h = { angle: Math.random() * Math.PI * 2, until: now + 800 + Math.random() * 900 };
         wanderHeadings[actor.id] = h;
       }
-      return { ax: Math.cos(h.angle) * NPC_ACCEL, ay: Math.sin(h.angle) * NPC_ACCEL };
+      const sep = steerSeparation(actor, actor.x + actor.w / 2, actor.y + actor.h / 2);
+      return { ax: Math.cos(h.angle) * NPC_ACCEL + sep.ax, ay: Math.sin(h.angle) * NPC_ACCEL + sep.ay };
     }
     if (!player) return { ax: 0, ay: 0 };
-    const dx = (player.x + player.w / 2) - (actor.x + actor.w / 2);
-    const dy = (player.y + player.h / 2) - (actor.y + actor.h / 2);
+    const acx = actor.x + actor.w / 2, acy = actor.y + actor.h / 2;
+    const dx = (player.x + player.w / 2) - acx;
+    const dy = (player.y + player.h / 2) - acy;
     const dist = Math.hypot(dx, dy) || 1;
     const sign = def.temperament === "chaser" ? 1 : (def.temperament === "fleer" ? -1 : 0);
     if (sign === 0) return { ax: 0, ay: 0 };
-    return { ax: (dx / dist) * NPC_ACCEL * sign, ay: (dy / dist) * NPC_ACCEL * sign };
+    const now = gameNow();
+    // Not a perfect straight line: a per-character wobble (seeded from the id, so replays match) bends the
+    // heading a little, so a herd doesn't take one identical path.
+    const p1 = ((actor.id * 2654435761) >>> 0) % 6283 / 1000, p2 = ((actor.id * 40503 + 7919) >>> 0) % 6283 / 1000;
+    const wob = STEER_WOBBLE_RAD * (0.6 * Math.sin(now / 1000 * 0.9 + p1) + 0.4 * Math.sin(now / 1000 * 1.7 + p2));
+    const bx = (dx / dist) * sign, by = (dy / dist) * sign; // the straight chase / flee direction
+    let hx = bx * Math.cos(wob) - by * Math.sin(wob), hy = bx * Math.sin(wob) + by * Math.cos(wob);
+    // A fleer pinned against a wall or in a corner picks the roomiest way out and sticks with it for a moment.
+    if (sign < 0) {
+      let st = steerState[actor.id];
+      if (!st) st = steerState[actor.id] = { dx: 0, dy: 0, until: 0, cool: 0 };
+      const open = (ux, uy, tiles) => { // how many tiles this direction stays free
+        let n = 0;
+        for (let i = 1; i <= tiles; i++) {
+          if (isCellBlocking(Math.floor((acx + ux * i * TILE) / TILE), Math.floor((acy + uy * i * TILE) / TILE), actor)) break;
+          n++;
+        }
+        return n;
+      };
+      if (now < st.until) { hx = st.dx; hy = st.dy; }
+      else if (now > st.cool && dist < STEER_ESCAPE_NEAR_TILES * TILE && open(hx, hy, 1) === 0) {
+        let best = null, bestScore = -1e9;
+        for (let k = 0; k < 8; k++) {
+          const a = k * Math.PI / 4, ux = Math.cos(a), uy = Math.sin(a);
+          const away = ux * bx + uy * by;
+          if (away < -0.2) continue; // never run into the hero's arms
+          const room = open(ux, uy, STEER_ESCAPE_SCAN_TILES);
+          if (room === 0) continue;
+          const score = room / STEER_ESCAPE_SCAN_TILES + 0.6 * away;
+          if (score > bestScore) { bestScore = score; best = { x: ux, y: uy }; }
+        }
+        if (best) { st.dx = best.x; st.dy = best.y; st.until = now + STEER_ESCAPE_COMMIT_MS; st.cool = st.until + STEER_ESCAPE_COOLDOWN_MS; hx = st.dx; hy = st.dy; }
+      }
+    }
+    let ax = hx * NPC_ACCEL, ay = hy * NPC_ACCEL;
+    const sep = steerSeparation(actor, acx, acy); ax += sep.ax; ay += sep.ay;
+    return { ax, ay };
   }
 
   // ============== Per-actor physics step ==============
@@ -15041,7 +15102,7 @@
       triggerGoal, triggerFlip, triggerCannon, tickCannonLoad, fireLoadedCannon, triggerBombArm, cancelBombArm, detonateBombAt, triggerWarp,
       checkPlayerTileContacts, checkPhysicsObjectSwitchContacts, checkPhysicsObjectLethalContacts, destroyPhysicsObjectInLethal, checkNpcLethalContacts, triggerNpcLethalReset, checkGravityWellContacts, triggerGravityWellCapture, triggerPlayerGravityWellCapture, checkActorContacts, contactKey, tickActorContactCooldowns, tickDragCooldowns,
       updatePressurePlates, updateChannelTransitions, tickTraps, syncChannelsToHotRoom,
-      steeringAccelFor, consumeLifeIfPlaying, scheduleLevelRetry, triggerGameOver, triggerWin,
+      steeringAccelFor, steerSeparation, consumeLifeIfPlaying, scheduleLevelRetry, triggerGameOver, triggerWin,
       activateRoom, triggerDoor, beginRoomTransition,
       spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
       stepActor, tick,
@@ -15139,6 +15200,7 @@
       `const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];`,
       `const APP_NAME = ${JSON.stringify(APP_NAME)};`,
       `const GRAVITY = ${GRAVITY}, JUMP_VELOCITY = ${JUMP_VELOCITY}, MOVE_ACCEL = ${MOVE_ACCEL};`,
+      `const STEER_WOBBLE_RAD = ${STEER_WOBBLE_RAD}, STEER_SEPARATION_PX = ${STEER_SEPARATION_PX}, STEER_SEPARATION_ACCEL = ${STEER_SEPARATION_ACCEL}, STEER_ESCAPE_NEAR_TILES = ${STEER_ESCAPE_NEAR_TILES}, STEER_ESCAPE_SCAN_TILES = ${STEER_ESCAPE_SCAN_TILES}, STEER_ESCAPE_COMMIT_MS = ${STEER_ESCAPE_COMMIT_MS}, STEER_ESCAPE_COOLDOWN_MS = ${STEER_ESCAPE_COOLDOWN_MS};`,
       `const MAX_SPEED = ${MAX_SPEED}, NPC_MAX_SPEED = ${NPC_MAX_SPEED}, NPC_ACCEL = ${NPC_ACCEL};`,
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
       `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION}, BOUNCE_REST_SPEED = ${BOUNCE_REST_SPEED};`,
@@ -15308,6 +15370,7 @@
   let checkpoint = null;
   let fatalErrorShown = false; // handleFatalError's own state — not a function, so functionSource's toString() extraction never carries it; declared here by hand instead
   const wanderHeadings = {};
+  const steerState = {};
 
   function addScore(n) {
     score += n;
