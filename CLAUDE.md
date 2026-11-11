@@ -7614,6 +7614,10 @@ Seeds 10000+ moved relative to the old review build because the first-half curat
 - **Crate Opens The Door** (`opensdoor`): four cages in waves. Pen 1 (red, as before) plus three closets in a column (blue, green, yellow; each a different enemy: pets, walker, softchaser, real chaser). Plates sit in a column at the end of the cannon's arc (x=15, rows 16 to 13): the crates pile up leaning west, so crate 1 opens pen 1, crate 2 the lowest closet, crates 3-4 the next, about crate 6 the top one. A falling crate pulses the plates it passes for 2-4 frames; that does not release anything (a gate that closes under a pet lifts it back), so no wave comes early. Closets' gate rows have open sides so released enemies walk out. Reliability 20/20 at 30/60/144 fps (first release about 4.1 s). The stack keeps growing while the spawner runs.
 - **Drain** (`drain`): the five straight-in spawners are replaced by seven spawners on the wind disc rims throwing along the clockwise flow (pets, crates, bombs), so things orbit before being eaten. 20/20 at 30/60/144 fps, about 77 captures in 30 s.
 
+## Review links for retired seed numbers: `#surprise=SEED:templateid`
+
+The hash form `#surprise=10002:rink` builds that template at that seed (forces the pick, everything else seeded as usual). It exists so seeds from before the curation can be reviewed one by one: `docs/surprise-review-10000-10051.md` lists the 50 old seeds with their old template (fanclub and treadmill, removed on purpose, have no link). The primary room and its name match the old build; scene fillers can differ because the filler pool changed. The pool itself is unchanged, so no current seed moved.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),

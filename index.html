@@ -15014,9 +15014,10 @@
   // #surprise=4821 in the URL rebuilds that exact arrangement (then clears the hash so a reload
   // doesn't stack another copy on top of the autosave).
   (function surpriseFromHash() {
-    const m = /^#surprise=(\d+)$/.exec(location.hash || "");
+    // #surprise=SEED:templateid builds that template at that seed (used to review a retired seed number's old template).
+    const m = /^#surprise=(\d+)(?::([a-z0-9]+))?$/.exec(location.hash || "");
     if (!m) return;
-    surpriseMe(Number(m[1]));
+    surpriseMe(Number(m[1]), m[2] ? { templateId: m[2] } : undefined);
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* file:// may refuse */ }
   })();
   // First visit (nothing autosaved, no deep-link hash) lands on the front screen; a returning
