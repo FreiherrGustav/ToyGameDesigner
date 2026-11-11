@@ -7607,6 +7607,13 @@ Removed by id (the user's list, from the review seeds): chaserparade, alltramps,
 
 **Crate Carousel**: a bomb spawner above the gate (bombs hit the closed gate from 7 tiles and go off there, so crates survive), a `gust:e` at the belt end that pulls arriving crates fully into the fan column (the belt-end tile overhung the lift and jammed them under it), and a `gust:n` above the fan so a hovering crate rises to the west gust rows. Traced 120 s: no permanent jam.
 
+## v2.65 Stage 2b: three review fixes (Wind Spiral, Crate Opens The Door, Drain)
+
+Seeds 10000+ moved relative to the old review build because the first-half curation deleted templates (plain deletion shifts the weighted walk); the current seed-to-template table for 10000-10051 was handed to the user. Edits below are in place and do not change any pick.
+- **The Wind Spiral** (`windspiral`): the trap tiles were `raw|solid:trap` (no skin) while walls got a random skin, so they gave the solution away. New piece `walltrap` (a trap that takes the room's wall skin) replaces them, the entry is `vary:{mirror:false}` (always as designed), and `drawGameplayTile` no longer tints a skinned trap tile once playing (`appMode !== "build"`), so a trap looks exactly like the wall around it in Play and exports; Build keeps the tint as an authoring cue. Only skinned traps were ever tinted, so other content is unchanged.
+- **Crate Opens The Door** (`opensdoor`): four cages in waves. Pen 1 (red, as before) plus three closets in a column (blue, green, yellow; each a different enemy: pets, walker, softchaser, real chaser). Plates sit in a column at the end of the cannon's arc (x=15, rows 16 to 13): the crates pile up leaning west, so crate 1 opens pen 1, crate 2 the lowest closet, crates 3-4 the next, about crate 6 the top one. A falling crate pulses the plates it passes for 2-4 frames; that does not release anything (a gate that closes under a pet lifts it back), so no wave comes early. Closets' gate rows have open sides so released enemies walk out. Reliability 20/20 at 30/60/144 fps (first release about 4.1 s). The stack keeps growing while the spawner runs.
+- **Drain** (`drain`): the five straight-in spawners are replaced by seven spawners on the wind disc rims throwing along the clockwise flow (pets, crates, bombs), so things orbit before being eaten. 20/20 at 30/60/144 fps, about 77 captures in 30 s.
+
 ## Repo layout
 
 `index.html` (the app), `CLAUDE.md`, `README.md`, `tests/`, `prototypes/` (sprite editor, experiments, past screenshots),
