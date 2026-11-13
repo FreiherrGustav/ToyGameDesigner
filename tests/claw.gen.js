@@ -57,15 +57,23 @@ function fuse() {
   const R = blank();
   fill(R, 0, 0, 23, 0, "I"); fill(R, 0, 17, 23, 17, "I"); fill(R, 0, 0, 0, 17, "I"); fill(R, 23, 0, 23, 17, "I");
   const N = 5;
-  put(R, 3, 1, "s");                                    // stone spawner facing south over bomb 1
-  for (let k = 0; k < N; k++) {
-    const bx = 3 + k, by = 4 + k * 3;
-    put(R, bx, by, "B"); put(R, bx, by + 1, "I");
-    if (k < N - 1) { put(R, bx + 1, by, "w"); put(R, bx + 1, by - 1, "S"); }   // support block, and the next stone on it
-  }
-  fill(R, 8, 16, 14, 16, "B"); fill(R, 9, 15, 13, 15, "B");                     // the finale: a heap of bombs at the end of the line
+  // one link = a bomb on an indestructible floor tile, with the next stone resting on a support block right of it
+  const link = (x0) => {
+    for (let k = 0; k < N; k++) {
+      const bx = x0 + k, by = 4 + k * 2;
+      put(R, bx, by, "B"); put(R, bx, by + 1, "I");
+      put(R, bx + 1, by, "w"); put(R, bx + 1, by - 1, "S");
+    }
+  };
+  link(2);                                   // chain 1: a stone spawner lights bomb 1
+  put(R, 2, 1, "s");
+  put(R, 7, 14, "r"); put(R, 7, 15, "I");    // its last stone lands on a red plate...
+  link(10);                                  // chain 2, exactly the same, a couple of tiles over
+  put(R, 10, 2, "g"); put(R, 10, 1, "S");    // ...which opens the red gate holding chain 2's first stone
+  put(R, 15, 14, "B"); put(R, 15, 15, "I");  // chain 2's last stone lands on a bomb touching the display
+  fill(R, 16, 1, 22, 16, "B");               // the bomb display: floor to ceiling, every square
   put(R, 1, 16, "P");
-  const legend = { I: "raw|solid:indestructible", w: "wall", B: "bomb", S: "stone", s: "spawners:s", P: "player" };
+  const legend = { I: "raw|solid:indestructible", w: "wall", B: "bomb", S: "stone", s: "spawners:s", r: "plate:red", g: "gate:red", P: "player" };
   return { R, legend };
 }
 function entryFuse() {
@@ -78,7 +86,7 @@ function entryFuse() {
     id: "fuseline", category: "room", closed: false, stooge: "P", ext: true, weight: 2, authored: true,
     names: ["The Fuse Line", "Finale", "Light The Sky", "A Chain Of Fireworks"],
     room: { gravity: "on", wrapH: false, wrapV: false }, requires: ["bombActors"], discover: "B",
-    expect: { fact: "a stone lights the first bomb; each blast drops the next stone on the next bomb down the staircase, ending in a heap of bombs", check: "selfStart", needsInput: false, selfStart: true, chain: ["spawn", "impact", "detonate", "blastClear", "fall", "impact", "detonate"] },
+    expect: { fact: "two identical five-bomb staircases (the first ends on a plate that starts the second), then a floor-to-ceiling wall of bombs goes off", check: "selfStart", needsInput: false, selfStart: true, chain: ["spawn", "impact", "detonate", "blastClear", "fall", "impact", "detonate", "plateOn", "gateOpen"] },
     legend, rows: R.map(r => r.join("")), vary: { mirror: false },
     exact: { actors: {}, grounds: {}, bgs, skins: [], backs: [], backRows: back.map(r => r.join("|")), backLegend: Object.fromEntries(Object.keys(bgs).map(k => [k, k])), pet: null, chaser: null, reward: null, playerLook: null, _multi: true },
   });
@@ -91,7 +99,7 @@ function packBack(e) {
   delete X._multi; return e;
 }
 const only = process.argv[2];
-const entries = [entryClaw(), entryFuse()];
+const entries = [entryFuse()];
 let lines = fs.readFileSync(IDX, "utf8").split("\n");
 entries.forEach(e => {
   lines = lines.filter(l => !l.startsWith('    {"id":"' + e.id + '"'));
