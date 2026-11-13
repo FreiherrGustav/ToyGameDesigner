@@ -7711,8 +7711,8 @@ Update: a blast now sends a "comes back" character home (it respawns) in Play as
 
 `examples/cannon-range.json` is now the user's own `Cannon_range.json` (also kept in `surprise-sources/`), and the same room is a
 whole-room Surprise Me entry, `cannonrange` (`ext`, `authored`, weight 2, `exact` block, serialized with `tests/surprise.import.js --keeppets`).
-Gravity on, no wrap, a sealed indestructible box (so category `toy`, `closed: true`): four NE cannons stacked at the left, a crate spawner
-and two bomb spawners in the left wall, a lava moat in the floor, and nine of the author's own wanderers (McDinglechud look, lethal,
+Gravity on, no wrap, a sealed indestructible box (so category `toy`, `closed: true`): four NE cannons stacked at the left, one bomb spawner
+in the left wall (the file's spawner contents also list two stale keys for cells with no spawner; ignored), a lava moat in the floor, and nine of the author's own wanderers (McDinglechud look, lethal,
 "stays gone") pacing platforms on the right. The player starts in the middle. Checked: exactfidelity 1 ok, exactdefs 22/0, exactdeterm 31 identical,
 surprise5 103/0; a Play run shows the bomb spawner adding a bomb every 2.5 s with no errors. Not played by a person; the hit-the-wanderers
 challenge was not tuned. The earlier coded Cannon Range notes (Rampart/Cannon Range Space are separate examples) are unaffected.
