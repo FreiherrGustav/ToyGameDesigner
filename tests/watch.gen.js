@@ -1,5 +1,5 @@
 // Dev generator (not shipped): writes the two "to-be-watched" Surprise Me entries (fanwindmill, lavalamp) into index.html.
-// node tests/watch.gen.js  inserts them into index.html; then node tests/watch.export.js <id> examples/<file>.json; they are NOT shipped in Surprise Me yet: git checkout index.html afterwards (the user asked for examples first).
+// node tests/watch.gen.js  inserts both entries into index.html (they ship in Surprise Me). Fan Windmill's hero is the Princess preset (watch.princess.json).
 const fs = require("fs"), path = require("path");
 const IDX = path.join(__dirname, "..", "index.html");
 const W = 24, H = 18;
@@ -47,7 +47,7 @@ function windmill() {
     room: { gravity: "off", wrapH: false, wrapV: false }, requires: ["fan"], discover: "c",
     expect: { fact: "six pinwheels of four fans each blow a light crate round and round its own ring", check: "selfStart", needsInput: false, selfStart: true },
     legend, rows: rows.map(r => r.join("")), vary: { mirror: false },
-    exact: { actors: {}, grounds: {}, bgs, skins: [], backs: [], backRows: back.map(r => r.join("|")).map(s => s), backLegend, pet: null, chaser: null, reward: null, playerLook: null, _multi: true },
+    exact: { actors: {}, grounds: {}, bgs, skins: [], backs: [], backRows: back.map(r => r.join("|")).map(s => s), backLegend, pet: null, chaser: null, reward: null, playerLook: JSON.parse(fs.readFileSync(path.join(__dirname, "watch.princess.json"), "utf8")), _multi: true },
   };
 }
 
