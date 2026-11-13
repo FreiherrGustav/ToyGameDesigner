@@ -12,7 +12,7 @@ const MAP = {
   fanloop: ["Fan loop - surprise me 2.json", 1], byebyecupcake: ["byebye cupcake - surprise me 4.json", 1], oopscannons: ["Oops cannons - surprise me 9.json", 1],
   warpfall: ["Warpfall - surprise me.json", 1], windspiral: ["Wind spiral - surprise me.json", 1],
   stonedomino: [UP + "/4d151336-Stone_Cold_Domino_-_mini_level.json", 1], plinko: [UP + "/d1d1dba1-Plinko.json", 1], trafficjam: [UP + "/80df2881-Traffic_jam.json", 1], oopstramps: [UP + "/ebcca2ea-oops_all_trampolines.json", 3],
-  cannonrange: ["Cannon_range.json", 1], crateescape: ["The_Crate_Escape.json", 1], cannonballrun: ["Cannonball_Run.json", 1],
+  cannonrange: ["Cannon_range.json", 1], crateescape: ["The_Crate_Escape.json", 1], mousetrap: ["Mousetrap.json", 1], herd: ["Herd_the_Wheebuns.json", 1], cannonballrun: ["Cannonball_Run.json", 1],
   magnetmile: [UP + "/39819088-magnet_mile_mini_level.json", 1],
 };
 const only = process.argv.slice(2);
