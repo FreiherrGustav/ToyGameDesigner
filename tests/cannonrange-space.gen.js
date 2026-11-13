@@ -21,7 +21,7 @@ const HOOK = `window.__g = () => {
   board[7][0] = "spawner-e:none"; board[10][0] = "spawner-e:none";
   spawnerContents[roomCellKey(currentRoomId, 0, 7)] = PUSHABLE_DEF_ID;
   spawnerContents[roomCellKey(currentRoomId, 0, 10)] = CARRY_BOMB2_DEF_ID;
-  actorDefs[findDefaultActorDef("wanderer")].lethal = false; // the targets are harmless
+  actorDefs[findDefaultActorDef("wanderer")].lethal = false; actorDefs[findDefaultActorDef("wanderer")].staysGone = true; // the targets are harmless
   const put = (defId, cx, cy) => { selectedActorDefId = defId; return placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2); };
   put(playerDefId, 4, 9);
   [[15,4],[16,8],[15,12],[17,6],[16,14]].forEach(([x, y]) => put(findDefaultActorDef("wanderer"), x, y));

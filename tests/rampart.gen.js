@@ -65,7 +65,7 @@ const HOOK = `window.__g = () => {
   bg(K0 + 2, 10, BG_FLAGPOLE); bg(K1 - 2, 3, BG_FLAGPOLE); bg(F0, 10, BG_FLAGPOLE);
   for (let y = 12; y <= 14; y++) for (let x = F0 + 2; x < K0; x++) bg(x, y, BG_COBBLE);
   // ---- enemies: harmless wanderers in every chamber, on the roof and in the yard ----
-  actorDefs[findDefaultActorDef("wanderer")].lethal = false;
+  actorDefs[findDefaultActorDef("wanderer")].lethal = false; actorDefs[findDefaultActorDef("wanderer")].staysGone = true;
   const wDef = findDefaultActorDef("wanderer");
   const put = (defId, cx, cy) => { selectedActorDefId = defId; return placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2); };
   [K0 + 2, K0 + 6, K1 - 2].forEach(x => put(wDef, x, 14));

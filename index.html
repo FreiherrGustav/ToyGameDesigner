@@ -750,6 +750,8 @@
       <div id="lethalPickerBlock" style="display:none;">
         <div class="section-title" style="margin-top:10px;">If it touches you — <span id="lethalPickerName"></span></div>
         <div class="swatch-row" id="lethalPickerSwatches"></div>
+        <div class="section-title" style="margin-top:10px;">If it dies</div>
+        <div class="swatch-row" id="goneSwatches"></div>
       </div>
       <div class="section-title" style="margin-top:10px;">Custom characters</div>
       <div class="swatch-row" id="customActorSwatches"></div>
@@ -1411,6 +1413,17 @@
   // chaser was ever dangerous, so it reads lethal and everything else reads harmless.
   function npcIsLethal(def) {
     return !!def && (def.lethal !== undefined ? !!def.lethal : def.temperament === "chaser");
+  }
+  // "Stays gone": a character whose def says so is removed for good when lava/a black hole/a squash defeats it,
+  // instead of being sent back to its start. No field (every older save and sample) = comes back, as before.
+  function npcStaysGone(def) { return !!def && !!def.staysGone; }
+  // Build mode only: remember a hand-placed character that stayed gone so "Reset to start" can bring it back
+  // (Play restores everything from its snapshot already). Same log the Build-mode bomb blasts use.
+  function logBuildKill(actor) {
+    if (appMode !== "build" || actor.spawnerKey) return;
+    const copy = structuredClone(actor);
+    delete copy.destroyed; delete copy.vortexHidden; delete copy.squashed; delete copy.detonating;
+    buildBlastLog.push({ type: "actor", roomId: currentRoomId, actor: copy });
   }
   // How long steering stays suppressed after a bounce/cannon launch, and (via a fresh reset every
   // frame the continuous force stays strong — see stepActor) how long it keeps NOT resuming while
@@ -5702,6 +5715,25 @@
       sw.addEventListener("click", () => { def.lethal = opt.lethal; renderLethalPicker(); log(defDisplayName(def) + " is now " + opt.label + "."); });
       container.appendChild(sw);
     });
+    // "If it dies": a defeated character normally comes back (sent home / back with the level restart);
+    // "stays gone" removes it for good in Build and Play (Reset to start brings it back in Build).
+    const goneBox = document.getElementById("goneSwatches");
+    goneBox.innerHTML = "";
+    const gone = npcStaysGone(def);
+    [{ gone: false, label: "comes back", color: "#3d5a80", tip: "Sent back to where it started." },
+     { gone: true, label: "stays gone", color: "#5a3d50", tip: "Gone for good when it dies." }].forEach(opt => {
+      const sw = document.createElement("div");
+      sw.className = "swatch" + (gone === opt.gone ? " selected" : "");
+      sw.style.background = opt.color;
+      sw.title = opt.label;
+      const label = document.createElement("div");
+      label.className = "lbl";
+      label.textContent = dispName(opt.label);
+      sw.appendChild(label);
+      wireCaption(sw, opt.tip);
+      sw.addEventListener("click", () => { def.staysGone = opt.gone; renderLethalPicker(); log(defDisplayName(def) + " " + opt.label + " when it dies."); });
+      goneBox.appendChild(sw);
+    });
   }
 
   // v2.18 section 3: an optional voice for a custom actor, picked from the small set of
@@ -7922,6 +7954,12 @@
     // (stepActor -> tickCannonLoad). Where/how the actor hit the cannon no longer matters.
     actor.cannonLoad = { geometry, t: CANNON_LOAD_MS, cx, cy, ax: anchorX, ay: anchorY };
     actor.cannonCooldown = CANNON_COOLDOWN_MS;
+    const cDef = actorDefs[actor.defId];
+    if (cDef && isCarryBombKind(cDef.temperament)) { // a bomb in a cannon: fuse resets and waits until it lands
+      const wasLit = actor.fuseTimerId != null || actor.fuseWaitLand; // a never-lit bomb stays unlit (the fall rule still applies)
+      pauseBombFuseIfTicking(actor); actor.fuseRemainingMs = BOMB_FUSE_MS;
+      if (wasLit) { actor.fuseWaitLand = true; actor.fuseWaitSince = gameNow(); }
+    }
     actor.vx = 0; actor.vy = 0;
     actor.x = anchorX - actor.w / 2; actor.y = anchorY - actor.h / 2;
     sounds.thud(0.6);
@@ -8374,7 +8412,8 @@
     log("Squashed!");
     gameSetTimeout(() => {
       if (!actors.includes(target)) return;
-      if (target.spawnerKey) {
+      if (target.spawnerKey || npcStaysGone(actorDefs[target.defId])) {
+        if (!target.spawnerKey) logBuildKill(target);
         target.destroyed = true;
         playRecipe(target, "popVanish");
         gameSetTimeout(() => removeActorObject(target), RECIPES.popVanish.duration);
@@ -8398,7 +8437,9 @@
     // and the spawner makes a fresh one on its own schedule; hand-placed characters still go home.
     // In Play a hand-placed character swallowed by lava stays gone (the level restart brings it back);
     // other lethal tiles (fire...) send it home. Build always sends home (sandbox rule).
-    if (actor.spawnerKey || (appMode === "play" && swallow)) {
+    const goneForGood = npcStaysGone(actorDefs[actor.defId]);
+    if (actor.spawnerKey || goneForGood || (appMode === "play" && swallow)) {
+      if (goneForGood) logBuildKill(actor);
       actor.destroyed = true;
       playActorSound(actor, "splat");
       playRecipe(actor, "popVanish");
@@ -8457,7 +8498,9 @@
     // to the spawner's launch cell, so they don't read as the spawner firing over and over.
     sounds.blackHole();
     swallowIntoBlackHole(actor, cx, cy, false);
-    if (isSteeringCharacter(temperament) && !actor.spawnerKey && appMode !== "play") {
+    const wellGone = npcStaysGone(actorDefs[actor.defId]);
+    if (wellGone) logBuildKill(actor);
+    if (isSteeringCharacter(temperament) && !actor.spawnerKey && appMode !== "play" && !wellGone) {
       actor.x = actor.spawnX; actor.y = actor.spawnY; actor.vx = 0; actor.vy = 0;
       actor.displacedCooldown = 0;
       playRecipe(actor, "warpIn", PARTICLE_ART, { artTo: 0.2 });
@@ -8793,6 +8836,7 @@
     const def = actorDefs[obj.defId];
     if (def && isCarryBombKind(def.temperament)) {
       pauseBombFuseIfTicking(obj);
+      obj.fuseRemainingMs = BOMB_FUSE_MS; obj.fuseWaitLand = false; // picking it up resets the fuse
       log("Grabbed the bomb — safe while you're holding it. Drop or throw it to light the fuse.");
     } else {
       log("Grabbed the " + (def ? def.name : "object") + ".");
@@ -8870,7 +8914,7 @@
     obj.bouncyCooldown = 500;
     obj.safeUntil = gameNow() + SAFE_AFTER_HANDLING_MS;
     const def = actorDefs[obj.defId];
-    if (def && isCarryBombKind(def.temperament)) startOrResumeBombFuse(obj);
+    if (def && isCarryBombKind(def.temperament)) { obj.fuseWaitLand = true; obj.fuseWaitSince = gameNow(); } // lit when it lands
     sounds.slide(); // a quick release whoosh — reusing "swoosh" rather than a dedicated new sound
     log("Threw it!");
   }
@@ -9161,6 +9205,10 @@
       if (actor.ballistic) {
         actor.ballisticT = (actor.ballisticT || 0) + dt * 1000;
         if (!inGravity || (actor.grounded && actor.ballisticT > 150)) actor.ballistic = false;
+      }
+      if (actor.fuseWaitLand && !actor.carried && !actor.cannonLoad && !actor.ballistic && !actor.detonating
+          && gameNow() - actor.fuseWaitSince > 150 && (inGravity ? actor.grounded : Math.hypot(actor.vx, actor.vy) < 40)) {
+        actor.fuseWaitLand = false; startOrResumeBombFuse(actor); // thrown/fired bomb has landed: now the fuse runs
       }
       if (!(actor.ballistic && inGravity)) applyAxisFriction(actor, cAx, dt, cAx === "x" ? ax : ay);
       const cap = actor.isPlayer ? MAX_SPEED : NPC_MAX_SPEED;
@@ -10518,7 +10566,7 @@
       actor.ridingMover = null; actor.lastDryX = null; actor.lastDryY = null;
       actor.vx = 0; actor.vy = 0;
       actor.fallStartY = null; actor.lastY = null; actor.ballistic = false;
-      actor.cannonLoad = null; actor.cannonExit = null; actor.vortexHidden = false;
+      actor.cannonLoad = null; actor.cannonExit = null; actor.vortexHidden = false; actor.fuseWaitLand = false;
     });
   }
 
@@ -15088,7 +15136,7 @@
 
     const runtimeFunctions = [
       geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
-      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, tryStoneCrushCrate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
+      cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, npcStaysGone, logBuildKill, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, tryStoneCrushCrate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, drawEffectTint, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
