@@ -748,10 +748,8 @@
         <div class="swatch-row" id="temperamentPickerSwatches"></div>
       </div>
       <div id="lethalPickerBlock" style="display:none;">
-        <div class="section-title" style="margin-top:10px;">If it touches you — <span id="lethalPickerName"></span></div>
+        <div class="section-title" style="margin-top:10px;">If it touches you, if it dies — <span id="lethalPickerName"></span></div>
         <div class="swatch-row" id="lethalPickerSwatches"></div>
-        <div class="section-title" style="margin-top:10px;">If it dies</div>
-        <div class="swatch-row" id="goneSwatches"></div>
       </div>
       <div class="section-title" style="margin-top:10px;">Custom characters</div>
       <div class="swatch-row" id="customActorSwatches"></div>
@@ -5717,8 +5715,7 @@
     });
     // "If it dies": a defeated character normally comes back (sent home / back with the level restart);
     // "stays gone" removes it for good in Build and Play (Reset to start brings it back in Build).
-    const goneBox = document.getElementById("goneSwatches");
-    goneBox.innerHTML = "";
+    const goneBox = container; // same row as lethal/harmless
     const gone = npcStaysGone(def);
     [{ gone: false, label: "comes back", color: "#3d5a80", tip: "Sent back to where it started." },
      { gone: true, label: "stays gone", color: "#5a3d50", tip: "Gone for good when it dies." }].forEach(opt => {
@@ -8093,6 +8090,9 @@
         return;
       }
       if (actorDef && actorDef.temperament === PUSHABLE_KIND && !actor.destroyed) { destroyPhysicsObjectInLethal(actor); return; } // a crate is blown apart
+      // A blast kills a character (wanderer/chaser/fleer/statue) the way lethal ground does: sent home
+      // (or gone for good if "stays gone"; in Play a placed one is removed until the level restarts).
+      if (actorDef && TEMPERAMENTS.includes(actorDef.temperament) && !actor.destroyed && !actor.isPlayer) { triggerNpcLethalReset(actor, true); return; }
       const dx = (actor.x + actor.w / 2) - (gx * TILE + TILE / 2);
       const dy = (actor.y + actor.h / 2) - (gy * TILE + TILE / 2);
       const dd = Math.hypot(dx, dy) || 1;
