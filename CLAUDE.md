@@ -7706,3 +7706,14 @@ Evidence scripts, not shipped: `tests/curation.evidence.js` (per template and fp
 `detonateBombAt` now treats a character (wanderer/chaser/fleer/statue, never the player) inside the blast like lethal ground: `triggerNpcLethalReset(actor, true)` (sent home in Build; in Play removed until the level restarts; always removed if "stays gone"). It used to only knock them back. Objects are unchanged (crates still smashed, bombs chain). Audit of what this changes: no built-in sample has a bomb and a character in the same room (Ice Cave's bombs and yeti are in different rooms), so samples are unaffected; Surprise Me rooms that now see it: Monster Escape, Chaos One, Stay Alive, Mini Level 1, Magnet Mile (bomb spawners), Carousel; examples: Mousetrap (Mousecop next to the bomb), Rampart, Cannon Range (+Space), Magnet Mile. In the Characters tab the "If it dies" swatches (comes back / stays gone) now sit in the same row as lethal / harmless. (`tests/gravdir.test.js` currently fails ~10 samples at frame 0/75 even HEAD-vs-HEAD, so it was not usable as the guard this time.)
 
 Update: a blast now sends a "comes back" character home (it respawns) in Play as well as Build, and only "stays gone" characters are removed (it used to remove them in Play until the level restart). So Chaos One's endless chaos keeps its enemies. Mini Level 1 (Surprise Me `minilevel1`: magnets releasing bombs, the skeleton wanderers behind the wall over lava, the brown gates, the flag) now has `staysGone: true` on its skeleton def, so killing them is permanent and opening the way to the flag is the goal.
+
+## Cannon Range replaces the old example and joins Surprise Me (`cannonrange`)
+
+`examples/cannon-range.json` is now the user's own `Cannon_range.json` (also kept in `surprise-sources/`), and the same room is a
+whole-room Surprise Me entry, `cannonrange` (`ext`, `authored`, weight 2, `exact` block, serialized with `tests/surprise.import.js --keeppets`).
+Gravity on, no wrap, a sealed indestructible box (so category `toy`, `closed: true`): four NE cannons stacked at the left, a crate spawner
+and two bomb spawners in the left wall, a lava moat in the floor, and nine of the author's own wanderers (McDinglechud look, lethal,
+"stays gone") pacing platforms on the right. The player starts in the middle. Checked: exactfidelity 1 ok, exactdefs 22/0, exactdeterm 31 identical,
+surprise5 103/0; a Play run shows the bomb spawner adding a bomb every 2.5 s with no errors. Not played by a person; the hit-the-wanderers
+challenge was not tuned. The earlier coded Cannon Range notes (Rampart/Cannon Range Space are separate examples) are unaffected.
+Seed numbers below 10000 are unchanged (ext templates only draw for seeds >= 10000); `seedstable.test.js` needs the old index path as an argument and was not re-run.
