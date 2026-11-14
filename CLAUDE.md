@@ -7769,3 +7769,20 @@ The 🎲 button (`surpriseDice`, also what the landing "Surprise me" clicks) no 
 **The Popcorn Box, rebuilt** (`tests/s2.popcorn.gen.js` rewrites the entry): a bouncy box with posts, a ceiling stub, shelves, an upper ledge and a low roof over the end of the start nook; four cheeses (collecting them all wins in Play, as before), a spawner in the ceiling dropping hazard balls (it bounces off every surface for chaos), seven harmless pets that spring about on the bouncy floors, and **a star cache** (option A): a sealed pocket in the top-left corner with a two-tile opening, reachable only by chaining two trampolines (one beside the start, one on the middle shelf) and steering left at the top of the second bounce. Honest status: the star is reachable by a **random-input bot in 25% of 60 s runs at both 60 and 30 fps** (24 runs each, first success 13 to 60 s), `node tests/popcorn.fuzz.js [runs] [ticks] [fps]` (hook-injected temp copy); not played by a person, 144 fps not run. **The "character who always jumps" does not exist** in the repo or its history; per the user's decision (c) no new character was added: the chaos comes from many wanderers on bouncy floors (they spring back at least 560 px/s on a plain bouncy tile, v2.65) plus the hazard balls. The always-jumping character is left for a separate engine patch.
 
 **Other checks run:** exactdeterm (39 identical), exactdefs 35/0, surprise5 119/0, picker 29/29. `tests/exactfidelity.test.js` could not be run in this session (its source project files are not on disk).
+
+## v2.67 Stage 3: "Try me" is split from Surprise Me
+
+The Objects-tab button (`#tryThisBtn`, now "🎲 Try me") no longer picks a Surprise Me design. It builds a small, readable demonstration
+of the SELECTED piece from `TRYME_TEMPLATES` (20 scenes, built by `tmScene(...)`, a separate array: `SURPRISE_TEMPLATES` still holds exactly the
+39 designs, and `surpriseEligibleTemplates(tryme)` returns one pool or the other). Pieces: fan, cannon, spawner, Gate, trampoline, magnet, bomb,
+black hole, switch, plate, bouncy, sticky, slippery, lava (any lethal), belt, locked door, crate, large stone, moving platform, key. Selecting
+anything else just logs "Pick a piece first, then press Try me." (no fallback to Surprise Me). `surpriseSelectedPiece()` maps the palette selection to a scene key;
+`SURPRISE_PIECE_MATCH`/`surpriseTemplatesFor` are gone.
+- **Rooms**: the first press opens a new room named "try me" (`room.tryMe = true`). Later presses reuse the current try-me room (or the latest one) and
+  put the scene in a free rectangle; if it does not fit, a new try-me room opens. Never overwrites, never asks. All scenes are gravity down, no wrap, so they share rooms.
+- **Live, not frozen**: `opts.live` skips the Surprise Me frozen start; scenes run at once. Try me never sets `surpriseLastPress` (so the dice's tab reuse ignores try-me rooms)
+  and never touches the dice's recency lists. Scenes are `authored` (no distance floors) and each has a player; a project's one player is moved into a new try-me room as usual.
+- New piece `lockeddoor:<color>` in `surpriseResolvePiece` (used by the locked door / key scenes; the key scene has a blue key, a blue door that opens and a red door that stays shut).
+- Scene facts found by tracing: a magnet only catches a falling crate if it hangs beside the crate's column (magnet (8,4), crate dropped at (7,1)); a bomb scene's blast clears the wall and floor cell next to it.
+- Tests: `node tests/tryme.test.js` (29 checks: every scene builds, one player, runs 3.5 s live with no errors, same-room sharing, new room when full, earlier scenes kept, real palette swatch + button).
+  `tests/surprise.test.js` section 7 (old "Try this") is retired. Not checked: each scene's demonstration was only traced for gate, cannon, magnet, bomb, locked door, stone and platform; the rest were checked to build and run cleanly.

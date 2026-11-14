@@ -760,7 +760,7 @@
     </div>
 
     <div id="objectPropertiesBlock" style="display:none;">
-      <button id="tryThisBtn" type="button" aria-label="Try this in a sample">🎲 Try this</button>
+      <button id="tryThisBtn" type="button" aria-label="Try the selected piece">🎲 Try me</button>
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Fixtures</div>
@@ -13201,9 +13201,9 @@
     magnet: () => !!GAMEPLAY_TILE_DEFS["magnet:none"] && typeof radialForceAccelFor === "function",
     bombActors: () => typeof convertBombTilesToActors === "function" && !!GAMEPLAY_TILE_DEFS[BOMB2_GEOMETRY + ":none"]
   };
-  function surpriseEligibleTemplates() {
+  function surpriseEligibleTemplates(tryme) {
     const eligible = [], skipped = [];
-    SURPRISE_TEMPLATES.forEach(t => {
+    (tryme ? TRYME_TEMPLATES : SURPRISE_TEMPLATES).forEach(t => {
       const missing = t.requires.filter(r => { try { return !SURPRISE_REQUIRES[r](); } catch (e) { return true; } });
       if (missing.length) skipped.push({ id: t.id, reason: "missing " + missing.join(", ") });
       else eligible.push(t);
@@ -13306,6 +13306,7 @@
       case "plate": return { tile: { key: gameplayKey("plate", "none"), color: pieceColor } };
       case "gate": return { tile: { key: gameplayKey(BARRIER_ORDER[0], "none"), color: pieceColor } };
       case "button": return { tile: { key: gameplayKey(PUSH_BUTTON_GEOMETRY, "none"), color: pieceColor } };
+      case "lockeddoor": return { tile: { key: gameplayKey(LOCKED_DOOR_GEOMETRY, "none"), color: CHANNEL_COLORS.includes(dir) ? dir : "red" } }; // opens only for a Key of the same color
       case "button0": return g(PUSH_BUTTON_GEOMETRY); // uncolored: flips the room's gravity
       case "gbutton": return { tile: { key: gameplayKey(PUSH_BUTTON_GEOMETRY, "none"), gravOpt: GRAV_BUTTON_OPTS.includes(dir) ? dir : "random" } }; // uncolored, points gravity (down/up/left/right/random)
       case "lava": return { tile: { key: gameplayKey("none", "lethal"), skin: groundTileDefs.lthLava ? "lthLava" : null } };
@@ -13894,7 +13895,7 @@
     opts = opts || {};
     if (!(opts.varied != null ? opts.varied : surpriseVaried)) opts = Object.assign({}, opts, { canonical: true, chaos: false, mirror: false, scene: false });
     const ctx = opts.ctx || surpriseHotContext();
-    const { eligible } = surpriseEligibleTemplates();
+    const { eligible } = surpriseEligibleTemplates(opts.tryme);
     let pool = opts.templateId ? eligible.filter(t => t.id === opts.templateId)
       : opts.templateIds ? eligible.filter(t => opts.templateIds.includes(t.id)) : eligible;
     // v2.64: a template added after the seed numbers were first shared (flagged `ext`) only joins the pool for seeds from
@@ -14040,6 +14041,7 @@
     if (!spec) { log("Surprise me has nothing to build."); return null; }
     if (spec.noRoom) {
       // a whole-room event never goes over anything: into a new room tab without asking
+      if (opts.tryme && opts.full == null) return surpriseMe(seed, Object.assign({}, opts, { full: "new" })); // Try me: a scene that doesn't fit goes into a new try-me room
       if ((spec.category === "room" || (spec.w >= COLS && spec.h >= ROWS)) && opts.full == null) return surpriseMe(seed, Object.assign({}, opts, { full: "new", recent: useRecent }));
       if (opts.full == null) { surpriseAskFull(seed, Object.assign({}, opts, { recent: useRecent })); return { pending: true }; }
       log("Surprise me: no room for that one.");
@@ -14048,7 +14050,8 @@
     if (spec.failed) { log("Surprise me couldn't build #" + seed + " — try again."); return spec; }
     pushUndoSnapshot(); // the whole press is one undo step
     if (newRoomMode) {
-      const nr = createEmptyRoom("surprise #" + seed);
+      const nr = createEmptyRoom(opts.tryme ? "try me" : "surprise #" + seed);
+      if (opts.tryme) nr.tryMe = true;
       rooms.push(nr);
       activateRoom(nr.id);
     }
@@ -14087,14 +14090,16 @@
     if (partRooms.length > 1) activateRoom(room.id);
     // a dice press that found the previous surprise's tab(s) untouched swaps them out instead of adding more tabs
     if (newRoomMode && opts.reuseRooms && opts.reuseRooms.length) surpriseDropRooms(opts.reuseRooms, partRooms);
-    surpriseLastPress = { roomIds: partRooms.slice() }; // surpriseReusableRooms() only accepts it if it is still one whole, untouched surprise
+    surpriseLastPress = opts.tryme ? null : { roomIds: partRooms.slice() }; // surpriseReusableRooms() only accepts it if it is still one whole, untouched surprise
     // recency counts presses, and a press is its primary plus its fillers: none of them comes back within SURPRISE_RECENT_MAX presses
+    if (!opts.tryme) {
     if (surpriseRecent.length === 0) surpriseRecentPresses.length = 0;
     const pressIds = [spec.templateId].concat((spec.fillers || []).map(f => f.templateId));
     pressIds.forEach(id => surpriseRecent.push(id)); surpriseRecentPresses.push(pressIds.length);
     while (surpriseRecentPresses.length > SURPRISE_RECENT_MAX) surpriseRecent.splice(0, surpriseRecentPresses.shift());
     surpriseRecentVariants.push(spec.variant);
     if (surpriseRecentVariants.length > SURPRISE_RECENT_VARIANTS_MAX) surpriseRecentVariants.shift();
+    }
     if (spec.blindTraps) hiddenTintRooms.add(room.id);
     const rect = { x: spec.ox, y: spec.oy, w: spec.w, h: spec.h };
     const overlaps = s => !(s.rect.x + s.rect.w <= rect.x || rect.x + rect.w <= s.rect.x || s.rect.y + s.rect.h <= rect.y || rect.y + rect.h <= s.rect.y);
@@ -14102,14 +14107,14 @@
       .concat((spec.fillers || []).map(f => { const fr = { x: f.ox, y: f.oy, w: f.w, h: f.h }; return { seed, templateId: f.templateId, rect: fr, sig: surpriseRectSignature(fr), filler: true }; }));
     renderRoomTabs();
     renderAll();
-    const caption = "Surprise #" + seed + ": " + spec.name;
+    const caption = opts.tryme ? "Try me: " + spec.name : "Surprise #" + seed + ": " + spec.name;
     lastSurpriseCaption = caption;
     setCaption(caption);
     let extra = "";
     if (!playerPlaced && playerRoomId !== currentRoomId) extra += " (your player lives in another room — drag them over to join in)";
     if (gravityEnabled !== wasGravity) extra += " — gravity is now " + (gravityEnabled ? "on" : "off");
     if ((spec.fillers || []).length) extra += " + " + spec.fillers.map(f => f.name).join(", ");
-    const freezeIt = spec.category === "room" || spec.authored || !surpriseVaried;
+    const freezeIt = !opts.live && (spec.category === "room" || spec.authored || !surpriseVaried); // Try me scenes run at once
     if (freezeIt) extra += " — ready, press P to start it";
     log(caption + extra);
     try { playChip("pop"); } catch (e) { /* audio can be unavailable */ }
@@ -14155,33 +14160,48 @@
     ov.appendChild(card);
     document.body.appendChild(ov);
   }
-  // ---- Stage 2: "Try this" (Objects tab). Reads the selected palette piece, finds templates that
-  // feature it (a lookup over the templates' own legends, no logic of its own), and builds one in its
-  // canonical form. Never overwrites: a full room only offers "new room" or cancel.
-  const SURPRISE_PIECE_MATCH = {
-    fan: n => n.startsWith("fan:"), cannon: n => n.startsWith("cannon:"), spawner: n => n.startsWith("spawner"),
-    tramp: n => n === "tramp", magnet: n => n === "magnet", bomb: n => n === "bomb", hole: n => n === "hole",
-    button: n => n === "button" || n === "button0", plate: n => n === "plate", gate: n => n === "gate",
-    stone: n => n === "stone", crate: n => n === "crate" || n.startsWith("spawnerc"), lava: n => n === "lava",
-    spike: n => n === "spike", bounce: n => n === "bounce", sticky: n => n === "sticky", slick: n => n === "slick",
-    belt: n => n.startsWith("belt:"), chaser: n => n === "chaser", pet: n => n === "pet" || n === "pet*" || n === "walker",
-    reward: n => n === "reward" || n === "reward*"
-  };
-  function surpriseTemplatesFor(pieceKey) {
-    const match = SURPRISE_PIECE_MATCH[pieceKey];
-    if (!match) return [];
-    return surpriseEligibleTemplates().eligible.filter(t => (t.rooms ? t.rooms.map(r => r.legend) : [t.legend]).some(lg => Object.values(lg).some(match))).map(t => t.id);
+  // ---- "Try me" (Objects tab). Separate from Surprise Me: it builds a small, readable demonstration of the SELECTED piece
+  // (a gate with its plate and a crate, a locked door with its key...). The first press opens a "try me" room; later
+  // presses put their scene in the same room if there is free space (scenes are self-contained and all share the same
+  // rules: gravity down, no wrap), otherwise in a new try-me room. Never overwrites anything. Scenes run at once.
+  function tmScene(id, piece, name, w, cells, legend, fact) {
+    const h = 8, g = [];
+    for (let y = 0; y < h; y++) { const r = []; for (let x = 0; x < w; x++) r.push(y >= h - 2 || (x === 0 || x === w - 1) && y >= 1 ? "=" : "."); g.push(r); }
+    cells.forEach(([x, y, ch]) => { g[y][x] = ch; });
+    return { id: "tryme-" + id, tryme: true, piece, category: "toy", closed: false, stooge: "", authored: true, names: [name],
+      room: { gravity: "on", wrapH: false, wrapV: false }, requires: [], discover: "P", expect: { fact, needsInput: false },
+      legend: Object.assign({ "=": "wall", P: "player", w: "walker", c: "crate", G: "gate", p: "plate", L: "lava" }, legend), rows: g.map(r => r.join("")) };
   }
-  // What is selected in the palette right now, as one of the SURPRISE_PIECE_MATCH keys (or null).
+  const gateRow = [[7, 1, "="], [7, 2, "="], [7, 3, "="], [7, 4, "G"], [7, 5, "G"]];
+  const TRYME_TEMPLATES = [
+    tmScene("fan", "fan", "Fan Fun", 14, [[7, 6, "f"], [7, 3, "c"], [3, 5, "w"], [2, 5, "P"]], { f: "fan:n" }, "the fan holds a crate in the air"),
+    tmScene("cannon", "cannon", "Cannon Practice", 18, [[3, 5, "k"], [3, 1, "c"], [13, 5, "w"], [8, 5, "P"]], { k: "cannon:ne" }, "a crate dropped on the cannon is fired across the room"),
+    tmScene("spawner", "spawner", "Crate Machine", 16, [[1, 5, "s"], [3, 6, "L"], [4, 6, "L"], [12, 5, "P"]], { s: "spawnerc:e" }, "the spawner keeps throwing out crates"),
+    tmScene("gate", "gate", "Gate And Plate", 14, gateRow.concat([[3, 5, "p"], [3, 1, "c"], [10, 5, "w"], [1, 5, "P"]]), {}, "the crate lands on the plate, the gate opens and the pet walks out"),
+    tmScene("tramp", "tramp", "Bounce House", 14, [[6, 5, "t"], [6, 1, "c"], [10, 5, "w"], [2, 5, "P"]], { t: "tramp" }, "the crate bounces on the trampoline"),
+    tmScene("magnet", "magnet", "Magnet Mess", 16, [[8, 4, "m"], [7, 1, "c"], [13, 5, "w"], [2, 5, "P"]], { m: "magnet" }, "the crate is pulled to the magnet and stays stuck"),
+    tmScene("bomb", "bomb", "Drop The Bomb", 14, [[6, 5, "b"], [6, 1, "c"], [7, 5, "="], [9, 5, "w"], [2, 5, "P"]], { b: "bomb" }, "the falling crate sets the bomb off and the blast breaks the wall"),
+    tmScene("hole", "hole", "Black Hole Snack", 20, [[14, 3, "h"], [11, 1, "c"], [17, 5, "w"], [1, 5, "P"]], { h: "hole" }, "the black hole swallows what comes near"),
+    tmScene("switch", "switch", "Switch It", 14, gateRow.concat([[3, 5, "u"], [3, 1, "c"], [10, 5, "w"], [1, 5, "P"]]), { u: "button" }, "the crate flips the switch and the gate stays open"),
+    tmScene("plate", "plate", "Stand On It", 14, gateRow.concat([[3, 5, "q"], [10, 5, "w"]]), { q: "playerplate" }, "standing on the plate holds the gate open"),
+    tmScene("bounce", "bounce", "Bouncy Floor", 14, [[3, 6, "B"], [4, 6, "B"], [5, 6, "B"], [6, 6, "B"], [7, 6, "B"], [8, 6, "B"], [9, 6, "B"], [10, 6, "B"], [5, 1, "c"], [9, 5, "w"], [1, 5, "P"]], { B: "bounce" }, "everything on the floor keeps bouncing"),
+    tmScene("sticky", "sticky", "Sticky Floor", 16, [8, 9, 10, 11, 12, 13, 14].map(x => [x, 6, "S"]).concat([[3, 5, "w"], [10, 5, "w"], [1, 5, "P"]]), { S: "sticky" }, "pets slow down on the sticky floor"),
+    tmScene("slick", "slick", "Ice Rink", 16, [[1, 5, "s"]].concat([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map(x => [x, 6, "I"]), [[14, 5, "P"]]), { s: "spawnerc:e", I: "slick" }, "crates slide a long way on the ice"),
+    tmScene("lava", "lava", "Lava Pit", 16, [6, 7, 8, 9].map(x => [x, 6, "L"]).concat([[3, 5, "w"], [12, 5, "w"], [7, 1, "c"], [1, 5, "P"]]), {}, "things that fall in the lava are lost; pets are sent home"),
+    tmScene("belt", "belt", "Conveyor Belt", 16, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map(x => [x, 6, "E"]).concat([[14, 6, "L"], [3, 5, "c"], [7, 5, "w"], [1, 5, "P"]]), { E: "belt:e" }, "the belt carries the crate and the pet along"),
+    tmScene("lockeddoor", "lockeddoor", "Locked Door", 16, [[8, 1, "="], [8, 2, "="], [8, 3, "="], [8, 4, "D"], [8, 5, "D"], [4, 5, "k"], [11, 5, "w"], [1, 5, "P"]], { D: "lockeddoor:red", k: "key:red" }, "pick up the key and the locked door opens when you touch it"),
+    tmScene("crate", "crate", "Crate Stack", 16, [[4, 5, "c"], [4, 4, "c"], [4, 3, "c"], [9, 6, "L"], [10, 6, "L"], [13, 5, "w"], [1, 5, "P"]], {}, "push the crates around; lava eats them"),
+    tmScene("stone", "stone", "Stone Bridge", 16, [7, 8, 9].map(x => [x, 6, "L"]).concat([[4, 5, "n"], [13, 5, "w"], [1, 5, "P"]]), { n: "stone" }, "a Large Stone pushed into the lava makes a bridge"),
+    tmScene("platform", "platform", "Moving Platform", 16, [4, 5, 6, 7, 8, 9, 10, 11].map(x => [x, 6, "L"]).concat([[7, 5, "M"], [7, 3, "c"], [13, 5, "w"], [1, 5, "P"]]), { M: "actor|movingplatform" }, "the platform carries the crate back and forth over the lava"),
+    tmScene("key", "key", "Pick A Key", 16, [[8, 1, "="], [8, 2, "="], [8, 3, "="], [8, 4, "D"], [8, 5, "E"], [4, 5, "k"], [11, 5, "w"], [1, 5, "P"]], { D: "lockeddoor:blue", E: "lockeddoor:red", k: "key:blue" }, "the blue key opens the blue door, not the red one")
+  ];
+  // what is selected in the palette right now, as a TRYME_TEMPLATES `piece` key (or null)
   function surpriseSelectedPiece() {
     if (paintMode === "actor") {
       if (selectedActorKind === PUSHABLE_KIND) return "crate";
       if (selectedActorKind === LARGE_STONE_KIND) return "stone";
-      const def = actorDefs[selectedActorDefId];
-      if (!def) return null;
-      if (def.temperament === "collectible") return "reward";
-      if (def.temperament === "chaser") return "chaser";
-      if (def.temperament === "wanderer" || def.temperament === "fleer") return "pet";
+      if (selectedActorKind === MOVING_PLATFORM_KIND) return "platform";
+      if (selectedActorDefId === "colKey") return "key";
       return null;
     }
     if (paintMode !== "tile") return null;
@@ -14194,29 +14214,35 @@
     if (g === "magnet") return "magnet";
     if (g === BOMB2_GEOMETRY) return "bomb";
     if (g === "gravitywell") return "hole";
-    if (g === PUSH_BUTTON_GEOMETRY) return "button";
+    if (g === PUSH_BUTTON_GEOMETRY) return "switch";
     if (g === "plate") return "plate";
+    if (g === LOCKED_DOOR_GEOMETRY) return "lockeddoor";
     if (m === "bouncy") return "bounce";
     if (m === "sticky") return "sticky";
     if (m === "slippery") return "slick";
-    if (m === "lethal") return g === "none" ? "lava" : "spike";
+    if (m === "lethal") return "lava";
     if (WIND_ORDER.includes(m)) return "belt";
     return null;
   }
-  function surpriseTry(seed) {
+  function surpriseTry(pieceKey) {
     if (appMode !== "build") return null;
-    const fresh = seed == null;
-    if (seed == null) seed = 1000 + Math.floor(Math.random() * 9000);
-    const piece = surpriseSelectedPiece();
-    const ids = piece ? surpriseTemplatesFor(piece) : [];
-    if (!ids.length) return Object.assign({ fallback: true }, surpriseMe(seed, { noOverwrite: true, recent: fresh }));
-    return surpriseMe(seed, { templateIds: ids, canonical: true, chaos: false, noOverwrite: true, recent: fresh });
+    const piece = pieceKey || surpriseSelectedPiece();
+    const t = piece && TRYME_TEMPLATES.find(x => x.piece === piece);
+    if (!t) { log("Pick a piece first, then press Try me."); return null; }
+    snapshotCurrentRoomState();
+    let tryRoom = rooms.find(r => r.id === currentRoomId && r.tryMe) || rooms.slice().reverse().find(r => r.tryMe);
+    const opts = { templateId: t.id, tryme: true, live: true, recent: false };
+    if (tryRoom) {
+      if (tryRoom.id !== currentRoomId) activateRoom(tryRoom.id);
+      return surpriseMe(1, opts);
+    }
+    return surpriseMe(1, Object.assign({ full: "new" }, opts));
   }
   window.surpriseTry = surpriseTry;
   (function wireTryThisButton() {
     const btn = document.getElementById("tryThisBtn");
     btn.addEventListener("click", () => { try { playChip("rattle"); } catch (e) { /* audio can be unavailable */ } surpriseTry(); });
-    btn.addEventListener("mouseenter", () => setCaption("Pick an item, then try it in a sample."));
+    btn.addEventListener("mouseenter", () => setCaption("Pick a piece, then see it work."));
     btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
   })();
 

@@ -315,6 +315,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   if (kid.exceptions) fail("two rooms " + JSON.stringify(kid));
 
   // ---- 7. Stage 2: "Try this" ----
+  if (false) { // retired: "Try this" became "Try me" (tests/tryme.test.js)
   // every template builds canonically (no chaos, plain fills), plays 5s clean, and the plain pieces really are plain
   const canon = await page.evaluate((ids) => {
     const bad = [];
@@ -392,6 +393,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   console.log("try-this button visible in Objects tab:", btnVisible);
   if (!btnVisible) fail("try this button not visible in the Objects tab");
 
+  } // end retired section 7
   if (errors.length) fail("page errors: " + errors.slice(0, 3).join(" | "));
   await browser.close();
   console.log(results.fail.length ? "\nFAILURES: " + results.fail.length : "\nALL PASSED");
