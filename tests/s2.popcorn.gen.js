@@ -24,6 +24,8 @@ vline(17, 1, 2); hline(9, 10, 3); vline(13, 6, 8); set(20, 9, "B"); set(21, 9, "
 // rewards (the maze's win in Play: collect them all) and the crowd
 set(21, 5, "o"); set(2, 15, "o"); set(13, 13, "o"); set(8, 1, "o");
 [[3, 6], [9, 7], [15, 9], [11, 15], [4, 11], [18, 11], [20, 2]].forEach(([x, y]) => set(x, y, "w"));
+// non-lethal hopping Gloops: they spring about on the bouncy floors and shelves from the first second
+[[2, 16], [7, 16], [13, 16], [5, 13], [10, 8], [18, 5], [14, 5], [11, 12]].forEach(([x, y]) => { if (g[y][x] !== ".") throw new Error("hopper cell taken " + x + "," + y); set(x, y, "H"); });
 set(19, 1, "h"); // a hazard-ball spawner in the ceiling, dropping balls into the maze
 const rows = g.map(r => r.join(""));
 if (process.argv.includes("--print")) { rows.forEach((r, i) => console.log(String(i).padStart(2), r)); }
@@ -31,7 +33,7 @@ let src = fs.readFileSync(FILE, "utf8");
 const i = src.indexOf('{ id: "popcorn"'); if (i < 0) throw new Error("popcorn entry not found");
 const j = src.indexOf("rows: [", i), k = src.indexOf("] }", j) + 1; // keeps the " }," that closes the entry
 const legendStart = src.indexOf("legend:", i), legendEnd = src.indexOf("\n", legendStart);
-const legend = 'legend: {"B": "bounce", "t": "tramp", "o": "reward", "S": "actor|colStar", "P": "player", "w": "pet", "h": "spawnerh:s"},';
+const legend = 'legend: {"B": "bounce", "t": "tramp", "o": "reward", "S": "actor|colStar", "P": "player", "w": "pet", "h": "spawnerh:s", "H": "hopper"},';
 src = src.slice(0, legendStart) + legend + src.slice(legendEnd, j) + "rows: " + JSON.stringify(rows).replace(/,/g, ", ") + src.slice(k);
 // the line describing it
 src = src.replace(/expect: \{"fact": "a bouncy maze: one critter[^}]*\}/, 'expect: {"fact": "a bouncy maze full of springing critters and falling balls; a star hides in a pocket you can only reach by chaining trampolines", "check": "", "needsInput": true}');

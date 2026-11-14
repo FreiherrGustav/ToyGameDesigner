@@ -1246,6 +1246,9 @@
   // is a MINIMUM enforced on top, so even a gentle step-on still gets a real, satisfying bounce
   // instead of reflection's usual "barely fell, barely bounces."
   const TRAMPOLINE_RESTITUTION = 0.97;
+  // Everything but the player (crates, bombs, characters...) keeps more of its speed on a trampoline than on a plain bouncy tile (0.82),
+  // but still settles (0.97 never did, and a launch floor never settled either).
+  const TRAMPOLINE_OBJECT_RESTITUTION = 0.92;
   const TRAMPOLINE_LAUNCH_SPEED = 900; // vs BOUNCY_LAUNCH_SPEED's 620 — a trampoline is stronger, on purpose
 
   // v2.19: the spawner prototype's own validated numbers, brought in as-is.
@@ -6409,12 +6412,23 @@
   // wrap is switched on for that axis, in which case that edge stops blocking at all and
   // applyWorldWrap() teleports whatever crosses it to the opposite side.
   function geometryAt(gx, gy) {
-    if (gx < 0 || gx >= roomCols()) return wrapHEnabled ? "none" : "solid";
-    if (gy < 0 || gy >= ROWS) return wrapVEnabled ? "none" : "solid";
+    // A wrapped edge continues with the tiles on the opposite side (so a belt or floor carries across the seam instead of
+    // ending at it). The player keeps the old open seam on the vertical axis only (stepIsPlayer): the Over-Engineered
+    // Escape's route depends on it.
+    if (gx < 0 || gx >= roomCols()) return wrapHEnabled ? geometryAt(wrapCellX(gx), gy) : "solid";
+    if (gy < 0 || gy >= ROWS) return wrapVEnabled ? (stepIsPlayer ? "none" : geometryAt(gx, wrapCellY(gy))) : "solid";
     const tile = gameplayTileAt(gx, gy);
     return tile ? tile.geometry : "none";
   }
+  function wrapCellX(gx) { const w = roomCols(); return ((gx % w) + w) % w; }
+  function wrapCellY(gy) { return ((gy % ROWS) + ROWS) % ROWS; }
+  function wrapCellCoords(gx, gy) { // out-of-range coordinates folded back onto the board on wrapped axes (non-player on the vertical axis)
+    if (wrapHEnabled && (gx < 0 || gx >= roomCols())) gx = wrapCellX(gx);
+    if (wrapVEnabled && !stepIsPlayer && (gy < 0 || gy >= ROWS)) gy = wrapCellY(gy);
+    return [gx, gy];
+  }
   function modifierAt(gx, gy) {
+    [gx, gy] = wrapCellCoords(gx, gy);
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return "none"; // the boundary itself has no modifier
     const tile = gameplayTileAt(gx, gy);
     return tile ? tile.modifier : "none";
@@ -6422,11 +6436,13 @@
   // The channel color a switch/plate/door/solid cell is tagged with (v2.9), or null for an
   // untagged cell (or one outside the board — a wrapped/solid boundary edge has no channel).
   function colorAt(gx, gy) {
+    [gx, gy] = wrapCellCoords(gx, gy);
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return colorBoard[gy][gx];
   }
   // The named skin (a groundTileDefs id) painted at a cell, or null for the plain built-in icon.
   function groundSkinAt(gx, gy) {
+    [gx, gy] = wrapCellCoords(gx, gy);
     if (gx < 0 || gx >= roomCols() || gy < 0 || gy >= ROWS) return null;
     return groundSkinBoard[gy][gx];
   }
@@ -7029,7 +7045,7 @@
         // place).
         if (bouncy && !actor.isPlayer && !(isSteeringNPC && isHopperDef(def))) actor.displacedCooldown = (isSteeringNPC && modifier === "bouncy" && !isTrampolineGeom) ? 100 : NPC_DISPLACED_RECOVERY_MS; // a bouncy-floor springer steers again between bounces
         // only the player gets the trampoline's springy 0.97; at 0.97 a crate/ball took about a minute to stop
-        const restitution = (isTrampolineGeom && actor.isPlayer) ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION;
+        const restitution = isTrampolineGeom ? (actor.isPlayer ? TRAMPOLINE_RESTITUTION : TRAMPOLINE_OBJECT_RESTITUTION) : BOUNCE_RESTITUTION;
         // v2.20.1: a bounce needs to SOUND like a bounce, not like an ordinary landing — the two
         // used to be indistinguishable (both just played the generic thud via triggerImpact).
         // v2.28: now plays for a bouncing physics object too, not just the player — a thrown crate
@@ -7443,7 +7459,7 @@
           triggerImpact(actor, axis, fall, bouncy && !settles);
           if (bouncy && !settles) {
             const hopperBounce = actorIsSteeringNPC && isHopperDef(actorDef);
-            actor[vk] = -actor[vk] * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : BOUNCE_RESTITUTION);
+            actor[vk] = -actor[vk] * (actor.isPlayer ? TRAMPOLINE_RESTITUTION : TRAMPOLINE_OBJECT_RESTITUTION);
             if (actor.isPlayer || hopperBounce) actor[vk] = -gs * Math.max(-actor[vk] * gs, TRAMPOLINE_LAUNCH_SPEED);
             actor.bouncyCooldown = 350;
             if (hopperBounce) hopBounceSteer(actor);
@@ -9273,7 +9289,9 @@
   }
 
   const AXES_XY = ["x", "y"], AXES_YX = ["y", "x"];
+  let stepIsPlayer = false; // set while an actor is being stepped (see geometryAt's wrap rule)
   function stepActor(actor, dt, player) {
+    stepIsPlayer = !!actor.isPlayer;
     if (actor.dragging) return;
     syncViewTables();
     const vAlongBefore = gravAxis() === "x" ? actor.vx : actor.vy; // frozen while the editor is dragging it
@@ -13508,8 +13526,8 @@
       room: {"gravity": "on", "dir": "any", "wrapH": false, "wrapV": false}, requires: ["bouncy", "trampoline"], discover: "o",
       expect: {"fact": "a bouncy maze full of springing critters and falling balls; a star hides in a pocket you can only reach by chaining trampolines", "check": "", "needsInput": true},
       /*v2.67-decor*/ exact: {"wallSkin":null,"bgs":{},"backs":[],"backLegend":{"a":"bgSky","b":"bgSky2","c":"bgSky3","d":"bgSky4","l":"bgCloud"},"backRows":["aaaaaaaaaaaaaaaaaaaaaaaa","aaaaaaaalaaaaaalaaaaaaaa","laaaaaaaaaaaalaaaaaaaaaa","alaaaaaaaaaaaaaaaaaaaaaa","aaaaaaaaaaaaaaaaaaaaaaaa","alaaaaaaaaaaaaaaaaaaaaaa","aaaaaaaaaaaalaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbb","bbbbbbbbbbbbbbbbbbbbbbbb","bbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccc","cccccccccccccccccccccccc","cccccccccccccccccccccccc","dddddddddddddddddddddddd","dddddddddddddddddddddddd","dddddddddddddddddddddddd","dddddddddddddddddddddddd","dddddddddddddddddddddddd"]},
-      legend: {"B": "bounce", "t": "tramp", "o": "reward", "S": "actor|colStar", "P": "player", "w": "pet", "h": "spawnerh:s"},
-      rows: ["BBBBBBBBBBBBBBBBBBBBBBBB", "B.......o........B.h...B", "B................B..w..B", "B.S.B....BB............B", "BBBBB..................B", "B....................o.B", "B..w.........B.BBBBBBBBB", "B........w...B.........B", "B..BBB.......B.........B", "B.........t....w....BB.B", "B.......BBBBBBB........B", "B...w.......B.....w....B", "B...........B..B.......B", "B...........Bo.B.......B", "B.....BBBBBBB..........B", "B.o........w.......BBBBB", "B...............t....P.B", "BBBBBBBBBBBBBBBBBBBBBBBB"] },
+      legend: {"B": "bounce", "t": "tramp", "o": "reward", "S": "actor|colStar", "P": "player", "w": "pet", "h": "spawnerh:s", "H": "hopper"},
+      rows: ["BBBBBBBBBBBBBBBBBBBBBBBB", "B.......o........B.h...B", "B................B..w..B", "B.S.B....BB............B", "BBBBB..................B", "B.............H...H..o.B", "B..w.........B.BBBBBBBBB", "B........w...B.........B", "B..BBB....H..B.........B", "B.........t....w....BB.B", "B.......BBBBBBB........B", "B...w.......B.....w....B", "B..........HB..B.......B", "B....H......Bo.B.......B", "B.....BBBBBBB..........B", "B.o........w.......BBBBB", "B.H....H.....H..t....P.B", "BBBBBBBBBBBBBBBBBBBBBBBB"] },
     { id: "warploop", category: "vignette", closed: false, stooge: "Qw", names: ["The Infinite Warp Loop", "Blink And You're Elsewhere", "Warp Core Breach"],
       room: {"gravity": "off", "wrapH": false, "wrapV": false}, requires: [], discover: "w",
       expect: {"fact": "the player starts on the warp field and keeps blinking from place to place", "check": "warp", "needsInput": false, "selfStart": true},
@@ -15410,7 +15428,7 @@
     gameData.rooms.forEach(r => { purgeSpawnedActors(r.actors); resetActorsToSpawn(r.actors, r.startPos); });
 
     const runtimeFunctions = [
-      geometryAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
+      geometryAt, wrapCellX, wrapCellY, wrapCellCoords, groundSkinAt, modifierAt, colorAt, isChannelOn, isBlockingGeometry, isChannelGateGeometry, isCellBlocking, isColorTaggable, lockedDoorOpenAt, lockedDoorColorAt, checkLockedDoorUnlock,
       cannonFamilyFor, isAnyCannonGeometry, isBombGeometry, isCarryBombKind, recoloredArt, isForceSusceptible, isSteeringCharacter, npcIsLethal, npcStaysGone, logBuildKill, triggerNpcCatch, reducedMotion, tryCrushNpc, squashNpc, tryImpactDetonate, tryStoneCrushCrate, npcJustWalking, bigHitFx, shakeOffset, renderPuffs,
       moverDefOf, moverDirOf, moverSpeedOf, moverIsVertical, moverExtentPx, moverSetDims, moverPlaceAt, moverCovers, moverTouches, moverFloatsUnder, roomHasFloatingMovers, tickMovers, drawMover,
       gameNow, gameSetTimeout, gameClearTimeout, advanceGameClock, clearGameTimers, setGamePaused, togglePause, drawPausedOverlay,
@@ -15494,7 +15512,7 @@
       `const GRAVITY_WELL_RADIUS_TILES = ${GRAVITY_WELL_RADIUS_TILES}, GRAVITY_WELL_CAPTURE_SPEED = ${GRAVITY_WELL_CAPTURE_SPEED};`,
       `const BLACK_HOLE_FRAMES = ${JSON.stringify(BLACK_HOLE_FRAMES)}, BLACK_HOLE_FRAME_MS = ${BLACK_HOLE_FRAME_MS};`,
       `const TELEPORTER_FRAMES = ${JSON.stringify(TELEPORTER_FRAMES)}, TELEPORTER_FRAME_MS = ${TELEPORTER_FRAME_MS};`,
-      `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
+      `const TRAMPOLINE_RESTITUTION = ${TRAMPOLINE_RESTITUTION}, TRAMPOLINE_OBJECT_RESTITUTION = ${TRAMPOLINE_OBJECT_RESTITUTION}, TRAMPOLINE_LAUNCH_SPEED = ${TRAMPOLINE_LAUNCH_SPEED};`,
       `const STICKY_MOVE_MULT = ${STICKY_MOVE_MULT}, STICKY_FRICTION_MULT = ${STICKY_FRICTION_MULT}, STICKY_RELEASE_MS = ${STICKY_RELEASE_MS};`,
       `const STICKY_CLING_MS = ${STICKY_CLING_MS};`,
       `const SPAWN_INTERVAL_MS = ${SPAWN_INTERVAL_MS}, SPAWNER_WINDUP_MS = ${SPAWNER_WINDUP_MS}, SPAWNER_VIEW_MARGIN_PX = ${SPAWNER_VIEW_MARGIN_PX}, SPAWNER_MAX_LIVE = ${SPAWNER_MAX_LIVE};`,
@@ -15659,6 +15677,7 @@
   let artCache = new WeakMap(), artContentCache = new Map(), artCacheEntries = 0, artCacheBytes = 0, artCacheOff = 0; let artViewK = 0;
   let spawnerRuntime = {}; // transient countdown state, never part of GAME_DATA — see tickSpawners
   let switchChannels = GAME_DATA.switchChannels;
+  let stepIsPlayer = false;
   let plateChannelsActive = {};
   let trapTimers = {};
   let switchTouchedCells = {}; // v2.31.2, edge-trigger bookkeeping — see checkPlayerTileContacts

@@ -3,9 +3,9 @@
 const fs = require("fs"), os = require("os"), path = require("path");
 const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 const [oldHtml, ...ids0] = process.argv.slice(2);
-const ids = ids0.length ? ids0 : ["trampit", "catcannon", "tunneltrouble", "elevator", "plinko", "cannonrange", "windrally"];
+let ids = ids0.length ? (ids0[0] === "all" ? null : ids0) : ["trampit", "catcannon", "tunneltrouble", "elevator", "plinko", "cannonrange", "windrally"];
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
-const HOOK = `window.__i = { run: (id, n) => { Math.random = (function () { let s = 12345; return () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
+const HOOK = `window.__i = { ids: () => SURPRISE_TEMPLATES.map(t => t.id), run: (id, n) => { Math.random = (function () { let s = 12345; return () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();
   const r = surpriseMe(10000, { templateId: id }); setGamePaused(false); const hs = []; let h = 5381;
   const mix = s => { for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0; };
   mix(JSON.stringify([board, colorBoard, groundSkinBoard]));
@@ -17,6 +17,7 @@ const A = mk(fs.readFileSync(oldHtml, "utf8"), "inv_old.html"), B = mk(fs.readFi
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const go = async (file, id) => { const p = await b.newPage(); p.on("dialog", d => d.accept()); await p.addInitScript(() => { window.requestAnimationFrame = () => 0; });
     await p.goto("file://" + file + "#t"); await p.waitForFunction(() => window.__i); const r = await p.evaluate(i => window.__i.run(i, 900), id); await p.close(); return r; };
+  if (!ids) { const p = await b.newPage(); await p.addInitScript(() => { window.requestAnimationFrame = () => 0; }); await p.goto("file://" + B + "#t"); await p.waitForFunction(() => window.__i); ids = await p.evaluate(() => window.__i.ids()); await p.close(); }
   let bad = 0;
   for (const id of ids) { const a = await go(A, id), c = await go(B, id); const same = a.ok && c.ok && JSON.stringify(a.hs) === JSON.stringify(c.hs); if (!same) bad++; console.log((same ? "identical " : "DIFFERS   ") + id + " (" + a.actors + " actors)"); }
   await b.close(); console.log(bad ? bad + " differ" : "all identical"); process.exit(bad ? 1 : 0);
