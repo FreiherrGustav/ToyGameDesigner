@@ -7,14 +7,14 @@ const defs = require(path.resolve(defsFile)); const def = defs.find(d => d.id ==
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = require("./causal.hook.js")() + `
-window.__m = { run: (def, seed, mirror, frames, every, dt) => { SURPRISE_TEMPLATES.push(def); surpriseRecent.length = 0;
+window.__m = { run: (def, seed, mirror, frames, every, dt) => { SURPRISE_TEMPLATES.push(def); 
   const r = surpriseMe(seed, { templateIds: [def.id], canonical: true, chaos: false, mirror: !!mirror });
   if (!r || r.failed) return { fail: JSON.stringify(r) };
   enterPlayMode(); tick(1/60); window.__czStart(); const lines = [];
   for (let i = 0; i < frames; i++) { window.__cz.frame++; tick(dt); window.__czPoll();
     if (i % every === 0) lines.push(i + ": " + actors.map(a => { const d = actorDefs[a.defId] || {}; const n = a.isPlayer ? "P" : (d.name || a.defId).slice(0, 6); return n + "(" + (a.x / TILE).toFixed(1) + "," + (a.y / TILE).toFixed(1) + (Math.abs(a.vx) + Math.abs(a.vy) > 30 ? " v" + Math.round(a.vx) + "," + Math.round(a.vy) : "") + (a.cannonLoad ? " LOAD" : "") + ")"; }).join(" ")); }
   const z = window.__czStop(); return { name: r.name, lines, ev: z.events.map(e => e.f + ":" + e.type + (e.char ? "*" : "") + "<" + (e.cause == null ? "-" : e.cause)), ops: r.ops, rect: r.rect, dir: r.gravity }; } };`;
-const tmp = path.join(os.tmpdir(), "machines_build.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+const tmp = path.join(os.tmpdir(), "machines_build.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); const p = await b.newPage(); p.on("dialog", d => d.accept()); p.on("pageerror", e => console.log("PAGEERROR", e));
   await p.addInitScript(() => { window.requestAnimationFrame = () => 0; });

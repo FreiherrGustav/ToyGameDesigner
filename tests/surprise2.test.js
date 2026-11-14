@@ -7,15 +7,15 @@ const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = require("./surprise.hook.js")() + `
   window.__st = {
-    reset: keep => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; if (!keep) surpriseRecent.length = 0; },
+    reset: keep => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; if (!keep) {} },
     templates: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, category: t.category, closed: t.closed, stooge: t.stooge, room: t.room || null, expect: t.expect || null, nonsense: !!t.nonsense, legend: t.legend || null, rows: t.rows || null, rooms: t.rooms || null, requires: t.requires, names: t.names, discover: t.discover, authored: !!t.authored })),
     eligible: () => surpriseEligibleTemplates(),
     gen: (seed, o) => generateSurprise(seed, o), press: (seed, o) => surpriseMe(seed, o),
     play: () => enterPlayMode(), stop: () => exitToBuildMode(),
     state: () => ({ actors, board, rooms, currentRoomId, playerRoomId, gravity: gravityEnabled, wrapH: wrapHEnabled, wrapV: wrapVEnabled, doorLinks }),
     snapshot: () => captureProjectSnapshot(), room: () => { snapshotCurrentRoomState(); return rooms.find(r => r.id === currentRoomId); },
-    recent: () => surpriseRecent.slice(), pushTemplate: t => SURPRISE_TEMPLATES.push(t), popTemplate: () => SURPRISE_TEMPLATES.pop(),
-    weights: () => SURPRISE_CATEGORY_WEIGHTS, defs: () => actorDefs,
+    pushTemplate: t => SURPRISE_TEMPLATES.push(t), popTemplate: () => SURPRISE_TEMPLATES.pop(),
+    defs: () => actorDefs,
     serialize: (m, n) => surpriseSerialize(m, n), key: (k, v) => { keys[k] = v; },
     loadSample: fn => loadExampleGame(fn, "t", { skipConfirm: true }),
     builders: () => ({ tunnel: buildTunnelTroubleGame }),
@@ -32,10 +32,10 @@ const HOOK = require("./surprise.hook.js")() + `
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise2_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 // a second copy with no function wrappers (an export serializes engine functions by source text, so the counting wrappers would break it)
 const tmpMini = path.join(os.tmpdir(), "surprise2_mini.html");
-fs.writeFileSync(tmpMini, src.replace(anchor, anchor + "\n  window.__mini = { make: (id) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; return surpriseMe(77, { templateId: id, chaos: false, canonical: true }); } };\n"));
+fs.writeFileSync(tmpMini, src.replace(anchor, anchor + "\n  window.__mini = { make: (id) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false;  return surpriseMe(77, { templateId: id, chaos: false, canonical: true }); } };\n"));
 let pass = 0; const fails = [];
 const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.push(m); console.log("FAIL", m); } };
 (async () => {
@@ -101,22 +101,11 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
     return { cats, per, repeats, fails, pool: __st.eligible().eligible.length };
   }, MIX);
   console.log("mix over", MIX, JSON.stringify(mix.cats), "per template", JSON.stringify(mix.per));
-  console.log("target mix (weights):", JSON.stringify(await page.evaluate(() => __st.weights())));
-  ok(mix.repeats === 0, "no template repeats within any 5 consecutive presses (" + mix.repeats + " repeats)");
+  // (recency checks retired in v2.67: the dice walks a shuffled cycle; see tests/picker.test.js)
   ok(mix.fails === 0, "no generator failures in the mix run (" + mix.fails + ")");
-  // small pool: with 3 eligible templates the OLDEST is the only one allowed to repeat
-  const small = await page.evaluate(() => {
-    const ids = ["plinko", "catcannon", "elevator"], seq = [], recent = [];
-    for (let i = 0; i < 30; i++) { const g = __st.gen(900 + i, { templateIds: ids, avoid: recent.slice() }); seq.push(g.templateId); recent.push(g.templateId); if (recent.length > 5) recent.shift(); }
-    let bad = 0; for (let i = 3; i < seq.length; i++) if (seq[i] !== seq[i - 3]) bad++; // round-robin: each one repeats only after the other two
-    return { seq: seq.slice(0, 9), bad };
-  });
-  ok(small.bad === 0, "with fewer than 6 eligible, only the oldest repeats " + JSON.stringify(small.seq));
   // a given seed always rebuilds the same thing, whatever was pressed before
   const det = await page.evaluate(() => { __st.reset(); const a = __st.press(4821).templateId; __st.reset(true); __st.press(1); __st.reset(true); const b = __st.press(4821).templateId; return a === b && __st.recent().length >= 2; });
   ok(det, "gen(seed) is independent of the recent list (explicit seeds replay exactly)");
-  const dice = await page.evaluate(() => { __st.reset(); const seen = []; for (let i = 0; i < 14; i++) { __st.reset(true); const r = __st.press(); if (r && r.pending) { document.getElementById("surpriseFullOverlay").remove(); break; } seen.push(r.templateId); } let bad = 0; for (let i = 0; i < seen.length; i++) for (let j = Math.max(0, i - 5); j < i; j++) if (seen[i] === seen[j]) bad++; return { n: seen.length, bad, recent: __st.recent() }; });
-  ok(dice.bad === 0 && dice.n >= 6, "real dice presses never repeat within 5 " + JSON.stringify(dice));
 
   // ---- C. self-start: an idle player sees an interaction within 3 s ----
   const SELF = T.filter(t => t.expect && t.expect.selfStart);

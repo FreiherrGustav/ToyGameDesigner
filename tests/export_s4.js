@@ -5,7 +5,7 @@ const { chromium } = require("/opt/node22/lib/node_modules/playwright");
   // a temp copy with only a build helper (no wrappers: the export serializes functions by source, wrapped ones would be anonymous)
   const srcH = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
   const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
-  fs.writeFileSync("/tmp/s4_build.html", srcH.replace(anchor, anchor + 'window.__f = { build: (seed, id) => { surpriseRecent.length = 0; const r = surpriseMe(seed, { templateIds: [id], chaos: false, canonical: true }); return !!(r && !r.failed); } };\n'));
+  fs.writeFileSync("/tmp/s4_build.html", srcH.replace(anchor, anchor + 'window.__f = { build: (seed, id) => {  const r = surpriseMe(seed, { templateIds: [id], chaos: false, canonical: true }); return !!(r && !r.failed); } };\n'));
   const br = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); let bad = 0;
   for (const [id, what] of [["stonepets", "squash"], ["craterain", "squash"], ["bombrow", "bombs"]]) {
     const c = await br.newContext({ acceptDownloads: true }); const q = await c.newPage(); const qe = []; q.on("pageerror", e => qe.push(String(e))); q.on("dialog", d => d.accept());

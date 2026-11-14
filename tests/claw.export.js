@@ -6,7 +6,7 @@ const [id, out, SECS = "20", PAD = "", VERB = ""] = process.argv.slice(2);
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = `window.__w = {
-  build: (id, yaxis) => { surpriseRecent.length = 0; surpriseMe(10001, { templateIds: [id] }); actors.forEach(a => { if (a.defId === MOVING_PLATFORM_DEF_ID && yaxis) a.platformAxis = "y"; }); return actors.length; },
+  build: (id, yaxis) => {  surpriseMe(10001, { templateIds: [id] }); actors.forEach(a => { if (a.defId === MOVING_PLATFORM_DEF_ID && yaxis) a.platformAxis = "y"; }); return actors.length; },
   save: () => { snapshotCurrentRoomState(); return JSON.stringify({ format: "toygamedesigner-project", version: 1, data: captureProjectSnapshot() }); },
   begin: () => { setGamePaused(false); enterPlayMode(); playReadyUntil = 0; tick(1/60); },
   step: n => { const dt = 1 / (window.__fps || 60); for (let i = 0; i < n * (window.__fps || 60) / 60; i++) tick(dt); },

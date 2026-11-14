@@ -11,7 +11,7 @@ const HOOK = require("./causal.hook.js")() + `
 window.__p = { ids: () => SURPRISE_TEMPLATES.map(t => t.id),
   run: (id, seed, which) => {
     Math.random = (function () { let a = seed * 7919 + 13; return () => { a = (a * 1103515245 + 12345) & 0x7fffffff; return a / 0x7fffffff; }; })();
-    suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+    suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false;  
     const r = surpriseMe(seed, { templateIds: [id], recent: false, scene: false, chaos: false, canonical: true, mirror: false }); if (!r || r.failed || r.pending || r.skipped || !r.templateId) return { gen: false };
     const MECHG = /^(plate|barrier|cannon2|fan|bomb2|spawner|magnet|trampoline|pushbutton|gravitywell)/;
     const cands = []; actors.forEach(a => { if (!a.isPlayer) cands.push({ kind: "actor", a }); });
@@ -21,7 +21,7 @@ window.__p = { ids: () => SURPRISE_TEMPLATES.map(t => t.id),
     enterPlayMode(); tick(1 / 60); window.__czStart(); let err = null; try { for (let i = 0; i < 600; i++) { window.__cz.frame++; tick(1 / 60); window.__czPoll(); } } catch (e) { err = String(e); }
     const z = window.__czStop(); const types = {}; z.events.forEach(e => { if (e.type !== "spawn") types[e.type] = (types[e.type] || 0) + 1; });
     return { gen: true, n, types, total: z.events.filter(e => e.type !== "spawn").length, err }; } };`;
-const tmp = path.join(os.tmpdir(), "poke_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+const tmp = path.join(os.tmpdir(), "poke_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const boot = await b.newPage(); await boot.goto("file://" + tmp + "#t"); await boot.waitForFunction(() => window.__p); let ids = await boot.evaluate(() => window.__p.ids()); await boot.close(); if (ONLY) ids = ids.filter(i => ONLY.includes(i));

@@ -4,7 +4,7 @@ const fs = require("fs"), os = require("os"), path = require("path");
 const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
-const HOOK = `window.__x = { ids: () => SURPRISE_TEMPLATES.filter(t => t.exact).map(t => t.id), build: id => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+const HOOK = `window.__x = { ids: () => SURPRISE_TEMPLATES.filter(t => t.exact).map(t => t.id), build: id => {  
   const r = surpriseMe(10001, { templateIds: [id], scene: false }); if (!r || r.failed) return { err: JSON.stringify(r) };
   const miss = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const s = groundSkinBoard[y][x]; if (s && !groundTileDefs[s]) miss.push("skin " + s + "@" + x + "," + y);
     const g = backgroundBoard[y][x]; if (g && !backgroundTileDefs[g]) miss.push("bg " + g + "@" + x + "," + y); } return { miss }; } };`;

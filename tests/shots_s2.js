@@ -6,7 +6,7 @@ fs.mkdirSync(out, { recursive: true });
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const tmp = path.join(os.tmpdir(), "shots_s2.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__x = { press: (seed, o) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; const r = surpriseMe(seed, o); return r && { variant: r.variant, ops: r.ops, name: r.name }; }, play: () => { enterPlayMode(); }, run: n => { for (let i = 0; i < n; i++) tick(1 / 60); renderGame(); }, restoreFactory: () => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; } };\n'));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__x = { press: (seed, o) => {   const r = surpriseMe(seed, o); return r && { variant: r.variant, ops: r.ops, name: r.name }; }, play: () => { enterPlayMode(); }, run: n => { for (let i = 0; i < n; i++) tick(1 / 60); renderGame(); }, restoreFactory: () => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; } };\n'));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const seen = new Set(); let n = 0;

@@ -8,7 +8,7 @@ const FPS = Number(process.argv[2] || 60), MAXS = Number(process.argv[3] || 40);
 const def = require(path.resolve(__dirname, "mousetrap.entry.json"))[0];
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
-const HOOK = `window.__go = (def, P, fps, maxS, noChaser) => { SURPRISE_TEMPLATES.push(def); surpriseRecent.length = 0;
+const HOOK = `window.__go = (def, P, fps, maxS, noChaser) => { SURPRISE_TEMPLATES.push(def); 
   const r = surpriseMe(1, { templateIds: [def.id], canonical: true, chaos: false, mirror: false }); if (!r || r.failed) return { fail: 1 };
   enterPlayMode(); playReadyUntil = null; tick(1 / fps);
   const pl = actors.find(a => a.isPlayer), mc = actors.find(a => { const d = actorDefs[a.defId]; return d && d.temperament === "chaser"; });

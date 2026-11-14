@@ -8,20 +8,20 @@ const src = fs.readFileSync(file, "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 if (!src.includes(anchor)) throw new Error("anchor missing");
 const HOOK = require("./surprise.hook.js")() + `
-  window.__f = { run: seed => { surpriseRecent.length = 0; const r = surpriseMe(seed); if (!r) return null;
+  window.__f = { run: seed => {  const r = surpriseMe(seed); if (!r) return null;
       const t = SURPRISE_TEMPLATES.find(t => t.id === r.templateId) || {};
       enterPlayMode(); tick(1/60); window.__iaStart(); let err = null; try { window.__iaTick(300); } catch (e) { err = String(e); }
       const ia = window.__iaStop(); const types = Object.keys(ia.counts).filter(k => k !== "spawn" && k !== "npcHit");
       return { id: r.templateId, category: t.category, types, counts: ia.counts, err }; },
-    probe: (seed, id, opts) => { surpriseRecent.length = 0; const r = surpriseMe(seed, Object.assign({ templateIds: [id] }, opts || {})); if (!r) return null;
+    probe: (seed, id, opts) => {  const r = surpriseMe(seed, Object.assign({ templateIds: [id] }, opts || {})); if (!r) return null;
       enterPlayMode(); tick(1/60); window.__iaStart(); window.__iaTick(300); const ia = window.__iaStop(); return { c: ia.counts, f: ia.first }; },
-    dump: (seed, id) => { surpriseRecent.length = 0; surpriseMe(seed, { templateIds: [id] }); const plates = [];
+    dump: (seed, id) => {  surpriseMe(seed, { templateIds: [id] }); const plates = [];
       for (let y = 0; y < ROWS; y++) for (let x = 0; x < 24; x++) if (String(board[y][x]).startsWith("plate")) plates.push([x, y]);
       const pl = actors.find(a => a.isPlayer); return { plates, px: pl.x / TILE, py: pl.y / TILE, g: gravityEnabled }; },
-    shot: seed => { surpriseRecent.length = 0; const r = surpriseMe(seed); enterPlayMode(); tick(1/60); for (let i = 0; i < 120; i++) tick(1/60); return r && r.templateId; } };
+    shot: seed => {  const r = surpriseMe(seed); enterPlayMode(); tick(1/60); for (let i = 0; i < 120; i++) tick(1/60); return r && r.templateId; } };
 `;
 const tmp = path.join(os.tmpdir(), "surprise4_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 (async () => {
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const rows = []; let errs = 0;

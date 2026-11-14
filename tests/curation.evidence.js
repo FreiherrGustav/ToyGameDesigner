@@ -13,7 +13,7 @@ window.__e = {
       wide: surpriseIsWide(t), rooms: parts.length, w: p0.rows[0].length, h: p0.rows.length, footprint: p0.rows[0].length * p0.rows.length / (ROWS * COLS), gravity: (t.room || {}).gravity, dir: (t.room || {}).dir || "down",
       chain: (t.expect || {}).chain || null, selfStart: !!(t.expect || {}).selfStart, needsInput: !!(t.expect || {}).needsInput, check: (t.expect || {}).check || null, vary: Object.keys(t.vary || {}), pieces: Object.keys(leg), strip: !!t.strip, requires: t.requires }; }),
   run: (id, seed, fps) => {
-    suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+    suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false;  
     const r = surpriseMe(seed, { templateIds: [id], recent: false, scene: false, chaos: true }); if (!r || r.failed || r.pending || r.skipped || !r.templateId) return { gen: false };
     let x0 = 99, x1 = -1, y0 = 99, y1 = -1; const mark = (x, y) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (board[y][x] || (backgroundBoard[y][x] && isRealBackground(backgroundBoard[y][x]))) mark(x, y);
@@ -28,7 +28,7 @@ window.__e = {
     const z = window.__czStop(); const hero = actors.find(a => a.isPlayer);
     return { gen: true, events: z.events, err, moved: moved.size, bbox, lives: typeof lives === "number" ? lives : null, heroAlive: !!hero && playSessionEnded !== "lose", end: playSessionEnded || null, first };
   } };`;
-const tmp = path.join(os.tmpdir(), "curation_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+const tmp = path.join(os.tmpdir(), "curation_hooked.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon", bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 const EFFECT = new Set(["gate", "cannon", "bomb", "fan", "trampoline", "gravity"]);
 function steps(p) { const st = []; for (const e of p) { const m = MECH[e.type]; if (!m) continue; if (st.length && st[st.length - 1] === m) continue; if (st.includes(m)) break; st.push(m); } return st; }

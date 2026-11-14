@@ -10,9 +10,9 @@ const [id, SEEDS = "6", FPS = "60", SHOTS] = process.argv.slice(2);
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = require("./causal.hook.js")() + `
-window.__a = { ev: s => eval(s), list: (id, seed) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; surpriseMe(seed, { templateIds: [id] }); return actors.filter(a => !a.isPlayer).map(a => a.defId + ":" + ((actorDefs[a.defId] || {}).temperament) + "@" + Math.floor(a.x / TILE) + "," + Math.floor(a.y / TILE)); },
+window.__a = { ev: s => eval(s), list: (id, seed) => {   surpriseMe(seed, { templateIds: [id] }); return actors.filter(a => !a.isPlayer).map(a => a.defId + ":" + ((actorDefs[a.defId] || {}).temperament) + "@" + Math.floor(a.x / TILE) + "," + Math.floor(a.y / TILE)); },
   run: (id, seed, fps, shotFrames) => {
-  surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+   
   const r = surpriseMe(seed, { templateIds: [id] }); if (!r || r.failed || r.pending || r.skipped) return { gen: false, why: JSON.stringify(r) };
   const t = SURPRISE_TEMPLATES.find(t => t.id === id);
   // area before Play
@@ -29,7 +29,7 @@ window.__a = { ev: s => eval(s), list: (id, seed) => { surpriseRecent.length = 0
   } } catch (e) { err = String(e); }
   const z = window.__czStop(); const hero = actors.find(a => a.isPlayer);
   return { gen: true, events: z.events, err, moved: moved.size, bbox, nearShare, lives: typeof lives === "number" ? lives : null, heroAlive: !!hero && playSessionEnded !== "lose", chain: t.expect.chain, variant: r.variant, shots, movers: [...moved].length }; } };`;
-const tmp = path.join(os.tmpdir(), "machines_act.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+const tmp = path.join(os.tmpdir(), "machines_act.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); const fps = Number(FPS); const out = [];
   for (let seed = 1; seed <= Number(SEEDS); seed++) {

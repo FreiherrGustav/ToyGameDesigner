@@ -5,7 +5,7 @@ const out = process.argv[2] || "/tmp/claude-0/s4shots"; fs.mkdirSync(out, { recu
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const tmp = path.join(os.tmpdir(), "s54_s4.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__x = { press: (seed, o) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; const r = surpriseMe(seed, o); return r && { variant: r.variant, ops: r.ops, name: r.name, id: r.templateId }; }, play: () => { enterPlayMode(); }, run: n => { for (let i = 0; i < n; i++) tick(1 / 60); renderGame(); }, pos: () => actors.map(a => [a.defId, Math.round(a.x), Math.round(a.y)]) };\n'));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__x = { press: (seed, o) => {   const r = surpriseMe(seed, o); return r && { variant: r.variant, ops: r.ops, name: r.name, id: r.templateId }; }, play: () => { enterPlayMode(); }, run: n => { for (let i = 0; i < n; i++) tick(1 / 60); renderGame(); }, pos: () => actors.map(a => [a.defId, Math.round(a.x), Math.round(a.y)]) };\n'));
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); let bad = 0;
   const fresh = async () => { const ctx = await b.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true }); const p = await ctx.newPage(); p.errs = []; p.on("pageerror", e => p.errs.push(String(e))); p.on("dialog", d => d.accept()); await p.addInitScript(() => { window.requestAnimationFrame = () => 0; }); await p.goto("file://" + tmp + "#t"); await p.waitForFunction(() => window.__x); return [ctx, p]; };

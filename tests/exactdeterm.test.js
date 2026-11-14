@@ -5,7 +5,7 @@ const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = `window.__d = { ids: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, cat: t.category, names: t.names })),
-  build: (id, seed) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; const r = surpriseMe(seed, { templateIds: [id] }); if (!r || r.failed || r.pending) return { err: JSON.stringify(r) };
+  build: (id, seed) => {   const r = surpriseMe(seed, { templateIds: [id] }); if (!r || r.failed || r.pending) return { err: JSON.stringify(r) };
     const room = rooms.find(q => q.id === r.roomId), cols = roomCols();
     const cells = {}; let tiles = 0, walls = 0, paint = 0;
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < BOARD_MAX_COLS; x++) { const t = board[y][x]; if (t) { tiles++; if (t === "solid:none" || t === "solid:indestructible") walls++; const g = t.split(":")[0]; cells[g] = (cells[g] || 0) + 1; } if (backgroundBoard[y][x]) paint++; }

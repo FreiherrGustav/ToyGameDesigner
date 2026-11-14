@@ -10,13 +10,13 @@ const src = fs.readFileSync(file, "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = require("./causal.hook.js")() + `
   window.__r = { ids: () => SURPRISE_TEMPLATES.map(t => ({ id: t.id, category: t.category })),
-    run: (seed, id, frames) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false; surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+    run: (seed, id, frames) => { suppressHistory = true; restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); suppressHistory = false;  
       const r = surpriseMe(seed, { templateId: id, recent: false, scene: false, chaos: true }); if (!r || !r.templateId) return null;
       enterPlayMode(); tick(1/60); window.__czStart(); let err = null; try { window.__czTick(frames); } catch (e) { err = String(e); }
       const z = window.__czStop(); return { events: z.events, err }; } };
 `;
 const tmp = path.join(os.tmpdir(), "reliab_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon", bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 const EFFECT = new Set(["gate", "cannon", "bomb", "fan", "trampoline", "gravity"]);
 function steps(path) { const st = []; for (const e of path) { const m = MECH[e.type]; if (!m) continue; if (st.length && st[st.length - 1] === m) continue; if (st.includes(m)) break; st.push(m); } return st; }

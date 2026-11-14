@@ -16,7 +16,7 @@ const REAL = path.join(REPO, "index.html");
 let pass = 0; const fails = [];
 const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.push(m); console.log("FAIL", m); } };
 const COUNT = /^https:\/\/tinygamemaker\.goatcounter\.com\/count\?e=true&p=%2Fe%2F([a-z_]+)(?:%2F([A-Za-z0-9<>%+-]+))?$/;
-const NAMES = ["visitor_new","visitor_returning","landing_choice","sample_opened","surprise_me_used","first_placement","first_play","play_started","win","death","restart","tutorial_started","tutorial_step_reached","tutorial_finished","tutorial_quit","save_used","share_used","session_length","error_class","viewport_class","browser_family","touch_present"];
+const NAMES = ["visitor_new","visitor_returning","landing_choice","sample_opened","surprise_me_used","surprise_shown","surprise_started","surprise_skipped","first_placement","first_play","play_started","win","death","restart","tutorial_started","tutorial_step_reached","tutorial_finished","tutorial_quit","save_used","share_used","session_length","error_class","viewport_class","browser_family","touch_present"];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function open(b, file, qs, opts = {}) {
   const ctx = await b.newContext(Object.assign({ viewport: { width: 1366, height: 768 }, acceptDownloads: true }, opts.ctx || {}));

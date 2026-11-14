@@ -7,13 +7,13 @@ const defs = defsFile === "index" ? null : require(path.resolve(defsFile)); cons
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 const HOOK = require("./causal.hook.js")() + `
-window.__r = { run: (def, id, seed, fps, secs) => { if (def) SURPRISE_TEMPLATES.push(def); const t = SURPRISE_TEMPLATES.find(t => t.id === id); surpriseRecent.length = 0; surpriseRecentVariants.length = 0;
+window.__r = { run: (def, id, seed, fps, secs) => { if (def) SURPRISE_TEMPLATES.push(def); const t = SURPRISE_TEMPLATES.find(t => t.id === id);  
   const r = surpriseMe(seed, { templateIds: [id] });
   if (!r || r.failed || r.pending || r.skipped) return { gen: false, why: JSON.stringify(r) };
   enterPlayMode(); tick(1 / fps); window.__czStart(); const frames = Math.ceil(secs * fps); let err = null;
   try { for (let i = 0; i < frames; i++) { window.__cz.frame++; tick(1 / fps); window.__czPoll(); } } catch (e) { err = String(e); }
   const z = window.__czStop(); return { gen: true, chain: t.expect.chain, events: z.events, err, variant: r.variant, ops: r.ops, fps }; } };`;
-const tmp = path.join(os.tmpdir(), "machines_rel.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+const tmp = path.join(os.tmpdir(), "machines_rel.html"); fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 function chainDone(events, chain) {
   const byId = new Map(events.map(e => [e.id, e])); let best = null;
   for (const e of events) { // walk each event's cause path to the root; the types must appear in order along it

@@ -16,7 +16,7 @@ const src = fs.readFileSync(file, "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
 if (!src.includes(anchor)) throw new Error("anchor missing");
 const HOOK = require("./causal.hook.js")() + `
-  window.__f = { run: (seed, frames, only, vary) => { surpriseRecent.length = 0; surpriseRecentVariants.length = 0; const r = surpriseMe(seed, only ? { templateIds: [only], vary: vary || undefined } : undefined); if (!r) return null;
+  window.__f = { run: (seed, frames, only, vary) => {   const r = surpriseMe(seed, only ? { templateIds: [only], vary: vary || undefined } : undefined); if (!r) return null;
       const t = SURPRISE_TEMPLATES.find(t => t.id === r.templateId) || {};
       const W = 24, H = 18; const occ = new Set(); let minx = 99, maxx = -1, miny = 99, maxy = -1;
       const add = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return; occ.add(x + "," + y); if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; };
@@ -27,7 +27,7 @@ const HOOK = require("./causal.hook.js")() + `
       const z = window.__czStop(); return { id: r.templateId, category: t.category, authored: !!t.authored, geo, events: z.events, err, ops: r.ops, variant: r.variant }; } };
 `;
 const tmp = path.join(os.tmpdir(), "causal_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 const MECH = { plateOn: "plate", plateOff: "plate", gateOpen: "gate", gateClose: "gate", buttonPress: "button", gravityFlip: "gravity", cannonLoad: "cannon", cannonFire: "cannon",
   bombArm: "bomb", impact: "bomb", detonate: "bomb", blastClear: "bomb", fanLift: "fan", fanPush: "fan", trampolineLaunch: "trampoline", spawn: "spawner" };
 function honestPath(path) { // path: events root -> leaf. Returns the loop-free mechanism prefix.

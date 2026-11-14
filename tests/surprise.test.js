@@ -31,7 +31,7 @@ const HOOK = `
   };
 `;
 const tmp = path.join(os.tmpdir(), "surprise_hooked.html");
-fs.writeFileSync(tmp, src.replace(anchor, anchor + "surpriseVaried = true;\n" + HOOK));
+fs.writeFileSync(tmp, src.replace(anchor, anchor + HOOK));
 const results = { fail: [], notes: [] };
 const fail = (m) => { results.fail.push(m); console.log("FAIL:", m); };
 const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsatisfied: 0, flipped: 0 });
@@ -171,131 +171,7 @@ const blank = () => ({ runs: 0, exception: 0, nan: 0, dead: 0, frozen: 0, unsati
   console.log("determinism mismatches:", det.length);
   if (det.length) fail("determinism " + det.slice(0, 5));
 
-  // ---- 4. Several surprises in one room, never overwriting, one undo each ----
-  const multi = await page.evaluate(() => {
-    const out = { problems: [] };
-    __st.reset();
-    // the kid's own stuff: some walls, a crate, a background cell — must survive untouched
-    for (let x = 0; x < 4; x++) __st.paint(x, 17, "solid:none");
-    __st.paint(1, 16, "solid:bouncy");
-    const kidCrate = __st.place("pushable", 3, 16);
-    const kidBefore = JSON.stringify([__st.state().board.map(r => r.slice(0, 24))]);
-    const placed = [];
-    for (let i = 0; i < 12; i++) {
-      const snapBefore = __st.snapshot();
-      const rep = __st.press(7000 + i, { chaos: false, scene: false, templateIds: __st.smallIds() }); // small templates only: a whole-room event never goes over the kid's stuff (it opens a new room tab)
-      if (rep && rep.pending) { out.pendingAt = i; out.overlay = !!document.getElementById("surpriseFullOverlay"); out.buttons = [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent); document.getElementById("surpriseFullOverlay").remove(); break; }
-      if (!rep || !rep.templateId) { out.problems.push("press " + i + " returned " + JSON.stringify(rep)); break; }
-      placed.push(rep.rect);
-      // one undo step restores exactly what was there before this press
-      const after = __st.snapshot();
-      __st.undo();
-      const undone = __st.snapshot();
-      if (JSON.stringify(undone.rooms.map(r => [r.board, r.colorBoard, r.actors.map(a => [a.id, a.defId, a.spawnX, a.spawnY])])) !== JSON.stringify(snapBefore.rooms.map(r => [r.board, r.colorBoard, r.actors.map(a => [a.id, a.defId, a.spawnX, a.spawnY])]))) out.problems.push("undo mismatch at " + i);
-      __st.restore(after);
-    }
-    out.count = placed.length;
-    // footprints (with margin 1) never overlap each other
-    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-      const a = placed[i], b = placed[j];
-      if (!(a.x + a.w + 1 <= b.x || b.x + b.w + 1 <= a.x || a.y + a.h + 1 <= b.y || b.y + b.h + 1 <= a.y)) out.problems.push("footprints touch " + i + "," + j);
-    }
-    // kid's own cells byte for byte
-    const st = __st.state();
-    const kidAfterBoard = st.board;
-    for (let x = 0; x < 4; x++) if (kidAfterBoard[17][x] !== "solid:none") out.problems.push("kid wall changed");
-    if (kidAfterBoard[16][1] !== "solid:bouncy") out.problems.push("kid bouncy changed");
-    const crate = st.actors.find(a => a.id === kidCrate.id);
-    if (!crate || crate.spawnX !== kidCrate.spawnX || crate.spawnY !== kidCrate.spawnY) out.problems.push("kid crate moved");
-    out.players = st.actors.filter(a => a.isPlayer).length;
-    // the whole crowded room still plays for 10 seconds without a problem
-    try { __st.play(); __st.tick(1); for (let s = 0; s < 10; s++) __st.tick(60); const ss = __st.state(); if (ss.actors.some(a => !Number.isFinite(a.x) || !Number.isFinite(a.y))) out.problems.push("NaN in crowded room"); __st.stop(); } catch (e) { out.problems.push("crowded room threw " + e); }
-    return out;
-  });
-  console.log("multi:", JSON.stringify(multi));
-  if (multi.problems.length || multi.count < 2 || multi.players !== 1 || !multi.overlay || ![JSON.stringify(["Create a new room", "Overwrite part of this room", "Cancel"]), JSON.stringify(["Create a new room", "Cancel"])].includes(JSON.stringify(multi.buttons))) fail("multi " /* a template too big to overwrite offers only new room / cancel */ + JSON.stringify(multi));
-
-  // ---- 4b. Crowded-room fuzz: 3-4 chaotic surprises in one room, then 10 seconds of play ----
-  const crowd = await page.evaluate(() => {
-    const out = { runs: 0, bad: [], flips: 0, pending: 0 };
-    for (let seed = 1; seed <= 80; seed++) {
-      try {
-        __st.reset();
-        let placed = 0;
-        for (let i = 0; i < 4; i++) { const r = __st.press(seed * 10 + i); if (r && r.pending) { out.pending++; const o = document.getElementById("surpriseFullOverlay"); if (o) o.remove(); break; } if (r && r.templateId) placed++; if (r && r.gravityFlipped) out.flips++; }
-        __st.play(); __st.tick(1);
-        const s1 = __st.state();
-        if (s1.ended || s1.lives < s1.DEFAULT_LIVES) out.bad.push(seed + ": dead on frame one");
-        for (let s = 0; s < 10; s++) __st.tick(60);
-        if (__st.state().actors.some(a => !Number.isFinite(a.x) || !Number.isFinite(a.y))) out.bad.push(seed + ": NaN");
-        __st.stop();
-        out.runs++;
-      } catch (e) { out.bad.push(seed + ": " + e); }
-    }
-    return out;
-  });
-  console.log("crowded rooms:", JSON.stringify({ runs: crowd.runs, bad: crowd.bad.slice(0, 5), pending: crowd.pending }));
-  if (crowd.bad.length) fail("crowded rooms " + crowd.bad.slice(0, 5).join(" | "));
-
-  // ---- 5. Full room: new room / overwrite prefers untouched surprises / kid stuff warns / cancel ----
-  const full = await page.evaluate(() => {
-    const out = {};
-    __st.reset();
-    let n = 0; for (; n < 14; n++) { const r = __st.press(8000 + n, { chaos: false }); if (r && r.pending) { document.getElementById("surpriseFullOverlay").remove(); break; } }
-    const roomsBefore = __st.snapshot().rooms.length;
-    const ow = __st.press(8100, { chaos: false, full: "overwrite" });
-    out.overwrite = ow && { mode: ow.mode, kid: ow.overwroteKidStuff };
-    const nw = __st.press(8101, { chaos: false, full: "new" });
-    out.newRoom = nw && { mode: nw.mode, rooms: __st.snapshot().rooms.length, before: roomsBefore, players: __st.snapshot().rooms.flatMap(r => r.actors.filter(a => a.isPlayer)).length, placed: nw.playerPlaced };
-    const nover = __st.press(8102, { chaos: false, full: "none-of-the-above" });
-    return out;
-  });
-  console.log("full:", JSON.stringify(full));
-  if (!full.overwrite || full.overwrite.mode !== "overwrite" || full.overwrite.kid !== 0) fail("overwrite should only replace untouched surprises first " + JSON.stringify(full));
-  if (!full.newRoom || full.newRoom.rooms !== full.newRoom.before + 1 || full.newRoom.players !== 1 || !full.newRoom.placed) fail("new room option " + JSON.stringify(full.newRoom));
-  // a room packed with the kid's own stuff: overwrite must say it hits their stuff, and nothing happens without a choice
-  const packed = await page.evaluate(() => {
-    __st.reset();
-    for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x + y) % 3 === 0) __st.paint(x, y, "solid:none");
-    const before = JSON.stringify(__st.state().board);
-    const r = __st.press(9100, { chaos: false });
-    const untouched = JSON.stringify(__st.state().board) === before;
-    const g = __st.gen(9100, { chaos: false, place: "overwrite" });
-    const ov = document.getElementById("surpriseFullOverlay"); if (ov) ov.remove();
-    return { pending: !!(r && r.pending), untouched, cost: g && g.cost };
-  });
-  console.log("packed room:", JSON.stringify(packed));
-  if (!packed.pending || !packed.untouched || !(packed.cost > 0)) fail("packed room " + JSON.stringify(packed));
-  // overwriting must not pick the same section every time: fill a room, overwrite repeatedly, count distinct spots
-  const spread = await page.evaluate(() => {
-    __st.reset();
-    for (let n = 0; n < 14; n++) { const r = __st.press(8200 + n, { chaos: false }); if (r && r.pending) { document.getElementById("surpriseFullOverlay").remove(); break; } }
-    const spots = new Set(), hits = [];
-    for (let i = 0; i < 12; i++) { const r = __st.press(8300 + i, { chaos: false, full: "overwrite" }); if (r && r.rect) { spots.add(r.rect.x + "," + r.rect.y); hits.push(r.overwroteKidStuff); } }
-    // and with the kid's own stuff lying around too (cost > 0 everywhere): still rotates
-    __st.reset();
-    for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x * 7 + y * 3) % 11 === 0) __st.paint(x, y, "solid:none");
-    const spots2 = new Set();
-    for (let i = 0; i < 12; i++) { const r = __st.press(8400 + i, { chaos: false, full: "overwrite" }); if (r && r.rect) spots2.add(r.rect.x + "," + r.rect.y); }
-    return { distinct: spots.size, kidHits: hits.filter(Boolean).length, distinctPacked: spots2.size };
-  });
-  console.log("overwrite spread:", JSON.stringify(spread));
-  if (spread.distinct < 3 || spread.kidHits || spread.distinctPacked < 3) fail("overwrite keeps choosing the same spot " + JSON.stringify(spread));
-  // the real button opens the dialog and Cancel changes nothing
-  await page.evaluate(() => { __st.reset(); for (let y = 0; y < 18; y++) for (let x = 0; x < 24; x++) if ((x + y) % 3 === 0) __st.paint(x, y, "solid:none"); });
-  const boardBefore = await page.evaluate(() => JSON.stringify(__st.state().board));
-  // a whole-room event goes into a new tab without asking (no dialog): undo it and press again until a small template asks
-  for (let tries = 0; tries < 12; tries++) {
-    await page.click("#surpriseBtn");
-    if (await page.evaluate(() => !!document.getElementById("surpriseFullOverlay"))) break;
-    await page.evaluate(() => __st.undo());
-  }
-  const dlg = await page.evaluate(() => [...document.querySelectorAll("#surpriseFullOverlay button")].map(b => b.firstChild.textContent));
-  console.log("dialog buttons:", JSON.stringify(dlg));
-  await page.click("#surpriseFullOverlay button:last-child");
-  const afterCancel = await page.evaluate(() => ({ same: JSON.stringify(__st.state().board), gone: !document.getElementById("surpriseFullOverlay") }));
-  if (dlg.length !== 3 || afterCancel.same !== boardBefore || !afterCancel.gone) fail("dialog/cancel " + JSON.stringify({ dlg, cancelSame: afterCancel.same === boardBefore, gone: afterCancel.gone }));
-
+  // (sections 4, 4b and 5 - several surprises in one room, crowded-room fuzz, overwrite dialog - were retired in v2.67: every design is a whole room in a new tab)
   // ---- 6. A room with the kid's own stuff and a project player in another room: nothing breaks ----
   const kid = await page.evaluate(() => {
     const out = { exceptions: 0, runs: 0 };

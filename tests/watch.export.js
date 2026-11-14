@@ -5,7 +5,7 @@ const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 const [id, out, SECS = "20"] = process.argv.slice(2);
 const src = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 const anchor = 'if (loadAutosave()) log("Welcome back! Restored your last auto-saved session.");\n  updateUndoRedoButtons();\n';
-const HOOK = `window.__w = { build: id => { surpriseRecent.length = 0; window.__logs = []; const ol = log; const r = surpriseMe(10001, { templateIds: [id] }); return JSON.stringify({r, last: document.getElementById("log").textContent}); return JSON.stringify(r && { failed: r.failed, why: r.why || r.reason, pending: r.pending, name: r.name, n: actors.length }); },
+const HOOK = `window.__w = { build: id => {  window.__logs = []; const ol = log; const r = surpriseMe(10001, { templateIds: [id] }); return JSON.stringify({r, last: document.getElementById("log").textContent}); return JSON.stringify(r && { failed: r.failed, why: r.why || r.reason, pending: r.pending, name: r.name, n: actors.length }); },
   save: () => { snapshotCurrentRoomState(); return JSON.stringify({ format: "toygamedesigner-project", version: 1, data: captureProjectSnapshot() }); },
   play: () => { setGamePaused(false); enterPlayMode(); tick(1/60); },
   adv: (s) => { for (let f = 0; f < s * 60; f++) tick(1/60); renderGame(); return actors.length; },
