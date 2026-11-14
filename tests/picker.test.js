@@ -86,7 +86,7 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
   await pr.evaluate(() => window.__p.resume()); await pr.waitForTimeout(1200);
   const r3 = await press(); const s3 = await pr.evaluate(() => window.__p.state());
   ok(r3.id === "herd" && s3.n === 1, "a surprise that was resumed and ran still counts as untouched (" + s3.n + " tab)");
-  ok(s3.paused, "every press opens frozen (design by decision)");
+  ok(!s3.paused, "a design that is not a one-shot machine opens live (herd)");
   await pr.evaluate(() => window.__p.edit());
   const r4 = await press(); const s4 = await pr.evaluate(() => window.__p.state());
   ok(r4.id === "magnetmile" && s4.n === 2 && s4.ids.includes(r3.room), "an edited tab is left alone; the new design gets a new tab (" + s4.n + " tabs)");
@@ -111,7 +111,8 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
   const pt = await b0.newPage(); pt.on("dialog", d => d.accept()); pt.on("pageerror", e => errors.push(String(e)));
   const reqs = []; await pt.route("**/*", route => { const u = route.request().url(); if (u.startsWith("file:")) return route.continue(); reqs.push(u); return route.abort(); });
   pt.on("console", m => { const t = m.text(); if (t.startsWith("[tele]")) events.push(t.slice(7)); });
-  await pt.addInitScript(initOrder(0));
+  const tIdx = full.indexOf("magnetmile"), idA = "magnetmile", idB = full[tIdx + 1], idC = full[tIdx + 2]; // A is a one-shot machine (opens paused); B and C open live
+  await pt.addInitScript(initOrder(tIdx));
   await pt.goto("file://" + tmp + "?study=1&telelog=1#t"); await pt.waitForFunction(() => window.__p);
   await pt.evaluate(() => window.surpriseDice()); // A, shown
   await pt.evaluate(() => window.__p.resume()); await pt.waitForTimeout(2200); // resumed within 10 s -> started
@@ -121,11 +122,11 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
   await pt.waitForTimeout(500);
   const sur = events.filter(e => e.indexOf("surprise_") === 0 && e !== "surprise_me_used");
   console.log("  events: " + sur.join(", "));
-  ok(sur[0] === "surprise_shown:lavalamp", "surprise_shown/<id> on the first press");
-  ok(sur.includes("surprise_started:lavalamp"), "surprise_started/<id> when resumed within 10 s");
-  ok(sur.includes("surprise_skipped:lavalamp"), "surprise_skipped/<id> when the next press comes within 10 s");
-  ok(sur.includes("surprise_shown:fanwindmill") && sur.includes("surprise_shown:herd"), "later presses are counted");
-  ok(!sur.includes("surprise_skipped:fanwindmill") && !sur.includes("surprise_started:fanwindmill"), "no skipped/started for a design left alone for 11 s");
+  ok(sur[0] === "surprise_shown:" + idA, "surprise_shown/<id> on the first press");
+  ok(sur.includes("surprise_started:" + idA), "surprise_started/<id> when resumed within 10 s");
+  ok(sur.includes("surprise_skipped:" + idA), "surprise_skipped/<id> when the next press comes within 10 s");
+  ok(sur.includes("surprise_shown:" + idB) && sur.includes("surprise_shown:" + idC), "later presses are counted");
+  ok(!sur.includes("surprise_skipped:" + idB) && !sur.includes("surprise_started:" + idB), "no skipped/started for a live design left alone for 11 s (a live design never counts as started)");
   ok(sur.every(e => /^surprise_(shown|started|skipped):[a-z0-9]+$/.test(e)), "only fixed-list design ids in the values");
   ok(reqs.every(u => u.indexOf("goatcounter.com/count?e=true&p=%2Fe%2F") >= 0) && reqs.every(u => !/seed|#|room/i.test(decodeURIComponent(u).replace("/e/", ""))), "network: only counter GETs with the event path, nothing else (" + reqs.length + " requests)");
   await pt.close();

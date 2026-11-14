@@ -59,7 +59,7 @@ const MEASURE = async (page) => {
       const box = await page.evaluate(() => { const c = document.getElementById("gameCanvas"), b = c.getBoundingClientRect(), bw = parseFloat(getComputedStyle(c).borderLeftWidth); return { x: b.left + bw, y: b.top + bw, w: b.width - 2 * bw, h: b.height - 2 * bw }; });
       const cells = [[0,0],[23,0],[0,17],[23,17],[12,9]], fr = [[0.5,0.5],[0.1,0.1],[0.9,0.9]];
       for (const [fx, fy] of fr) {
-        await page.evaluate(() => { document.getElementById("clearAllBtn").click(); }); await page.waitForTimeout(60);
+        await page.evaluate(() => { document.getElementById("clearAllBtn").click(); }); await page.click("#askYes"); await page.waitForTimeout(60);
         await page.evaluate(() => window.__h.check());
         for (const [cx, cy] of cells) await page.mouse.click(box.x + (cx + fx) * box.w / 24, box.y + (cy + fy) * box.h / 18);
         const painted = await page.evaluate(() => window.__h.painted());

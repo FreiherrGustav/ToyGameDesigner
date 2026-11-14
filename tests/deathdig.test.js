@@ -19,7 +19,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.goto("file://" + tmp + "#t"); await page.waitForFunction(() => window.__ev);
   const load = () => run(page, () => {
     if (appMode === "play") exitToBuildMode();
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
     for (const k in keys) keys[k] = false;
     if (!window.__wrapped) { window.__wrapped = true; window.__restarts = 0; const o = restartLevelKeepingLives; restartLevelKeepingLives = function(){ window.__restarts++; return o(); }; }
     window.__restarts = 0; return true; });
@@ -110,7 +110,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // 6. checkpoints: dying resets the current room only, at the door you came in by
   await load();
-  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi"); enterPlayMode(); playReadyUntil = null; for (const k in keys) keys[k] = false; });
+  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; for (const k in keys) keys[k] = false; });
   const r7 = await run(page, () => {
     const startRoom = currentRoomId;
     const r0 = rooms.find(r => r.id === startRoom);
@@ -152,7 +152,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const r9 = await run(page, () => { const first = rooms[0]; return first.board[2][5]; });
   ok(r9 === "solid:none", "other rooms keep their progress (" + r9 + ")");
   // death in the very first room goes back to the game start, not further
-  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi"); enterPlayMode(); playReadyUntil = null; });
+  await run(page, () => { exitToBuildMode(); loadExampleGame(buildSushiTrainGame, "Sushi", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; });
   const r10 = await run(page, () => { const p = actors.find(a => a.isPlayer); window.__p0 = [Math.round(p.x), Math.round(p.y)]; p.x += 120; triggerHazard(p); return { lives }; });
   await run(page, () => { advanceGameClock(0.9); });
   const r11 = await run(page, () => { const p = actors.find(a => a.isPlayer); return { pos: [Math.round(p.x), Math.round(p.y)], p0: window.__p0, lives }; });

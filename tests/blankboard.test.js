@@ -39,11 +39,11 @@ fs.writeFileSync('/tmp/blank_hooked.html', src);
     await make(p); const i = await info(p); ok(isStarter(i), 'first visit: Make a game -> starter board ' + JSON.stringify(i)); await shot(p, '1-first-visit-starter'); ok(!p.errs.length, 'first visit no errors ' + p.errs); await p.context().close(); }
 
   // 2. cleared project (Clear board), saved, reload, Home, Make a game
-  { const p = await mk(1366, 768, '#t'); await p.click('#clearAllBtn'); await p.waitForTimeout(300);
+  { const p = await mk(1366, 768, '#t'); await p.click('#clearAllBtn'); await p.click('#askYes'); await p.waitForTimeout(300);
     let i = await info(p); ok(i.tiles === 0 && i.actors === 0 && i.sky === 0 && i.real === 0, 'Clear board is a plain blank: no sky, tiles or actors ' + JSON.stringify(i)); await shot(p, '2a-clear-board-keeps-sky');
     ok(await p.evaluate(() => __b.empty()), 'cleared project counts as empty');
     await p.click('#undoBtn'); i = await info(p); ok(i.tiles === 0 && i.actors > 0 || true, 'undo after Clear board runs'); // Clear is undoable (back to the empty factory board here)
-    await p.click('#clearAllBtn'); await p.evaluate(() => __b.save());
+    await p.click('#clearAllBtn'); await p.click('#askYes'); await p.evaluate(() => __b.save());
     await reload(p); i = await info(p); ok(i.landing === false && i.tiles === 0, 'cleared project reloads empty');
     const sj = await p.evaluate(() => localStorage.getItem('toyGameDesigner.autosave.v1')); ok(sj && sj.length > 100, 'autosave exists');
     await home(p); ok((await info(p)).landing, 'Home shows landing');
@@ -52,8 +52,8 @@ fs.writeFileSync('/tmp/blank_hooked.html', src);
   // 3. New project
   { const p = await mk(1366, 768, '#t'); await p.evaluate(() => { __b.place(3, 10); }); await p.waitForTimeout(100);
     ok(!(await p.evaluate(() => __b.empty())), 'a project with one tile is not empty');
-    const c0 = confirms; await p.click('#newProjectBtn'); await p.waitForTimeout(300);
-    let i = await info(p); ok(confirms > c0, 'New project still asks first'); ok(isStarter(i), 'New project starts from the starter board ' + JSON.stringify(i)); await shot(p, '3a-new-project');
+    const c0 = confirms; await p.click('#newProjectBtn'); const asked = await p.isVisible('#askOverlay'); await p.click('#askYes'); await p.waitForTimeout(300);
+    let i = await info(p); ok(asked, 'New project still asks first'); ok(isStarter(i), 'New project starts from the starter board ' + JSON.stringify(i)); await shot(p, '3a-new-project');
     await p.click('#undoBtn'); await p.waitForTimeout(200); i = await info(p); ok(i.tiles === 0 && i.actors === 0 && i.sky > 100 && i.real === 0, 'undo takes the starter away but keeps the sky ' + JSON.stringify(i)); await shot(p, '3b-new-project-undo');
     await p.click('#redoBtn'); i = await info(p); ok(isStarter(i), 'redo brings the starter back');
     await p.evaluate(() => __b.save()); await reload(p); await home(p); await make(p); i = await info(p);
@@ -72,7 +72,7 @@ fs.writeFileSync('/tmp/blank_hooked.html', src);
     ok(await p.evaluate(() => __b.spriteOk()), 'the redraw survived'); await shot(p, '5-sprite-only-restored'); await p.context().close(); }
 
   // 6. samples keep their confirmation
-  { const p = await mk(1366, 768, '#t'); await p.click('#clearAllBtn'); await p.evaluate(() => __b.save()); await reload(p); await home(p);
+  { const p = await mk(1366, 768, '#t'); await p.click('#clearAllBtn'); await p.click('#askYes'); await p.evaluate(() => __b.save()); await reload(p); await home(p);
     let c0 = confirms; await p.click('#landingTakeApartBtn'); await p.waitForTimeout(400); ok(confirms === c0, 'empty project: Take it apart asks nothing');
     await p.context().close();
     const q = await mk(1366, 768, '#t'); await q.evaluate(() => { __b.place(3, 10); __b.save(); }); await reload(q); await home(q);

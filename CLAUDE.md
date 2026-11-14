@@ -7793,3 +7793,64 @@ Removed from `index.html` (net about 380 lines): scene fillers (`surpriseScenePl
 - **Old `#surprise=SEED` links (no template named) now build whatever the plain weighted pick gives, so numbers from before will not match.** Links with a design id (`#surprise=lavalamp`, `#surprise=10002:rink`'s template part) are unaffected. The dice never used seeds.
 - **Tests**: removed `tests/scenes.test.js`, `tests/gravsurprise.test.js` (operators, direction roll) and `tests/seedstable.test.js`; trimmed `surprise5` (kept the closed-box rule, 100 checks), `surprise2` (recency and mix checks), `surprise.test.js` (several-in-one-room, overwrite dialog and Try this sections); every test hook lost its `surpriseRecent.length = 0`/`surpriseVaried = true` lines. Other tests that exercised the operators through `vary`/`mirror` options (`causal`, `machines.*`, `reliability`, `surprise4`, `curation.*`) now simply run in exact mode and were not individually re-run. Known leftover failures that predate this stage: `surprise2` popcorn "spawner has a sink", cannonrange/cannonballrun "closed flag" (the test's blocking list).
 - **Verified**: every sample frame-identical to the pre-removal build (`gravdir.test.js`, 91/0), telemetry 63/63 (network capture: only counter GETs; the allowed list in the test now includes `surprise_shown/started/skipped`), landing 39, layout 35, picker 29, tryme 29, exactdeterm 39 identical, exactdefs 35, surprise5 100, surprise.test ALL PASSED, surprise2 all but the three leftovers, lockedin 5; `stage1` has its old landing-autopilot key failure; an autosave written by the pre-removal build (3 rooms, a try-me room and a surprise) restores with 3 rooms and takes a dice press and a Try me with no errors.
+
+## v2.68: Surprise start rule, a livelier world, Hoppers (Gloop), sample backdrops, in-app dialogs
+
+One patch, four independent parts. Draw/audio only where stated; nothing else in the physics changed. Tests are listed at the end.
+
+**1. Surprise Me start rule.** Authored one-shot machines open PAUSED, everything else opens LIVE. The flag is `"oneShot":true` on a
+template: `magnetmile`, `stonedomino`, `mousetrap`, `cannonballrun`, `crateescape` (the five authored chains that start from a set layout and run
+once; my reading of "one-shot", change the list freely). A paused one shows a gold pulsing **"▶ Click to start · P"** pill at the top of the canvas
+(`drawStartPill`, editor only; replaces the small "Paused" pill while it shows); a click on the pill (mouse or touch, `startPillHit`, tested before
+any painting) or P/Resume starts it. `surpriseStartPending` is declared next to `setGamePaused` and only read inside `appMode === "build"` guards,
+so `renderGame` (shared with exports) never touches it there. A live press also un-pauses (a previous one-shot left the room paused). Log lines:
+"... — paused at its starting layout. Click Start (or press P) to run it" / "... — running. P pauses". Two consequences handled: (a) tab reuse used
+to compare tile signatures, but a live machine rewrites its own tiles (a bomb tile becomes a bomb actor on the first tick), so the tabs piled up;
+`editSerial` (bumped by every `pushUndoSnapshot`) is now recorded in `room.surprises[].edit` and a surprise counts as untouched when no edit happened
+since it was placed (the signature is only the fallback); (b) telemetry `surprise_started` is now only counted for a paused machine the kid starts
+(`started: !gamePaused` at creation), a live design never counts. `exactdeterm`, `picker` and `lockedin` expectations were updated.
+
+**2. A livelier world (draw only).** (a) A bouncy or trampoline tile squashes when something bounces off it or a character jumps off it:
+`tileSquashAt/Hit/Under` set a `tileAnimState` entry (recipes `tileSquash`, `tileSquashSoft`, drawn along the line from the actor into the tile with the far
+edge held, so it works in all four gravity directions; a skinned tile keeps its skin because the entry carries `extra`). Called from the four bounce
+sites in `resolveAxis` and the jump in `stepActor`; never replaces a crumble/blast entry. (b) Idle motion, small: goal flag flutter (`drawGoalFlag`, column
+offsets of the cloth cells, cached art blits), cannon smoke (`drawCannonSmoke`), magnet field rings drawn inward (`drawMagnetField`, off while a colored magnet's
+channel is off), trampoline gentle squash (`beginTrampolineIdle`). Phase per cell (`extra.phase`) so neighbours do not pulse in step; all off under
+`prefers-reduced-motion`; game clock, so Pause freezes them. Warp, black hole, fan, plate, door, gate, switch are drawn exactly as before (verified frame
+for frame). **One addition the verification required:** an unskinned `solid:bouncy` tile was 0 px different from plain ground in Play (audit finding), so
+it now gets a faint breathing spring-coloured line along its top surface (the side away from gravity); remove that block in `drawGameplayTileInner` to
+take it back. `reducedMotion()` caches its MediaQueryList (the per-tile `matchMedia()` call was the whole performance cost). Render cost per frame over
+all 16 samples at 4x CPU throttle: before 1.2 to 8.3 ms, after 1.7 to 6.3 ms (`liveliness.test.js` prints the table); heaviest is Rock Bottom.
+
+**3. Hoppers: Gloop hops.** `isHopperDef(def)`: `def.hopper` true/false when a preset was applied (the Gloop preset carries `hopper: true`; applying any other look
+sets false), otherwise a hopper only while its art equals `SLIME_ART`. A hopper moves by hopping in gravity rooms (free-roam rooms: no ground, it glides as
+before): wait `HOP_LAND_MS` (120), squash `HOP_CROUCH_MS` (170), launch `HOP_JUMP_SPEED` 380 along gravity with `HOP_FORWARD_SPEED` 120 sideways toward where its
+behavior (wander/chase/flee, `steeringAccelFor`) wants to go, no steering or air friction in the air (`actor.hopAir`; wind and fans still push), repeat. Behavior,
+lethal flag and the whole reaction table (`resolveActorContact`) are untouched, so contact with the hero is identical to any other character (tested for all four
+temperaments, lethal and harmless). On a bouncy or trampoline tile a hopper gets what the hero gets (reflect, min launch `BOUNCY_LAUNCH_SPEED` 620 / `TRAMPOLINE_LAUNCH_SPEED`
+900, no displaced spin) and steers sideways on each landing (`hopBounceSteer`), so it bounces forever at a constant height, never stacking. Squash/stretch/squash is
+`hopScale` in `renderActors` (procedural, local frame so it follows the character onto a wall). Try me > bouncy now also drops a harmless hopping Gloop (`hopper`
+piece, `ensureHopperPetDef`). **Content affected (scan):** Surprise designs Chaos One (23 Gloops) and Oops All Cannons (77) now hop; Ice Cave, Traffic Jam,
+Windrally and Oops All Sprites have Gloops in gravity-free rooms (unchanged). Plinko's pets are named Gloop but drawn differently, so they do not hop (set `def.hopper`
+in their `exact` block if they should). Long run (`tests/hopper.test.js 60`): 4 gravities x wanderer/chaser/fleer on plain ground, fan, wind, conveyor, trampoline,
+bouncy, ice, mud, plus wrap (H, V, H+V) and frame rates x0.5/x2.4: stays in the room, apex never grows, max speed under the bounce limits.
+
+**4. Sample backdrops (Paint layer only).** Dungeon Diving, The World's Worst Elevator, The Bomb Factory, The Gravity Switcheroo and Sushi Train Panic sat on a black void.
+`decorateBackdrop(proj, theme)` (themes `dungeon`, `shaft`, `blueprint`, `gslab`, `sushi` in `BD_THEMES`) paints only empty cells with small procedural 8x8 tiles
+(darker and lower in contrast than the foreground), added as `bd_<theme>_*` entries in `backgroundTileDefs`; the embedded project JSON is untouched and the
+snapshot is decorated just before `restoreProjectSnapshot`. `tests/backdrop.invariance.js` proves tiles, colors, skins, actors, rules and door links are identical to
+the previous build. **The Monster's Den was deliberately left alone:** its pale look is the author's own and Cloud Hopper, Mousecop's Garden and Rock Bottom are also
+light, so it is not an outlier; a match would erase a hand-made look for no gain.
+
+**5. In-app dialogs, and Undo made true.** The four `confirm()` calls (replace project: sample / New project / landing; open a saved file; delete room; clear everything) are
+an in-app dialog (`askConfirm`, `#askOverlay`; default focus on the safe button, Escape or click outside cancels, keys do not reach the game). Findings before the change
+(`/tmp`-style repro, now `tests/dialogs.test.js`): the old text said "can't be undone" but Undo stayed enabled after a sample load and then restored an *older state of the
+old project* (it lost the last edit); New project reset history; Delete room put nothing on the Undo stack, so Undo jumped to an unrelated older snapshot; Clear everything was
+already undoable. Now every one of them pushes the old project onto the Undo stack first (`pushUndoSnapshot()` in `loadExampleGameNow`, New project, file load, `deleteRoomNow`;
+`endLanding(false)` keeps the held-aside project on the stack), and the text says exactly that: "Undo (Ctrl+Z) can bring it back while this page stays open". `loadExampleGame` is now
+asynchronous unless `{ skipConfirm: true }` (callers that need the result pass `onLoaded`); tests that load samples must pass `skipConfirm`.
+
+**Tests added:** `tests/surprisestart.test.js`, `tests/liveliness.test.js` (needs `BEFORE=<old index.html>` for the before/after parts), `tests/liveliness.shots.js`,
+`tests/liveliness.strip.js`, `tests/liveliness.squash.js`, `tests/liveliness.export.js`, `tests/hopper.test.js [seconds]`, `tests/backdrop.invariance.js <old index.html>`,
+`tests/dialogs.test.js`. Screenshots in `prototypes/liveliness-shots/`. Not tested: Firefox/Safari (no Chromium-only API was added; `roundRect` is guarded as before,
+`matchMedia`, `inset`, `Promise` are standard), a real listen/play by a child, the hopper in an exported game beyond a boot-and-run check.

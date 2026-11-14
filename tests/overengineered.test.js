@@ -23,7 +23,7 @@ function TOOLKIT() {
   const T = {};
   T.load = () => {
     if (appMode === "play") exitToBuildMode();
-    loadExampleGame(buildOverEngineeredEscapeGame, "The Over-Engineered Escape");
+    loadExampleGame(buildOverEngineeredEscapeGame, "The Over-Engineered Escape", { skipConfirm: true });
     enterPlayMode(); playReadyUntil = null;
     for (const k of Object.keys(keys)) keys[k] = false;
   };
@@ -321,7 +321,7 @@ const ROUTE = [
       let err = null;
       try {
         if (appMode === "play") exitToBuildMode();
-        loadExampleGame(g.builder, g.name); enterPlayMode(); playReadyUntil = null;
+        loadExampleGame(g.builder, g.name, { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
         const S = T.sim(60); S.hold("ArrowRight", true);
         for (let f = 0; f < 60 * 3; f++) S.step();
         S.release();

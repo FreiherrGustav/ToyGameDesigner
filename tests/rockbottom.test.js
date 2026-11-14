@@ -46,7 +46,7 @@ const LIB = `()=>{
   await page.evaluate(l => window.__ev(l)(), LIB);
   const load = () => run(page, () => {
     if (appMode === "play") exitToBuildMode();
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
     for (const k in keys) keys[k] = false;
     return true;
   });
@@ -96,7 +96,7 @@ const LIB = `()=>{
     out.well = { s: +(t / FRAMES).toFixed(2), cell: T.cell(q) };
     // the shelf: three input patterns. 'hold' keeps Right+Down for 1.2s after the crumble
     const pattern = (label, after) => {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       const p = T.P(); T.at(33, 10); T.tk(10);
       T.key("ArrowRight", true); T.key("ArrowDown", true);
       let dug = null, stop = null, last = null;
@@ -112,7 +112,7 @@ const LIB = `()=>{
     };
     pattern("hold", 72); pattern("release", 0); pattern("early", 0);
     // how long do the crates take to land? (release at the crumble, sample)
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
     const p = T.P(); T.at(33, 10); T.tk(10); B.dig(1, 34, 10); let ft = 0; const cs = T.list(PUSHABLE_DEF_ID).filter(a => a.x > 1088 && a.x < 1130);
     for (; ft < 200; ft++) { T.tk(1); if (cs.every(a => a.vy === 0 && a.grounded)) break; }
     out.fallS = +(ft / FRAMES).toFixed(2);
@@ -127,7 +127,7 @@ const LIB = `()=>{
   const pill = await run(page, () => {
     const out = {};
     for (const dt of [1 / 30, 1 / 60, 1 / 144]) for (const n of [0, 1, 2]) {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       const q = T.P(); const cs = T.list(PUSHABLE_DEF_ID).filter(a => a.x > 1088 && a.x < 1130);
       for (let i = n; i < cs.length; i++) actors.splice(actors.indexOf(cs[i]), 1);
       T.at(33, 10); T.tk(10, dt);
@@ -156,7 +156,7 @@ const LIB = `()=>{
   const p2 = await run(page, () => {
     const out = {};
     const attempt = (label, mode) => {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       const q = T.P(); T.at(25, 10); T.tk(10);
       const t1 = B.dig(-1, 24, 10); T.key("ArrowLeft", false);
       T.key("ArrowLeft", true); let w = 0; for (; w < 200; w++) { T.tk(1); if (T.cell(q)[0] <= 20) break; } T.key("ArrowLeft", false); T.tk(15);
@@ -176,7 +176,7 @@ const LIB = `()=>{
   ok(p2.hold.hits === 0, "holding Left through the dig costs no life: " + JSON.stringify(p2.hold));
   // recovery from the 'hold' outcome (crates shoved west along the hall): hop over them, push them back east into the pit
   const rec = await run(page, () => {
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
     const q = T.P(); T.at(25, 10); T.tk(10); B.dig(-1, 24, 10); T.key("ArrowLeft", true); for (let w = 0; w < 200; w++) { T.tk(1); if (T.cell(q)[0] <= 20) break; } T.key("ArrowLeft", false); T.tk(15);
     B.dig(-1, 19, 10); T.key("ArrowLeft", true); T.tk(240); T.key("ArrowLeft", false); T.tk(30);
     const before = { gate: isChannelOn("red"), crates: T.list(PUSHABLE_DEF_ID).filter(a => a.x < 24 * 32 && a.y < 14 * 32).map(a => Math.round(a.x)) };
@@ -194,7 +194,7 @@ const LIB = `()=>{
   const p3 = await run(page, () => {
     const out = {};
     const attempt = (label, mode) => {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       const q = T.P(); T.at(51, 15); T.tk(10);
       T.key("ArrowRight", true); T.key("ArrowDown", true); let t = 0; for (; t < 300; t++) { T.tk(1); if (board[15][52] === null) break; }
       T.key("ArrowDown", false); if (mode === "release") T.key("ArrowRight", false);
@@ -210,7 +210,7 @@ const LIB = `()=>{
     };
     attempt("release", "release"); attempt("hold", "hold");
     // released early: stop before the cork crumbles (0.4s of digging)
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P(); T.at(51, 15); T.tk(10);
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P(); T.at(51, 15); T.tk(10);
     T.key("ArrowRight", true); T.key("ArrowDown", true); T.tk(24); T.key("ArrowRight", false); T.key("ArrowDown", false); T.tk(120);
     out.early = { corkStands: board[15][52] === "solid:diggable", hits: T.hit(), stones: T.list(LARGE_STONE_DEF_ID).map(a => Math.round(a.y)).sort((a, b) => a - b) };
     return out;
@@ -223,7 +223,7 @@ const LIB = `()=>{
   const hop = await run(page, () => {
     const res = [];
     for (const jd of [0, 4, 8, 12, 16, 24, 32]) {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P();
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P();
       T.list(LARGE_STONE_DEF_ID).forEach(a => actors.splice(actors.indexOf(a), 1)); board[15][52] = null;
       T.at(49, 15); T.tk(10); T.key("ArrowRight", true); let jumped = null, crossed = false;
       for (let i = 0; i < 160; i++) { const edge = 52 * 32 - (q.x + q.w); if (jumped === null && edge <= jd) { T.key(" ", true); jumped = i; } if (jumped !== null && i >= jumped + 10) T.key(" ", false); T.tk(1); if (T.hit() > 0) break; if (q.x > 54 * 32) { crossed = true; break; } }
@@ -240,7 +240,7 @@ const LIB = `()=>{
   const p4 = await run(page, () => {
     const out = {};
     const attempt = (label, pat) => {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null;
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null;
       const q = T.P(); T.at(25, 15); T.tk(10);
       const dugT = B.dig(-1, 24, 15);
       let gateAt = null, pitAt = null; const be = T.beast(); const x0 = Math.round(be.x);
@@ -263,7 +263,7 @@ const LIB = `()=>{
   ok(p4.early.gateAt === null && p4.early.beast[0] < 13 * 32, "early: gate stays shut, beast stays sealed " + JSON.stringify(p4.early));
   // without the pit trap the beast is a real threat: remove the trap pit floor-holes and check it catches the player
   const threat = await run(page, () => {
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P();
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P();
     board[16][16] = "solid:none"; board[16][17] = "solid:none"; // fill the trap pit
     T.at(25, 15); T.tk(10); B.dig(-1, 24, 15); T.key("ArrowLeft", true); let caught = null;
     for (let i = 0; i < 800; i++) { if (isChannelOn("green")) T.key("ArrowLeft", false); T.tk(1); if (T.hit() > 0) { caught = i; break; } }
@@ -277,7 +277,7 @@ const LIB = `()=>{
   const cross = await run(page, () => {
     const res = [];
     for (const jd of [0, 8, 16, 24, 32, 40]) {
-      loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P();
+      loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P();
       T.list(PUSHABLE_DEF_ID).filter(a => a.x < 24 * 32 && a.y > 14 * 32).forEach(a => actors.splice(actors.indexOf(a), 1));
       board[16][19] = "solid:none"; actors.filter(a => a.defId === "rbBeast").forEach(a => actors.splice(actors.indexOf(a), 1));
       q.x = 21 * 32; q.y = 15 * 32 + 32 - 22; q.vx = 0; q.vy = 0; T.tk(20);
@@ -294,7 +294,7 @@ const LIB = `()=>{
   // ---------------------------------------------------------------- B5. Part 5 — Deep Vault
   sec("B5. Part 5 Deep Vault");
   const p5 = await run(page, () => {
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P(); T.at(55, 15); T.tk(10);
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P(); T.at(55, 15); T.tk(10);
     const crate = T.list(PUSHABLE_DEF_ID).find(a => a.x > 57 * 32); const out = { gateBefore: isChannelOn("blue") };
     T.key("ArrowRight", true); let t = 0; for (; t < 600; t++) { T.tk(1); if (isChannelOn("blue")) break; }
     out.openAfterS = +(t / 60).toFixed(2); out.gateOpen = isChannelOn("blue");
@@ -307,7 +307,7 @@ const LIB = `()=>{
   ok(!p5.gateBefore && p5.gateOpen && p5.gateStillOpen && p5.crate[1] > 500 && p5.vaultX > 66 * 32, "crate falls into the blue plate pit and holds the gate; holding Right cannot lose it " + JSON.stringify(p5));
   // the vault is shut without the crate: walking the player alone (no crate) never gets in
   const shut = await run(page, () => {
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P();
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P();
     T.list(PUSHABLE_DEF_ID).filter(a => a.x > 57 * 32).forEach(a => actors.splice(actors.indexOf(a), 1)); T.at(60, 15); T.tk(10);
     T.key("ArrowRight", true); T.tk(240); T.key("ArrowRight", false);
     return { x: Math.round(q.x), gate: isChannelOn("blue") };
@@ -369,7 +369,7 @@ const LIB = `()=>{
   }
   // Part 5 needs Part 3, not Part 2: with Part 2 untouched the vault opens; Part 5 without Part 3 is unreachable
   const dep = await run(page, () => {
-    loadExampleGame(buildRockBottomGame, "Rock Bottom"); enterPlayMode(); playReadyUntil = null; const q = T.P();
+    loadExampleGame(buildRockBottomGame, "Rock Bottom", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; const q = T.P();
     T.at(43, 15); T.tk(10); B.dig(1, 44, 15); B.walk(1, 51 * 32 + 6, 400, { hopWhenStuck: true });
     T.key("ArrowRight", true); T.tk(300); T.key("ArrowRight", false);
     return { x: Math.round(q.x), cell: T.cell(q) };

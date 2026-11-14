@@ -13,7 +13,7 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")
     const out = {};
     // scenario: wall column at col wallCol rows 8-16 (full height), platform shuttling toward it, player riding
     const run = (opts) => {
-      loadExampleGame(buildSushiTrainGame, "x");
+      loadExampleGame(buildSushiTrainGame, "x", { skipConfirm: true });
       for (const a of actors.filter(a => !a.isPlayer)) removeActorById(a.id);
       for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { board[y][x] = null; }
       for (let x = 0; x < COLS; x++) board[17][x] = "solid:none";

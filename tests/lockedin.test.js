@@ -12,7 +12,7 @@ const { chromium } = require('/opt/node22/lib/node_modules/playwright'); const f
   const open = async () => { const p = await b.newPage(); p.on('dialog', d => d.accept()); await p.goto('file://' + tmp + '#t'); await p.waitForTimeout(300); await p.evaluate(() => { window.requestAnimationFrame = () => 0; }); return p; };
   let p = await open();
   const r = await p.evaluate(() => { __v.sc.red = true; __v.sc.green = true; __v.sc.blue = true; __v.surpriseMe(1, { templateIds: ['byebyecupcake'] }); const a = JSON.stringify(__v.pdef.art); return { sc: JSON.stringify(__v.sc), paused: __v.paused, derpy: __v.P.some(q => q.name === 'Derpy' && JSON.stringify(q.art) === a) }; });
-  ok(r.sc === '{}', 'channels left on by an earlier room are cleared'); ok(r.paused, 'a whole-room surprise opens paused'); ok(r.derpy, 'the cupcake hero look is applied over the stock look');
+  ok(r.sc === '{}', 'channels left on by an earlier room are cleared'); ok(!r.paused, 'a design that is not a one-shot machine opens live (byebyecupcake)'); ok(r.derpy, 'the cupcake hero look is applied over the stock look');
   const r2 = await p.evaluate(() => { __v.surpriseMe(2, { templateIds: ['minilevel1'] }); __v.surpriseMe(3, { templateIds: ['byebyecupcake'] }); const a = JSON.stringify(__v.pdef.art); return __v.P.some(q => q.name === 'Derpy' && JSON.stringify(q.art) === a); });
   ok(r2, 'a second press still gets the cupcake after another authored look'); await p.close();
   p = await open();

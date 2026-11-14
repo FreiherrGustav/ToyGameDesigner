@@ -85,7 +85,7 @@ const rectsOverlap = (a, b) => !(a.r <= b.l + 0.5 || b.r <= a.l + 0.5 || a.b <= 
   ok(await count() === 1, "click paints one cell"); 
   await page.click("#undoBtn"); ok(await count() === 0, "Undo works");
   await page.click("#redoBtn"); ok(await count() === 1, "Redo works");
-  await page.click("#clearAllBtn"); await page.waitForTimeout(100); ok(await count() === 0, "Clear board works");
+  await page.click("#clearAllBtn"); await page.click("#askYes"); await page.waitForTimeout(100); ok(await count() === 0, "Clear board works");
   // room tabs: duplicate, close
   await page.click("#roomTabRow .ghost"); await page.waitForTimeout(200);
   ok(await ev("()=>rooms.length") === 2, "Duplicate Room adds a room");

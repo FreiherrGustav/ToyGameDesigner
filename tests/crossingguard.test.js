@@ -22,7 +22,7 @@ const run = (pg, fn, arg) => pg.evaluate(([s, a]) => window.__ev(s)(a), [fn.toSt
 
   const load = () => run(page, () => {
     exitToBuildMode && appMode === "play" && exitToBuildMode();
-    loadExampleGame(buildCrossingGuardGame, "Crossing Guard"); enterPlayMode(); playReadyUntil = null; window.__hz = 0;
+    loadExampleGame(buildCrossingGuardGame, "Crossing Guard", { skipConfirm: true }); enterPlayMode(); playReadyUntil = null; window.__hz = 0;
     const p = actors.find(a => a.isPlayer);
     return { cols: roomCols(), cam: cameraMode, wrapV: wrapVEnabled, grav: gravityEnabled, lives, movers: actors.filter(a => moverDefOf(a)).length, px: p.x, py: p.y, coins: actors.filter(a => a.defId === "colCoin").length };
   });

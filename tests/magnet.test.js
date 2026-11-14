@@ -10,10 +10,10 @@ fs.writeFileSync(tmp, src.replace(anchor, anchor + 'window.__ev=f=>eval("("+f+")
   const p = await b.newPage(); p.on("dialog", d => d.accept()); const errs = []; p.on("pageerror", e => errs.push(e.message));
   await p.goto("file://" + tmp + "#t");
   const r = await p.evaluate(() => window.__ev(function () {
-    loadExampleGame(buildSushiTrainGame, "x"); exitToBuildMode && 0;
+    loadExampleGame(buildSushiTrainGame, "x", { skipConfirm: true }); exitToBuildMode && 0;
     const out = {};
     const trial = (color, sw) => {
-      loadExampleGame(buildSushiTrainGame, "x");
+      loadExampleGame(buildSushiTrainGame, "x", { skipConfirm: true });
       for (const a of actors.filter(a => !a.isPlayer)) removeActorById(a.id);
       for (let x = 0; x < 24; x++) board[17][x] = "solid:none";
       board[14][10] = "magnet:none"; colorBoard[14][10] = color;

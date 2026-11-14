@@ -56,7 +56,7 @@ const open = async (b, vp, hash) => {
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "undo removes the whole starter in one step");
     await page.click("#redoBtn"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1][0]==='solid:none'"), "redo brings it back");
-    await page.click("#clearAllBtn"); await page.waitForTimeout(200);
+    await page.click("#clearAllBtn"); await page.click("#askYes"); await page.waitForTimeout(200);
     ok(await ev(page, "()=>actors.length===0&&board[ROWS-1].every(c=>!c)"), "Clear board stays empty");
     // Play with no player: caption, flash, no mode change
     await page.click("#modePlayBtn"); await page.waitForTimeout(300);

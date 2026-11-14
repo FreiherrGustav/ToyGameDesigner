@@ -52,7 +52,7 @@ const parse = reqs => reqs.map(r => { const m = COUNT.exec(r.url); return m ? de
     await p.click("#modeBuildBtn"); await p.waitForTimeout(500);
     await p.click("#homeLogo"); await p.waitForTimeout(800);
     await p.click("#landingMakeBtn"); await p.waitForTimeout(800);
-    await p.click("#clearAllBtn"); await p.waitForTimeout(400);                       // empty board: next placement is the first
+    await p.click("#clearAllBtn"); await p.click("#askYes"); await p.waitForTimeout(400);                       // empty board: next placement is the first
     // place a hero with the real palette and canvas
     await p.click("#modeCharacter").catch(() => {});
     await p.locator("#playerSwatchRow .swatch, #playerSwatchRow canvas").first().click().catch(() => {});
