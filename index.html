@@ -13452,11 +13452,13 @@
   // ---- what the hot room looks like right now (read-only) ----
   // occ[y][x]: 0 free, 1 somebody's stuff (or a surprise's reserved area), 2 an untouched earlier
   // surprise's area (free to replace), 3 the player's own cell (never replaced).
-  function surpriseRectSignature(rect) {
+  function surpriseRectSignature(rect, src) {
+    // src: a room object (or anything with the same five fields); default is the hot room's globals
+    const B = src ? src.board : board, CB = src ? src.colorBoard : colorBoard, GB = src ? src.groundSkinBoard : groundSkinBoard, BB = src ? src.backgroundBoard : backgroundBoard, AC = src ? src.actors : actors;
     const cells = [];
     for (let y = rect.y; y < rect.y + rect.h; y++) for (let x = rect.x; x < rect.x + rect.w; x++)
-      cells.push([board[y][x], colorBoard[y][x], groundSkinBoard[y][x], backgroundBoard[y][x]]);
-    const acts = actors.filter(a => !a.spawnerKey && Math.floor((a.spawnX + a.w / 2) / TILE) >= rect.x && Math.floor((a.spawnX + a.w / 2) / TILE) < rect.x + rect.w
+      cells.push([B[y][x], CB[y][x], GB[y][x], BB[y][x]]);
+    const acts = AC.filter(a => !a.spawnerKey && Math.floor((a.spawnX + a.w / 2) / TILE) >= rect.x && Math.floor((a.spawnX + a.w / 2) / TILE) < rect.x + rect.w
       && Math.floor((a.spawnY + a.h / 2) / TILE) >= rect.y && Math.floor((a.spawnY + a.h / 2) / TILE) < rect.y + rect.h).map(a => [a.defId, a.spawnX, a.spawnY]);
     const s = JSON.stringify([cells, acts]);
     let h = 5381;
@@ -14030,7 +14032,7 @@
     if (!spec) { log("Surprise me has nothing to build."); return null; }
     if (spec.noRoom) {
       // a whole-room event never goes over anything: into a new room tab without asking
-      if (spec.category === "room" && opts.full == null) return surpriseMe(seed, Object.assign({}, opts, { full: "new", recent: useRecent }));
+      if ((spec.category === "room" || (spec.w >= COLS && spec.h >= ROWS)) && opts.full == null) return surpriseMe(seed, Object.assign({}, opts, { full: "new", recent: useRecent }));
       if (opts.full == null) { surpriseAskFull(seed, Object.assign({}, opts, { recent: useRecent })); return { pending: true }; }
       log("Surprise me: no room for that one.");
       return { skipped: "no room" };
@@ -14074,6 +14076,9 @@
       doorLinks[roomCellKey(partRooms[b.part], b.x, b.y)] = { toRoomId: partRooms[a.part], toX: a.x, toY: a.y };
     });
     if (partRooms.length > 1) activateRoom(room.id);
+    // a dice press that found the previous surprise's tab(s) untouched swaps them out instead of adding more tabs
+    if (newRoomMode && opts.reuseRooms && opts.reuseRooms.length) surpriseDropRooms(opts.reuseRooms, partRooms);
+    surpriseLastPress = { roomIds: partRooms.slice() }; // surpriseReusableRooms() only accepts it if it is still one whole, untouched surprise
     // recency counts presses, and a press is its primary plus its fillers: none of them comes back within SURPRISE_RECENT_MAX presses
     if (surpriseRecent.length === 0) surpriseRecentPresses.length = 0;
     const pressIds = [spec.templateId].concat((spec.fillers || []).map(f => f.templateId));
@@ -14205,10 +14210,94 @@
     btn.addEventListener("mouseenter", () => setCaption("Pick an item, then try it in a sample."));
     btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
   })();
+
+  // ===== SURPRISE CYCLE START =====
+  // The dice walks a shuffled order of every design instead of rolling a seed: each design once per cycle, then a fresh shuffle
+  // (never starting on the design just shown). A fresh visit's first two slots are two different tier-1 designs; everything
+  // after is a plain uniform shuffle (tier-1 designs included), so nothing else is pushed back.
+  const SURPRISE_TIER1 = ["lavalamp", "fanwindmill", "herd", "magnetmile", "trafficjam", "carousel", "windrally", "oopstramps"];
+  const SURPRISE_ORDER_KEEP_IN_SESSION = true; // true: a reload in the same tab continues the order (sessionStorage); false: every load reshuffles
+  const SURPRISE_ORDER_KEY = "toyGameDesigner.surpriseOrder";
+  function surpriseShuffle(arr, rnd) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+  function surpriseBuildOrder(ids, tier1, rnd) {
+    const head = surpriseShuffle(ids.filter(id => tier1.includes(id)), rnd).slice(0, 2);
+    return head.concat(surpriseShuffle(ids.filter(id => !head.includes(id)), rnd));
+  }
+  function surpriseReshuffle(ids, last, rnd) {
+    const o = surpriseShuffle(ids, rnd);
+    if (o.length > 1 && o[0] === last) { const j = 1 + Math.floor(rnd() * (o.length - 1)); const t = o[0]; o[0] = o[j]; o[j] = t; }
+    return o;
+  }
+  // state: { order, pos, last } or null. Returns { state, id } without touching the input.
+  function surpriseCycleNext(state, ids, tier1, rnd) {
+    const ok = state && Array.isArray(state.order) && state.order.length === ids.length && ids.every(id => state.order.includes(id)) && Number.isInteger(state.pos) && state.pos >= 0;
+    let st = ok ? { order: state.order.slice(), pos: state.pos, last: state.last || null } : { order: surpriseBuildOrder(ids, tier1, rnd), pos: 0, last: null };
+    if (st.pos >= st.order.length) st = { order: surpriseReshuffle(ids, st.last, rnd), pos: 0, last: st.last };
+    const id = st.order[st.pos];
+    return { state: { order: st.order, pos: st.pos + 1, last: id }, id };
+  }
+  // ===== SURPRISE CYCLE END =====
+  let surpriseCycleState = null, surpriseCycleLoaded = false, surpriseLastPress = null;
+  function surpriseCycleLoad() {
+    if (!SURPRISE_ORDER_KEEP_IN_SESSION) return null;
+    try { const s = JSON.parse(sessionStorage.getItem(SURPRISE_ORDER_KEY)); return s && Array.isArray(s.order) ? s : null; } catch (e) { return null; }
+  }
+  function surpriseCycleSave() {
+    if (!SURPRISE_ORDER_KEEP_IN_SESSION) return;
+    try { sessionStorage.setItem(SURPRISE_ORDER_KEY, JSON.stringify(surpriseCycleState)); } catch (e) { /* storage blocked: the order just lives in memory */ }
+  }
+  // The previous press's tab(s), if every one is still exactly as it was built (the signature covers tiles, colours, skins,
+  // Paint and where the actors were placed, not where they are right now, so a run that was resumed still counts as untouched).
+  function surpriseReusableRooms() {
+    const last = surpriseLastPress;
+    if (!last || !last.roomIds.length) return null;
+    snapshotCurrentRoomState();
+    for (const id of last.roomIds) {
+      const r = rooms.find(q => q.id === id);
+      if (!r || !r.surprises || r.surprises.length !== 1) return null;
+      const sv = r.surprises[0];
+      if (sv.rect.x !== 0 || sv.rect.y !== 0 || sv.rect.h !== ROWS || sv.rect.w < COLS) return null; // only whole-room surprises are swapped
+      if (sv.sig !== surpriseRectSignature(sv.rect, r)) return null;
+    }
+    return last.roomIds.slice();
+  }
+  function surpriseDropRooms(oldIds, newIds) {
+    const firstIdx = rooms.findIndex(r => oldIds.includes(r.id));
+    Object.keys(doorLinks).forEach(k => {
+      const rid = Number(k.split(":")[0]), link = doorLinks[k];
+      if (oldIds.includes(rid) || (link && oldIds.includes(link.toRoomId))) delete doorLinks[k];
+    });
+    [bombArmed, digProgress].forEach(map => Object.keys(map).forEach(k => { if (oldIds.includes(Number(k.split(":")[0]))) { if (map === bombArmed) cancelBombArm(k); else delete map[k]; } }));
+    oldIds.forEach(id => { hiddenTintRooms.delete(id); });
+    const newRooms = newIds.map(id => rooms.find(r => r.id === id));
+    rooms = rooms.filter(r => !oldIds.includes(r.id) && !newIds.includes(r.id));
+    rooms.splice(Math.max(0, Math.min(firstIdx, rooms.length)), 0, ...newRooms);
+    if (playerRoomId != null && oldIds.includes(playerRoomId)) playerRoomId = null;
+    renderRoomTabs();
+  }
+  // The dice button: the next design in this visit's order.
+  function surpriseDice() {
+    if (appMode !== "build") return null;
+    const ids = surpriseEligibleTemplates().eligible.map(t => t.id);
+    if (!ids.length) return surpriseMe();
+    if (!surpriseCycleLoaded) { surpriseCycleState = surpriseCycleLoad(); surpriseCycleLoaded = true; }
+    const r = surpriseCycleNext(surpriseCycleState, ids, SURPRISE_TIER1, Math.random);
+    surpriseCycleState = r.state; surpriseCycleSave();
+    const seed = SURPRISE_EXT_SEED_MIN + Math.floor(Math.random() * 90000);
+    const res = surpriseMe(seed, { templateId: r.id, recent: false, reuseRooms: surpriseReusableRooms() });
+    if (res && res.roomId != null) tele("surprise_shown", r.id); // TELEMETRY
+    return res;
+  }
+  window.surpriseDice = surpriseDice;
+  window.surpriseCycle = { next: surpriseCycleNext, build: surpriseBuildOrder, state: () => surpriseCycleState, reset: () => { surpriseCycleState = null; surpriseCycleLoaded = true; } };
   window.surpriseMe = surpriseMe; // console entry point: surpriseMe(4821)
   (function wireSurpriseButton() {
     const btn = document.getElementById("surpriseBtn");
-    btn.addEventListener("click", () => { try { playChip("rattle"); } catch (e) { /* audio can be unavailable */ } surpriseMe(); });
+    btn.addEventListener("click", () => { try { playChip("rattle"); } catch (e) { /* audio can be unavailable */ } surpriseDice(); });
     btn.addEventListener("mouseenter", () => setCaption("Surprise me."));
     btn.addEventListener("mouseleave", () => setCaption(lastSurpriseCaption));
   })();
@@ -14949,7 +15038,8 @@
     } catch (e) { return NOOP; }
     const NAMES = ["visitor_new", "visitor_returning", "landing_choice", "sample_opened", "surprise_me_used", "first_placement",
       "first_play", "play_started", "win", "death", "restart", "tutorial_started", "tutorial_step_reached", "tutorial_finished",
-      "tutorial_quit", "save_used", "share_used", "session_length", "error_class", "viewport_class", "browser_family", "touch_present"];
+      "tutorial_quit", "save_used", "share_used", "session_length", "error_class", "viewport_class", "browser_family", "touch_present",
+      "surprise_shown", "surprise_started", "surprise_skipped"];
     // every value is checked against a fixed list or number range; anything else is dropped
     const ENUMS = {
       landing_choice: ["make", "samples", "tutorial", "surprise"],
@@ -14962,11 +15052,12 @@
     };
     const MAX_PER_NAME = 25, MAX_TOTAL = 150;
     const log = [], counts = {}; let total = 0, pageStart = performance.now(), deaths = 0, gotHidden = false;
-    const once = {};
+    const once = {}; let surp = null; // the last design shown: { id, t, started, skipped }
     function valueOk(name, v) {
       if (v == null) return true;
       if (name === "sample_opened") return typeof SAMPLE_GAMES !== "undefined" && SAMPLE_GAMES.some(g => g.id === v);
       if (name === "tutorial_step_reached") return Number.isInteger(v) && v >= 0 && v < 30;
+      if (name === "surprise_shown" || name === "surprise_started" || name === "surprise_skipped") return typeof SURPRISE_TEMPLATES !== "undefined" && SURPRISE_TEMPLATES.some(g => g.id === v); // a design id from the fixed list
       return !!ENUMS[name] && ENUMS[name].indexOf(String(v)) >= 0;
     }
     function t(name, value) {
@@ -14977,6 +15068,11 @@
         const ev = value == null ? name : name + ":" + value;
         log.push(ev);
         queueSend(ev);
+        if (name === "surprise_shown") {
+          const now = performance.now();
+          if (surp && !surp.skipped && now - surp.t <= 10000) { surp.skipped = true; t("surprise_skipped", surp.id); } // the next press came within 10 s
+          surp = { id: value, t: now, started: false, skipped: false };
+        }
         if (new URLSearchParams(location.search).has("telelog")) console.log("[tele]", ev);
       } catch (e) { /* never throws */ }
     }
@@ -15071,6 +15167,7 @@
               if (appMode === "play" && prevEnded && !playSessionEnded) t("restart");
               if (appMode === "play" && lives < prevLives) deaths += prevLives - lives;
             }
+            if (surp && !surp.started && !demo && performance.now() - surp.t <= 10000 && (appMode === "play" || !gamePaused)) { surp.started = true; t("surprise_started", surp.id); } // played or resumed within 10 s
             prevMode = demo ? prevMode : appMode; prevEnded = demo ? null : playSessionEnded; prevLives = lives;
             if (tutorialActive && !prevTut) { t("tutorial_started"); prevStep = null; }
             if (tutorialActive && tutorial) {
@@ -15109,9 +15206,12 @@
   // doesn't stack another copy on top of the autosave).
   (function surpriseFromHash() {
     // #surprise=SEED:templateid builds that template at that seed (used to review a retired seed number's old template).
+    // #surprise=<design id> (letters first) builds that one design, e.g. #surprise=lavalamp
     const m = /^#surprise=(\d+)(?::([a-z0-9]+))?$/.exec(location.hash || "");
-    if (!m) return;
-    surpriseMe(Number(m[1]), m[2] ? { templateId: m[2] } : undefined);
+    const byId = /^#surprise=([a-z][a-z0-9]*)$/.exec(location.hash || "");
+    if (!m && !byId) return;
+    if (byId) surpriseMe(SURPRISE_EXT_SEED_MIN, { templateId: byId[1] });
+    else surpriseMe(Number(m[1]), m[2] ? { templateId: m[2] } : undefined);
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* file:// may refuse */ }
   })();
   // First visit (nothing autosaved, no deep-link hash) lands on the front screen; a returning
