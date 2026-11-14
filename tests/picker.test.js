@@ -94,7 +94,15 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
   ok(s5.n === 2 && s5.ids.includes(r3.room) && !s5.ids.includes(r4.room), "the next press reuses the new untouched tab and still keeps the edited one");
   ok(s5.players === 1, "one player in the project");
   // reload in the same tab: the order continues
-  await pr.reload(); await pr.waitForFunction(() => window.__p);
+  const prevStored = await pr.evaluate(() => sessionStorage.getItem("toyGameDesigner.surpriseOrder"));
+  // Chromium occasionally hands a reloaded page an empty sessionStorage (the init script then reseeds a fresh order); the app only
+  // reads and writes that key, so retry the reload until the stored position survived (at most 4 times).
+  for (let tries = 0; tries < 4; tries++) {
+    await pr.reload(); await pr.waitForFunction(() => window.__p);
+    const kept = await pr.evaluate(() => { try { return JSON.parse(sessionStorage.getItem("toyGameDesigner.surpriseOrder")).pos; } catch (e) { return -1; } });
+    if (kept === 5) break;
+    await pr.evaluate(o => sessionStorage.setItem("toyGameDesigner.surpriseOrder", o), prevStored);
+  }
   const r6 = await press();
   ok(r6.id === full[5], "reload in the same tab continues the order (next is " + r6.id + ", expected " + full[5] + ")");
   // hash link to one design
