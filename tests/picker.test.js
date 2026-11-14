@@ -70,7 +70,7 @@ function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
   const st = await pg.evaluate(() => window.__p.state());
   console.log("  rooms after 39 presses: " + st.n + ", players: " + st.players);
   ok(st.players <= 1, "at most one player in the project");
-  ok(st.n < 12, "tabs did not pile up (" + st.n + " tabs after 39 presses)");
+  ok(st.n <= 2, "tabs did not pile up (" + st.n + " tabs after 39 presses; 2 only while the two-room design is shown)");
   await pg.close();
 
   // ---- tab reuse: order starts with whole-room designs ----
