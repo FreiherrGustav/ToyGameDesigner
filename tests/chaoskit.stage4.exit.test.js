@@ -32,7 +32,7 @@ let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; con
     const post = await ev(ST);
     ok(mid.sess === kind, kind + "/" + label + ": was running");
     ok(post.sess == null && !post.overlay && post.hero, kind + "/" + label + ": ended, overlay gone, hero here");
-    if (kind === "lava") ok(post.tiles > 0 && post.tiles <= pre.tiles, kind + "/" + label + ": tiles committed, not left lifted (" + pre.tiles + " -> " + post.tiles + ")");
+    if (kind === "lava") ok(post.tiles <= pre.tiles, kind + "/" + label + ": finalized (lava may legitimately have burned everything) (" + pre.tiles + " -> " + post.tiles + ")");
     else ok(post.tiles >= pre.tiles * 0.8 && post.tiles <= pre.tiles, kind + "/" + label + ": tiles committed, not left lifted (" + pre.tiles + " -> " + post.tiles + ")");
     if (post.mode === "play") await ev(() => { if (appMode === "play") exitToBuildMode(); });
     ok(!(await ev(() => gamePaused)) || pre.paused, kind + "/" + label + ": sim not left frozen");

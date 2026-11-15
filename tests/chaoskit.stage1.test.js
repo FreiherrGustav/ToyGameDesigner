@@ -154,7 +154,7 @@ const PANEL_INFO = () => {
     ok((await p.evaluate(() => document.getElementById("messCaption").textContent)).startsWith("Surprise #"), tag + " the Make a Mess caption bar shows it");
     // placeholders do nothing
     const before = await p.evaluate(() => window.__ev("()=>JSON.stringify([undoStack.length,actors.length,rooms.length])")());
-    for (const k of ["quake", "lava"]) await p.click('[data-mk="' + k + '"]');
+    // (no placeholder buttons are left after Stage 4: all eight are live and covered by the stage 2-4 tests)
     ok(before === await p.evaluate(() => window.__ev("()=>JSON.stringify([undoStack.length,actors.length,rooms.length])")()), tag + " placeholder buttons change nothing");
     // captions
     await p.hover('[data-mk="bombs"]'); ok((await p.evaluate(() => document.getElementById("messCaption").textContent)).length > 10, tag + " hover shows a caption");
