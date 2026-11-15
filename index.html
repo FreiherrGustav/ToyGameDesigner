@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.5";
+  const CHAOS_KIT_VERSION = "v2.72.6";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15533,13 +15533,13 @@
       if (mess) {
         renderGravMirror();
         timer = setInterval(() => { // only while this tab is open
-          if (tutorialActive) { showTab("game"); return; } // the tutorial points at Make a Game controls
+          if (tutorialActive && !(tutorial && tutorial.curName === "mess")) { showTab("game"); return; } // the tutorial points at Make a Game controls (except on its own last step, which asks for this tab)
           if (shownGrav !== gravityEnabled + "|" + gravityDir) renderGravMirror();
         }, 200);
       }
     }
     $("messTabGame").addEventListener("click", () => showTab("game"));
-    $("messTabMess").addEventListener("click", () => showTab("mess"));
+    $("messTabMess").addEventListener("click", () => { showTab("mess"); messTele("mess_tab_opened"); });
 
     // Surprise Me: the dice button's own click handler (rattle, telemetry and all), not a copy of it
     const sb = $("mkSurprise");
@@ -16071,6 +16071,14 @@
       }
       a.x = ox; a.y = oy; return false;
     }
+    // a hero can walk through a door while the sim runs; whatever happens, the commit must land in the room the session belongs to
+    function ckInRoom(roomId, fn) {
+      if (currentRoomId === roomId) { fn(); return; }
+      if (!rooms.some(r => r.id === roomId)) return;
+      const back = currentRoomId;
+      activateRoom(roomId);
+      try { fn(); } finally { snapshotCurrentRoomState(); activateRoom(back); }
+    }
     const ckSettleActors = () => { actors.filter(a => !a.isPlayer).forEach(ckNudgeOut); const h = actors.find(a => a.isPlayer); if (h) ckNudgeOut(h); };
     const ckEase = p => p < 0 ? 0 : p > 1 ? 1 : p * p * (3 - 2 * p);
     function ckDrawSprite(cx, sp, x, y, alpha, rot, scale) {
@@ -16145,11 +16153,14 @@
     function quakeCommit(s) {
       if (s.phase !== 1) return;
       s.phase = 2; s.settleAt = performance.now() + 600;
-      s.metas.forEach(m => { if (!m.broken) ckPlace(m, m.tx, m.ty); });
+      ckInRoom(s.roomId, () => {
+        s.metas.forEach(m => { if (!m.broken) ckPlace(m, m.tx, m.ty); });
+        ckSettleActors();
+        snapshotCurrentRoomState();
+      });
       ovHide();
       if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
-      ckSettleActors();
-      snapshotCurrentRoomState(); renderAll();
+      renderAll();
       log("The earthquake is over.");
     }
     const quakeHooks = {
@@ -16160,7 +16171,7 @@
           if (el < QK.LIFT - 350 && !reducedMotion() && el - s.lastShake > 150) { shakeAt = gameNow(); s.lastShake = el; } // the game's own modest world shake, written as data
           if (el >= QK.LIFT) quakeLift(s, el);
         } else if (s.phase === 1 && el >= s.liftedAt + QK.DRIFT + QK.SETTLE) quakeCommit(s);
-        else if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckSettleActors(); } // a second pass once things have fallen onto the new board
+        else if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckInRoom(s.roomId, ckSettleActors); } // a second pass once things have fallen onto the new board
       },
       end(why, s, abort) {
         if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
@@ -16241,21 +16252,24 @@
     function lavaCommit(s) {
       if (s.phase !== 1) return;
       s.phase = 2; s.settleAt = performance.now() + 600;
-      s.burnActors(s.L); // anything still in the burnt zone goes (a Stop mid-run finalizes the same way)
-      s.metas.forEach(m => {
-        if (m.burn) { if (ckIsDoor(m.key)) severDoorLink(currentRoomId, m.cx, m.cy); return; }
-        ckPlace(m, m.tx, m.ty);
+      ckInRoom(s.roomId, () => {
+        s.burnActors(s.L); // anything still in the burnt zone goes (a Stop mid-run finalizes the same way)
+        s.metas.forEach(m => {
+          if (m.burn) { if (ckIsDoor(m.key)) severDoorLink(currentRoomId, m.cx, m.cy); return; }
+          ckPlace(m, m.tx, m.ty);
+        });
+        ckSettleActors();
+        snapshotCurrentRoomState();
       });
       ovHide();
       if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
-      ckSettleActors();
-      snapshotCurrentRoomState(); renderAll();
+      renderAll();
       log("The lava is gone.");
     }
     const lavaHooks = {
       start(s) { s.phase = 0; log("Rising Lava!"); lavaStart(s); },
       tick(el, s) {
-        if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckSettleActors(); }
+        if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckInRoom(s.roomId, ckSettleActors); }
         if (s.phase !== 1) return;
         if (el < LV.RISE + LV.HOLD) s.burnActors(lavaFront(el, s.L)); // burned as the front passes (the sim runs)
         const lastFall = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP + LV.STAGGER + 120 + Math.max(0, ...s.metas.map(m => m.fdur)) + 150;
@@ -16269,6 +16283,56 @@
       }
     };
 
+    // ---- Stage 5: tutorial step, usage counters, captions ----
+    // (1) One last tutorial step, appended to the existing list (no existing step is touched): the ring goes to the Make a Mess tab.
+    try {
+      if (typeof TUTORIAL_STEPS !== "undefined" && !TUTORIAL_STEPS.some(x => x.name === "mess")) {
+        TUTORIAL_STEPS.push({ name: "mess", say: () => ({ t: "Want to wreck it?", b: "Open the Make a Mess tab to shake things up. Then build it all back." }),
+          done: () => !!(tutorial && tutorial.messClicked), target: () => (appMode === "build" ? { sel: "#messTabMess" } : null) });
+      }
+    } catch (e) { /* the tutorial is optional */ }
+    window.addEventListener("click", e => { if (tutorial && tutorial.curName === "mess" && e.target.closest && e.target.closest("#messTabMess")) tutorial.messClicked = true; }, true);
+    // (2) Anonymous counters, only with ?study=1 (the same switch, opt-outs and transport as the main counters: tele.active is true only when
+    // counting is on and not opted out). Counters only, nothing typed/drawn/placed, no ids. Fixed names; at most 25 per name and 150 in all.
+    const MESS_EVENTS = ["mess_tab_opened", "quickbuild_walls", "quickbuild_stuff", "quickbuild_enemies", "quickbuild_scenery",
+      "chaos_tumble", "chaos_earthquake", "chaos_bombs", "chaos_lava", "mess_undo"];
+    const messCounts = {}; let messTotal = 0, messPending = [], messTimer = null, messLastSerial = null;
+    const messLog = [];
+    function messFlush() {
+      messTimer = null;
+      try {
+        if (navigator.onLine === false) { messPending = []; return; }
+        const batch = messPending.splice(0, 12); messPending = [];
+        batch.forEach(ev => { try { fetch(TELEMETRY_ENDPOINT + "?e=true&p=" + encodeURIComponent("/e/" + ev), { method: "GET", mode: "no-cors", keepalive: true, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" }).catch(() => {}); } catch (err) {} });
+      } catch (e) {}
+    }
+    function messTele(name) {
+      try {
+        if (typeof tele === "undefined" || !tele.active || landingActive) return;
+        if (MESS_EVENTS.indexOf(name) < 0 || messTotal >= 150 || (messCounts[name] || 0) >= 25) return;
+        messCounts[name] = (messCounts[name] || 0) + 1; messTotal++; messLog.push(name);
+        messPending.push(name); if (!messTimer) messTimer = setTimeout(messFlush, 8000);
+        if (new URLSearchParams(location.search).has("telelog")) console.log("[tele]", name);
+      } catch (e) { /* never throws */ }
+    }
+    document.addEventListener("visibilitychange", () => { if (document.hidden && messPending.length) setTimeout(messFlush, 50); });
+    // an undo right after a Make a Mess press (the toast's Undo, the Undo button or Ctrl+Z) counts once
+    function messUndoCheck() { if (messLastSerial != null && editSerial === messLastSerial) { messTele("mess_undo"); messLastSerial = null; } }
+    document.addEventListener("click", e => { const b = e.target && e.target.closest && e.target.closest("#undoBtn, #mkToastUndo"); if (b) messUndoCheck(); }, true);
+    document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && /^z$/i.test(e.key) && !e.shiftKey) messUndoCheck(); }, true);
+    // (3) captions for every button, in the same style (the Make a Mess caption line, or the main caption bar while Make a Game is open)
+    const capNow = t => (pal.classList.contains("messMode") ? setMessCaption(t) : setCaption(t || ""));
+    function wireAny(el, text) {
+      el.addEventListener("mouseenter", () => capNow(text));
+      el.addEventListener("mouseleave", () => capNow(""));
+      el.addEventListener("touchstart", () => capNow(text), { passive: true });
+      el.title = text;
+    }
+    wireAny($("messTabGame"), "Build your game: pick pieces and place them.");
+    wireAny($("messTabMess"), "Tear it down: random piles, and chaos buttons that shake everything up.");
+    wireAny($("mkStop"), "Stops right now and keeps whatever has happened so far.");
+    wireAny($("mkToastUndo"), "Takes back everything that last button just did.");
+
     // the build/chaos buttons: tumble and bombs are live, the rest are placeholders until their stages
     panel.querySelectorAll(".mkBtn").forEach(b => {
       wire(b, CAPTIONS[b.dataset.mk]);
@@ -16280,27 +16344,26 @@
             const txt = { walls: "walls", stuff: "machines", enemies: "enemy groups", scenery: "bits of scenery" }[kind];
             const msg = "Added " + r.count + " " + txt + ".";
             setMessCaption(msg); log(msg + " Undo takes it all back."); showToast(msg, r.serial);
+            messTele("quickbuild_" + kind); messLastSerial = r.serial;
           }
           return;
         }
         if (kind === "quake" || kind === "lava") {
           if (sess && sess.kind === kind) { endSession("stop"); return; }
           if (viewK() !== 0) { setMessCaption("Not while the board is turned."); return; }
-          if (kind === "quake") beginSession("quake", "Earthquake", QK.DUR, quakeHooks);
-          else beginSession("lava", "Rising Lava", LV.DUR, lavaHooks);
+          if (kind === "quake" ? beginSession("quake", "Earthquake", QK.DUR, quakeHooks) : beginSession("lava", "Rising Lava", LV.DUR, lavaHooks)) { messTele(kind === "quake" ? "chaos_earthquake" : "chaos_lava"); messLastSerial = sess.serial; }
           return;
         }
         if (kind === "tumble" || kind === "bombs") {
           if (sess && sess.kind === kind) { endSession("stop"); return; }
-          if (kind === "tumble") beginSession("tumble", "Gravity Tumble", TUMBLE_STEP_MS * TUMBLE_STEPS, tumbleHooks);
-          else beginSession("bombs", "Bomb Storm", STORM_MS, stormHooks);
+          if (kind === "tumble" ? beginSession("tumble", "Gravity Tumble", TUMBLE_STEP_MS * TUMBLE_STEPS, tumbleHooks) : beginSession("bombs", "Bomb Storm", STORM_MS, stormHooks)) { messTele(kind === "tumble" ? "chaos_tumble" : "chaos_bombs"); messLastSerial = sess.serial; }
           return;
         }
         setMessCaption("That one isn't built yet.");
       });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, teleDump: () => messLog.slice(), ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 

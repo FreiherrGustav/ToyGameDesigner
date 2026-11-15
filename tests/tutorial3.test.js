@@ -93,8 +93,10 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     const rg = await ring(p);
     ok(rg && rg[0] <= tab[0] + 1 && rg[1] <= tab[1] + 1 && rg[0] + rg[2] >= tab[0] + tab[2] - 1, w + ': ring on the Objects tab');
     await shot(p, `s3_welldone_${w}`);
-    await p.click('#modeObject'); await p.waitForTimeout(1500);
-    ok(!(await p.evaluate(() => __t.active())), w + ': clicking Objects ends it');
+    await p.click('#modeObject'); await p.waitForTimeout(900);
+    ok(await p.evaluate(() => __t.active()), w + ': clicking Objects moves on to the Make a Mess step');
+    await p.click('#messTabMess'); await p.waitForTimeout(1500);
+    ok(!(await p.evaluate(() => __t.active())), w + ': clicking the Make a Mess tab ends it');
     ok(p.errs.length === 0, w + ': no errors ' + p.errs.join(';'));
     await p.close();
   }

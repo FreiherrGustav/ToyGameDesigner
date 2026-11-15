@@ -52,7 +52,7 @@ const GROUND = LABEL === 'before' ? 'solid' : 'grass';
     ok((await p.evaluate(() => __t.info())).step === 'play', w + ': all placed -> Play');
     await p.click('#modePlayBtn'); await p.waitForTimeout(1500); await p.evaluate(() => __t.teleportToGoal()); await p.waitForTimeout(3600);
     i = await p.evaluate(() => __t.info()); ok(i.step === 'objects', w + ': won -> objects step ' + i.step);
-    await p.click('#modeObject'); await p.waitForTimeout(3300);
+    await p.click('#modeObject'); await p.waitForTimeout(900); await p.click('#messTabMess'); await p.waitForTimeout(3300);
     i = await p.evaluate(() => __t.info()); ok(!i.tut && i.tiles >= 19 && i.actors >= 2, w + ': finished, board kept ' + JSON.stringify(i)); if (LABEL !== 'before') ok(i.sky > 100, w + ': finished board has the sky');
     await shot(p, `${LABEL}-finished-${w}`); ok(!p.errs.length, w + ': no errors ' + p.errs); await p.context().close();
   }
