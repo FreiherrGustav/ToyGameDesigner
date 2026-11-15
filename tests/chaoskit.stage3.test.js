@@ -56,7 +56,7 @@ const ok = (c, m) => { if (c) pass++; else { fail++; console.log("FAIL " + m); }
       const variant = VARIANTS[i % VARIANTS.length], gdir = ["down", "up", "left", "right", "off"][Math.floor(i / VARIANTS.length) % 5];
       const r = await ev(([kind, variant, gdir, keep]) => {
         const problems = [];
-        restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT));
+        restoreProjectSnapshot(structuredClone(FACTORY_DEFAULT_SNAPSHOT)); undoStack.length = 0; redoStack.length = 0; // (a full undo stack would hide the +1)
         if (variant === "starter") { loadStarterBoard(); }
         else if (variant !== "empty") { const s = SAMPLE_GAMES.find(x => x.id === variant); loadExampleGame(s.builder, s.name, { skipConfirm: true }); }
         setGamePaused(false);
