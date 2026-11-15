@@ -16144,7 +16144,7 @@
     }
     function quakeCommit(s) {
       if (s.phase !== 1) return;
-      s.phase = 2;
+      s.phase = 2; s.settleAt = performance.now() + 600;
       s.metas.forEach(m => { if (!m.broken) ckPlace(m, m.tx, m.ty); });
       ovHide();
       if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
@@ -16160,6 +16160,7 @@
           if (el < QK.LIFT - 350 && !reducedMotion() && el - s.lastShake > 150) { shakeAt = gameNow(); s.lastShake = el; } // the game's own modest world shake, written as data
           if (el >= QK.LIFT) quakeLift(s, el);
         } else if (s.phase === 1 && el >= s.liftedAt + QK.DRIFT + QK.SETTLE) quakeCommit(s);
+        else if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckSettleActors(); } // a second pass once things have fallen onto the new board
       },
       end(why, s, abort) {
         if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
@@ -16238,7 +16239,7 @@
     }
     function lavaCommit(s) {
       if (s.phase !== 1) return;
-      s.phase = 2;
+      s.phase = 2; s.settleAt = performance.now() + 600;
       s.doomed.forEach(d => removeActorObject(d.a)); s.doomed = [];
       s.metas.forEach(m => {
         if (m.burn) { if (ckIsDoor(m.key)) severDoorLink(currentRoomId, m.cx, m.cy); return; }
@@ -16253,6 +16254,7 @@
     const lavaHooks = {
       start(s) { s.phase = 0; log("Rising Lava!"); lavaStart(s); },
       tick(el, s) {
+        if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckSettleActors(); }
         if (s.phase !== 1) return;
         for (let i = s.doomed.length - 1; i >= 0; i--) if (el >= s.doomed[i].at) { removeActorObject(s.doomed[i].a); s.doomed.splice(i, 1); } // burned as the front passes
         const lastFall = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP + LV.STAGGER + 120 + Math.max(0, ...s.metas.map(m => m.fdur)) + 150;

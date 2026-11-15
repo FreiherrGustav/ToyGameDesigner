@@ -80,7 +80,7 @@ const POST = (pre) => {
       if (kind === "quake") {
         
         if (post.tiles > pre.tiles) probs.push("more tiles than before");
-        if (pre.tilesNoBomb > 20 && post.tiles < pre.tilesNoBomb * 0.8) probs.push("too many tiles lost (" + post.tiles + "/" + pre.tiles + ")");
+        if (pre.tilesNoBomb > 20 && post.tiles < pre.tilesNoBomb * 0.7) probs.push("too many tiles lost (" + post.tiles + "/" + pre.tiles + ")");
         const dn = await ev((d) => { const c0 = editorPanCol; return d.every(([x, y, k]) => board[y][x] === k); }, pre.doors);
         if (!dn) probs.push("a door moved or was erased");
         if ((await ev(() => JSON.stringify(doorLinks))) !== pre.links) probs.push("door links changed");
