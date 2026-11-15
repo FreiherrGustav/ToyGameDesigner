@@ -89,7 +89,7 @@ fs.writeFileSync('/tmp/tut2_hooked.html', src);
     await shot(p, `s4_objects_${w}`);
     await p.click('#modeObject'); await p.waitForTimeout(900);
     ok(await p.evaluate(() => __t.stepName()) === 'mess', w + ': after Objects the last step is the Make a Mess tab');
-    ok(onRect(await ring(p), await rect(p, '#messTabMess')) || around(await ring(p), await rect(p, '#messTabMess'), +w), w + ': last ring on the Make a Mess tab');
+    { const g = await ring(p), t = await rect(p, '#messTabMess'); ok(onRect(g, t) || around(g, t, +w), w + ': last ring on the Make a Mess tab ' + JSON.stringify([g, t])); }
     await p.click('#messTabMess'); await p.waitForTimeout(3300);
     ok(!(await p.evaluate(() => __t.active())) && await nothing(p), w + ': finished, layer gone');
     ok(await p.evaluate(() => document.getElementById('paletteWrap').classList.contains('messMode')), w + ': the Make a Mess tab stayed open (not bounced back)');

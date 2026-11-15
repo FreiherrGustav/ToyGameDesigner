@@ -16288,7 +16288,7 @@
     try {
       if (typeof TUTORIAL_STEPS !== "undefined" && !TUTORIAL_STEPS.some(x => x.name === "mess")) {
         TUTORIAL_STEPS.push({ name: "mess", say: () => ({ t: "Want to wreck it?", b: "Open the Make a Mess tab to shake things up. Then build it all back." }),
-          done: () => !!(tutorial && tutorial.messClicked), target: () => (appMode === "build" ? { sel: "#messTabMess" } : null) });
+          done: () => !!(tutorial && tutorial.messClicked), target: () => (appMode === "build" ? { sel: "#messTabMess", prep: () => { const e = document.getElementById("messTabMess"); if (e && e.scrollIntoView) e.scrollIntoView({ block: "nearest" }); } } : null) }); // prep: the palette may have scrolled down to the Objects tab
       }
     } catch (e) { /* the tutorial is optional */ }
     window.addEventListener("click", e => { if (tutorial && tutorial.curName === "mess" && e.target.closest && e.target.closest("#messTabMess")) tutorial.messClicked = true; }, true);
