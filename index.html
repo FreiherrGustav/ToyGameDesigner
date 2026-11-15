@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.4";
+  const CHAOS_KIT_VERSION = "v2.72.5";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15463,9 +15463,9 @@
       '</div></div>' +
       '<div><div class="mkTitle">Chaos</div><div class="mkGrid">' +
         '<button class="mkBtn mkChaos" data-mk="tumble" type="button">Gravity Tumble</button>' +
-        '<button class="mkBtn mkChaos mkInert" data-mk="quake" type="button">Earthquake</button>' +
+        '<button class="mkBtn mkChaos" data-mk="quake" type="button">Earthquake</button>' +
         '<button class="mkBtn mkChaos" data-mk="bombs" type="button">Bomb Storm</button>' +
-        '<button class="mkBtn mkChaos mkInert" data-mk="lava" type="button">Rising Lava</button>' +
+        '<button class="mkBtn mkChaos" data-mk="lava" type="button">Rising Lava</button>' +
       '</div>' +
       '<div id="mkSession"><span id="mkSessLabel"></span><button id="mkStop" type="button">Stop</button></div></div>' +
       '<div id="messCaption">Hover (or tap) a button to see what it does.</div>';
@@ -15476,8 +15476,8 @@
       surprise: "Builds one of the surprise rooms, just like the dice.",
       walls: "Piles of towers, arches and walls in matching textures.", stuff: "Dozens of little machines that do things.",
       enemies: "Gangs of enemies, ready to cause trouble.", scenery: "Clouds, hills and bushes so the board looks finished.",
-      tumble: "Gravity spins around for 8 seconds, then goes back.", quake: "Coming soon: everything gets shaken loose.",
-      bombs: "Three waves of bombs, then one giant boom. Undo brings it all back.", lava: "Coming soon: lava rises, then everything left falls."
+      tumble: "Gravity spins around for 8 seconds, then goes back.", quake: "Everything gets shaken loose and lands in a new place.",
+      bombs: "Three waves of bombs, then one giant boom. Undo brings it all back.", lava: "Lava rises and burns what it reaches, then what is left falls."
     };
     const $ = id => document.getElementById(id);
     const caption = $("messCaption");
@@ -15580,7 +15580,7 @@
       if (rooms !== s.rooms0) return endSession("project"); // a load / undo / redo replaced the whole project
       if (currentRoomId !== s.roomId) return endSession("room");
       if (editSerial !== s.serial) return endSession("edit");
-      if (gamePaused) return endSession("paused");
+      if (gamePaused && !s.ownPause) return endSession("paused");
       const el = performance.now() - s.t0;
       if (el >= s.dur) return endSession("done");
       try { s.hooks.tick(el, s); } catch (e) { endSession("error"); throw e; }
@@ -15995,6 +15995,277 @@
     }
     $("mkToastUndo").addEventListener("click", () => { hideToast(); $("undoBtn").click(); });
 
+    // ---- the shared overlay animation module (Earthquake, Rising Lava) ----
+    // A separate canvas above the game canvas (pointer-events none). Tiles are "lifted": copied as pictures into a sheet, then removed from
+    // the board DATA (the overlay cannot hide pixels beneath it), animated here as free sprites, and committed back as one final board.
+    // The sheet is made by drawing the game twice (with and without the tiles) and keeping the pixels that differ, so every tile keeps its
+    // exact look, transparent parts included. The press-time undo snapshot (taken by the session wrapper) is the one undo step; every exit
+    // path finalizes (commits the precomputed end state), so tiles are never left lifted. The sim is frozen (paused) while tiles are lifted.
+    const ov = { cv: null, cx: null, sheet: null, sprites: [], parts: [], lava: null, s: null, on: false };
+    function ovEnsure() {
+      if (ov.cv) return;
+      const c = document.createElement("canvas");
+      c.id = "mkOverlay"; c.style.cssText = "position:fixed;pointer-events:none;z-index:50;display:none;image-rendering:pixelated";
+      document.body.appendChild(c); ov.cv = c; ov.cx = c.getContext("2d");
+    }
+    function ovSync() {
+      const g = gameCanvas, r = g.getBoundingClientRect(), b = canvasBorderPx;
+      if (ov.cv.width !== g.width) ov.cv.width = g.width;
+      if (ov.cv.height !== g.height) ov.cv.height = g.height;
+      const st = ov.cv.style;
+      st.left = (r.left + b) + "px"; st.top = (r.top + b) + "px"; st.width = (r.width - 2 * b) + "px"; st.height = (r.height - 2 * b) + "px";
+    }
+    function ovDraw(now) {
+      if (!ov.on || !ov.s) return;
+      ovSync();
+      const cx = ov.cx, t = now - ov.s.t0;
+      cx.clearRect(0, 0, ov.cv.width, ov.cv.height);
+      cx.imageSmoothingEnabled = false;
+      ov.drawFn(cx, t);
+    }
+    function ovLoop() { if (!ov.on) return; ovDraw(performance.now()); requestAnimationFrame(ovLoop); }
+    function ovShow(s, drawFn) { ovEnsure(); ov.s = s; ov.drawFn = drawFn; ov.on = true; ov.cv.style.display = "block"; ovSync(); requestAnimationFrame(ovLoop); }
+    function ovHide() { ov.on = false; ov.sprites = []; ov.parts = []; ov.lava = null; ov.s = null; if (ov.cv) { ov.cv.style.display = "none"; ov.cx.clearRect(0, 0, ov.cv.width, ov.cv.height); } }
+    const ckVisible = () => { const c0 = editorPanCol; return { c0, W: Math.min(COLS, hotRoomCols() - c0) }; };
+    const ckIsDoor = k => { const d = k && GAMEPLAY_TILE_DEFS[k]; return !!d && d.geometry === "door"; };
+    const ckHotRoom = () => rooms.find(r => r.id === currentRoomId);
+    // lift: remember every layer of each cell, take the cells off the board, and build the picture sheet
+    function ovLift(cells) {
+      shakeAt = -1e9;
+      renderGame();
+      const w = gameCanvas.width, h = gameCanvas.height;
+      const A = document.createElement("canvas"); A.width = w; A.height = h;
+      const ax = A.getContext("2d"); ax.drawImage(gameCanvas, 0, 0);
+      const hr = ckHotRoom();
+      const metas = cells.map(([cx, cy]) => ({ cx, cy, key: board[cy][cx], color: colorBoard[cy][cx], skin: groundSkinBoard[cy][cx], rot: groundSkinRotationBoard[cy][cx],
+        content: spawnerContents[roomCellKey(currentRoomId, cx, cy)], gravOpt: hr && hr.gravButtons ? hr.gravButtons[cx + "," + cy] : undefined }));
+      cells.forEach(([cx, cy]) => gmClearCell(cx, cy));
+      renderGame();
+      const bd = gctx.getImageData(0, 0, w, h).data, ad = ax.getImageData(0, 0, w, h), d = ad.data;
+      for (let i = 0; i < d.length; i += 4) if (d[i] === bd[i] && d[i + 1] === bd[i + 1] && d[i + 2] === bd[i + 2]) d[i + 3] = 0;
+      ax.putImageData(ad, 0, 0);
+      ov.sheet = A;
+      return metas;
+    }
+    function ckPlace(m, cx, cy) { // writes a lifted tile back with all its layers
+      gmClearCell(cx, cy);
+      board[cy][cx] = m.key;
+      if (m.color) colorBoard[cy][cx] = m.color;
+      if (m.skin) { groundSkinBoard[cy][cx] = m.skin; groundSkinRotationBoard[cy][cx] = m.rot || 0; }
+      if (m.content) spawnerContents[roomCellKey(currentRoomId, cx, cy)] = m.content;
+      if (m.gravOpt) { const hr = ckHotRoom(); hr.gravButtons = hr.gravButtons || {}; hr.gravButtons[cx + "," + cy] = m.gravOpt; }
+    }
+    function ckNudgeOut(a) { // an actor that ended up inside a tile goes to the nearest free spot (start position fields are never touched)
+      if (!actorBlockedByTiles(a)) return false;
+      const c0 = editorPanCol, W = Math.min(COLS, hotRoomCols() - c0), [cx, cy] = gmCell(a), ox = a.x, oy = a.y;
+      for (let r = 1; r < 16; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < c0 || nx >= c0 + W || ny < 0 || ny >= ROWS || board[ny][nx]) continue;
+        a.x = nx * TILE + TILE / 2 - a.w / 2; a.y = ny * TILE + TILE / 2 - a.h / 2;
+        if (!actorBlockedByTiles(a)) {
+          a.vx = 0; a.vy = 0;
+          if (!a.isPlayer) { const [sx, sy] = [Math.floor((a.spawnX + a.w / 2) / TILE), Math.floor((a.spawnY + a.h / 2) / TILE)]; if (sy >= 0 && sy < ROWS && board[sy] && board[sy][sx]) { a.spawnX = a.x; a.spawnY = a.y; } }
+          return true;
+        }
+      }
+      a.x = ox; a.y = oy; return false;
+    }
+    const ckSettleActors = () => { actors.filter(a => !a.isPlayer).forEach(ckNudgeOut); const h = actors.find(a => a.isPlayer); if (h) ckNudgeOut(h); };
+    const ckEase = p => p < 0 ? 0 : p > 1 ? 1 : p * p * (3 - 2 * p);
+    function ckDrawSprite(cx, sp, x, y, alpha, rot, scale) {
+      cx.save(); cx.globalAlpha = alpha; cx.translate(Math.round(x + TILE / 2), Math.round(y + TILE / 2));
+      if (rot) cx.rotate(rot); if (scale !== 1) cx.scale(scale, scale);
+      cx.drawImage(ov.sheet, sp.sx, sp.sy, TILE, TILE, -TILE / 2, -TILE / 2, TILE, TILE);
+      cx.restore();
+    }
+
+    // ---- Earthquake: violent impulses on loose things, then every movable tile comes unmoored, drifts and settles as a shuffled board ----
+    const QK = { IMPULSES: [150, 650, 1150, 1650], LIFT: 2000, DRIFT: 3200, SETTLE: 700, BREAK_FRAC: 0.06, DUR: 6900 };
+    function quakeImpulse(theta) {
+      actors.forEach(a => {
+        if (a.isPlayer || a.carried || a.cannonLoad || moverDefOf(a)) return;
+        const def = actorDefs[a.defId]; if (def && def.temperament === MOVING_PLATFORM_KIND) return;
+        const ang = theta + (Math.random() - 0.5) * 0.8, sp = 450 + Math.random() * 350;
+        a.vx += Math.cos(ang) * sp; a.vy += Math.sin(ang) * sp; a.grounded = false;
+        a.bouncyCooldown = 400; a.displacedCooldown = Math.max(a.displacedCooldown || 0, 450);
+      });
+    }
+    function quakeLift(s, el) {
+      const { c0, W } = ckVisible(), cells = [];
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < W; x++) { const k = board[y][c0 + x]; if (k && !ckIsDoor(k)) cells.push([c0 + x, y]); } // doors neither move nor break
+      const metas = ovLift(cells);
+      const taken = new Set(), reserve = (cx, cy, r) => { for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) taken.add(x + "," + y); };
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < W; x++) if (board[y][c0 + x]) taken.add((c0 + x) + "," + y); // the doors that stayed
+      const hero = actors.find(a => a.isPlayer);
+      if (hero) { const [hx, hy] = gmCell(hero); reserve(hx, hy, 1); }
+      reserve(Math.floor((startPos.x + ACTOR_SIZE / 2) / TILE), Math.floor((startPos.y + ACTOR_SIZE / 2) / TILE), 1);
+      const order = metas.slice().sort(() => Math.random() - 0.5);
+      order.forEach(m => {
+        const d = GAMEPLAY_TILE_DEFS[m.key], unbreakable = (d && d.geometry === "goal") || (d && d.modifier === "indestructible");
+        m.broken = !unbreakable && Math.random() < QK.BREAK_FRAC;
+        m.tx = m.cx; m.ty = m.cy;
+        if (m.broken) return;
+        for (let r = 1; r <= 12; r++) {
+          const lim = r <= 4 ? r : 12; let spot = null;
+          for (let tries = 0; tries < 12 && !spot; tries++) {
+            const nx = m.cx + Math.round((Math.random() * 2 - 1) * lim * (r <= 4 ? 1 : 1)), ny = m.cy + Math.round((Math.random() * 2 - 1) * lim);
+            if (nx < c0 || nx >= c0 + W || ny < 0 || ny >= ROWS || taken.has(nx + "," + ny)) continue;
+            spot = [nx, ny];
+          }
+          if (spot) { m.tx = spot[0]; m.ty = spot[1]; break; }
+        }
+        if (taken.has(m.tx + "," + m.ty)) { // could not find a free cell nearby: it is lost in the quake
+          m.broken = true; return;
+        }
+        taken.add(m.tx + "," + m.ty);
+      });
+      metas.forEach(m => { m.sx = (m.cx - c0) * TILE; m.sy = m.cy * TILE; m.x1 = (m.tx - c0) * TILE; m.y1 = m.ty * TILE; m.ph = Math.random() * 6.28; m.bt = 0.15 + Math.random() * 0.7; m.dly = Math.random() * 500; });
+      s.metas = metas; s.c0 = c0; s.liftedAt = el; s.ownPause = true; setGamePaused(true); s.phase = 1;
+      ov.sprites = metas;
+      ovShow(s, (cx, t) => {
+        const rt = t - s.liftedAt, still = reducedMotion();
+        metas.forEach(m => {
+          const p = ckEase((rt - m.dly) / (QK.DRIFT - 500)), settle = Math.max(0, 1 - Math.max(0, rt - (QK.DRIFT - 500)) / QK.SETTLE);
+          const wob = still ? 0 : Math.sin(rt / 90 + m.ph) * 2.5 * Math.min(1, rt / 300) * (0.35 + 0.65 * settle);
+          const x = m.sx + (m.x1 - m.sx) * p + wob, y = m.sy + (m.y1 - m.sy) * p + (still ? 0 : Math.cos(rt / 110 + m.ph) * 2 * settle) - Math.sin(Math.PI * p) * 10;
+          if (m.broken) {
+            const bp = (rt - (QK.DRIFT * m.bt)) / 700;
+            if (bp < 0) ckDrawSprite(cx, m, x, y, 1, still ? 0 : Math.sin(rt / 70 + m.ph) * 0.12, 1);
+            else if (bp < 1) for (let q = 0; q < 4; q++) { // four fragments fly apart and fade
+              const qx = (q % 2) * 16, qy = Math.floor(q / 2) * 16, dx = (q % 2 ? 1 : -1) * bp * 22, dy = (q < 2 ? -1 : 1) * bp * 14 + bp * bp * 30;
+              cx.save(); cx.globalAlpha = 1 - bp; cx.drawImage(ov.sheet, m.sx + qx, m.sy + qy, 16, 16, Math.round(x + qx + dx), Math.round(y + qy + dy), 16, 16); cx.restore();
+            }
+            return;
+          }
+          ckDrawSprite(cx, m, x, y, 1, still ? 0 : Math.sin(rt / 120 + m.ph) * 0.1 * (0.3 + 0.7 * settle), 1);
+        });
+      });
+    }
+    function quakeCommit(s) {
+      if (s.phase !== 1) return;
+      s.phase = 2;
+      s.metas.forEach(m => { if (!m.broken) ckPlace(m, m.tx, m.ty); });
+      ovHide();
+      if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
+      ckSettleActors();
+      snapshotCurrentRoomState(); renderAll();
+      log("The earthquake is over.");
+    }
+    const quakeHooks = {
+      start(s) { s.phase = 0; s.k = 0; s.theta = Math.random() * Math.PI * 2; s.lastShake = -999; log("Earthquake!"); },
+      tick(el, s) {
+        if (s.phase === 0) {
+          while (s.k < QK.IMPULSES.length && el >= QK.IMPULSES[s.k]) { quakeImpulse(s.theta + s.k * (1.9 + Math.random() * 0.5)); s.k++; }
+          if (el < QK.LIFT - 350 && !reducedMotion() && el - s.lastShake > 150) { shakeAt = gameNow(); s.lastShake = el; } // the game's own modest world shake, written as data
+          if (el >= QK.LIFT) quakeLift(s, el);
+        } else if (s.phase === 1 && el >= s.liftedAt + QK.DRIFT + QK.SETTLE) quakeCommit(s);
+      },
+      end(why, s, abort) {
+        if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
+        if (s.phase === 1) quakeCommit(s); // any exit finalizes: the shuffled board is committed, nothing stays lifted
+        ovHide();
+        if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
+      }
+    };
+
+    // ---- Rising Lava: lava drawn on the overlay rises from the gravity side to a random level, burns everything it covers (never the hero),
+    //      recedes, and then (gravity on) what is left falls column by column; loose things then fall onto the new surfaces ----
+    const LV = { RISE: 2400, HOLD: 400, RECEDE: 1800, GAP: 300, STAGGER: 1100, DUR: 8400 };
+    function lavaFront(t, L) { // lava height in cells at time t
+      if (t < LV.RISE) return L * (1 - Math.pow(1 - t / LV.RISE, 2));
+      if (t < LV.RISE + LV.HOLD) return L;
+      if (t < LV.RISE + LV.HOLD + LV.RECEDE) return L * (1 - ckEase((t - LV.RISE - LV.HOLD) / LV.RECEDE));
+      return 0;
+    }
+    function lavaStart(s) {
+      const { c0, W } = ckVisible();
+      const dir = gravityEnabled ? gravityDir : ["down", "up", "left", "right"][Math.floor(Math.random() * 4)];
+      const vert = dir === "down" || dir === "up", E = vert ? ROWS : W;
+      const vOf = (cx, cy) => dir === "down" ? ROWS - 1 - cy : dir === "up" ? cy : dir === "left" ? cx - c0 : W - 1 - (cx - c0);
+      const uOf = (cx, cy) => vert ? cx - c0 : cy;
+      const cellOf = (u, v) => dir === "down" ? [c0 + u, ROWS - 1 - v] : dir === "up" ? [c0 + u, v] : dir === "left" ? [c0 + v, u] : [c0 + W - 1 - v, u];
+      const L = Math.max(2, Math.round(E * (0.3 + 0.5 * Math.random())));
+      const cells = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < W; x++) if (board[y][c0 + x]) cells.push([c0 + x, y]);
+      const metas = ovLift(cells);
+      const fall = gravityEnabled;
+      const byU = {};
+      metas.forEach(m => {
+        m.u = uOf(m.cx, m.cy); m.v = vOf(m.cx, m.cy); m.fixed = ckIsDoor(m.key);
+        m.sx = (m.cx - c0) * TILE; m.sy = m.cy * TILE;
+        m.burn = m.v < L; m.fv = m.v;
+        if (!m.burn) (byU[m.u] = byU[m.u] || []).push(m);
+      });
+      Object.keys(byU).forEach(u => { // each line settles toward the gravity side, stacking on doors that stay
+        let p = 0;
+        byU[u].sort((a, b) => a.v - b.v).forEach(m => { if (m.fixed || !fall) { p = m.v + 1; m.fv = m.v; } else { m.fv = p++; } });
+      });
+      const us = Object.keys(byU).map(Number).sort((a, b) => a - b);
+      metas.forEach(m => {
+        const [fx, fy] = cellOf(m.u, m.fv); m.tx = fx; m.ty = fy; m.x1 = (fx - c0) * TILE; m.y1 = fy * TILE;
+        m.burnAt = m.burn ? LV.RISE * (1 - Math.sqrt(1 - Math.min(1, (m.v + 0.5) / L))) : null; // when the front reaches it
+        m.fdly = us.length ? (us.indexOf(m.u) / us.length) * LV.STAGGER + Math.random() * 120 : 0;
+        m.fdur = 320 + 110 * Math.abs(m.fv - m.v);
+      });
+      const doomed = actors.filter(a => !a.isPlayer && (() => { const [ax, ay] = gmCell(a); return ax >= c0 && ax < c0 + W && ay >= 0 && ay < ROWS && vOf(ax, ay) < L; })())
+        .map(a => ({ a, at: LV.RISE * (1 - Math.sqrt(1 - Math.min(1, (vOf(...gmCell(a)) + 0.5) / L))) }));
+      Object.assign(s, { metas, doomed, L, dir, vert, c0, W, E, vOf, phase: 1, ownPause: true, fall });
+      setGamePaused(true);
+      ov.sprites = metas;
+      ovShow(s, (cx, t) => {
+        const fv = lavaFront(t, L), fallT = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP;
+        metas.forEach(m => {
+          if (m.burn) { if (t > m.burnAt + 160) return; ckDrawSprite(cx, m, m.sx, m.sy, t > m.burnAt ? Math.max(0, 1 - (t - m.burnAt) / 160) : 1, 0, 1); return; }
+          const p = fall && !m.fixed ? Math.min(1, Math.max(0, (t - fallT - m.fdly) / m.fdur)) : 0, e = p * p;
+          ckDrawSprite(cx, m, m.sx + (m.x1 - m.sx) * e, m.sy + (m.y1 - m.sy) * e, 1, 0, 1);
+        });
+        if (fv <= 0.02) return;
+        const px = fv * TILE, W2 = W * TILE, H2 = ROWS * TILE, wob = reducedMotion() ? 0 : 1;
+        cx.save();
+        cx.beginPath();
+        const wave = x => (Math.sin(x / 14 + t / 220) * 3 + Math.sin(x / 31 - t / 310) * 2) * wob;
+        if (dir === "down") { cx.moveTo(0, H2); cx.lineTo(0, H2 - px); for (let x = 0; x <= W2; x += 4) cx.lineTo(x, H2 - px + wave(x)); cx.lineTo(W2, H2); }
+        else if (dir === "up") { cx.moveTo(0, 0); cx.lineTo(0, px); for (let x = 0; x <= W2; x += 4) cx.lineTo(x, px + wave(x)); cx.lineTo(W2, 0); }
+        else if (dir === "left") { cx.moveTo(0, 0); cx.lineTo(px, 0); for (let y = 0; y <= H2; y += 4) cx.lineTo(px + wave(y), y); cx.lineTo(0, H2); }
+        else { cx.moveTo(W2, 0); cx.lineTo(W2 - px, 0); for (let y = 0; y <= H2; y += 4) cx.lineTo(W2 - px + wave(y), y); cx.lineTo(W2, H2); }
+        cx.closePath();
+        const g = vert ? cx.createLinearGradient(0, dir === "down" ? H2 : 0, 0, dir === "down" ? H2 - px : px) : cx.createLinearGradient(dir === "left" ? 0 : W2, 0, dir === "left" ? px : W2 - px, 0);
+        g.addColorStop(0, "#8e1c0e"); g.addColorStop(0.6, "#e0431a"); g.addColorStop(1, "#ff8a3d");
+        cx.globalAlpha = 0.86; cx.fillStyle = g; cx.fill();
+        cx.globalAlpha = 0.9; cx.lineWidth = 3; cx.strokeStyle = "#ffd27a"; cx.stroke();
+        cx.restore();
+      });
+    }
+    function lavaCommit(s) {
+      if (s.phase !== 1) return;
+      s.phase = 2;
+      s.doomed.forEach(d => removeActorObject(d.a)); s.doomed = [];
+      s.metas.forEach(m => {
+        if (m.burn) { if (ckIsDoor(m.key)) severDoorLink(currentRoomId, m.cx, m.cy); return; }
+        ckPlace(m, m.tx, m.ty);
+      });
+      ovHide();
+      if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
+      ckSettleActors();
+      snapshotCurrentRoomState(); renderAll();
+      log("The lava is gone.");
+    }
+    const lavaHooks = {
+      start(s) { s.phase = 0; log("Rising Lava!"); lavaStart(s); },
+      tick(el, s) {
+        if (s.phase !== 1) return;
+        for (let i = s.doomed.length - 1; i >= 0; i--) if (el >= s.doomed[i].at) { removeActorObject(s.doomed[i].a); s.doomed.splice(i, 1); } // burned as the front passes
+        const lastFall = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP + LV.STAGGER + 120 + Math.max(0, ...s.metas.map(m => m.fdur)) + 150;
+        if (el >= (s.fall ? lastFall : LV.RISE + LV.HOLD + LV.RECEDE + 200)) lavaCommit(s);
+      },
+      end(why, s, abort) {
+        if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
+        if (s.phase === 1) lavaCommit(s); // any exit finalizes: the end state is committed, nothing stays lifted
+        ovHide();
+        if (s.ownPause) { s.ownPause = false; setGamePaused(false); }
+      }
+    };
+
     // the build/chaos buttons: tumble and bombs are live, the rest are placeholders until their stages
     panel.querySelectorAll(".mkBtn").forEach(b => {
       wire(b, CAPTIONS[b.dataset.mk]);
@@ -16009,6 +16280,13 @@
           }
           return;
         }
+        if (kind === "quake" || kind === "lava") {
+          if (sess && sess.kind === kind) { endSession("stop"); return; }
+          if (viewK() !== 0) { setMessCaption("Not while the board is turned."); return; }
+          if (kind === "quake") beginSession("quake", "Earthquake", QK.DUR, quakeHooks);
+          else beginSession("lava", "Rising Lava", LV.DUR, lavaHooks);
+          return;
+        }
         if (kind === "tumble" || kind === "bombs") {
           if (sess && sess.kind === kind) { endSession("stop"); return; }
           if (kind === "tumble") beginSession("tumble", "Gravity Tumble", TUMBLE_STEP_MS * TUMBLE_STEPS, tumbleHooks);
@@ -16019,7 +16297,7 @@
       });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 
