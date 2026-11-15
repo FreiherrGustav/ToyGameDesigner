@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.2";
+  const CHAOS_KIT_VERSION = "v2.72.3";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15474,7 +15474,7 @@
       walls: "Coming soon: dense piles of ground and walls.", stuff: "Coming soon: lots of little machines.",
       enemies: "Coming soon: groups of enemies.", scenery: "Coming soon: scenery so a board looks finished.",
       tumble: "Gravity spins around for 8 seconds, then goes back.", quake: "Coming soon: everything gets shaken loose.",
-      bombs: "Armed bombs rain down for a few seconds. Undo brings it all back.", lava: "Coming soon: lava rises, then everything left falls."
+      bombs: "Three waves of bombs, then one giant boom. Undo brings it all back.", lava: "Coming soon: lava rises, then everything left falls."
     };
     const $ = id => document.getElementById(id);
     const caption = $("messCaption");
@@ -15644,35 +15644,74 @@
       }
     };
 
-    // ---- Bomb Storm: armed bombs rain down for ~6 s through the game's own bomb actor + fuse + blast code ----
-    const STORM_MS = 6000, STORM_STOP_SPAWN_MS = 1300, STORM_MAX_LIVE = 6, STORM_MAX_TOTAL = 24, STORM_MIN_GAP_TILES = 3, STORM_ACTOR_CAP = 400;
+    // ---- Bomb Storm: three waves, built from the game's own bomb actor + fuse + blast code ----
+    // 1) a cascade of lit bombs sweeping left to right along a wandering path, so the blasts run across the screen in sequence;
+    // 2) the same right to left; 3) every free tile on screen gets a bomb, a beat to see it coming, then they all go off at once.
+    // Chain blasts are welcome here (this is the "tear it down" button); the sound limiter and the actor cap still apply.
+    const STORM_SWEEP_STEP_MS = 130, STORM_FUSE_MS = 450, STORM_WAVE_GAP_MS = 700, STORM_CHARGE_MS = 1300, STORM_TAIL_MS = 1800;
+    const STORM_ACTOR_CAP = 700, STORM_FILL_CAP = 420;
     const STORM_KEY = "chaos:storm"; // marks storm bombs: Reset-to-start never resurrects them, Play entry purges them
-    function stormPickCell(s) {
-      const player = actors.find(a => a.isPlayer);
-      for (let tries = 0; tries < 14; tries++) {
-        const cx = editorPanCol + Math.floor(Math.random() * COLS), cy = Math.floor(Math.random() * ROWS);
-        if (isCellBlocking(cx, cy, { isPlayer: false })) continue;
-        if (typeof cellOccupiedByActor === "function" && cellOccupiedByActor(cx, cy)) continue;
-        const px = cx * TILE + TILE / 2, py = cy * TILE + TILE / 2;
-        if (player && Math.hypot(px - (player.x + player.w / 2), py - (player.y + player.h / 2)) < 2 * TILE) continue; // never right on the hero
-        if (s.live.some(b => Math.hypot(px - (b.x + b.w / 2), py - (b.y + b.h / 2)) < STORM_MIN_GAP_TILES * TILE)) continue; // no chain blasts
-        return [px, py];
-      }
-      return null;
+    const STORM_MS = STORM_SWEEP_STEP_MS * 24 * 2 + STORM_WAVE_GAP_MS * 2 + STORM_CHARGE_MS + STORM_TAIL_MS;
+    function stormFreeCell(cx, cy, hero) {
+      if (cx < 0 || cy < 0 || cy >= ROWS) return false;
+      if (isCellBlocking(cx, cy, { isPlayer: false })) return false;
+      if (cellOccupiedByActor(cx, cy)) return false;
+      if (hero && Math.abs(cx - hero[0]) <= 1 && Math.abs(cy - hero[1]) <= 1) return false; // never on top of the hero
+      return true;
+    }
+    function stormAdd(s, cx, cy, lit) {
+      if (actors.length >= STORM_ACTOR_CAP) return null;
+      const b = placeCarryableActor(CARRY_BOMB2_DEF_ID, cx * TILE + TILE / 2, cy * TILE + TILE / 2);
+      b.spawnerKey = STORM_KEY;
+      if (lit) { b.fuseRemainingMs = STORM_FUSE_MS; startOrResumeBombFuse(b); }
+      s.live.push(b); s.count++;
+      return b;
     }
     const stormHooks = {
-      start(s) { s.live = []; s.count = 0; s.nextAt = 0; log("Bomb Storm!"); },
+      start(s) {
+        const hp = actors.find(a => a.isPlayer);
+        s.hero = hp ? [Math.floor((hp.x + hp.w / 2) / TILE), Math.floor((hp.y + hp.h / 2) / TILE)] : null;
+        s.live = []; s.count = 0; s.col = [0, 0]; s.row = [Math.floor(Math.random() * ROWS), Math.floor(Math.random() * ROWS)];
+        s.t2 = STORM_SWEEP_STEP_MS * COLS + STORM_WAVE_GAP_MS;           // wave 2 starts
+        s.t3 = s.t2 + STORM_SWEEP_STEP_MS * COLS + STORM_WAVE_GAP_MS;    // wave 3 fills the screen
+        s.filled = false; s.fired = false; s.fillCount = 0;
+        log("Bomb Storm!");
+      },
       tick(el, s) {
+        const hp = actors.find(a => a.isPlayer);
+        if (hp) s.hero = [Math.floor((hp.x + hp.w / 2) / TILE), Math.floor((hp.y + hp.h / 2) / TILE)];
         s.live = s.live.filter(b => !b.detonating && actors.includes(b));
-        if (el < s.nextAt || el > s.dur - STORM_STOP_SPAWN_MS) return;
-        if (s.live.length >= STORM_MAX_LIVE || s.count >= STORM_MAX_TOTAL || actors.length >= STORM_ACTOR_CAP) return;
-        const c = stormPickCell(s);
-        s.nextAt = el + 300 + Math.random() * 200;
-        if (!c) return;
-        const b = placeCarryableActor(CARRY_BOMB2_DEF_ID, c[0], c[1]);
-        b.spawnerKey = STORM_KEY;
-        startOrResumeBombFuse(b);
-        s.live.push(b); s.count++;
+        // waves 1 and 2: one column per step, left to right then right to left; the path wanders up and down
+        for (let w = 0; w < 2; w++) {
+          const t0 = w === 0 ? 0 : s.t2;
+          if (el < t0) continue;
+          const want = Math.min(COLS, Math.floor((el - t0) / STORM_SWEEP_STEP_MS) + 1);
+          while (s.col[w] < want) {
+            const i = s.col[w]++, cx = editorPanCol + (w === 0 ? i : COLS - 1 - i);
+            s.row[w] = Math.max(0, Math.min(ROWS - 1, s.row[w] + Math.floor(Math.random() * 5) - 2));
+            const n = 1 + Math.floor(Math.random() * 3); // 1-3 bombs in the column: the path plus a couple of strays
+            for (let k = 0; k < n; k++) {
+              const wantRow = k === 0 ? s.row[w] : Math.floor(Math.random() * ROWS);
+              for (let d = 0; d < 4; d++) { // the nearest free cell to where it wanted to go
+                const cy = wantRow + (d % 2 ? -1 : 1) * Math.ceil(d / 2);
+                if (stormFreeCell(cx, cy, s.hero)) { stormAdd(s, cx, cy, true); break; }
+              }
+            }
+          }
+        }
+        // wave 3: every free tile on screen gets an unlit bomb at once, a beat later they all go off together
+        if (!s.filled && el >= s.t3) {
+          s.filled = true; s.fillAt = el;
+          const cells = [];
+          for (let cy = 0; cy < ROWS; cy++) for (let cx = editorPanCol; cx < editorPanCol + COLS; cx++) if (stormFreeCell(cx, cy, s.hero)) cells.push([cx, cy]);
+          for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+          cells.slice(0, STORM_FILL_CAP).forEach(c => { if (stormAdd(s, c[0], c[1], false)) s.fillCount++; });
+          log("Every free tile just got a bomb...");
+        }
+        if (s.filled && !s.fired && el >= s.fillAt + STORM_CHARGE_MS) {
+          s.fired = true;
+          s.live.slice().forEach(b => detonateCarriedBombAt(s.roomId, b.id)); // the game's own detonation; chains do the rest
+        }
       },
       end(why, s, abort) {
         if (abort) return;

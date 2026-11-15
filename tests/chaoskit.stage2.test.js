@@ -109,25 +109,35 @@ async function showMess(page) { await page.click("#messTabMess"); await page.wai
   ok((await ev(page, STATE)).paused === true, "...and paused again after a normal stop");
   await ev(page, () => setGamePaused(false));
 
-  // ---- Bomb Storm ----
+  // ---- Bomb Storm (three waves) ----
   await ev(page, LOAD); await showMess(page);
   await ev(page, () => {
-    window.__bl = []; window.__peak = { actors: 0, live: 0 };
+    window.__bl = []; window.__peak = { actors: 0, live: 0 }; window.__gaps = []; window.__t0 = 0;
     const orig = detonateCarriedBombAt;
-    detonateCarriedBombAt = function (r, id) { const b = actors.find(a => a.id === id); if (b && b.spawnerKey === "chaos:storm" && !b.detonating) window.__bl.push(performance.now()); return orig.apply(this, arguments); };
+    detonateCarriedBombAt = function (r, id) { const b = actors.find(a => a.id === id); if (b && b.spawnerKey === "chaos:storm" && !b.detonating) window.__bl.push([performance.now() - window.__t0, b.x]); return orig.apply(this, arguments); };
     window.__mon = setInterval(() => { window.__peak.actors = Math.max(window.__peak.actors, actors.length); window.__peak.live = Math.max(window.__peak.live, actors.filter(a => a.spawnerKey === "chaos:storm" && !a.detonating).length); }, 30);
+    let last = performance.now(); (function f() { const n = performance.now(); if (window.__t0) window.__gaps.push(n - last); last = n; requestAnimationFrame(f); })();
   });
   const b0 = await ev(page, STATE), bsig0 = await ev(page, snapSig);
   const startActors = await ev(page, () => actors.length);
-  const tb = Date.now();
+  await ev(page, () => { window.__t0 = performance.now(); });
   await page.click('[data-mk="bombs"]');
-  await page.waitForTimeout(7600);
+  const total = await ev(page, () => 0);
+  await page.waitForTimeout(12600);
   const b1 = await ev(page, STATE);
-  const m = await ev(page, () => { const bl = window.__bl; let maxWin = 0; for (const t of bl) maxWin = Math.max(maxWin, bl.filter(u => u >= t && u < t + 1000).length); return { n: bl.length, maxWin, peak: window.__peak, left: actors.filter(a => a.spawnerKey === "chaos:storm").length }; });
-  console.log("storm: blasts", m.n, "max blasts in any 1 s", m.maxWin, "peak actors", m.peak.actors, "(start " + startActors + ") peak live bombs", m.peak.live, "leftover storm bombs", m.left);
-  ok(m.n >= 8, "the storm made blasts (" + m.n + ")");
-  ok(m.maxWin <= 8, "blasts in any second capped (" + m.maxWin + ")");
-  ok(m.peak.live <= 6, "simultaneous live bombs capped (" + m.peak.live + ")");
+  const m = await ev(page, () => {
+    const bl = window.__bl, cor = a => { const n = a.length, mx = a.reduce((p, q) => p + q[0], 0) / n, my = a.reduce((p, q) => p + q[1], 0) / n; let sxy = 0, sxx = 0, syy = 0; a.forEach(q => { sxy += (q[0] - mx) * (q[1] - my); sxx += (q[0] - mx) ** 2; syy += (q[1] - my) ** 2; }); return sxy / Math.sqrt(sxx * syy); };
+    const w1 = bl.filter(q => q[0] < 3500), w2 = bl.filter(q => q[0] > 3800 && q[0] < 7700), w3 = bl.filter(q => q[0] >= 8200 && q[0] < 11000);
+    const g = window.__gaps.slice().sort((a, b) => a - b);
+    return { n: bl.length, w1: w1.length, w2: w2.length, w3: w3.length, c1: cor(w1), c2: cor(w2), first3: w3.length ? Math.min(...w3.map(q => q[0])) : 0, last3: w3.length ? Math.max(...w3.map(q => q[0])) : 0,
+      peak: window.__peak, left: actors.filter(a => a.spawnerKey === "chaos:storm").length, maxGap: g[g.length - 1], p99: g[Math.floor(g.length * 0.99)], p50: g[Math.floor(g.length * 0.5)], fill: window.__fill };
+  });
+  console.log("storm:", JSON.stringify(m), "start actors", startActors); console.log("hist", JSON.stringify(await ev(page, () => { const h = {}; window.__bl.forEach(q => { const k = Math.floor(q[0] / 500) * 500; h[k] = (h[k] || 0) + 1; }); return h; })));
+  ok(m.w1 >= 20 && m.w2 >= 20, "waves 1 and 2 made blasts (" + m.w1 + ", " + m.w2 + ")");
+  ok(m.c1 > 0.8, "wave 1 blasts run left to right (corr " + m.c1.toFixed(2) + ")");
+  ok(m.c2 < -0.8, "wave 2 blasts run right to left (corr " + m.c2.toFixed(2) + ")");
+  ok(m.w3 >= 100, "wave 3: one giant blast of many bombs (" + m.w3 + " bombs between " + Math.round(m.first3) + " and " + Math.round(m.last3) + " ms)");
+  ok(m.peak.actors <= 700, "actor cap held (peak " + m.peak.actors + ")");
   ok(m.left === 0, "no storm bombs left over");
   ok(b1.sess == null && b1.player, "storm ended by itself, hero still here");
   ok(b1.undo === b0.undo + 1, "one undo step");
@@ -151,7 +161,7 @@ async function showMess(page) { await page.click("#messTabMess"); await page.wai
   // storm in a gravity-off room
   await ev(page, LOAD); await showMess(page);
   await ev(page, () => { gravityEnabled = false; });
-  await page.click('[data-mk="bombs"]'); await page.waitForTimeout(7200);
+  await page.click('[data-mk="bombs"]'); await page.waitForTimeout(13500);
   ok((await ev(page, STATE)).sess == null, "storm in a gravity-off room ends by itself");
   // idle cost
   const idle = await ev(page, () => new Promise(res => { let n = 0; const t0 = performance.now(); const f = () => { if (++n < 120) requestAnimationFrame(f); else res((performance.now() - t0) / n); }; requestAnimationFrame(f); }));
