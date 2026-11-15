@@ -6939,17 +6939,25 @@
   // Draw only. Squash a bouncy/trampoline tile when something bounces off it (or jumps off it): a tileAnimState recipe, the same
   // mechanism the bomb blast uses. `axis` + `hitSign` say which side of the tile was hit (+1 = the tile is at the larger x/y of the
   // actor); `dirx/diry` is the unit vector from the actor into the tile. The recipe is drawn along that line (see renderRoomContents).
-  function tileSquashAt(cx, cy, dirx, diry, soft) {
+  const TILE_SQUASH_REST_MS = 110;
+  // `speed` (px/s, optional) scales how deep the squash is: a tiny hop barely moves the tile and a micro-bounce does nothing, so a
+  // character bouncing fast between two tiles doesn't keep both of them permanently mid-squash.
+  function tileSquashAt(cx, cy, dirx, diry, soft, speed) {
     if (cy < 0 || cy >= ROWS || cx < 0 || !board[cy] || !board[cy][cx]) return;
     const tile = GAMEPLAY_TILE_DEFS[board[cy][cx]];
     if (!tile || !(tile.modifier === "bouncy" || tile.geometry === "trampoline")) return;
+    const amp = speed == null ? 1 : Math.max(0, Math.min(1, (speed - 160) / 520));
+    if (amp < 0.08) return;
     const key = cx + "," + cy, cur = tileAnimState[key];
     if (cur && cur.recipe !== "tileSquash" && cur.recipe !== "tileSquashSoft") return; // never replace a crumble/blast
+    // a squash is left to finish and then rests briefly: restarting it on every bounce of a fast bouncer kept the tile (and so the
+    // picture) almost permanently mid-squash and made it jump
+    if (cur && gameNow() - cur.t < RECIPES[cur.recipe].duration + TILE_SQUASH_REST_MS) return;
     const skinId = groundSkinBoard[cy] && groundSkinBoard[cy][cx];
     const extra = skinId && groundTileDefs[skinId] ? { skinDef: groundTileDefs[skinId], skinRotation: (groundSkinRotationBoard[cy] && groundSkinRotationBoard[cy][cx]) || 0 } : null;
-    tileAnimState[key] = { recipe: soft ? "tileSquashSoft" : "tileSquash", t: gameNow(), geometry: tile.geometry, modifier: tile.modifier, extra, dirx, diry };
+    tileAnimState[key] = { recipe: soft ? "tileSquashSoft" : "tileSquash", t: gameNow(), geometry: tile.geometry, modifier: tile.modifier, extra, dirx, diry, amp };
   }
-  function tileSquashHit(cx, cy, axis, hitSign, soft) { tileSquashAt(cx, cy, axis === "x" ? hitSign : 0, axis === "y" ? hitSign : 0, soft); }
+  function tileSquashHit(cx, cy, axis, hitSign, soft, speed) { tileSquashAt(cx, cy, axis === "x" ? hitSign : 0, axis === "y" ? hitSign : 0, soft, speed); }
   // a jump off a bouncy/trampoline floor: the tile under the feet gives a little
   function tileSquashUnder(actor) {
     for (const { cx, cy } of cellsUnderneath(actor)) tileSquashAt(cx, cy, gravAxis() === "x" ? gravSign() : 0, gravAxis() === "y" ? gravSign() : 0, true);
@@ -7103,14 +7111,14 @@
             actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, -1, jumpHeldForBounce);
             if (bouncy && boingHeard) bounceSound();
-            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false);
+            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
           } else if (actor[vk] < 0) {
             actor[axis] = (cc + 1) * TILE;
             triggerImpact(actor, axis, actor[vk], bouncy);
             actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (isPlainBouncyHit) applyBouncyWallKick(actor, 1, jumpHeldForBounce);
             if (bouncy && boingHeard) bounceSound();
-            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false);
+            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
           }
         } else {
           const fall = actor[vk] * gs; // > 0: moving toward the surface gravity pulls it to
@@ -7141,7 +7149,7 @@
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor[vk] += JUMP_VELOCITY * gs; sounds.jump(); }
               if (boingHeard) bounceSound();
-              tileSquashHit(cx, cy, axis, hitSign, false);
+              tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
             }
             else { actor[vk] = 0; actor.grounded = true; }
           } else if (fall < 0) {
@@ -7149,7 +7157,7 @@
             triggerImpact(actor, axis, fall, bouncy);
             actor[vk] = bouncy ? -actor[vk] * restitution : 0;
             if (bouncy && boingHeard) bounceSound();
-            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false);
+            if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
           }
         }
         if (steppedOnTop && modifier === "lethal" && actor.isPlayer) triggerLethalHazard(actor);
@@ -7499,10 +7507,13 @@
   function triggerImpact(actor, axis, incomingSpeed, isBounce) {
     const mag = Math.min(1, Math.abs(incomingSpeed) / 260);
     if (mag <= IMPACT_NOISE_FLOOR) return;
+    // a bounce only gives a little: a full landing squash (and the crouch pose it triggers) on every bounce made a character bouncing
+    // between two bouncy tiles flick between poses several times a second (draw only; the sound uses the real speed below)
+    const wobbleMag = isBounce ? Math.min(mag, 0.28) : mag;
     const currentEnvelope = actor.impactAxis === axis
       ? actor.impactMag * Math.exp(-IMPACT_WOBBLE_DECAY * actor.impactWobbleT) : 0;
-    if (mag > currentEnvelope) {
-      actor.impactMag = mag;
+    if (wobbleMag > currentEnvelope) {
+      actor.impactMag = wobbleMag;
       actor.impactWobbleT = 0;
       actor.impactAxis = axis;
     }
@@ -12528,7 +12539,8 @@
               // tile squash: scale along the line from the actor into the tile (local +y = that direction), far edge held
               const a = Math.atan2(tanim.diry, tanim.dirx) - Math.PI / 2;
               ctx.translate(screenX + TILE / 2, y * TILE + TILE / 2);
-              ctx.rotate(a); ctx.translate(sample.ox * TILE, sample.oy * TILE); ctx.scale(sample.sx, sample.sy); ctx.rotate(-a);
+              const amp = tanim.amp == null ? 1 : tanim.amp;
+              ctx.rotate(a); ctx.translate(sample.ox * amp * TILE, sample.oy * amp * TILE); ctx.scale(1 + (sample.sx - 1) * amp, 1 + (sample.sy - 1) * amp); ctx.rotate(-a);
             } else {
             ctx.translate(screenX + TILE / 2 + sample.ox * TILE, y * TILE + TILE / 2 + sample.oy * TILE);
             if (sample.rot) ctx.rotate(sample.rot);
@@ -12848,8 +12860,14 @@
       // by how much of the recovery window is still left, so it winds down as steering comes back
       // rather than cutting off flat.
       if (actor.displacedCooldown > 0 && !actor.isPlayer && isSteeringCharacter(def.temperament)) {
-        const spinFrac = Math.min(1, actor.displacedCooldown / NPC_DISPLACED_RECOVERY_MS);
-        t.rot += (now / 90) * spinFrac;
+        // One clean somersault over the recovery window: the angle runs from 0 to a full turn as the cooldown runs out, so it starts and
+        // ends upright. (It used to add an angle proportional to the wall clock, which snapped a bouncing character to a different
+        // random orientation every time its cooldown restarted.) The short plain-bouncy lockout (100 ms) doesn't spin at all.
+        if (actor.displacedCooldown > 150) {
+          const prog = 1 - Math.min(1, actor.displacedCooldown / NPC_DISPLACED_RECOVERY_MS);
+          const eased = 1 - (1 - prog) * (1 - prog);
+          t.rot += eased * Math.PI * 2;
+        }
       }
       if (chargingPlayer && actor.id === chargingPlayer.carrying) {
         const heldMs = now - grabKeyDownAt;
@@ -15579,6 +15597,7 @@
       `const TRAP_CRUMBLE_MS = ${TRAP_CRUMBLE_MS};`,
       `const CRUSH_MIN_VY = ${CRUSH_MIN_VY}, SAFE_AFTER_HANDLING_MS = ${SAFE_AFTER_HANDLING_MS};`,
       `const SQUASH_FLATTEN_MS = ${SQUASH_FLATTEN_MS}, SQUASH_COOLDOWN_MS = ${SQUASH_COOLDOWN_MS};`,
+      `const TILE_SQUASH_REST_MS = ${TILE_SQUASH_REST_MS};`,
       `const BIG_HIT_FX = ${BIG_HIT_FX}, BIG_HIT_MIN_SPEED = ${BIG_HIT_MIN_SPEED}, BIG_HIT_PUFF_MS = ${BIG_HIT_PUFF_MS}, BIG_HIT_PUFF_GAP_MS = ${BIG_HIT_PUFF_GAP_MS}, BIG_HIT_PUFF_MAX = ${BIG_HIT_PUFF_MAX}, BIG_HIT_SHAKE_PX = ${BIG_HIT_SHAKE_PX}, BIG_HIT_SHAKE_MS = ${BIG_HIT_SHAKE_MS}, BIG_HIT_SHAKE_PER_SEC = ${BIG_HIT_SHAKE_PER_SEC};`,
       `const PLAYER_BOARD_MARGIN = ${PLAYER_BOARD_MARGIN}, PLAYER_EMBED_FRAMES = ${PLAYER_EMBED_FRAMES};`,
       `const MASTER_VOLUME = ${MASTER_VOLUME}, SOUND_LIMIT_DEFAULT = ${JSON.stringify(SOUND_LIMIT_DEFAULT)}, SOUND_LIMITS = ${JSON.stringify(SOUND_LIMITS)}, SOUND_MAX_TOTAL = ${SOUND_MAX_TOTAL}, SOUND_OVERLAP_GAIN = ${SOUND_OVERLAP_GAIN};`,
