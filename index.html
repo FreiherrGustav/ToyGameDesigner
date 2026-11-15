@@ -16000,7 +16000,7 @@
     // the board DATA (the overlay cannot hide pixels beneath it), animated here as free sprites, and committed back as one final board.
     // The sheet is made by drawing the game twice (with and without the tiles) and keeping the pixels that differ, so every tile keeps its
     // exact look, transparent parts included. The press-time undo snapshot (taken by the session wrapper) is the one undo step; every exit
-    // path finalizes (commits the precomputed end state), so tiles are never left lifted. The sim is frozen (paused) while tiles are lifted.
+    // path finalizes (commits the precomputed end state), so tiles are never left lifted. The sim keeps running while tiles are lifted (things tumble and fall through the gap).
     const ov = { cv: null, cx: null, sheet: null, sprites: [], parts: [], lava: null, s: null, on: false };
     function ovEnsure() {
       if (ov.cv) return;
@@ -16121,7 +16121,7 @@
         taken.add(m.tx + "," + m.ty);
       });
       metas.forEach(m => { m.sx = (m.cx - c0) * TILE; m.sy = m.cy * TILE; m.x1 = (m.tx - c0) * TILE; m.y1 = m.ty * TILE; m.ph = Math.random() * 6.28; m.bt = 0.15 + Math.random() * 0.7; m.dly = Math.random() * 500; });
-      s.metas = metas; s.c0 = c0; s.liftedAt = el; s.ownPause = true; setGamePaused(true); s.phase = 1;
+      s.metas = metas; s.c0 = c0; s.liftedAt = el; s.phase = 1; // the sim keeps running while the tiles drift: loose things tumble through the gap, then land on the new board
       ov.sprites = metas;
       ovShow(s, (cx, t) => {
         const rt = t - s.liftedAt, still = reducedMotion();
@@ -16208,10 +16208,11 @@
         m.fdly = us.length ? (us.indexOf(m.u) / us.length) * LV.STAGGER + Math.random() * 120 : 0;
         m.fdur = 320 + 110 * Math.abs(m.fv - m.v);
       });
-      const doomed = actors.filter(a => !a.isPlayer && (() => { const [ax, ay] = gmCell(a); return ax >= c0 && ax < c0 + W && ay >= 0 && ay < ROWS && vOf(ax, ay) < L; })())
-        .map(a => ({ a, at: LV.RISE * (1 - Math.sqrt(1 - Math.min(1, (vOf(...gmCell(a)) + 0.5) / L))) }));
-      Object.assign(s, { metas, doomed, L, dir, vert, c0, W, E, vOf, phase: 1, ownPause: true, fall });
-      setGamePaused(true);
+      // how far (in cells) from the gravity edge a point is, so the live sim's actors can be burned as the front passes them (the sim keeps running)
+      const vCont = a => { const px = a.x + a.w / 2, py = a.y + a.h / 2; return dir === "down" ? (ROWS * TILE - py) / TILE : dir === "up" ? py / TILE : dir === "left" ? (px - c0 * TILE) / TILE : (W * TILE + c0 * TILE - px) / TILE; };
+      const inView = a => { const [ax, ay] = gmCell(a); return ax >= c0 && ax < c0 + W && ay >= 0 && ay < ROWS; };
+      const burnActors = front => { for (let i = actors.length - 1; i >= 0; i--) { const a = actors[i]; if (!a.isPlayer && inView(a) && vCont(a) < front) removeActorObject(a); } };
+      Object.assign(s, { metas, burnActors, L, dir, vert, c0, W, E, vOf, phase: 1, fall });
       ov.sprites = metas;
       ovShow(s, (cx, t) => {
         const fv = lavaFront(t, L), fallT = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP;
@@ -16240,7 +16241,7 @@
     function lavaCommit(s) {
       if (s.phase !== 1) return;
       s.phase = 2; s.settleAt = performance.now() + 600;
-      s.doomed.forEach(d => removeActorObject(d.a)); s.doomed = [];
+      s.burnActors(s.L); // anything still in the burnt zone goes (a Stop mid-run finalizes the same way)
       s.metas.forEach(m => {
         if (m.burn) { if (ckIsDoor(m.key)) severDoorLink(currentRoomId, m.cx, m.cy); return; }
         ckPlace(m, m.tx, m.ty);
@@ -16256,7 +16257,7 @@
       tick(el, s) {
         if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckSettleActors(); }
         if (s.phase !== 1) return;
-        for (let i = s.doomed.length - 1; i >= 0; i--) if (el >= s.doomed[i].at) { removeActorObject(s.doomed[i].a); s.doomed.splice(i, 1); } // burned as the front passes
+        if (el < LV.RISE + LV.HOLD) s.burnActors(lavaFront(el, s.L)); // burned as the front passes (the sim runs)
         const lastFall = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP + LV.STAGGER + 120 + Math.max(0, ...s.metas.map(m => m.fdur)) + 150;
         if (el >= (s.fall ? lastFall : LV.RISE + LV.HOLD + LV.RECEDE + 200)) lavaCommit(s);
       },
