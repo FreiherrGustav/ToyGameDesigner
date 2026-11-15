@@ -28,10 +28,17 @@ const SIG = () => window.__SIG();
 const PRE = () => {
   const hero = actors.find(a => a.isPlayer), c0 = editorPanCol;
   let tiles = 0, tilesNoBomb = 0, doors = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const k = board[y][c0 + x]; if (k) { tiles++; if (!(GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry === BOMB2_GEOMETRY)) tilesNoBomb++; if (GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry === "door") doors.push([c0 + x, y, k]); } }
-  return { tiles, tilesNoBomb, doors, actors: actors.length, hero: !!hero, start: JSON.stringify(startPos), links: JSON.stringify(doorLinks), stuck: actors.filter(a => actorBlockedByTiles(a)).length, sig: window.__SIG(), paused: gamePaused, u: undoStack.length };
+  return { room: currentRoomId, tiles, tilesNoBomb, doors, actors: actors.length, hero: !!hero, start: JSON.stringify(startPos), links: JSON.stringify(doorLinks), stuck: actors.filter(a => actorBlockedByTiles(a)).length, sig: window.__SIG(), paused: gamePaused, u: undoStack.length };
 };
 const POST = (pre) => {
   const out = { problems: [] }, c0 = editorPanCol;
+  if (currentRoomId !== pre.room) { // the hero walked through a door while the sim ran: judge the room the session belonged to
+    const R = rooms.find(r => r.id === pre.room); let t = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (R.board[y][c0 + x]) t++;
+    out.tiles = t; out.actors = R.actors.length; out.moved = true;
+    if (JSON.stringify(R.startPos) !== pre.start) out.problems.push("start moved");
+    if (window.chaosKit.active()) out.problems.push("session still active");
+    return out;
+  }
   const hero = actors.find(a => a.isPlayer);
   if (!hero) out.problems.push("hero missing");
   else if (!(Number.isFinite(hero.x) && Number.isFinite(hero.y) && hero.x > -80 && hero.y > -80 && hero.x < BOARD_MAX_COLS * TILE + 80 && hero.y < ROWS * TILE + 80)) out.problems.push("hero off the board");
@@ -77,7 +84,7 @@ const POST = (pre) => {
       const u1 = await ev(() => undoStack.length);
       const probs = post.problems.slice();
       if (u1 !== pre.u + 1) probs.push("not one undo step (" + (u1 - pre.u) + ")");
-      if (kind === "quake") {
+      if (post.moved) { /* judged on the original room only (above) */ } else if (kind === "quake") {
         
         if (post.tiles > pre.tiles) probs.push("more tiles than before");
         if (pre.tilesNoBomb > 20 && post.tiles < pre.tilesNoBomb * 0.7) probs.push("too many tiles lost (" + post.tiles + "/" + pre.tiles + ")");
@@ -86,6 +93,7 @@ const POST = (pre) => {
         if ((await ev(() => JSON.stringify(doorLinks))) !== pre.links) probs.push("door links changed");
       } else if (post.tiles > pre.tiles) probs.push("lava: more tiles than before");
       await ev(() => performUndo()); await page.waitForTimeout(100);
+      if (post.moved) { results[kind].push({ variant, gdir, probs, pre: pre.tiles, post: post.tiles, preA: pre.actors, postA: post.actors, moved: true }); continue; }
       if ((await ev(SIG)) !== pre.sig) probs.push("undo did not restore the project");
       results[kind].push({ variant, gdir, probs, pre: pre.tiles, post: post.tiles, preA: pre.actors, postA: post.actors });
     }
