@@ -15388,6 +15388,164 @@
   try { window.tele = tele; } catch (e) {} // console view: tele.dump() lists what would be sent
   // ===== END TELEMETRY =====
 
+  // ===== CHAOS KIT (removable) =====
+  // "Make a Mess": a second tab in the left panel next to "Make a Game". Additive and editor-only (never in an
+  // export). Everything it needs lives in this block: its own CSS, its own markup (built from JS and inserted as the
+  // first children of #paletteWrap, so no existing HTML/CSS line is edited) and its own tiny timers, which run only
+  // while the Make a Mess tab is open. With CHAOS_KIT_ENABLED = false the IIFE returns first: no DOM, no style, no timer.
+  // To remove it entirely: delete everything between the two CHAOS KIT marker comments (nothing outside refers to it).
+  // Stage 1 = the shell: tabs, layout, the second gravity view and the Surprise Me button. The build and chaos
+  // buttons are inert placeholders until their stages.
+  const CHAOS_KIT_ENABLED = true;
+  const CHAOS_KIT_VERSION = "v2.72.1";
+  (function chaosKit() {
+    if (!CHAOS_KIT_ENABLED) return;
+    const pal = document.getElementById("paletteWrap");
+    if (!pal) return;
+
+    const style = document.createElement("style");
+    style.id = "chaosKitStyle";
+    style.textContent = `
+      #messTabs { display: flex; gap: 4px; flex: 0 0 auto; }
+      #messTabs button { flex: 1 1 0; min-width: 0; box-sizing: border-box; height: 32px; /* whole pixels, so the panel below sits on a whole pixel exactly as before */ background: var(--panel-light); color: var(--text); border: none; border-radius: 6px; padding: 0 4px; cursor: pointer; font-size: 12px; }
+      #messTabs button.active { background: var(--accent); color: #222; font-weight: bold; }
+      #messTabs button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+      #paletteWrap.messMode > :not(#messTabs):not(#messPanel) { display: none !important; }
+      #messPanel { display: none; flex-direction: column; gap: 12px; flex: 0 0 auto; }
+      #paletteWrap.messMode > #messPanel { display: flex; }
+      #messPanel .mkTitle { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #aaa; margin-bottom: 6px; }
+      #mkGravRow { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+      .mkChip { width: 30px; height: 30px; border: none; border-radius: 6px; padding: 0; cursor: pointer; font-size: 16px; line-height: 1; background: #2f3140; color: var(--accent); }
+      .mkChip.on { background: var(--accent); color: #222; }
+      .mkChip:focus-visible, .mkBtn:focus-visible, #mkSurprise:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+      .mkGravLbl { font-size: 12px; color: #9aa0b4; margin-right: 2px; }
+      #mkSurprise { width: 100%; padding: 18px 8px; font-size: 20px; font-weight: bold; background: var(--accent); color: #222; border: none; border-radius: 10px; cursor: pointer; }
+      #mkSurprise:hover { filter: brightness(1.08); }
+      .mkGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .mkBtn { background: var(--panel-light); color: var(--text); border: none; border-radius: 8px; padding: 12px 6px; cursor: pointer; font-size: 13px; }
+      .mkBtn:hover { filter: brightness(1.15); }
+      .mkBtn.mkInert { opacity: 0.55; cursor: default; }
+      .mkChaos { box-shadow: inset 0 0 0 1px #ef6c00; }
+      #messCaption { min-height: 16px; font-size: 12px; color: #9aa0b4; font-style: italic; padding: 2px 2px 8px 2px; border-top: 1px solid #2a2c3a; margin-top: 4px; }
+      @media (min-width: 1500px) and (min-height: 820px) {
+        #messTabs button { font-size: 13px; height: 38px; }
+        #messPanel .mkTitle { font-size: 13px; margin-bottom: 8px; }
+        .mkChip { width: 34px; height: 34px; }
+        .mkBtn { font-size: 14px; padding: 14px 6px; }
+        #messCaption { font-size: 13px; }
+      }`;
+    document.head.appendChild(style);
+
+    // markup
+    const tabs = document.createElement("div");
+    tabs.id = "messTabs";
+    tabs.setAttribute("role", "tablist");
+    tabs.innerHTML = '<button id="messTabGame" role="tab" class="active" aria-selected="true">Make a Game</button>' +
+      '<button id="messTabMess" role="tab" aria-selected="false">Make a Mess</button>';
+    const panel = document.createElement("div");
+    panel.id = "messPanel";
+    panel.innerHTML =
+      '<div><div class="mkTitle">Gravity</div><div id="mkGravRow"></div></div>' +
+      '<button id="mkSurprise" type="button">🎲 Surprise Me</button>' +
+      '<div><div class="mkTitle">Give me ...</div><div class="mkGrid">' +
+        '<button class="mkBtn mkInert" data-mk="walls" type="button">Give me walls</button>' +
+        '<button class="mkBtn mkInert" data-mk="stuff" type="button">Give me stuff</button>' +
+        '<button class="mkBtn mkInert" data-mk="enemies" type="button">Give me enemies</button>' +
+        '<button class="mkBtn mkInert" data-mk="scenery" type="button">Give me scenery</button>' +
+      '</div></div>' +
+      '<div><div class="mkTitle">Chaos</div><div class="mkGrid">' +
+        '<button class="mkBtn mkChaos mkInert" data-mk="tumble" type="button">Gravity Tumble</button>' +
+        '<button class="mkBtn mkChaos mkInert" data-mk="quake" type="button">Earthquake</button>' +
+        '<button class="mkBtn mkChaos mkInert" data-mk="bombs" type="button">Bomb Storm</button>' +
+        '<button class="mkBtn mkChaos mkInert" data-mk="lava" type="button">Rising Lava</button>' +
+      '</div></div>' +
+      '<div id="messCaption">Hover (or tap) a button to see what it does.</div>';
+    pal.insertBefore(tabs, pal.firstChild);
+    pal.insertBefore(panel, tabs.nextSibling);
+
+    const CAPTIONS = {
+      surprise: "Builds one of the surprise rooms, just like the dice.",
+      walls: "Coming soon: dense piles of ground and walls.", stuff: "Coming soon: lots of little machines.",
+      enemies: "Coming soon: groups of enemies.", scenery: "Coming soon: scenery so a board looks finished.",
+      tumble: "Coming soon: gravity spins around for a few seconds.", quake: "Coming soon: everything gets shaken loose.",
+      bombs: "Coming soon: a storm of armed bombs.", lava: "Coming soon: lava rises, then everything left falls."
+    };
+    const $ = id => document.getElementById(id);
+    const caption = $("messCaption");
+    const IDLE = caption.textContent;
+    function setMessCaption(t) { caption.textContent = t || IDLE; }
+    function wire(el, text) {
+      el.addEventListener("mouseenter", () => setMessCaption(text));
+      el.addEventListener("mouseleave", () => setMessCaption(el.id === "mkSurprise" ? lastSurpriseCaption : ""));
+      el.addEventListener("touchstart", () => setMessCaption(text), { passive: true });
+    }
+
+    // the second gravity view: the same state, the same setters as the Make a Game one
+    const gravRule = GAME_RULES.find(r => r.key === "gravity");
+    let shownGrav = null, timer = null;
+    function renderGravMirror() {
+      const row = $("mkGravRow");
+      shownGrav = gravityEnabled + "|" + gravityDir;
+      row.innerHTML = "";
+      const lbl = document.createElement("span");
+      lbl.className = "mkGravLbl"; lbl.textContent = "gravity";
+      row.appendChild(lbl);
+      const t = document.createElement("button");
+      t.type = "button"; t.className = "mkChip" + (gravityEnabled ? " on" : ""); t.textContent = "▼";
+      t.title = "gravity" + (gravityEnabled ? " (on — click to turn off)" : " (off — click to turn on)");
+      t.addEventListener("click", () => { // exactly what the Make a Game chip does
+        gravRule.set(!gravRule.get());
+        log(gravRule.label + (gravRule.get() ? " on." : " off."));
+        renderGameRuleSwatches();
+        renderGravMirror();
+      });
+      wire(t, "Turns gravity on or off for this room.");
+      row.appendChild(t);
+      if (!gravityEnabled) return;
+      GRAVITY_DIR_BUTTONS.forEach(b => {
+        const usable = GRAVITY_DIRS.includes(b.dir);
+        const c = document.createElement("button");
+        c.type = "button"; c.className = "mkChip" + (gravityDir === b.dir ? " on" : ""); c.textContent = b.glyph;
+        c.title = "Gravity pulls " + b.label;
+        if (!usable) c.style.opacity = "0.35";
+        else c.addEventListener("click", () => { setGravityDir(b.dir); renderGravMirror(); });
+        wire(c, "Gravity pulls " + b.label + ".");
+        row.appendChild(c);
+      });
+    }
+
+    function showTab(which) {
+      const mess = which === "mess";
+      pal.classList.toggle("messMode", mess);
+      $("messTabGame").classList.toggle("active", !mess); $("messTabGame").setAttribute("aria-selected", String(!mess));
+      $("messTabMess").classList.toggle("active", mess); $("messTabMess").setAttribute("aria-selected", String(mess));
+      if (timer) { clearInterval(timer); timer = null; }
+      if (mess) {
+        renderGravMirror();
+        timer = setInterval(() => { // only while this tab is open
+          if (tutorialActive) { showTab("game"); return; } // the tutorial points at Make a Game controls
+          if (shownGrav !== gravityEnabled + "|" + gravityDir) renderGravMirror();
+        }, 200);
+      }
+    }
+    $("messTabGame").addEventListener("click", () => showTab("game"));
+    $("messTabMess").addEventListener("click", () => showTab("mess"));
+
+    // Surprise Me: the dice button's own click handler (rattle, telemetry and all), not a copy of it
+    const sb = $("mkSurprise");
+    sb.addEventListener("click", () => { $("surpriseBtn").click(); setMessCaption(lastSurpriseCaption); });
+    wire(sb, CAPTIONS.surprise);
+
+    // placeholders until their stages
+    panel.querySelectorAll(".mkBtn").forEach(b => {
+      wire(b, CAPTIONS[b.dataset.mk]);
+      b.addEventListener("click", () => setMessCaption("That one isn't built yet."));
+    });
+
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab }; } catch (e) { /* console view only */ }
+  })();
+  // ===== END CHAOS KIT =====
+
   // ============== Boot: factory defaults + resume from auto-save (v2.10) ==============
   // Captured now — after every built-in actor/background def above has been seeded and the
   // initial empty board is in place, but before any auto-save restore might replace them — so
