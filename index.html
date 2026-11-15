@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.3";
+  const CHAOS_KIT_VERSION = "v2.72.4";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15431,6 +15431,9 @@
       #mkStop { background: #ef6c00; color: #222; border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; }
       #mkStop:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
       .mkBtn.running { background: #ef6c00; color: #222; }
+      #mkToast { position: fixed; transform: translateX(-50%); z-index: 60; display: none; align-items: center; gap: 10px; background: rgba(20,21,30,0.94); color: var(--text); border: 2px solid var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+      #mkToastUndo { background: var(--accent); color: #222; border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; }
+      #mkToastUndo:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
       #messCaption { min-height: 16px; font-size: 12px; color: #9aa0b4; font-style: italic; padding: 2px 2px 8px 2px; border-top: 1px solid #2a2c3a; margin-top: 4px; }
       @media (min-width: 1500px) and (min-height: 820px) {
         #messTabs button { font-size: 13px; height: 38px; }
@@ -15453,10 +15456,10 @@
       '<div><div class="mkTitle">Gravity</div><div id="mkGravRow"></div></div>' +
       '<button id="mkSurprise" type="button">🎲 Surprise Me</button>' +
       '<div><div class="mkTitle">Give me ...</div><div class="mkGrid">' +
-        '<button class="mkBtn mkInert" data-mk="walls" type="button">Give me walls</button>' +
-        '<button class="mkBtn mkInert" data-mk="stuff" type="button">Give me stuff</button>' +
-        '<button class="mkBtn mkInert" data-mk="enemies" type="button">Give me enemies</button>' +
-        '<button class="mkBtn mkInert" data-mk="scenery" type="button">Give me scenery</button>' +
+        '<button class="mkBtn" data-mk="walls" type="button">Give me walls</button>' +
+        '<button class="mkBtn" data-mk="stuff" type="button">Give me stuff</button>' +
+        '<button class="mkBtn" data-mk="enemies" type="button">Give me enemies</button>' +
+        '<button class="mkBtn" data-mk="scenery" type="button">Give me scenery</button>' +
       '</div></div>' +
       '<div><div class="mkTitle">Chaos</div><div class="mkGrid">' +
         '<button class="mkBtn mkChaos" data-mk="tumble" type="button">Gravity Tumble</button>' +
@@ -15471,8 +15474,8 @@
 
     const CAPTIONS = {
       surprise: "Builds one of the surprise rooms, just like the dice.",
-      walls: "Coming soon: dense piles of ground and walls.", stuff: "Coming soon: lots of little machines.",
-      enemies: "Coming soon: groups of enemies.", scenery: "Coming soon: scenery so a board looks finished.",
+      walls: "Piles of towers, arches and walls in matching textures.", stuff: "Dozens of little machines that do things.",
+      enemies: "Gangs of enemies, ready to cause trouble.", scenery: "Clouds, hills and bushes so the board looks finished.",
       tumble: "Gravity spins around for 8 seconds, then goes back.", quake: "Coming soon: everything gets shaken loose.",
       bombs: "Three waves of bombs, then one giant boom. Undo brings it all back.", lava: "Coming soon: lava rises, then everything left falls."
     };
@@ -15646,7 +15649,7 @@
 
     // ---- Bomb Storm: three waves, built from the game's own bomb actor + fuse + blast code ----
     // 1) a cascade of lit bombs sweeping left to right along a wandering path, so the blasts run across the screen in sequence;
-    // 2) the same right to left; 3) every free tile on screen gets a bomb, a beat to see it coming, then they all go off at once.
+    // 2) the same right to left; 3) every free tile on screen gets a LIT bomb with one shared fuse, so they all go off together.
     // Chain blasts are welcome here (this is the "tear it down" button); the sound limiter and the actor cap still apply.
     const STORM_SWEEP_STEP_MS = 130, STORM_FUSE_MS = 450, STORM_WAVE_GAP_MS = 700, STORM_CHARGE_MS = 1300, STORM_TAIL_MS = 1800;
     const STORM_ACTOR_CAP = 700, STORM_FILL_CAP = 420;
@@ -15659,11 +15662,11 @@
       if (hero && Math.abs(cx - hero[0]) <= 1 && Math.abs(cy - hero[1]) <= 1) return false; // never on top of the hero
       return true;
     }
-    function stormAdd(s, cx, cy, lit) {
+    function stormAdd(s, cx, cy, lit, fuseMs) {
       if (actors.length >= STORM_ACTOR_CAP) return null;
       const b = placeCarryableActor(CARRY_BOMB2_DEF_ID, cx * TILE + TILE / 2, cy * TILE + TILE / 2);
       b.spawnerKey = STORM_KEY;
-      if (lit) { b.fuseRemainingMs = STORM_FUSE_MS; startOrResumeBombFuse(b); }
+      if (lit) { b.fuseRemainingMs = fuseMs || STORM_FUSE_MS; startOrResumeBombFuse(b); }
       s.live.push(b); s.count++;
       return b;
     }
@@ -15705,12 +15708,8 @@
           const cells = [];
           for (let cy = 0; cy < ROWS; cy++) for (let cx = editorPanCol; cx < editorPanCol + COLS; cx++) if (stormFreeCell(cx, cy, s.hero)) cells.push([cx, cy]);
           for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
-          cells.slice(0, STORM_FILL_CAP).forEach(c => { if (stormAdd(s, c[0], c[1], false)) s.fillCount++; });
+          cells.slice(0, STORM_FILL_CAP).forEach(c => { if (stormAdd(s, c[0], c[1], true, STORM_CHARGE_MS)) s.fillCount++; }); // lit, all with the same fuse: they go off together
           log("Every free tile just got a bomb...");
-        }
-        if (s.filled && !s.fired && el >= s.fillAt + STORM_CHARGE_MS) {
-          s.fired = true;
-          s.live.slice().forEach(b => detonateCarriedBombAt(s.roomId, b.id)); // the game's own detonation; chains do the rest
         }
       },
       end(why, s, abort) {
@@ -15724,11 +15723,292 @@
       }
     };
 
+    // ---- "Give me ...": a catalog of small vignettes (data) and one placer ----
+    // A vignette = rows of piece letters + a legend of Surprise Me piece names (the game's existing vocabulary, resolved by the
+    // existing surpriseResolvePiece), a name and a one-line "what it does". The placer stamps them with the same writes the editor
+    // makes by hand. Rules: only the cells a vignette actually uses are rewritten ("." is transparent), never the hero, the start
+    // position, doors or goal flags; a stamp never overlaps another stamp of the same press; anything standing where a stamp lands is
+    // moved to the nearest free cell; the whole press is ONE undo step (plus an Undo toast). Stamps are turned so their own "down"
+    // points where gravity pulls. Known limit: placement stays inside the visible columns and does not wrap across a seam.
+    const GM_DIRS = { n: [0, -1], e: [1, 0], s: [0, 1], w: [-1, 0], ne: [1, -1], se: [1, 1], sw: [-1, 1], nw: [-1, -1] };
+    const GM_DIR_NAME = v => Object.keys(GM_DIRS).find(k => GM_DIRS[k][0] === v[0] && GM_DIRS[k][1] === v[1]);
+    const GM_BASE = { "=": "wallA", "#": "wallB", c: "crate", w: "walker", L: "lava", p: "plate", G: "gate", b: "bomb", f: "fan:n", k: "cannon:ne", n: "stone",
+      m: "magnet", h: "hole", t: "tramp", B: "bounce", S: "sticky", I: "slick", E: "belt:e", u: "button", s: "spawnerc:e", H: "hopper",
+      M: "actor|movingplatform", F: "foeW", C: "foeC", R: "foeF", T: "foeS" };
+    const GM = [];
+    const gm = (cat, id, name, what, rows, legend) => GM.push({ cat, id, name, what, rows, legend: Object.assign({}, GM_BASE, legend || {}) });
+    // small working machines
+    gm("stuff", "fanhover", "Fan hover", "a fan holds a crate in the air", [".c.", "...", "...", "=f="]);
+    gm("stuff", "fanbomb", "Floating bomb", "a fan keeps a bomb hovering", [".b.", "...", "=f="]);
+    gm("stuff", "cratepit", "Crate machine", "a spawner throws crates into a lava pit", ["s..", "=LL"]);
+    gm("stuff", "gateplate", "Gate and plate", "a crate lands on the plate, the gate opens", ["c..", "...", "pGw", "==="]);
+    gm("stuff", "buttongate", "Switch and gate", "a crate flips the switch and the gate stays open", ["c..", "...", "uGw", "==="]);
+    gm("stuff", "trampcrate", "Bounce house", "a crate bounces on a trampoline", [".c.", "...", "=t="]);
+    gm("stuff", "magnetcatch", "Magnet catch", "a magnet grabs a falling crate", [".c.", "...", "..m", "==="]);
+    gm("stuff", "bombdrop", "Bomb drop", "a crate sets off a bomb and the blast breaks the floor", [".c.", "...", ".b.", "==="]);
+    gm("stuff", "holesnack", "Black hole snack", "a black hole swallows a crate", [".c.", ".h.", "...", "==="]);
+    gm("stuff", "bouncepad", "Bounce pad", "a crate bounces on a springy floor", [".c.", "...", "BBB"]);
+    gm("stuff", "hoppad", "Hopper pad", "a hopping Gloop bounces on a springy floor", ["H.", "BB"]);
+    gm("stuff", "stickywalk", "Sticky floor", "pets slow down on the sticky floor", ["w.w", "SSS"]);
+    gm("stuff", "iceskate", "Ice skaters", "pets slide around on the ice", ["w.w", "III"]);
+    gm("stuff", "icecrates", "Ice rink", "crates slide a long way on the ice", ["s...", "=III"]);
+    gm("stuff", "lavapit", "Lava pit", "a pet walks by a lava pit and a crate falls in", ["wc.", "=L="]);
+    gm("stuff", "beltlava", "Conveyor", "the belt carries a crate into the lava", ["c...", "EEEL"]);
+    gm("stuff", "stonecrate", "Stone smash", "a falling stone smashes the crate", ["n", ".", ".", "c", "="]);
+    gm("stuff", "bombrain", "Bomb dropper", "a spawner drops bombs that blow up on landing", ["x", ".", ".", ".", ".", ".", ".", "="], { x: "spawnerb:s" });
+    gm("stuff", "pinball", "Mini pinball", "hazard balls bounce off a bouncy peg", ["x..", "...", ".B.", "...", "==="], { x: "spawnerh:s" });
+    gm("stuff", "petdrain", "Pet drain", "a spawner throws pets toward a black hole", ["P.h", "==="], { P: "spawnerp:e" });
+    gm("stuff", "gustcrate", "Wind tunnel", "wind pushes a crate along the floor", ["Cgg", "==="], { C: "crate&gust:e", g: "gust:e" });
+    gm("stuff", "craterain", "Crate rain", "a spawner rains crates onto a springy floor", ["s", ".", ".", "B"], { s: "spawnerc:s" });
+    gm("stuff", "bombchain", "Bomb chain", "a crate sets off a row of bombs", [".c.", "...", "bbb", "==="]);
+    // bigger machines: at most two per press
+    gm("stuff", "cannonshot", "Cannon shot", "a crate falls on the cannon and is fired across", [".c.........", "...........", "...........", ".k.......w.", "==========="]);
+    gm("stuff", "platformride", "Platform ride", "a moving platform carries a crate over the lava", ["...........", ".....c.....", "...........", ".....M.....", "==LLLLLLL=="]);
+    gm("stuff", "trampchain", "Cannon and trampoline", "a crate is fired onto a trampoline", [".c..........", "............", "............", ".k..........", "=========t=="]);
+    gm("stuff", "hopperpen", "Hopper pen", "hopping Gloops bounce around a springy box", ["=.....=", "=.....=", "=.H.H.=", "=.....=", "BBBBBBB"]);
+    // wall structures (each with its own coherent pair of ground textures: = is the main one, # the accent)
+    gm("walls", "tower", "Tower", "a tall tower", [".#.", "=#=", "=#=", "=#=", "=#=", "=#=", "==="]);
+    gm("walls", "stairs", "Staircase", "stairs climbing right", [".....#", "....##", "...###", "..####"]);
+    gm("walls", "arch", "Arch", "an arch", [".===.", "=...=", "=...=", "=...=", "=...="]);
+    gm("walls", "pillars", "Pillar row", "a row of pillars", ["=.#.=.#.=", "=.#.=.#.=", "=.#.=.#.=", "=.#.=.#.="]);
+    gm("walls", "hut", "Little room", "a room with a doorway", ["======", "=....=", "=.....", "=....=", "======"]);
+    gm("walls", "bridge", "Bridge", "a bridge on two legs", ["=========", "=.......=", "=.......=", "=.......="]);
+    gm("walls", "zigzag", "Zigzag ledges", "floating ledges", ["......===", ".........", "...===...", ".........", "===......", "........."]);
+    gm("walls", "cup", "Cup", "a cup in the ground", ["===.===", "=.....=", "=.....=", "======="]);
+    gm("walls", "castle", "Castle wall", "a wall with battlements", ["=.=.=.=.", "========", "########"]);
+    gm("walls", "pyramid", "Pyramid", "a little pyramid", ["...#...", "..###..", ".#####.", "======="]);
+    gm("walls", "ell", "Corner", "an L-shaped wall", ["=....", "=....", "=....", "=....", "====="]);
+    // groups of enemies
+    gm("enemies", "ledgepack", "Ledge pack", "wanderers pacing a walled ledge", ["=.......=", "=F.F.F.F=", "========="]);
+    gm("enemies", "chasertrio", "Chaser pen", "chasers burst out of a pen", ["=========", "=.C.C.C..", "=.......=", "========="]);
+    gm("enemies", "fleerherd", "Fleer herd", "fleers scatter from you", ["=======.", "=R.R.R..", "=R.R.R..", "========"]);
+    gm("enemies", "statuegarden", "Statue garden", "statues with a wanderer wandering among them", ["T..T..T..", "...F.....", "========="]);
+    gm("enemies", "mob", "The mob", "a mixed gang", [".........." , "F.C.R.F.C.", "=========="]);
+    gm("enemies", "hoppack", "Hopping gang", "Gloops hopping in a springy box", ["=.......=", "=.H.H.H.=", "=.......=", "BBBBBBBBB"]);
+    gm("enemies", "gauntlet", "Lava gauntlet", "wanderers on pillars over lava", ["F.F.F.F.F.F", "=.=.=.=.=.=", "=.=.=.=.=.=", "=L=L=L=L=L="]);
+    // scenery (Paint layer only)
+    gm("scenery", "clouds", "Clouds", "a few clouds", [".c.cc.", "cc...c"], { c: "bg:bgCloud" });
+    gm("scenery", "hills", "Hills", "rolling hills", ["12332113"], { 1: "bg:bgHill1", 2: "bg:bgHill2", 3: "bg:bgHill3" });
+    gm("scenery", "bushes", "Bushes", "a line of bushes", ["b.b.bb"], { b: "bg:bgBush" });
+    gm("scenery", "skypatch", "Sky patch", "paler sky", ["SSSSSS", "TTTTTT", "UUUUUU", "VVVVVV"], { S: "bg:bgSky", T: "bg:bgSky2", U: "bg:bgSky3", V: "bg:bgSky4" });
+    gm("scenery", "hillbush", "Hill and bush", "a hill with bushes", ["..b.b..", "1233221"], { b: "bg:bgBush", 1: "bg:bgHill1", 2: "bg:bgHill2", 3: "bg:bgHill3" });
+    gm("scenery", "texture", "Texture patch", "a patch of one of your own Paint tiles", ["xxxx", "xxxx", "xxx."], { x: "bg:@rand" });
+    gm("scenery", "bigcloud", "Big cloud", "one big cloud", [".ccc..", "cccccc", ".cccc."], { c: "bg:bgCloud" });
+    gm("scenery", "horizon", "Horizon", "a pale horizon", ["UUUUUUUUUU", "VVVVVVVVVV"], { U: "bg:bgSky3", V: "bg:bgSky4" });
+    ["cannonshot", "platformride", "trampchain", "hopperpen"].forEach(id => { GM.find(v => v.id === id).big = true; });
+    const GM_SKIN_SETS = [["gndStone", "gndBrick"], ["gndDirt", "gndGrass"], ["gndSand", "gndBrick"], ["gndSnow", "gndStone"], ["gndCrystalPink", "gndCrystalCyan"], ["gndRubble", "gndDirt"]];
+    const GM_TARGETS = { walls: { min: 8, extra: 2, cap: 14 }, stuff: { min: 30, extra: 0, cap: 50 }, enemies: { min: 5, extra: 1, cap: 6 }, scenery: { min: 12, extra: 0, cap: 70 } };
+    const GM_COVER = { walls: 0.55, stuff: 0.55, enemies: 2, scenery: 0.75 };
+    const GM_ENEMY_CLEAR = 5, GM_HERO_CLEAR = 3, GM_START_CLEAR = 2;
+
+    function gmTurn(x, y, w, h, rot) { return rot === "up" ? [w - 1 - x, h - 1 - y] : rot === "left" ? [h - 1 - y, x] : rot === "right" ? [y, w - 1 - x] : [x, y]; }
+    function gmTurnVec(v, rot) { return rot === "up" ? [-v[0], -v[1]] : rot === "left" ? [-v[1], v[0]] : rot === "right" ? [v[1], -v[0]] : v; }
+    function gmTurnName(name, rot) {
+      if (rot === "down") return name;
+      return name.split("&").map(p => { const i = p.indexOf(":"); if (i < 0) return p; const suf = p.slice(i + 1); if (!GM_DIRS[suf]) return p; return p.slice(0, i + 1) + GM_DIR_NAME(gmTurnVec(GM_DIRS[suf], rot)); }).join("&");
+    }
+    function gmStampCells(v, rot) { // [[x, y, pieceName]] turned, plus the turned size
+      const h = v.rows.length, w = v.rows[0].length, sw = rot === "left" || rot === "right";
+      const cells = [];
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const ch = v.rows[y][x];
+        if (ch === "." || ch === " ") continue;
+        const nm = v.legend[ch]; if (!nm) continue;
+        const [nx, ny] = gmTurn(x, y, w, h, rot);
+        cells.push([nx, ny, gmTurnName(nm, rot)]);
+      }
+      return { cells, w: sw ? h : w, h: sw ? w : h };
+    }
+    function gmResolve(name, st) {
+      if (name.includes("&")) return name.split("&").reduce((acc, n) => Object.assign(acc, gmResolve(n, st)), {});
+      const base = name.split(":")[0], arg = name.includes(":") ? name.split(":")[1] : null;
+      if (base === "wallA" || base === "wallB") return { tile: { key: gameplayKey("solid", "none"), skin: base === "wallA" ? st.skinA : st.skinB } };
+      if (base.startsWith("foe")) return { actor: defaultDefIdForKind({ foeW: "wanderer", foeC: "chaser", foeF: "fleer", foeS: "stationary" }[base]) };
+      if (base === "bg") return { bg: arg === "@rand" ? st.bgRand : arg };
+      return surpriseResolvePiece(name, st.fills, Math.random, st.kit);
+    }
+    const hotRoomCols = () => Math.min(roomCols(), BOARD_MAX_COLS);
+    function gmNewCtx() {
+      const kit = surpriseKit();
+      const used = {};
+      CHANNEL_COLORS.forEach(c => { used[c] = 0; });
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < hotRoomCols(); x++) { const c = colorBoard[y][x]; if (c && used[c] != null) used[c]++; }
+      const sets = GM_SKIN_SETS.filter(s => s.every(id => groundTileDefs[id])).slice().sort(() => Math.random() - 0.5).slice(0, 3);
+      const bgIds = Object.keys(backgroundTileDefs).filter(id => !STARTER_DECOR_IDS.includes(id) && id !== SKY_BG_ID && id !== CLOUD_BG_ID);
+      return { kit, used, sets, bgIds, fills: { wallSkin: null, color: "red", pet: kit.pets[0], chaser: defaultDefIdForKind("chaser") || kit.chasers[0], reward: kit.rewards[0], ball: HAZARD_BALL_DEF_ID, doorColor: () => "red" } };
+    }
+    function gmClearCell(cx, cy) { // the same cleanup the eraser does, for every layer a tile can carry
+      const key = roomCellKey(currentRoomId, cx, cy);
+      delete digProgress[key]; cancelBombArm(key); delete spawnerContents[key];
+      const hr = rooms.find(r => r.id === currentRoomId); if (hr && hr.gravButtons) delete hr.gravButtons[cx + "," + cy];
+      board[cy][cx] = null; colorBoard[cy][cx] = null; groundSkinBoard[cy][cx] = null; groundSkinRotationBoard[cy][cx] = 0;
+    }
+    // writes one vignette (already turned) with its top-left at absolute (ax, ay); returns the ids of the actors it made
+    function gmWrite(v, stamp, ax, ay, st) {
+      const made = [];
+      st.skinA = st.sets.length ? st.sets[st.n % st.sets.length][0] : null; st.skinB = st.sets.length ? st.sets[st.n % st.sets.length][1] : null;
+      st.bgRand = st.bgIds.length ? st.bgIds[Math.floor(Math.random() * st.bgIds.length)] : SKY_BG_ID;
+      const col = CHANNEL_COLORS.slice().sort((a, b) => st.used[a] - st.used[b] || Math.random() - 0.5)[0];
+      st.fills.color = col; st.used[col] += 2;
+      const savedSel = selectedActorDefId;
+      stamp.cells.forEach(([x, y, name]) => {
+        const cx = ax + x, cy = ay + y, r = gmResolve(name, st);
+        if (r.bg) { ensureSkyBackdropDefs(); backgroundBoard[cy][cx] = r.bg; return; }
+        if (r.player) return; // never makes a player
+        gmClearCell(cx, cy);
+        if (r.tile) {
+          board[cy][cx] = r.tile.key;
+          if (r.tile.color) { colorBoard[cy][cx] = r.tile.color; delete switchChannels[r.tile.color]; }
+          if (r.tile.skin && groundTileDefs[r.tile.skin]) { groundSkinBoard[cy][cx] = r.tile.skin; groundSkinRotationBoard[cy][cx] = 0; }
+          if (GAMEPLAY_TILE_DEFS[r.tile.key].geometry === PUSH_BUTTON_GEOMETRY && !r.tile.color && r.tile.gravOpt) {
+            const hr = rooms.find(q => q.id === currentRoomId); hr.gravButtons = hr.gravButtons || {}; hr.gravButtons[cx + "," + cy] = r.tile.gravOpt;
+          }
+        }
+        if (r.spawnerContent) spawnerContents[roomCellKey(currentRoomId, cx, cy)] = surpriseDefFor(r.spawnerContent, "pet");
+        if (r.actor) {
+          selectedActorDefId = r.role ? surpriseDefFor(r.actor, r.role) : r.actor;
+          const act = placeNewActor(cx * TILE + TILE / 2, cy * TILE + TILE / 2);
+          if (act) { if (r.axis) act.platformAxis = r.axis; if (r.channel) act.channel = r.channel; made.push(act.id); }
+        }
+      });
+      selectedActorDefId = savedSel;
+      st.n++;
+      return made;
+    }
+    const gmCell = a => [Math.floor((a.x + a.w / 2) / TILE), Math.floor((a.y + a.h / 2) / TILE)];
+    function gmPress(kind) {
+      if (appMode !== "build" || landingActive || tutorialActive) { setMessCaption("Only while you're building."); return null; }
+      if (sess) endSession("replaced");
+      const pool = GM.filter(v => v.cat === kind);
+      if (!pool.length) return null;
+      const t0 = performance.now();
+      const scenery = kind === "scenery";
+      const rot = gravityEnabled ? gravityDir : "down";
+      const c0 = editorPanCol, W = Math.min(COLS, hotRoomCols() - c0), H = ROWS;
+      pushUndoSnapshot(); // the one undo step, before anything is written
+      const serial = editSerial;
+      const hero = actors.find(a => a.isPlayer);
+      // what is in the way: reserved cells (the hero's surroundings, the start position, doors, goals, and every footprint already stamped)
+      const R = [], busy = [], free0 = { n: 0 };
+      for (let y = 0; y < H; y++) { R.push(new Array(W).fill(false)); busy.push(new Array(W).fill(false)); }
+      const mark = (cx, cy, rad) => { for (let y = cy - rad; y <= cy + rad; y++) for (let x = cx - rad; x <= cx + rad; x++) if (x >= c0 && x < c0 + W && y >= 0 && y < H) R[y][x - c0] = true; };
+      const before = actors.filter(a => !a.isPlayer);
+      const beforeIds = new Set(before.map(a => a.id));
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const k = board[y][c0 + x];
+        if (k) { busy[y][x] = true; const g = GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry; if (g === "door" || g === "goal") R[y][x] = true; }
+      }
+      actors.forEach(a => { const [cx, cy] = gmCell(a); if (cx >= c0 && cx < c0 + W && cy >= 0 && cy < H) busy[cy][cx - c0] = true; });
+      const startCx = Math.floor((startPos.x + ACTOR_SIZE / 2) / TILE), startCy = Math.floor((startPos.y + ACTOR_SIZE / 2) / TILE);
+      const heroRad = kind === "enemies" ? GM_ENEMY_CLEAR : GM_HERO_CLEAR;
+      if (!scenery) {
+        if (hero) { const [hx, hy] = gmCell(hero); mark(hx, hy, heroRad); }
+        mark(startCx, startCy, kind === "enemies" ? GM_ENEMY_CLEAR : GM_START_CLEAR);
+      } else { for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) R[y][x] = false; } // Paint only: nothing to protect
+      const RS = []; for (let y = 0; y < H; y++) RS.push(new Array(W).fill(false)); // this press's own footprints
+      let freeCells = 0; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!busy[y][x]) freeCells++;
+      const st = gmNewCtx(); st.n = Math.floor(Math.random() * 3);
+      const tg = GM_TARGETS[kind], want = tg.min + Math.floor(Math.random() * (tg.extra + 1));
+      const total = scenery ? W * H : freeCells;
+      const placed = [], uses = {}, created = [];
+      let covered = 0, fails = 0, lastId = null, bigUsed = 0;
+      while (placed.length < tg.cap && fails < 14) {
+        const done = placed.length >= want && covered >= GM_COVER[kind] * total;
+        if (done) break;
+        let v = null; // least-used of three random picks, never the same one twice running; at most two big machines per press
+        for (let i = 0; i < 3; i++) { const c = pool[Math.floor(Math.random() * pool.length)]; if (c.id !== lastId && !(c.big && bigUsed >= 2) && (!v || (uses[c.id] || 0) < (uses[v.id] || 0))) v = c; }
+        if (!v) { fails++; continue; }
+        if (v.big) bigUsed++;
+        const stamp = gmStampCells(v, rot);
+        if (stamp.w > W || stamp.h > H) { fails++; continue; }
+        const set = new Set(stamp.cells.map(([x, y]) => x + "," + y));
+        let best = [], bestCost = Infinity;
+        for (let oy = 0; oy + stamp.h <= H; oy++) for (let ox = 0; ox + stamp.w <= W; ox++) {
+          let cost = 0, bad = false, snug = 0;
+          for (let y = 0; y < stamp.h && !bad; y++) for (let x = 0; x < stamp.w; x++) {
+            const gx = ox + x, gy = oy + y;
+            if (R[gy][gx] || RS[gy][gx]) { bad = true; break; }
+            if (!scenery && busy[gy][gx]) cost += set.has(x + "," + y) ? 3 : 2;
+          }
+          if (bad) continue;
+          for (let x = -1; x <= stamp.w; x++) for (const y of [-1, stamp.h]) { const gx = ox + x, gy = oy + y; if (gx < 0 || gy < 0 || gx >= W || gy >= H || RS[gy][gx] || (!scenery && busy[gy][gx])) snug++; }
+          for (let y = 0; y < stamp.h; y++) for (const x of [-1, stamp.w]) { const gx = ox + x, gy = oy + y; if (gx < 0 || gy < 0 || gx >= W || gy >= H || RS[gy][gx] || (!scenery && busy[gy][gx])) snug++; }
+          if (cost < bestCost) { bestCost = cost; best = []; }
+          if (cost === bestCost) best.push([ox, oy, snug]);
+        }
+        if (!best.length) { fails++; continue; }
+        best.sort((a, b) => b[2] - a[2] || Math.random() - 0.5);
+        const pick = best[Math.floor(Math.random() * Math.min(6, best.length))];
+        const [ox, oy] = pick;
+        created.push(...gmWrite(v, stamp, c0 + ox, oy, st));
+        for (let y = 0; y < stamp.h; y++) for (let x = 0; x < stamp.w; x++) { RS[oy + y][ox + x] = true; if (!busy[oy + y][ox + x]) covered++; else if (scenery) covered++; }
+        placed.push({ id: v.id, name: v.name, x: c0 + ox, y: oy, w: stamp.w, h: stamp.h });
+        uses[v.id] = (uses[v.id] || 0) + 1; lastId = v.id; fails = 0;
+      }
+      // anything that was standing where a stamp landed moves to the nearest free cell (scenery never touches gameplay)
+      let moved = 0;
+      if (!scenery) {
+        before.forEach(a => {
+          const [cx, cy] = gmCell(a), lx = cx - c0;
+          if (lx < 0 || lx >= W || cy < 0 || cy >= H || !RS[cy][lx]) return;
+          let spot = null;
+          for (let r = 1; r < 14 && !spot; r++) for (let dy = -r; dy <= r && !spot; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const nx = cx + dx, ny = cy + dy, nl = nx - c0;
+            if (nl < 0 || nl >= W || ny < 0 || ny >= H || RS[ny][nl] || R[ny][nl] || board[ny][nx]) continue;
+            if (actors.some(o => o !== a && !o.isPlayer && gmCell(o)[0] === nx && gmCell(o)[1] === ny)) continue;
+            spot = [nx, ny]; break;
+          }
+          if (spot) { a.x = spot[0] * TILE + TILE / 2 - a.w / 2; a.y = spot[1] * TILE + TILE / 2 - a.h / 2; a.spawnX = a.x; a.spawnY = a.y; a.vx = 0; a.vy = 0; moved++; }
+        });
+      }
+      snapshotCurrentRoomState();
+      renderAll();
+      const rep = { kind, count: placed.length, placements: placed, covered, total, coverage: total ? covered / total : 0, moved, ms: performance.now() - t0, serial, actorsMade: created.length };
+      return rep;
+    }
+    // Quality gate helper: one vignette alone at a visible position (no reservation logic, nothing displaced)
+    function gmStampAlone(id, ox, oy) {
+      const v = GM.find(q => q.id === id), rot = gravityEnabled ? gravityDir : "down", stamp = gmStampCells(v, rot);
+      const st = gmNewCtx(); st.n = 0;
+      const made = gmWrite(v, stamp, editorPanCol + ox, oy, st);
+      snapshotCurrentRoomState();
+      return { w: stamp.w, h: stamp.h, made };
+    }
+    // the Undo toast: about 8 s, gone as soon as the kid edits anything else
+    const toast = document.createElement("div");
+    toast.id = "mkToast"; toast.style.display = "none";
+    toast.innerHTML = '<span id="mkToastText"></span><button id="mkToastUndo" type="button">Undo</button>';
+    document.body.appendChild(toast);
+    let toastTimer = null, toastPoll = null, toastSerial = 0;
+    function hideToast() { toast.style.display = "none"; clearTimeout(toastTimer); clearInterval(toastPoll); }
+    function showToast(text, serial) {
+      const cv = document.getElementById("gameCanvas"), r = cv.getBoundingClientRect();
+      $("mkToastText").textContent = text;
+      toast.style.display = "flex";
+      toast.style.left = Math.round(r.left + r.width / 2) + "px";
+      toast.style.top = Math.round(Math.max(8, r.bottom - toast.offsetHeight - 14)) + "px";
+      toastSerial = serial;
+      clearTimeout(toastTimer); clearInterval(toastPoll);
+      toastTimer = setTimeout(hideToast, 8000);
+      toastPoll = setInterval(() => { if (editSerial !== toastSerial || appMode !== "build") hideToast(); }, 250);
+    }
+    $("mkToastUndo").addEventListener("click", () => { hideToast(); $("undoBtn").click(); });
+
     // the build/chaos buttons: tumble and bombs are live, the rest are placeholders until their stages
     panel.querySelectorAll(".mkBtn").forEach(b => {
       wire(b, CAPTIONS[b.dataset.mk]);
       const kind = b.dataset.mk;
       b.addEventListener("click", () => {
+        if (kind === "walls" || kind === "stuff" || kind === "enemies" || kind === "scenery") {
+          const r = gmPress(kind);
+          if (r) {
+            const txt = { walls: "walls", stuff: "machines", enemies: "enemy groups", scenery: "bits of scenery" }[kind];
+            const msg = "Added " + r.count + " " + txt + ".";
+            setMessCaption(msg); log(msg + " Undo takes it all back."); showToast(msg, r.serial);
+          }
+          return;
+        }
         if (kind === "tumble" || kind === "bombs") {
           if (sess && sess.kind === kind) { endSession("stop"); return; }
           if (kind === "tumble") beginSession("tumble", "Gravity Tumble", TUMBLE_STEP_MS * TUMBLE_STEPS, tumbleHooks);
@@ -15739,7 +16019,7 @@
       });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 
