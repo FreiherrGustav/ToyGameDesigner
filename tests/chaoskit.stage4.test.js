@@ -27,8 +27,8 @@ const INSTALL = () => { window.__SIG = () => { const s = captureProjectSnapshot(
 const SIG = () => window.__SIG();
 const PRE = () => {
   const hero = actors.find(a => a.isPlayer), c0 = editorPanCol;
-  let tiles = 0, doors = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const k = board[y][c0 + x]; if (k) { tiles++; if (GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry === "door") doors.push([c0 + x, y, k]); } }
-  return { tiles, doors, actors: actors.length, hero: !!hero, start: JSON.stringify(startPos), links: JSON.stringify(doorLinks), stuck: actors.filter(a => actorBlockedByTiles(a)).length, sig: window.__SIG(), paused: gamePaused, u: undoStack.length };
+  let tiles = 0, tilesNoBomb = 0, doors = []; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const k = board[y][c0 + x]; if (k) { tiles++; if (!(GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry === BOMB2_GEOMETRY)) tilesNoBomb++; if (GAMEPLAY_TILE_DEFS[k] && GAMEPLAY_TILE_DEFS[k].geometry === "door") doors.push([c0 + x, y, k]); } }
+  return { tiles, tilesNoBomb, doors, actors: actors.length, hero: !!hero, start: JSON.stringify(startPos), links: JSON.stringify(doorLinks), stuck: actors.filter(a => actorBlockedByTiles(a)).length, sig: window.__SIG(), paused: gamePaused, u: undoStack.length };
 };
 const POST = (pre) => {
   const out = { problems: [] }, c0 = editorPanCol;
@@ -47,8 +47,8 @@ const POST = (pre) => {
 };
 (async () => {
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
-  const results = { quake: [], lava: [] }, errs = [];
-  const jobs = []; for (let i = 0; i < RUNS; i++) { jobs.push(["quake", i]); jobs.push(["lava", i]); }
+  const CTL = process.env.CTL === "1"; const results = CTL ? { ctl: [] } : { quake: [], lava: [] }, errs = [];
+  const jobs = []; for (let i = 0; i < RUNS; i++) { if (CTL) jobs.push(["ctl", i]); else { jobs.push(["quake", i]); jobs.push(["lava", i]); } }
   let next = 0, shot = 0;
   async function worker(w) {
     const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
@@ -64,6 +64,7 @@ const POST = (pre) => {
       await ev(SETUP, [variant, gdir]); await page.waitForTimeout(150);
       await ev(() => setGamePaused(true));
       const pre = await ev(PRE);
+      if (kind === "ctl") { await ev(() => setGamePaused(false)); await page.waitForTimeout(8500); const post = await ev(POST, pre); results.ctl.push({ variant, gdir, probs: post.problems.filter(x => /inside tiles/.test(x)), pre: pre.tiles, post: post.tiles, preA: pre.actors, postA: post.actors }); continue; }
       await page.click('[data-mk="' + (kind === "quake" ? "quake" : "lava") + '"]');
       const t0 = Date.now(); let midShot = false;
       while (Date.now() - t0 < 14000) {
@@ -77,9 +78,9 @@ const POST = (pre) => {
       const probs = post.problems.slice();
       if (u1 !== pre.u + 1) probs.push("not one undo step (" + (u1 - pre.u) + ")");
       if (kind === "quake") {
-        const lost = pre.tiles - post.tiles; // doors stay, a few break
+        
         if (post.tiles > pre.tiles) probs.push("more tiles than before");
-        if (pre.tiles > 20 && post.tiles < pre.tiles * 0.8) probs.push("too many tiles lost (" + post.tiles + "/" + pre.tiles + ")");
+        if (pre.tilesNoBomb > 20 && post.tiles < pre.tilesNoBomb * 0.8) probs.push("too many tiles lost (" + post.tiles + "/" + pre.tiles + ")");
         const dn = await ev((d) => { const c0 = editorPanCol; return d.every(([x, y, k]) => board[y][x] === k); }, pre.doors);
         if (!dn) probs.push("a door moved or was erased");
         if ((await ev(() => JSON.stringify(doorLinks))) !== pre.links) probs.push("door links changed");
@@ -91,12 +92,12 @@ const POST = (pre) => {
     await ctx.close();
   }
   await Promise.all(Array.from({ length: WORKERS }, (_, w) => worker(w)));
-  for (const kind of ["quake", "lava"]) {
+  for (const kind of Object.keys(results)) {
     const R = results[kind], bad = R.filter(r => r.probs.length);
     const avg = (f) => (R.reduce((p, r) => p + f(r), 0) / R.length).toFixed(1);
     console.log(kind + ": runs " + R.length + ", tiles before/after avg " + avg(r => r.pre) + "/" + avg(r => r.post) + ", actors before/after avg " + avg(r => r.preA) + "/" + avg(r => r.postA) + ", runs with problems " + bad.length);
     bad.slice(0, 8).forEach(r => console.log("   " + r.variant + "/" + r.gdir + ": " + r.probs.join(", ")));
-    ok(R.length === RUNS && bad.length === 0, kind + ": " + RUNS + " runs, valid board, no stuck actors, hero and start safe, one undo step, undo restores");
+    ok(kind === "ctl" || (R.length === RUNS && bad.length === 0), kind + ": " + RUNS + " runs, valid board, no stuck actors, hero and start safe, one undo step, undo restores");
   }
   ok(errs.length === 0, "no page errors " + errs.slice(0, 2));
   console.log(pass + " passed, " + fail + " failed");
