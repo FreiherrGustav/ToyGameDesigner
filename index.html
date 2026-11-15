@@ -1660,6 +1660,14 @@
   // untouched).
   const BOUNCY_WALL_KICK = 320;     // minimum horizontal launch speed away from a bouncy wall
   const BOUNCY_WALL_LIFT = 160;     // upward vy nudge added on every bouncy-wall bounce
+  // Bounce speed cap (reversible: set BOUNCE_SPEED_CAP_ON = false to restore the old uncapped pumping).
+  // A hero pumping a plain bouncy floor/ceiling with jump held gained speed every bounce (1000+ px/s), which
+  // strobes on 60 Hz screens. Plain bouncy tiles (not Trampolines) now limit the speed along gravity.
+  const BOUNCE_SPEED_CAP_ON = true;
+  const BOUNCE_MAX_SPEED = 750;
+  function capBounceSpeed(actor, vk) {
+    if (BOUNCE_SPEED_CAP_ON && Math.abs(actor[vk]) > BOUNCE_MAX_SPEED) actor[vk] = Math.sign(actor[vk]) * BOUNCE_MAX_SPEED;
+  }
   const BOUNCY_LAUNCH_SPEED = 620; // none+bouncy launch impulse on entry — matches jump magnitude
   const HAZARD_KNOCKBACK_SPEED = 380;
   const HAZARD_COOLDOWN_MS = 450;
@@ -7148,6 +7156,7 @@
               // Trampoline already has its own enforced minimum just above, stacking a second boost
               // on top would blur the two mechanics' distinct identities.
               if (isPlainBouncyHit && jumpHeldForBounce) { actor[vk] += JUMP_VELOCITY * gs; sounds.jump(); }
+              if (!isTrampolineGeom) capBounceSpeed(actor, vk);
               if (boingHeard) bounceSound();
               tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
             }
@@ -7156,6 +7165,7 @@
             actor[axis] = gs > 0 ? (cc + 1) * TILE : cc * TILE - actor[sk];
             triggerImpact(actor, axis, fall, bouncy);
             actor[vk] = bouncy ? -actor[vk] * restitution : 0;
+            if (bouncy && !isTrampolineGeom) capBounceSpeed(actor, vk);
             if (bouncy && boingHeard) bounceSound();
             if (bouncy) tileSquashHit(cx, cy, axis, hitSign, false, Math.abs(actor[vk]));
           }
@@ -15453,7 +15463,7 @@
       gravityOn, gravSign, gravAxis, rightSign, viewK, viewKFor, worldVecFromScreen, screenVecFromWorld, syncViewTables, platformWorldAxis, turnArtBack, applyViewTransform, renderWorld, drawGameplayTileInner, drawEffectTint, updateGravIndicator, gravButtonOptAt, gravRandomDir, applyGravButtonOption, drawGravOptBadge, flipArtRows, mirrorArtH, rotateArt90CW, rotateArt90CCW, applyWorldWrap, colsForCameraMode, roomCols, updateCamera, checkRunnerFailState,
       overlappedCells, cellsUnderneath, isHopperDef, hopSteerDir, hopUpdate, hopBounceSteer, hopScale, goalFlagArts, drawGoalFlag, drawCannonSmoke, drawMagnetField, beginTrampolineIdle, tileSquashAt, tileSquashHit, tileSquashUnder, frictionMultiplierFor, applyAxisFriction, windAt, windRunLength, windAccelFor,
       checkWhooshSurface, fanAccelFor, radialForceAccelFor, magnetActiveAt, magnetHoldsActor, isStuckToSticky, isOnStickyGround,
-      resolveAxis, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
+      resolveAxis, capBounceSpeed, applyBouncyWallKick, actorBlockedByTiles, actorBlockedByOtherPushables, shovePushables, triggerImpact, impactWobbleValue, gameplayTileAt,
       currentSkinFrame, currentBackgroundArt, cloudDriftOffset, drawCloudOverlays, idleLifeFor, drawArtStretched, drawSparkle,
       countCollectibles, gameHasGoalTile, starActive, takePlayerHit, collectPowerup, shadeHex, tintedKeyArt,
       roundComplete, maybeRoundCompleteFromCollectibles, resolveActorContact,
@@ -15567,6 +15577,7 @@
       `const FRICTION_DECEL = ${FRICTION_DECEL}, SLIPPERY_FRICTION_MULT = ${SLIPPERY_FRICTION_MULT};`,
       `const MAX_FALL = ${MAX_FALL}, BOUNCE_RESTITUTION = ${BOUNCE_RESTITUTION}, BOUNCE_REST_SPEED = ${BOUNCE_REST_SPEED};`,
       `const BOUNCY_WALL_KICK = ${BOUNCY_WALL_KICK}, BOUNCY_WALL_LIFT = ${BOUNCY_WALL_LIFT};`,
+      `const BOUNCE_SPEED_CAP_ON = ${BOUNCE_SPEED_CAP_ON}, BOUNCE_MAX_SPEED = ${BOUNCE_MAX_SPEED};`,
       `const BOUNCY_LAUNCH_SPEED = ${BOUNCY_LAUNCH_SPEED}, HAZARD_KNOCKBACK_SPEED = ${HAZARD_KNOCKBACK_SPEED};`,
       `const GRAVITY_OFF_POP_SPEED = ${GRAVITY_OFF_POP_SPEED};`,
       `const HAZARD_COOLDOWN_MS = ${HAZARD_COOLDOWN_MS}, DIG_DURATION_MS = ${DIG_DURATION_MS};`,
