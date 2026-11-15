@@ -154,7 +154,7 @@ const PANEL_INFO = () => {
     ok((await p.evaluate(() => document.getElementById("messCaption").textContent)).startsWith("Surprise #"), tag + " the Make a Mess caption bar shows it");
     // placeholders do nothing
     const before = await p.evaluate(() => window.__ev("()=>JSON.stringify([undoStack.length,actors.length,rooms.length])")());
-    for (const k of ["walls", "stuff", "enemies", "scenery", "tumble", "quake", "bombs", "lava"]) await p.click('[data-mk="' + k + '"]');
+    for (const k of ["walls", "stuff", "enemies", "scenery", "quake", "lava"]) await p.click('[data-mk="' + k + '"]');
     ok(before === await p.evaluate(() => window.__ev("()=>JSON.stringify([undoStack.length,actors.length,rooms.length])")()), tag + " placeholder buttons change nothing");
     // captions
     await p.hover('[data-mk="bombs"]'); ok((await p.evaluate(() => document.getElementById("messCaption").textContent)).length > 10, tag + " hover shows a caption");

@@ -15394,10 +15394,11 @@
   // first children of #paletteWrap, so no existing HTML/CSS line is edited) and its own tiny timers, which run only
   // while the Make a Mess tab is open. With CHAOS_KIT_ENABLED = false the IIFE returns first: no DOM, no style, no timer.
   // To remove it entirely: delete everything between the two CHAOS KIT marker comments (nothing outside refers to it).
-  // Stage 1 = the shell: tabs, layout, the second gravity view and the Surprise Me button. The build and chaos
-  // buttons are inert placeholders until their stages.
+  // Stage 1 = the shell: tabs, layout, the second gravity view and the Surprise Me button. Stage 2 = the session
+  // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
+  // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.1";
+  const CHAOS_KIT_VERSION = "v2.72.2";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15426,6 +15427,10 @@
       .mkBtn:hover { filter: brightness(1.15); }
       .mkBtn.mkInert { opacity: 0.55; cursor: default; }
       .mkChaos { box-shadow: inset 0 0 0 1px #ef6c00; }
+      #mkSession { display: none; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 2px #ef6c00; font-size: 13px; }
+      #mkStop { background: #ef6c00; color: #222; border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; }
+      #mkStop:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+      .mkBtn.running { background: #ef6c00; color: #222; }
       #messCaption { min-height: 16px; font-size: 12px; color: #9aa0b4; font-style: italic; padding: 2px 2px 8px 2px; border-top: 1px solid #2a2c3a; margin-top: 4px; }
       @media (min-width: 1500px) and (min-height: 820px) {
         #messTabs button { font-size: 13px; height: 38px; }
@@ -15454,11 +15459,12 @@
         '<button class="mkBtn mkInert" data-mk="scenery" type="button">Give me scenery</button>' +
       '</div></div>' +
       '<div><div class="mkTitle">Chaos</div><div class="mkGrid">' +
-        '<button class="mkBtn mkChaos mkInert" data-mk="tumble" type="button">Gravity Tumble</button>' +
+        '<button class="mkBtn mkChaos" data-mk="tumble" type="button">Gravity Tumble</button>' +
         '<button class="mkBtn mkChaos mkInert" data-mk="quake" type="button">Earthquake</button>' +
-        '<button class="mkBtn mkChaos mkInert" data-mk="bombs" type="button">Bomb Storm</button>' +
+        '<button class="mkBtn mkChaos" data-mk="bombs" type="button">Bomb Storm</button>' +
         '<button class="mkBtn mkChaos mkInert" data-mk="lava" type="button">Rising Lava</button>' +
-      '</div></div>' +
+      '</div>' +
+      '<div id="mkSession"><span id="mkSessLabel"></span><button id="mkStop" type="button">Stop</button></div></div>' +
       '<div id="messCaption">Hover (or tap) a button to see what it does.</div>';
     pal.insertBefore(tabs, pal.firstChild);
     pal.insertBefore(panel, tabs.nextSibling);
@@ -15467,8 +15473,8 @@
       surprise: "Builds one of the surprise rooms, just like the dice.",
       walls: "Coming soon: dense piles of ground and walls.", stuff: "Coming soon: lots of little machines.",
       enemies: "Coming soon: groups of enemies.", scenery: "Coming soon: scenery so a board looks finished.",
-      tumble: "Coming soon: gravity spins around for a few seconds.", quake: "Coming soon: everything gets shaken loose.",
-      bombs: "Coming soon: a storm of armed bombs.", lava: "Coming soon: lava rises, then everything left falls."
+      tumble: "Gravity spins around for 8 seconds, then goes back.", quake: "Coming soon: everything gets shaken loose.",
+      bombs: "Armed bombs rain down for a few seconds. Undo brings it all back.", lava: "Coming soon: lava rises, then everything left falls."
     };
     const $ = id => document.getElementById(id);
     const caption = $("messCaption");
@@ -15515,6 +15521,7 @@
     }
 
     function showTab(which) {
+      if (sess) endSession("tab");
       const mess = which === "mess";
       pal.classList.toggle("messMode", mess);
       $("messTabGame").classList.toggle("active", !mess); $("messTabGame").setAttribute("aria-selected", String(!mess));
@@ -15536,13 +15543,164 @@
     sb.addEventListener("click", () => { $("surpriseBtn").click(); setMessCaption(lastSurpriseCaption); });
     wire(sb, CAPTIONS.surprise);
 
-    // placeholders until their stages
+    // ---- the session wrapper (every chaos button goes through it) ----
+    // One undo step taken at press (before anything changes). Finite, and always ends: by itself, by Stop, by pressing
+    // another chaos button, by any click/key that would edit (a capture-phase listener ends the session BEFORE the edit
+    // runs, so the edit's own undo snapshot never contains a half-done chaos state), by switching tab/room/mode, or by
+    // a project load/undo (then there is nothing of ours left to restore). Build mode only; it forces the simulation
+    // running while it works (a paused room is un-paused and put back to paused when a normal end restores it).
+    const SESS_POLL_MS = 50;
+    let sess = null;
+    const sessBar = $("mkSession"), sessLabel = $("mkSessLabel");
+    function setRunningButton(kind) {
+      panel.querySelectorAll(".mkBtn").forEach(b => b.classList.toggle("running", !!kind && b.dataset.mk === kind));
+    }
+    function beginSession(kind, label, durMs, hooks) {
+      if (sess) endSession("replaced");
+      if (appMode !== "build" || landingActive || tutorialActive) { setMessCaption("Chaos only works while you're building."); return false; }
+      pushUndoSnapshot(); // the one undo step: the state before anything changes
+      sess = { kind, label, dur: durMs, t0: performance.now(), rooms0: rooms, roomId: currentRoomId, serial: editSerial,
+        wasPaused: gamePaused, wasPending: surpriseStartPending, hooks };
+      if (gamePaused) { surpriseStartPending = false; setGamePaused(false); }
+      sess.timer = setInterval(sessTick, SESS_POLL_MS);
+      sessBar.style.display = "flex";
+      sessLabel.textContent = label;
+      setRunningButton(kind);
+      try { hooks.start(sess); } catch (e) { endSession("error"); throw e; }
+      return true;
+    }
+    function sessTick() {
+      const s = sess;
+      if (!s) return;
+      if (appMode !== "build") return endSession("mode");
+      if (landingActive || tutorialActive) return endSession("busy");
+      if (rooms !== s.rooms0) return endSession("project"); // a load / undo / redo replaced the whole project
+      if (currentRoomId !== s.roomId) return endSession("room");
+      if (editSerial !== s.serial) return endSession("edit");
+      if (gamePaused) return endSession("paused");
+      const el = performance.now() - s.t0;
+      if (el >= s.dur) return endSession("done");
+      try { s.hooks.tick(el, s); } catch (e) { endSession("error"); throw e; }
+      sessLabel.textContent = s.label + " — " + Math.ceil((s.dur - el) / 1000) + "s";
+    }
+    function endSession(why) {
+      const s = sess;
+      if (!s) return;
+      sess = null;
+      clearInterval(s.timer);
+      sessBar.style.display = "none";
+      setRunningButton(null);
+      const abort = why === "project"; // the project this session belonged to is gone
+      try { s.hooks.end(why, s, abort); } catch (e) { /* ending must never throw */ }
+      if (!abort && s.wasPaused && (why === "done" || why === "stop" || why === "tab" || why === "replaced") && appMode === "build" && currentRoomId === s.roomId) {
+        setGamePaused(true); surpriseStartPending = s.wasPending;
+      }
+    }
+    // anything that could edit, or leave Build, ends the session first (capture phase = before the page's own handlers)
+    function guard(ev) {
+      if (!sess) return;
+      const t = ev.target;
+      if (t && t.closest && t.closest("#messPanel")) return;
+      endSession("edit");
+    }
+    document.addEventListener("pointerdown", guard, true);
+    document.addEventListener("click", guard, true);
+    document.addEventListener("keydown", ev => {
+      if (!sess) return;
+      const k = ev.key, t = ev.target;
+      const onBtn = t && t.tagName && /^(BUTTON|INPUT|SELECT|TEXTAREA)$/.test(t.tagName) && !(t.closest && t.closest("#messPanel"));
+      if (((ev.ctrlKey || ev.metaKey) && /^[zy]$/i.test(k)) || k === "p" || k === "P" || (onBtn && (k === "Enter" || k === " "))) endSession("edit");
+    }, true);
+    $("mkStop").addEventListener("click", () => endSession("stop"));
+
+    // ---- Gravity Tumble: the room's gravity cycles through the four directions about once a second for 8 s, then goes back ----
+    const TUMBLE_STEP_MS = 1000, TUMBLE_STEPS = 8;
+    const tumbleHooks = {
+      start(s) {
+        s.orig = { on: gravityEnabled, dir: gravityDir };
+        if (!gravityEnabled) gravRule.set(true); // a room with gravity off tumbles too (and goes back off at the end)
+        const cyc = ["down", "right", "up", "left"].filter(d => GRAVITY_DIRS.includes(d));
+        const at = cyc.indexOf(gravityDir);
+        s.order = cyc.map((_, i) => cyc[(at + 1 + i) % cyc.length]);
+        s.step = -1;
+        log("Gravity Tumble!");
+      },
+      tick(el, s) {
+        const idx = Math.floor(el / TUMBLE_STEP_MS);
+        if (idx !== s.step && idx < TUMBLE_STEPS) { s.step = idx; setGravityDir(s.order[idx % s.order.length]); renderGameRuleSwatches(); }
+      },
+      end(why, s, abort) {
+        if (abort) return;
+        if (currentRoomId === s.roomId) {
+          if (!gravityEnabled) gravRule.set(true); // setGravityDir needs nothing, but keep the order simple
+          setGravityDir(s.orig.dir);
+          gravRule.set(s.orig.on);
+          renderGameRuleSwatches();
+        } else { // the room is no longer hot: put its own saved fields back
+          const room = rooms.find(r => r.id === s.roomId);
+          if (room) { room.gravityEnabled = s.orig.on; room.gravityDir = s.orig.dir; }
+        }
+        log("Gravity is back to normal.");
+      }
+    };
+
+    // ---- Bomb Storm: armed bombs rain down for ~6 s through the game's own bomb actor + fuse + blast code ----
+    const STORM_MS = 6000, STORM_STOP_SPAWN_MS = 1300, STORM_MAX_LIVE = 6, STORM_MAX_TOTAL = 24, STORM_MIN_GAP_TILES = 3, STORM_ACTOR_CAP = 400;
+    const STORM_KEY = "chaos:storm"; // marks storm bombs: Reset-to-start never resurrects them, Play entry purges them
+    function stormPickCell(s) {
+      const player = actors.find(a => a.isPlayer);
+      for (let tries = 0; tries < 14; tries++) {
+        const cx = editorPanCol + Math.floor(Math.random() * COLS), cy = Math.floor(Math.random() * ROWS);
+        if (isCellBlocking(cx, cy, { isPlayer: false })) continue;
+        if (typeof cellOccupiedByActor === "function" && cellOccupiedByActor(cx, cy)) continue;
+        const px = cx * TILE + TILE / 2, py = cy * TILE + TILE / 2;
+        if (player && Math.hypot(px - (player.x + player.w / 2), py - (player.y + player.h / 2)) < 2 * TILE) continue; // never right on the hero
+        if (s.live.some(b => Math.hypot(px - (b.x + b.w / 2), py - (b.y + b.h / 2)) < STORM_MIN_GAP_TILES * TILE)) continue; // no chain blasts
+        return [px, py];
+      }
+      return null;
+    }
+    const stormHooks = {
+      start(s) { s.live = []; s.count = 0; s.nextAt = 0; log("Bomb Storm!"); },
+      tick(el, s) {
+        s.live = s.live.filter(b => !b.detonating && actors.includes(b));
+        if (el < s.nextAt || el > s.dur - STORM_STOP_SPAWN_MS) return;
+        if (s.live.length >= STORM_MAX_LIVE || s.count >= STORM_MAX_TOTAL || actors.length >= STORM_ACTOR_CAP) return;
+        const c = stormPickCell(s);
+        s.nextAt = el + 300 + Math.random() * 200;
+        if (!c) return;
+        const b = placeCarryableActor(CARRY_BOMB2_DEF_ID, c[0], c[1]);
+        b.spawnerKey = STORM_KEY;
+        startOrResumeBombFuse(b);
+        s.live.push(b); s.count++;
+      },
+      end(why, s, abort) {
+        if (abort) return;
+        s.live.forEach(b => { // bombs not yet gone off are taken away; blasts already done stay (undo brings it all back)
+          if (b.detonating) return;
+          if (b.fuseTimerId != null) { gameClearTimeout(b.fuseTimerId); b.fuseTimerId = null; }
+          removeActorObject(b);
+        });
+        log("The storm is over.");
+      }
+    };
+
+    // the build/chaos buttons: tumble and bombs are live, the rest are placeholders until their stages
     panel.querySelectorAll(".mkBtn").forEach(b => {
       wire(b, CAPTIONS[b.dataset.mk]);
-      b.addEventListener("click", () => setMessCaption("That one isn't built yet."));
+      const kind = b.dataset.mk;
+      b.addEventListener("click", () => {
+        if (kind === "tumble" || kind === "bombs") {
+          if (sess && sess.kind === kind) { endSession("stop"); return; }
+          if (kind === "tumble") beginSession("tumble", "Gravity Tumble", TUMBLE_STEP_MS * TUMBLE_STEPS, tumbleHooks);
+          else beginSession("bombs", "Bomb Storm", STORM_MS, stormHooks);
+          return;
+        }
+        setMessCaption("That one isn't built yet.");
+      });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 
