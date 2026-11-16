@@ -5136,6 +5136,7 @@
     container.innerHTML = "";
     Object.keys(backgroundTileDefs).forEach(id => {
       const def = backgroundTileDefs[id];
+      if (def.hidden) return; // backdrops borrowed by Make a Mess are used on the board but not listed here
       const sw = document.createElement("div");
       sw.className = "swatch" + (paintMode === "background" && selectedBackgroundId === id ? " selected" : "");
       sw.title = def.name;
@@ -14736,7 +14737,7 @@
       "SSSSSSSS", "SSSSSSSS", "SSSSSSSS", "SSBBBSSS", "SBLBBBBS", "BBBBBLBB", "BBLBBBBB", "BBBBBBBB" ], { S: STARTER_HORIZON, B: "#4fa85a", L: "#7ccb7b" })
   };
   const STARTER_DECOR_IDS = STARTER_SKY_BANDS.map(b => b[0]).concat(Object.keys(STARTER_DECOR_ART));
-  function isRealBackground(id) { return !!id && id !== SKY_BG_ID && id !== CLOUD_BG_ID && !STARTER_DECOR_IDS.includes(id); }
+  function isRealBackground(id) { return !!id && !String(id).startsWith("mx~") && id !== SKY_BG_ID && id !== CLOUD_BG_ID && !STARTER_DECOR_IDS.includes(id); }
   function ensureSkyBackdropDefs() {
     BACKGROUND_PRESETS.forEach(p => {
       if (!p.id || backgroundTileDefs[p.id]) return;
@@ -15398,7 +15399,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.10";
+  const CHAOS_KIT_VERSION = "v2.72.11";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15749,27 +15750,29 @@
     gm("stuff", "buttongate", "Switch and gate", "a crate flips the switch and the gate stays open", ["c..", "...", "uGw"]);
     gm("stuff", "trampcrate", "Bounce house", "a crate bounces on a trampoline", [".c.", "...", ".t."]);
     gm("stuff", "magnetcatch", "Magnet catch", "a magnet grabs a falling crate", [".c.", "...", "..m"]);
-    gm("stuff", "bombdrop", "Bomb drop", "a crate sets off a bomb and the blast breaks the floor", [".c.", "...", ".b.", "==="]);
+    gm("stuff", "bombdrop", "Bomb drop", "a crate sets off a bomb and the blast breaks the floor", [".c.", "...", ".b."]);
     gm("stuff", "holesnack", "Black hole snack", "a black hole swallows a crate", [".c.", ".h.", "..."]);
-    gm("stuff", "bouncepad", "Bounce pad", "a crate bounces on a springy floor", [".c.", "...", "BBB"]);
-    gm("stuff", "hoppad", "Hopper pad", "a hopping Gloop bounces on a springy floor", ["H.", "BB"]);
-    gm("stuff", "stickywalk", "Sticky floor", "pets slow down on the sticky floor", ["w.w", "SSS"]);
-    gm("stuff", "iceskate", "Ice skaters", "pets slide around on the ice", ["w.w", "III"]);
-    gm("stuff", "icecrates", "Ice rink", "crates slide a long way on the ice", ["s...", "III."]);
-    gm("stuff", "lavapit", "Lava pit", "a pet walks by a lava pit and a crate falls in", ["wc.", "=L="]);
     gm("stuff", "beltlava", "Conveyor", "the belt carries a crate into the lava", ["c...", "EEEL"]);
-    gm("stuff", "stonecrate", "Stone smash", "a falling stone smashes the crate", ["n", ".", ".", "c", "="]);
+    gm("stuff", "stonecrate", "Stone smash", "a falling stone smashes the crate", ["n", ".", ".", "c"]);
     gm("stuff", "bombrain", "Bomb dropper", "a spawner drops bombs that blow up on landing", ["x", ".", ".", ".", ".", ".", ".", "="], { x: "spawnerb:s" });
     gm("stuff", "pinball", "Mini pinball", "hazard balls bounce off a bouncy peg", ["x..", "...", ".B.", "..."], { x: "spawnerh:s" });
     gm("stuff", "petdrain", "Pet drain", "a spawner throws pets toward a black hole", ["P.h"], { P: "spawnerp:e" });
     gm("stuff", "gustcrate", "Wind tunnel", "wind pushes a crate along the floor", ["Cgg"], { C: "crate&gust:e", g: "gust:e" });
     gm("stuff", "craterain", "Crate rain", "a spawner rains crates onto a springy floor", ["s", ".", ".", "B"], { s: "spawnerc:s" });
-    gm("stuff", "bombchain", "Bomb chain", "a crate sets off a row of bombs", [".c.", "...", "bbb", "==="]);
+    gm("stuff", "bombchain", "Bomb chain", "a crate sets off a row of bombs", [".c.", "...", "bbb"]);
+    gm("stuff", "stonepile", "Stone pile", "a big stack of heavy stones", ["nn", "nn", "nn", "nn"]);
+    gm("stuff", "stonetower", "Stone tower", "a tall tower of stones", ["n", "n", "n", "n", "n", "n"]);
+    gm("stuff", "twinfans", "Twin fans", "two fans each keep a crate floating", ["c...c", ".....", "f...f"]);
+    gm("stuff", "fantrio", "Fan trio", "three fans juggle a crate and two bombs", ["b.c.b", ".....", "f.f.f"]);
+    gm("stuff", "cannonloop", "Cannon loop", "two cannons throw a crate back and forth", ["c.........", "..........", "..........", "k........q"], { q: "cannon:nw" });
+    gm("stuff", "plategatebomb", "Crate, plate, gate", "a spawner drops crates on a plate, the gate opens and a bomb falls", ["x....", ".....", "....b", "p...G"], { x: "spawnerc:s" });
+    gm("stuff", "bombladder", "Bomb ladder", "stones drop onto a row of bombs", ["n.n.n", ".....", "b.b.b"]);
+    gm("stuff", "magnetcrates", "Magnet and crates", "a magnet holds a crate, another one drops", ["c.c", "...", ".m."]);
+    gm("stuff", "holefeed", "Hole feeder", "a spawner feeds crates to a black hole", ["x.h"], { x: "spawnerc:e" });
+    gm("stuff", "tramptower", "Bounce tower", "crates bounce between two trampolines", ["c...", "....", "....", "t...", "....", "...t"]);
     // bigger machines: at most two per press
-    gm("stuff", "cannonshot", "Cannon shot", "a crate falls on the cannon and is fired across", [".c.........", "...........", "...........", ".k.......w.", "==========="]);
-    gm("stuff", "platformride", "Platform ride", "a moving platform carries a crate over the lava", ["...........", ".....c.....", "...........", ".....M.....", "==LLLLLLL=="]);
-    gm("stuff", "trampchain", "Cannon and trampoline", "a crate is fired onto a trampoline", [".c..........", "............", "............", ".k..........", "=========t=="]);
-    gm("stuff", "hopperpen", "Hopper pen", "hopping Gloops bounce around a springy box", ["=.....=", "=.....=", "=.H.H.=", "=.....=", "BBBBBBB"]);
+    gm("stuff", "cannonshot", "Cannon shot", "a crate falls on the cannon and is fired across", [".c.........", "...........", "...........", ".k.......w."]);
+    gm("stuff", "trampchain", "Cannon and trampoline", "a crate is fired onto a trampoline", [".c..........", "............", "............", ".k.......t.."]);
     // wall structures (each with its own coherent pair of ground textures: = is the main one, # the accent)
     gm("walls", "tower", "Tower", "a tall tower", [".#.", "=#=", "=#=", "=#=", "=#=", "=#=", "==="]);
     gm("walls", "stairs", "Staircase", "stairs climbing right", [".....#", "....##", "...###", "..####"]);
@@ -15796,10 +15799,17 @@
     gm("scenery", "bushes", "Bushes", "a line of bushes", ["b.b.bb"], { b: "bg:bgBush" });
     gm("scenery", "skypatch", "Sky patch", "paler sky", ["SSSSSS", "TTTTTT", "UUUUUU", "VVVVVV"], { S: "bg:bgSky", T: "bg:bgSky2", U: "bg:bgSky3", V: "bg:bgSky4" });
     gm("scenery", "hillbush", "Hill and bush", "a hill with bushes", ["..b.b..", "1233221"], { b: "bg:bgBush", 1: "bg:bgHill1", 2: "bg:bgHill2", 3: "bg:bgHill3" });
-    gm("scenery", "texture", "Texture patch", "a patch of one of your own Paint tiles", ["xxxx", "xxxx", "xxx."], { x: "bg:@rand" });
+    const poolLegend = { a: "bg:@a", b: "bg:@b", c: "bg:@c" }; // three tiles from one finished game (see gmBgPool)
+    gm("scenery", "poolpatch", "Backdrop patch", "a patch of backdrop from another game", ["aabba", "abbbc", "ccbaa"], poolLegend);
+    gm("scenery", "poolband", "Backdrop band", "a band of backdrop", ["aaaaaaaaaa", "bbbbbbbbbb"], poolLegend);
+    gm("scenery", "poolblob", "Backdrop blob", "a rounded blob of backdrop", [".aaa.", "abbba", "abbba", ".aaa."], poolLegend);
+    gm("scenery", "poolstripes", "Backdrop stripes", "stripes of backdrop", ["abab", "abab", "abab"], poolLegend);
+    gm("scenery", "poolspeckle", "Backdrop speckle", "scattered backdrop tiles", ["a.b.a", ".c.a.", "b.a.c"], poolLegend);
+    gm("scenery", "poolblock", "Backdrop block", "a big block of one backdrop tile", ["aaa", "aaa", "aaa"], poolLegend);
+    gm("scenery", "poolpillar", "Backdrop pillar", "a tall strip of backdrop", ["a", "b", "a", "c", "c", "b"], poolLegend);
     gm("scenery", "bigcloud", "Big cloud", "one big cloud", [".ccc..", "cccccc", ".cccc."], { c: "bg:bgCloud" });
     gm("scenery", "horizon", "Horizon", "a pale horizon", ["UUUUUUUUUU", "VVVVVVVVVV"], { U: "bg:bgSky3", V: "bg:bgSky4" });
-    ["cannonshot", "platformride", "trampchain", "hopperpen"].forEach(id => { GM.find(v => v.id === id).big = true; });
+    ["cannonshot", "trampchain", "cannonloop", "plategatebomb"].forEach(id => { GM.find(v => v.id === id).big = true; });
     const GM_SKIN_SETS = [["gndStone", "gndBrick"], ["gndDirt", "gndGrass"], ["gndSand", "gndBrick"], ["gndSnow", "gndStone"], ["gndCrystalPink", "gndCrystalCyan"], ["gndRubble", "gndDirt"]];
     const GM_TARGETS = { walls: { min: 8, extra: 2, cap: 14 }, stuff: { min: 30, extra: 0, cap: 50 }, enemies: { min: 9, extra: 2, cap: 12 }, scenery: { min: 12, extra: 0, cap: 70 } };
     const GM_COVER = { walls: 0.55, stuff: 0.55, enemies: 2, scenery: 0.75 };
@@ -15823,12 +15833,59 @@
       }
       return { cells, w: sw ? h : w, h: sw ? w : h };
     }
+    // ---- backdrops borrowed from the finished games (embedded projects, Surprise rooms, sample backdrops) ----
+    // Nothing is generated: the art is read as it is, grouped by the game it came from, and a stamp uses three tiles from one group.
+    // Tiles are copied into the project as hidden defs ("mx~..."), so they draw and save, but the Paint tab does not list them.
+    let bgPoolCache = null;
+    function gmBgPool() {
+      if (bgPoolCache) return bgPoolCache;
+      const groups = [], seen = new Set();
+      const add = (name, defs) => {
+        const tiles = [];
+        Object.keys(defs || {}).forEach(id => {
+          let d = defs[id]; if (Array.isArray(d)) d = { name: d[0], art: d[1] };
+          if (!d || !Array.isArray(d.art) || d.art.length !== 64) return;
+          if (d.art.every(c => c === d.art[0])) return;           // flat colours are what Sky already gives
+          const key = JSON.stringify(d.art); if (seen.has(key)) return; seen.add(key);
+          tiles.push({ name: d.name || "backdrop", art: d.art, frames: d.frames, frameMs: d.frameMs });
+        });
+        if (tiles.length) groups.push({ name, tiles });
+      };
+      const P = { "Monster's Den": typeof MONSTERS_DEN_PROJECT !== "undefined" && MONSTERS_DEN_PROJECT, "Worst Elevator": typeof WORST_ELEVATOR_PROJECT !== "undefined" && WORST_ELEVATOR_PROJECT,
+        "Crystal Cave": typeof CRYSTAL_CAVE_PROJECT !== "undefined" && CRYSTAL_CAVE_PROJECT, "Ice Cave": typeof ICE_CAVE_PROJECT !== "undefined" && ICE_CAVE_PROJECT,
+        "Bomb Factory": typeof BOMB_FACTORY_PROJECT !== "undefined" && BOMB_FACTORY_PROJECT, "Gravity Switcheroo": typeof GRAVITY_SWITCHEROO_PROJECT !== "undefined" && GRAVITY_SWITCHEROO_PROJECT,
+        "Sushi Train": typeof SUSHI_TRAIN_PROJECT !== "undefined" && SUSHI_TRAIN_PROJECT, "Escape": typeof OVER_ENGINEERED_PROJECT !== "undefined" && OVER_ENGINEERED_PROJECT,
+        "Vault": typeof STONEKEEPERS_VAULT_PROJECT !== "undefined" && STONEKEEPERS_VAULT_PROJECT, "Garden": typeof MOUSECOPS_GARDEN_PROJECT !== "undefined" && MOUSECOPS_GARDEN_PROJECT };
+      Object.keys(P).forEach(n => { try { if (P[n]) add(n, P[n].backgroundTileDefs); } catch (e) {} });
+      try { Object.keys(BD_THEMES).forEach(k => { const o = {}; Object.keys(BD_THEMES[k].defs).forEach(i => { o[i] = { name: "backdrop " + k, art: BD_THEMES[k].defs[i] }; }); add("theme " + k, o); }); } catch (e) {}
+      try { SURPRISE_TEMPLATES.forEach(t => { if (t.exact && t.exact.bgs) add("room " + t.id, t.exact.bgs); }); } catch (e) {}
+      // a group of fewer than three tiles joins one shared group so every stamp has three to choose from
+      const small = groups.filter(g => g.tiles.length < 3), big = groups.filter(g => g.tiles.length >= 3);
+      if (small.length) big.push({ name: "mixed", tiles: [].concat(...small.map(g => g.tiles)) });
+      return (bgPoolCache = big);
+    }
+    function gmBgHash(art) { let h = 5381; const t = art.join(","); for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+    function gmPoolBg(st, slot) {
+      if (!st.bgSet) {
+        const pool = gmBgPool();
+        if (!pool.length) st.bgSet = [SKY_BG_ID, SKY_BG_ID, SKY_BG_ID];
+        else {
+          const g = pool[Math.floor(Math.random() * pool.length)], pick = () => g.tiles[Math.floor(Math.random() * g.tiles.length)];
+          st.bgSet = [pick(), pick(), pick()].map(t => {
+            const id = "mx~" + gmBgHash(t.art);
+            if (!backgroundTileDefs[id]) { backgroundTileDefs[id] = { name: t.name, art: t.art.slice(), hidden: true }; if (t.frames) { backgroundTileDefs[id].frames = t.frames.map(f => f.slice()); backgroundTileDefs[id].frameMs = t.frameMs || 400; } }
+            return id;
+          });
+        }
+      }
+      return st.bgSet[{ a: 0, b: 1, c: 2 }[slot] || 0];
+    }
     function gmResolve(name, st) {
       if (name.includes("&")) return name.split("&").reduce((acc, n) => Object.assign(acc, gmResolve(n, st)), {});
       const base = name.split(":")[0], arg = name.includes(":") ? name.split(":")[1] : null;
       if (base === "wallA" || base === "wallB") return { tile: { key: gameplayKey("solid", "none"), skin: base === "wallA" ? st.skinA : st.skinB } };
       if (base.startsWith("foe")) return { actor: defaultDefIdForKind({ foeW: "wanderer", foeC: "chaser", foeF: "fleer", foeS: "stationary" }[base]) };
-      if (base === "bg") return { bg: arg === "@rand" ? st.bgRand : arg };
+      if (base === "bg") return { bg: arg && arg[0] === "@" ? gmPoolBg(st, arg[1]) : arg };
       return surpriseResolvePiece(name, st.fills, Math.random, st.kit);
     }
     const hotRoomCols = () => Math.min(roomCols(), BOARD_MAX_COLS);
@@ -15851,7 +15908,7 @@
     function gmWrite(v, stamp, ax, ay, st) {
       const made = [];
       st.skinA = st.sets.length ? st.sets[st.n % st.sets.length][0] : null; st.skinB = st.sets.length ? st.sets[st.n % st.sets.length][1] : null;
-      st.bgRand = st.bgIds.length ? st.bgIds[Math.floor(Math.random() * st.bgIds.length)] : SKY_BG_ID;
+      st.bgSet = null; // a fresh trio of backdrop tiles per stamp
       const col = CHANNEL_COLORS.slice().sort((a, b) => st.used[a] - st.used[b] || Math.random() - 0.5)[0];
       st.fills.color = col; st.used[col] += 2;
       const savedSel = selectedActorDefId;
@@ -16469,7 +16526,7 @@
       });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, teleDump: () => messLog.slice(), ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, teleDump: () => messLog.slice(), ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone, pool: gmBgPool }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 
