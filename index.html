@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.6";
+  const CHAOS_KIT_VERSION = "v2.72.7";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -16091,6 +16091,85 @@
     }
 
     // ---- Earthquake: violent impulses on loose things, then every movable tile comes unmoored, drifts and settles as a shuffled board ----
+    // ---- Disaster sounds (synthesized here with the page's own AudioContext and master bus; nothing sampled, no existing sound code touched) ----
+    // Earthquake: a low rumble that starts quiet, swells to a peak and fades out. Rising Lava: a thick, slow gurgle with bubbles, and a hiss for everything it burns.
+    function sfxOpen() {
+      try {
+        if (landingActive) return null;
+        const ctx = getAudioCtx(); if (ctx.state === "suspended") ctx.resume();
+        const out = ctx.createGain(); out.gain.value = 0; out.connect(getMasterBus());
+        const src = [], n = getNoiseBuffer(ctx);
+        const noise = () => { const b = ctx.createBufferSource(); b.buffer = n; b.loop = true; b.start(ctx.currentTime, Math.random() * 0.5); src.push(b); return b; };
+        const osc = (type, f) => { const o = ctx.createOscillator(); o.type = type; o.frequency.value = f; o.start(); src.push(o); return o; };
+        return { ctx, out, src, noise, osc, hissAt: 0 };
+      } catch (e) { return null; }
+    }
+    function sfxClose(k) {
+      if (!k) return;
+      try { const t = k.ctx.currentTime; k.out.gain.cancelScheduledValues(t); k.out.gain.setValueAtTime(k.out.gain.value, t); k.out.gain.linearRampToValueAtTime(0, t + 0.3);
+        setTimeout(() => { k.src.forEach(o => { try { o.stop(); } catch (e) {} }); try { k.out.disconnect(); } catch (e) {} }, 450); } catch (e) { /* sound must never break the disaster */ }
+    }
+    function sfxQuakeStart() {
+      const k = sfxOpen(); if (!k) return null;
+      try {
+        const { ctx, out } = k, t0 = ctx.currentTime, D = QK.DUR / 1000;
+        const lp = (f, q) => { const b = ctx.createBiquadFilter(); b.type = "lowpass"; b.frequency.value = f; b.Q.value = q || 0.7; return b; };
+        const g = v => { const x = ctx.createGain(); x.gain.value = v; return x; };
+        const rumble = g(0.9); k.noise().connect(lp(110, 1.2)).connect(rumble).connect(out); // grinding ground
+        const deep = g(0.55); k.osc("sawtooth", 41).connect(lp(120)).connect(deep).connect(out); // the low body
+        const mid = g(0.28); k.osc("sawtooth", 63).connect(lp(180)).connect(mid).connect(out); // so small speakers carry it too
+        const lfo = k.osc("sine", 6.5), lfoG = g(0.25); lfo.connect(lfoG).connect(rumble.gain); const lfo2 = k.osc("sine", 3.1), lfo2G = g(0.18); lfo2.connect(lfo2G).connect(deep.gain); // shuddering
+        out.gain.setValueAtTime(0.08, t0); out.gain.linearRampToValueAtTime(1, t0 + D * 0.66); out.gain.linearRampToValueAtTime(0, t0 + D); // quiet start, swell, fade out
+        QK.IMPULSES.forEach(ms => { // a heavy thump with each jolt
+          const o = ctx.createOscillator(), e = g(0), tt = t0 + ms / 1000;
+          o.type = "sine"; o.frequency.setValueAtTime(75, tt); o.frequency.exponentialRampToValueAtTime(32, tt + 0.4);
+          e.gain.setValueAtTime(0.0001, tt); e.gain.exponentialRampToValueAtTime(0.7, tt + 0.02); e.gain.exponentialRampToValueAtTime(0.0001, tt + 0.45);
+          o.connect(e).connect(out); o.start(tt); o.stop(tt + 0.5);
+        });
+      } catch (e) { return k; }
+      return k;
+    }
+    function sfxLavaStart() {
+      const k = sfxOpen(); if (!k) return null;
+      try {
+        const { ctx, out } = k, t0 = ctx.currentTime;
+        const lp = (f, q) => { const b = ctx.createBiquadFilter(); b.type = "lowpass"; b.frequency.value = f; b.Q.value = q || 0.7; return b; };
+        const g = v => { const x = ctx.createGain(); x.gain.value = v; return x; };
+        out.gain.setValueAtTime(0, t0); out.gain.linearRampToValueAtTime(1, t0 + 0.35);
+        k.bed = g(0.25); k.bed.connect(out);
+        const churn = g(0.7); k.noise().connect(lp(300, 2)).connect(churn).connect(k.bed); // thick slow churn
+        const l1 = k.osc("sine", 0.7), l1g = g(0.5); l1.connect(l1g).connect(churn.gain);
+        const body = g(0.4), burble = k.osc("sine", 78); burble.connect(body).connect(k.bed); // a low, wobbling gurgle
+        const fm = k.osc("sine", 4.3), fmg = g(26); fm.connect(fmg).connect(burble.frequency);
+        const fm2 = k.osc("sine", 1.3), fmg2 = g(0.25); fm2.connect(fmg2).connect(body.gain);
+      } catch (e) { return k; }
+      return k;
+    }
+    function sfxBubble(k, lvl) {
+      try {
+        const { ctx } = k, t = ctx.currentTime, f = 70 + Math.random() * 220, len = 0.07 + Math.random() * 0.16;
+        const o = ctx.createOscillator(), e = ctx.createGain(), l = ctx.createBiquadFilter();
+        o.type = "sine"; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * (1.8 + Math.random()), t + len); // pitch rises as the bubble pops
+        l.type = "lowpass"; l.frequency.value = 900;
+        e.gain.setValueAtTime(0.0001, t); e.gain.linearRampToValueAtTime((0.25 + 0.3 * Math.random()) * (0.5 + 0.5 * lvl), t + len * 0.35); e.gain.exponentialRampToValueAtTime(0.0001, t + len);
+        o.connect(l).connect(e).connect(k.bed); o.start(t); o.stop(t + len + 0.02);
+      } catch (e) { /* ignore */ }
+    }
+    function sfxHiss(k, count) { // something was consumed: a short sizzle, louder and longer for more at once
+      if (!k) return;
+      try {
+        const { ctx } = k, now = performance.now();
+        if (now - k.hissAt < 70) return; k.hissAt = now;
+        const t = ctx.currentTime, amt = Math.min(1, 0.35 + Math.log2(1 + count) * 0.22), len = 0.22 + 0.25 * amt;
+        const b = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), hp = ctx.createBiquadFilter(), e = ctx.createGain();
+        b.buffer = getNoiseBuffer(ctx);
+        bp.type = "bandpass"; bp.Q.value = 0.8; bp.frequency.setValueAtTime(7500, t); bp.frequency.exponentialRampToValueAtTime(3200, t + len);
+        hp.type = "highpass"; hp.frequency.value = 2200;
+        e.gain.setValueAtTime(0.0001, t); e.gain.linearRampToValueAtTime(0.55 * amt, t + 0.015); e.gain.exponentialRampToValueAtTime(0.0001, t + len);
+        b.connect(bp).connect(hp).connect(e).connect(k.out); b.start(t, Math.random() * 0.5); b.stop(t + len + 0.02);
+      } catch (e) { /* ignore */ }
+    }
+
     const QK = { IMPULSES: [150, 650, 1150, 1650], LIFT: 2000, DRIFT: 3200, SETTLE: 700, BREAK_FRAC: 0.06, DUR: 6900 };
     function quakeImpulse(theta) {
       actors.forEach(a => {
@@ -16166,7 +16245,7 @@
       log("The earthquake is over.");
     }
     const quakeHooks = {
-      start(s) { s.phase = 0; s.k = 0; s.theta = Math.random() * Math.PI * 2; s.lastShake = -999; log("Earthquake!"); },
+      start(s) { s.phase = 0; s.k = 0; s.theta = Math.random() * Math.PI * 2; s.lastShake = -999; log("Earthquake!"); s.sfx = sfxQuakeStart(); },
       tick(el, s) {
         if (s.phase === 0) {
           while (s.k < QK.IMPULSES.length && el >= QK.IMPULSES[s.k]) { quakeImpulse(s.theta + s.k * (1.9 + Math.random() * 0.5)); s.k++; }
@@ -16176,6 +16255,7 @@
         else if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckInRoom(s.roomId, ckSettleActors); } // a second pass once things have fallen onto the new board
       },
       end(why, s, abort) {
+        sfxClose(s.sfx);
         if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
         if (s.phase === 1) quakeCommit(s); // any exit finalizes: the shuffled board is committed, nothing stays lifted
         ovHide();
@@ -16269,15 +16349,29 @@
       log("The lava is gone.");
     }
     const lavaHooks = {
-      start(s) { s.phase = 0; log("Rising Lava!"); lavaStart(s); },
+      start(s) {
+        s.phase = 0; log("Rising Lava!"); lavaStart(s);
+        s.sfx = sfxLavaStart(); s.lastEl = 0;
+        const burn0 = s.burnActors; // a hiss for every actor the front consumes
+        if (burn0) s.burnActors = f => { const n = actors.length; burn0(f); if (n > actors.length) sfxHiss(s.sfx, n - actors.length); };
+      },
       tick(el, s) {
         if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckInRoom(s.roomId, ckSettleActors); }
+        if (s.sfx && s.sfx.bed && s.phase === 1) { // bed follows the lava level; bubbles get more frequent as it rises; hiss for tiles as the front reaches them
+          const lvl = Math.min(1, lavaFront(el, s.L) / s.L), dt = Math.max(0, (el - s.lastEl) / 1000);
+          s.sfx.bed.gain.setTargetAtTime(0.2 + 0.8 * lvl, s.sfx.ctx.currentTime, 0.15);
+          let nb = Math.min(4, (2.5 + 9 * lvl) * dt); while (nb > 0 && (nb >= 1 || Math.random() < nb)) { sfxBubble(s.sfx, lvl); nb -= 1; }
+          let burned = 0; s.metas.forEach(m => { if (m.burn && !m.hissed && el >= m.burnAt) { m.hissed = true; burned++; } });
+          if (burned) sfxHiss(s.sfx, burned);
+          s.lastEl = el;
+        }
         if (s.phase !== 1) return;
         if (el < LV.RISE + LV.HOLD) s.burnActors(lavaFront(el, s.L)); // burned as the front passes (the sim runs)
         const lastFall = LV.RISE + LV.HOLD + LV.RECEDE + LV.GAP + LV.STAGGER + 120 + Math.max(0, ...s.metas.map(m => m.fdur)) + 150;
         if (el >= (s.fall ? lastFall : LV.RISE + LV.HOLD + LV.RECEDE + 200)) lavaCommit(s);
       },
       end(why, s, abort) {
+        sfxClose(s.sfx);
         if (abort) { ovHide(); if (s.ownPause) { s.ownPause = false; setGamePaused(false); } return; }
         if (s.phase === 1) lavaCommit(s); // any exit finalizes: the end state is committed, nothing stays lifted
         ovHide();
