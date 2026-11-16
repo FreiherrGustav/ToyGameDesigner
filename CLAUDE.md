@@ -7968,3 +7968,7 @@ Inside the CHAOS KIT block only; nothing sampled, no existing sound code or `CHI
 ## Make a Mess sound revision (chaos kit v2.72.8)
 
 Earthquake keeps its base rumble and gains a second level: 8 explosion-like booms at random moments (noise burst through a low-pass sweeping 420 to 90 Hz plus a sine dropping 85 to 26 Hz, sharp attack, 0.55 to 1.05 s decay, so never sustained), growing with the quake's swell (`sfxQuakeStart`). The Rising Lava hisses are removed entirely (`sfxHiss` and its two call sites are gone); the gurgle and bubbles stay. Gravity Tumble now has a quiet siren (`sfxSirenStart`: a triangle wave wailing about 590 to 930 Hz at 0.9 Hz, low-passed, gain 0.22, faded in and out) for the whole session, closed by `sfxClose` in the tumble `end` hook. Measured (`tests/chaoskit.sound.test.js`, 13 checks): siren RMS 0.045, max 0.08; quake max 0.23, no clipping. Not listened to.
+
+## Earthquake: crumbling-rock rumble replaces the booms (chaos kit v2.72.9)
+
+The eight explosion-like booms are gone. `sfxQuakeStart` now layers a sustained, dirty rumble over the base rumble: band-passed (260 Hz) noise whose level is re-randomised every 50-120 ms (ragged, flickering), plus about 100-200 short band-passed noise grains (15-75 ms, 350-2150 Hz) that read as rocks clacking and crumbling, denser and louder as the quake swells (same 0.25 to 1 swell over the first 66%). The four jolt thumps stay. Sound test: 12-13 of 13 per run; the one flaky check ("silent after the quake") picks up the game's own settling sounds, not the kit. Not listened to.

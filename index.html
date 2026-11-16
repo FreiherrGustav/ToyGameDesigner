@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.8";
+  const CHAOS_KIT_VERSION = "v2.72.9";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -16122,16 +16122,20 @@
         const mid = g(0.28); k.osc("sawtooth", 63).connect(lp(180)).connect(mid).connect(out); // so small speakers carry it too
         const lfo = k.osc("sine", 6.5), lfoG = g(0.25); lfo.connect(lfoG).connect(rumble.gain); const lfo2 = k.osc("sine", 3.1), lfo2G = g(0.18); lfo2.connect(lfo2G).connect(deep.gain); // shuddering
         out.gain.setValueAtTime(0.08, t0); out.gain.linearRampToValueAtTime(1, t0 + D * 0.66); out.gain.linearRampToValueAtTime(0, t0 + D); // quiet start, swell, fade out
-        for (let i = 0; i < 8; i++) { // a second level: deep explosion-like booms (sharp hit, quick decay, not sustained) at random moments, bigger as the quake builds
-          const at = 0.9 + Math.random() * (D - 2.2), tt = t0 + at, amp = 0.35 + 0.65 * Math.min(1, at / (D * 0.66)), dec = 0.55 + Math.random() * 0.5;
-          const nb = ctx.createBufferSource(); nb.buffer = getNoiseBuffer(ctx); k.src.push(nb);
-          const nf = lp(240 + Math.random() * 160, 0.9), ne = g(0), oo = ctx.createOscillator(), oe = g(0);
-          nf.frequency.setValueAtTime(420, tt); nf.frequency.exponentialRampToValueAtTime(90, tt + dec);
-          ne.gain.setValueAtTime(0.0001, tt); ne.gain.exponentialRampToValueAtTime(1.1 * amp, tt + 0.012); ne.gain.exponentialRampToValueAtTime(0.0001, tt + dec);
-          nb.connect(nf).connect(ne).connect(out); nb.start(tt, Math.random() * 0.5); nb.stop(tt + dec + 0.05);
-          oo.type = "sine"; oo.frequency.setValueAtTime(85, tt); oo.frequency.exponentialRampToValueAtTime(26, tt + dec);
-          oe.gain.setValueAtTime(0.0001, tt); oe.gain.exponentialRampToValueAtTime(0.9 * amp, tt + 0.01); oe.gain.exponentialRampToValueAtTime(0.0001, tt + dec * 0.9);
-          oo.connect(oe).connect(out); oo.start(tt); oo.stop(tt + dec + 0.05);
+        { // a second level: a sustained, dirty rumble of crumbling rock (gritty noise with a ragged, flickering level) plus rock grains
+          const bp = (f, q) => { const b = ctx.createBiquadFilter(); b.type = "bandpass"; b.frequency.value = f; b.Q.value = q; return b; };
+          const swell = at => 0.25 + 0.75 * Math.min(1, at / (D * 0.66));
+          const grit = ctx.createBufferSource(); grit.buffer = getNoiseBuffer(ctx); grit.loop = true; k.src.push(grit);
+          const ge = g(0.0001);
+          for (let at = 0.6; at < D - 0.5; at += 0.05 + Math.random() * 0.07) ge.gain.linearRampToValueAtTime(swell(at) * (0.25 + Math.random() * 0.75) * 0.9, t0 + at);
+          ge.gain.linearRampToValueAtTime(0.0001, t0 + D);
+          grit.connect(bp(260, 0.7)).connect(ge).connect(out); grit.start(t0 + 0.6); grit.stop(t0 + D + 0.1);
+          for (let at = 0.7; at < D - 0.3; at += 0.03 + Math.random() * 0.1 / (0.4 + swell(at))) { // rock grains: short clacks and crumbles
+            const dur = 0.015 + Math.random() * 0.06, tt = t0 + at, amp = swell(at) * (0.25 + Math.random() * 0.6);
+            const nb = ctx.createBufferSource(); nb.buffer = getNoiseBuffer(ctx); k.src.push(nb);
+            const ne = g(0); ne.gain.setValueAtTime(0.0001, tt); ne.gain.exponentialRampToValueAtTime(amp, tt + 0.004); ne.gain.exponentialRampToValueAtTime(0.0001, tt + dur);
+            nb.connect(bp(350 + Math.random() * 1800, 1.2 + Math.random() * 2)).connect(ne).connect(out); nb.start(tt, Math.random() * 0.5); nb.stop(tt + dur + 0.05);
+          }
         }
         QK.IMPULSES.forEach(ms => { // a heavy thump with each jolt
           const o = ctx.createOscillator(), e = g(0), tt = t0 + ms / 1000;
