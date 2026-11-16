@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.7";
+  const CHAOS_KIT_VERSION = "v2.72.8";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15629,12 +15629,14 @@
         s.order = cyc.map((_, i) => cyc[(at + 1 + i) % cyc.length]);
         s.step = -1;
         log("Gravity Tumble!");
+        s.sfx = sfxSirenStart();
       },
       tick(el, s) {
         const idx = Math.floor(el / TUMBLE_STEP_MS);
         if (idx !== s.step && idx < TUMBLE_STEPS) { s.step = idx; setGravityDir(s.order[idx % s.order.length]); renderGameRuleSwatches(); }
       },
       end(why, s, abort) {
+        sfxClose(s.sfx);
         if (abort) return;
         if (currentRoomId === s.roomId) {
           if (!gravityEnabled) gravRule.set(true); // setGravityDir needs nothing, but keep the order simple
@@ -16120,6 +16122,17 @@
         const mid = g(0.28); k.osc("sawtooth", 63).connect(lp(180)).connect(mid).connect(out); // so small speakers carry it too
         const lfo = k.osc("sine", 6.5), lfoG = g(0.25); lfo.connect(lfoG).connect(rumble.gain); const lfo2 = k.osc("sine", 3.1), lfo2G = g(0.18); lfo2.connect(lfo2G).connect(deep.gain); // shuddering
         out.gain.setValueAtTime(0.08, t0); out.gain.linearRampToValueAtTime(1, t0 + D * 0.66); out.gain.linearRampToValueAtTime(0, t0 + D); // quiet start, swell, fade out
+        for (let i = 0; i < 8; i++) { // a second level: deep explosion-like booms (sharp hit, quick decay, not sustained) at random moments, bigger as the quake builds
+          const at = 0.9 + Math.random() * (D - 2.2), tt = t0 + at, amp = 0.35 + 0.65 * Math.min(1, at / (D * 0.66)), dec = 0.55 + Math.random() * 0.5;
+          const nb = ctx.createBufferSource(); nb.buffer = getNoiseBuffer(ctx); k.src.push(nb);
+          const nf = lp(240 + Math.random() * 160, 0.9), ne = g(0), oo = ctx.createOscillator(), oe = g(0);
+          nf.frequency.setValueAtTime(420, tt); nf.frequency.exponentialRampToValueAtTime(90, tt + dec);
+          ne.gain.setValueAtTime(0.0001, tt); ne.gain.exponentialRampToValueAtTime(1.1 * amp, tt + 0.012); ne.gain.exponentialRampToValueAtTime(0.0001, tt + dec);
+          nb.connect(nf).connect(ne).connect(out); nb.start(tt, Math.random() * 0.5); nb.stop(tt + dec + 0.05);
+          oo.type = "sine"; oo.frequency.setValueAtTime(85, tt); oo.frequency.exponentialRampToValueAtTime(26, tt + dec);
+          oe.gain.setValueAtTime(0.0001, tt); oe.gain.exponentialRampToValueAtTime(0.9 * amp, tt + 0.01); oe.gain.exponentialRampToValueAtTime(0.0001, tt + dec * 0.9);
+          oo.connect(oe).connect(out); oo.start(tt); oo.stop(tt + dec + 0.05);
+        }
         QK.IMPULSES.forEach(ms => { // a heavy thump with each jolt
           const o = ctx.createOscillator(), e = g(0), tt = t0 + ms / 1000;
           o.type = "sine"; o.frequency.setValueAtTime(75, tt); o.frequency.exponentialRampToValueAtTime(32, tt + 0.4);
@@ -16155,21 +16168,18 @@
         o.connect(l).connect(e).connect(k.bed); o.start(t); o.stop(t + len + 0.02);
       } catch (e) { /* ignore */ }
     }
-    function sfxHiss(k, count) { // something was consumed: a short sizzle, louder and longer for more at once
-      if (!k) return;
+    function sfxSirenStart() { // Gravity Tumble: a gentle two-tone-sweep siren under the whole session
+      const k = sfxOpen(); if (!k) return null;
       try {
-        const { ctx } = k, now = performance.now();
-        if (now - k.hissAt < 70) return; k.hissAt = now;
-        const t = ctx.currentTime, amt = Math.min(1, 0.35 + Math.log2(1 + count) * 0.22), len = 0.22 + 0.25 * amt;
-        const b = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), hp = ctx.createBiquadFilter(), e = ctx.createGain();
-        b.buffer = getNoiseBuffer(ctx);
-        bp.type = "bandpass"; bp.Q.value = 0.8; bp.frequency.setValueAtTime(7500, t); bp.frequency.exponentialRampToValueAtTime(3200, t + len);
-        hp.type = "highpass"; hp.frequency.value = 2200;
-        e.gain.setValueAtTime(0.0001, t); e.gain.linearRampToValueAtTime(0.55 * amt, t + 0.015); e.gain.exponentialRampToValueAtTime(0.0001, t + len);
-        b.connect(bp).connect(hp).connect(e).connect(k.out); b.start(t, Math.random() * 0.5); b.stop(t + len + 0.02);
-      } catch (e) { /* ignore */ }
+        const { ctx, out } = k, t0 = ctx.currentTime, D = TUMBLE_STEP_MS * TUMBLE_STEPS / 1000;
+        const o = k.osc("triangle", 760), lfo = k.osc("sine", 0.9), lfoG = ctx.createGain(); lfoG.gain.value = 170; lfo.connect(lfoG).connect(o.frequency); // wails between about 590 and 930 Hz
+        const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1800;
+        const g = ctx.createGain(); g.gain.value = 0.22; // not too loud
+        o.connect(lp).connect(g).connect(out);
+        out.gain.setValueAtTime(0, t0); out.gain.linearRampToValueAtTime(1, t0 + 0.4); out.gain.setValueAtTime(1, t0 + D - 0.8); out.gain.linearRampToValueAtTime(0, t0 + D);
+      } catch (e) { return k; }
+      return k;
     }
-
     const QK = { IMPULSES: [150, 650, 1150, 1650], LIFT: 2000, DRIFT: 3200, SETTLE: 700, BREAK_FRAC: 0.06, DUR: 6900 };
     function quakeImpulse(theta) {
       actors.forEach(a => {
@@ -16352,8 +16362,6 @@
       start(s) {
         s.phase = 0; log("Rising Lava!"); lavaStart(s);
         s.sfx = sfxLavaStart(); s.lastEl = 0;
-        const burn0 = s.burnActors; // a hiss for every actor the front consumes
-        if (burn0) s.burnActors = f => { const n = actors.length; burn0(f); if (n > actors.length) sfxHiss(s.sfx, n - actors.length); };
       },
       tick(el, s) {
         if (s.phase === 2 && s.settleAt && performance.now() >= s.settleAt) { s.settleAt = 0; ckInRoom(s.roomId, ckSettleActors); }
@@ -16361,8 +16369,6 @@
           const lvl = Math.min(1, lavaFront(el, s.L) / s.L), dt = Math.max(0, (el - s.lastEl) / 1000);
           s.sfx.bed.gain.setTargetAtTime(0.2 + 0.8 * lvl, s.sfx.ctx.currentTime, 0.15);
           let nb = Math.min(4, (2.5 + 9 * lvl) * dt); while (nb > 0 && (nb >= 1 || Math.random() < nb)) { sfxBubble(s.sfx, lvl); nb -= 1; }
-          let burned = 0; s.metas.forEach(m => { if (m.burn && !m.hissed && el >= m.burnAt) { m.hissed = true; burned++; } });
-          if (burned) sfxHiss(s.sfx, burned);
           s.lastEl = el;
         }
         if (s.phase !== 1) return;

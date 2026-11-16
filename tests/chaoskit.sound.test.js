@@ -38,6 +38,11 @@ let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; con
   ok(lmax < 0.9, "no clipping (lava)");
   await page.waitForTimeout(1200);
   const lafter = avg(await sample(5, 40), 0, 5); ok(lafter < 0.003, "silent after lava: " + lafter.toFixed(4));
+  // tumble siren: audible but quiet, silent after
+  await page.click("[data-mk=tumble]"); const ta = await sample(50, 100);
+  const tm = avg(ta, 8, 40), tmax = Math.max(...ta); console.log("tumble siren rms", tm.toFixed(4), "max", tmax.toFixed(4));
+  ok(tm > 0.004 && tmax < 0.12, "siren audible but not loud");
+  await page.waitForTimeout(4500); ok(avg(await sample(5, 40), 0, 5) < 0.003, "silent after tumble");
   // Stop mid-run silences quickly
   await page.click("[data-mk=quake]"); await page.waitForTimeout(3000); await page.click("#mkStop"); await page.waitForTimeout(900);
   ok(avg(await sample(5, 40), 0, 5) < 0.003, "Stop silences the quake");
