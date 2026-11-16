@@ -15398,7 +15398,7 @@
   // wrapper (one undo step, finite, Stop, always restores/finalizes), Gravity Tumble and Bomb Storm. The other build
   // and chaos buttons are inert placeholders until their stages.
   const CHAOS_KIT_ENABLED = true;
-  const CHAOS_KIT_VERSION = "v2.72.9";
+  const CHAOS_KIT_VERSION = "v2.72.10";
   (function chaosKit() {
     if (!CHAOS_KIT_ENABLED) return;
     const pal = document.getElementById("paletteWrap");
@@ -15742,27 +15742,27 @@
     const GM = [];
     const gm = (cat, id, name, what, rows, legend) => GM.push({ cat, id, name, what, rows, legend: Object.assign({}, GM_BASE, legend || {}) });
     // small working machines
-    gm("stuff", "fanhover", "Fan hover", "a fan holds a crate in the air", [".c.", "...", "...", "=f="]);
-    gm("stuff", "fanbomb", "Floating bomb", "a fan keeps a bomb hovering", [".b.", "...", "=f="]);
+    gm("stuff", "fanhover", "Fan hover", "a fan holds a crate in the air", [".c.", "...", "...", ".f."]);
+    gm("stuff", "fanbomb", "Floating bomb", "a fan keeps a bomb hovering", [".b.", "...", ".f."]);
     gm("stuff", "cratepit", "Crate machine", "a spawner throws crates into a lava pit", ["s..", "=LL"]);
-    gm("stuff", "gateplate", "Gate and plate", "a crate lands on the plate, the gate opens", ["c..", "...", "pGw", "==="]);
-    gm("stuff", "buttongate", "Switch and gate", "a crate flips the switch and the gate stays open", ["c..", "...", "uGw", "==="]);
-    gm("stuff", "trampcrate", "Bounce house", "a crate bounces on a trampoline", [".c.", "...", "=t="]);
-    gm("stuff", "magnetcatch", "Magnet catch", "a magnet grabs a falling crate", [".c.", "...", "..m", "==="]);
+    gm("stuff", "gateplate", "Gate and plate", "a crate lands on the plate, the gate opens", ["c..", "...", "pGw"]);
+    gm("stuff", "buttongate", "Switch and gate", "a crate flips the switch and the gate stays open", ["c..", "...", "uGw"]);
+    gm("stuff", "trampcrate", "Bounce house", "a crate bounces on a trampoline", [".c.", "...", ".t."]);
+    gm("stuff", "magnetcatch", "Magnet catch", "a magnet grabs a falling crate", [".c.", "...", "..m"]);
     gm("stuff", "bombdrop", "Bomb drop", "a crate sets off a bomb and the blast breaks the floor", [".c.", "...", ".b.", "==="]);
-    gm("stuff", "holesnack", "Black hole snack", "a black hole swallows a crate", [".c.", ".h.", "...", "==="]);
+    gm("stuff", "holesnack", "Black hole snack", "a black hole swallows a crate", [".c.", ".h.", "..."]);
     gm("stuff", "bouncepad", "Bounce pad", "a crate bounces on a springy floor", [".c.", "...", "BBB"]);
     gm("stuff", "hoppad", "Hopper pad", "a hopping Gloop bounces on a springy floor", ["H.", "BB"]);
     gm("stuff", "stickywalk", "Sticky floor", "pets slow down on the sticky floor", ["w.w", "SSS"]);
     gm("stuff", "iceskate", "Ice skaters", "pets slide around on the ice", ["w.w", "III"]);
-    gm("stuff", "icecrates", "Ice rink", "crates slide a long way on the ice", ["s...", "=III"]);
+    gm("stuff", "icecrates", "Ice rink", "crates slide a long way on the ice", ["s...", "III."]);
     gm("stuff", "lavapit", "Lava pit", "a pet walks by a lava pit and a crate falls in", ["wc.", "=L="]);
     gm("stuff", "beltlava", "Conveyor", "the belt carries a crate into the lava", ["c...", "EEEL"]);
     gm("stuff", "stonecrate", "Stone smash", "a falling stone smashes the crate", ["n", ".", ".", "c", "="]);
     gm("stuff", "bombrain", "Bomb dropper", "a spawner drops bombs that blow up on landing", ["x", ".", ".", ".", ".", ".", ".", "="], { x: "spawnerb:s" });
-    gm("stuff", "pinball", "Mini pinball", "hazard balls bounce off a bouncy peg", ["x..", "...", ".B.", "...", "==="], { x: "spawnerh:s" });
-    gm("stuff", "petdrain", "Pet drain", "a spawner throws pets toward a black hole", ["P.h", "==="], { P: "spawnerp:e" });
-    gm("stuff", "gustcrate", "Wind tunnel", "wind pushes a crate along the floor", ["Cgg", "==="], { C: "crate&gust:e", g: "gust:e" });
+    gm("stuff", "pinball", "Mini pinball", "hazard balls bounce off a bouncy peg", ["x..", "...", ".B.", "..."], { x: "spawnerh:s" });
+    gm("stuff", "petdrain", "Pet drain", "a spawner throws pets toward a black hole", ["P.h"], { P: "spawnerp:e" });
+    gm("stuff", "gustcrate", "Wind tunnel", "wind pushes a crate along the floor", ["Cgg"], { C: "crate&gust:e", g: "gust:e" });
     gm("stuff", "craterain", "Crate rain", "a spawner rains crates onto a springy floor", ["s", ".", ".", "B"], { s: "spawnerc:s" });
     gm("stuff", "bombchain", "Bomb chain", "a crate sets off a row of bombs", [".c.", "...", "bbb", "==="]);
     // bigger machines: at most two per press
@@ -15783,13 +15783,13 @@
     gm("walls", "pyramid", "Pyramid", "a little pyramid", ["...#...", "..###..", ".#####.", "======="]);
     gm("walls", "ell", "Corner", "an L-shaped wall", ["=....", "=....", "=....", "=....", "====="]);
     // groups of enemies
-    gm("enemies", "ledgepack", "Ledge pack", "wanderers pacing a walled ledge", ["=.......=", "=F.F.F.F=", "========="]);
-    gm("enemies", "chasertrio", "Chaser pen", "chasers burst out of a pen", ["=========", "=.C.C.C..", "=.......=", "========="]);
-    gm("enemies", "fleerherd", "Fleer herd", "fleers scatter from you", ["=======.", "=R.R.R..", "=R.R.R..", "========"]);
-    gm("enemies", "statuegarden", "Statue garden", "statues with a wanderer wandering among them", ["T..T..T..", "...F.....", "========="]);
-    gm("enemies", "mob", "The mob", "a mixed gang", [".........." , "F.C.R.F.C.", "=========="]);
-    gm("enemies", "hoppack", "Hopping gang", "Gloops hopping in a springy box", ["=.......=", "=.H.H.H.=", "=.......=", "BBBBBBBBB"]);
-    gm("enemies", "gauntlet", "Lava gauntlet", "wanderers on pillars over lava", ["F.F.F.F.F.F", "=.=.=.=.=.=", "=.=.=.=.=.=", "=L=L=L=L=L="]);
+    gm("enemies", "ledgepack", "Wanderer pack", "wanderers pacing about", ["F.F.F.F"]);
+    gm("enemies", "chasertrio", "Chaser trio", "chasers on your tail", ["C.C.C"]);
+    gm("enemies", "fleerherd", "Fleer herd", "fleers scatter from you", ["R.R.R", "R.R.R"]);
+    gm("enemies", "statuegarden", "Statue garden", "statues with a wanderer wandering among them", ["T..T..T", "..F...."]);
+    gm("enemies", "mob", "The mob", "a mixed gang", ["F.C.R.F.C"]);
+    gm("enemies", "hoppack", "Hopping gang", "Gloops hopping about", ["H.H.H.H"]);
+    gm("enemies", "pairs", "Odd couple", "a chaser and a fleer", ["C...R"]);
     // scenery (Paint layer only)
     gm("scenery", "clouds", "Clouds", "a few clouds", [".c.cc.", "cc...c"], { c: "bg:bgCloud" });
     gm("scenery", "hills", "Hills", "rolling hills", ["12332113"], { 1: "bg:bgHill1", 2: "bg:bgHill2", 3: "bg:bgHill3" });
@@ -15801,7 +15801,7 @@
     gm("scenery", "horizon", "Horizon", "a pale horizon", ["UUUUUUUUUU", "VVVVVVVVVV"], { U: "bg:bgSky3", V: "bg:bgSky4" });
     ["cannonshot", "platformride", "trampchain", "hopperpen"].forEach(id => { GM.find(v => v.id === id).big = true; });
     const GM_SKIN_SETS = [["gndStone", "gndBrick"], ["gndDirt", "gndGrass"], ["gndSand", "gndBrick"], ["gndSnow", "gndStone"], ["gndCrystalPink", "gndCrystalCyan"], ["gndRubble", "gndDirt"]];
-    const GM_TARGETS = { walls: { min: 8, extra: 2, cap: 14 }, stuff: { min: 30, extra: 0, cap: 50 }, enemies: { min: 5, extra: 1, cap: 6 }, scenery: { min: 12, extra: 0, cap: 70 } };
+    const GM_TARGETS = { walls: { min: 8, extra: 2, cap: 14 }, stuff: { min: 30, extra: 0, cap: 50 }, enemies: { min: 9, extra: 2, cap: 12 }, scenery: { min: 12, extra: 0, cap: 70 } };
     const GM_COVER = { walls: 0.55, stuff: 0.55, enemies: 2, scenery: 0.75 };
     const GM_ENEMY_CLEAR = 5, GM_HERO_CLEAR = 3, GM_START_CLEAR = 2;
 
@@ -16127,11 +16127,11 @@
           const swell = at => 0.25 + 0.75 * Math.min(1, at / (D * 0.66));
           const grit = ctx.createBufferSource(); grit.buffer = getNoiseBuffer(ctx); grit.loop = true; k.src.push(grit);
           const ge = g(0.0001);
-          for (let at = 0.6; at < D - 0.5; at += 0.05 + Math.random() * 0.07) ge.gain.linearRampToValueAtTime(swell(at) * (0.25 + Math.random() * 0.75) * 0.9, t0 + at);
+          for (let at = 0.6; at < D - 0.5; at += 0.05 + Math.random() * 0.07) ge.gain.linearRampToValueAtTime(swell(at) * (0.25 + Math.random() * 0.75) * 2.6, t0 + at);
           ge.gain.linearRampToValueAtTime(0.0001, t0 + D);
           grit.connect(bp(260, 0.7)).connect(ge).connect(out); grit.start(t0 + 0.6); grit.stop(t0 + D + 0.1);
           for (let at = 0.7; at < D - 0.3; at += 0.03 + Math.random() * 0.1 / (0.4 + swell(at))) { // rock grains: short clacks and crumbles
-            const dur = 0.015 + Math.random() * 0.06, tt = t0 + at, amp = swell(at) * (0.25 + Math.random() * 0.6);
+            const dur = 0.015 + Math.random() * 0.06, tt = t0 + at, amp = swell(at) * (0.6 + Math.random() * 1.2);
             const nb = ctx.createBufferSource(); nb.buffer = getNoiseBuffer(ctx); k.src.push(nb);
             const ne = g(0); ne.gain.setValueAtTime(0.0001, tt); ne.gain.exponentialRampToValueAtTime(amp, tt + 0.004); ne.gain.exponentialRampToValueAtTime(0.0001, tt + dur);
             nb.connect(bp(350 + Math.random() * 1800, 1.2 + Math.random() * 2)).connect(ne).connect(out); nb.start(tt, Math.random() * 0.5); nb.stop(tt + dur + 0.05);

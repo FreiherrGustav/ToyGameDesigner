@@ -7972,3 +7972,10 @@ Earthquake keeps its base rumble and gains a second level: 8 explosion-like boom
 ## Earthquake: crumbling-rock rumble replaces the booms (chaos kit v2.72.9)
 
 The eight explosion-like booms are gone. `sfxQuakeStart` now layers a sustained, dirty rumble over the base rumble: band-passed (260 Hz) noise whose level is re-randomised every 50-120 ms (ragged, flickering), plus about 100-200 short band-passed noise grains (15-75 ms, 350-2150 Hz) that read as rocks clacking and crumbling, denser and louder as the quake swells (same 0.25 to 1 swell over the first 66%). The four jolt thumps stay. Sound test: 12-13 of 13 per run; the one flaky check ("silent after the quake") picks up the game's own settling sounds, not the kit. Not listened to.
+
+## Make a Mess: honest "Give me enemies", fewer floors in "Give me stuff", louder crumble (kit v2.72.10)
+
+- **Enemies now place only enemies.** The seven enemy vignettes no longer carry ground, pens, lava or bouncy floors: just groups of wanderers, chasers, fleers, statues and hoppers (`gm("enemies", ...)` in the kit catalog; "Lava gauntlet" and the pen/box groups are gone, "Odd couple" is new). Because each group is tiny, a press places 12 groups (`GM_TARGETS.enemies` min 9, extra 2, cap 12; coverage about 33%).
+- **Stuff drops floors it doesn't need.** Fan hover, floating bomb, gate and plate, switch and gate, bounce house, magnet catch, black hole snack, ice rink, pet drain, wind tunnel and mini pinball lost their ground row (tiles like gates, plates, fans and magnets are fixed; things falling land on them). Machines that need a floor (bomb drop, bomb chain, stone smash, lava pits, cannon shots, platforms) keep it, so some ground still comes with stuff.
+- **Crumble louder**: grit level 0.9 to 2.6, grain amplitude 0.25-0.85 to 0.6-1.8 (peak is limited by the master bus, so the gain shows mostly in the early and tail levels: RMS early 0.019 to 0.032, tail 0.018 to 0.043, max 0.15 to 0.17). Not listened to.
+- Stage 3 test (200 presses per button): 0 problems. Sound test: 12 of 13 on this run, the one failure is the old flaky "silent after the quake" check (the game's own settling sounds).
