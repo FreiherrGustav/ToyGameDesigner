@@ -5,7 +5,7 @@ CELL=6; INK=(26,16,32)
 TONES={'y':dict(hi=(255,240,130),base=(255,210,31),sh=(245,160,10),deep=(214,110,8)),
        't':dict(hi=(130,238,234),base=(24,198,198),sh=(14,150,165),deep=(10,110,128))}
 FONT='fonts/LilitaOne-Regular.ttf'; TEXT='ThingamaBox'; SPLIT=8   # first 8 letters yellow
-WIDTH_CELLS=300; ARC=0.055; EXT=5; SHADOW=(8,5)               # extrusion depth, drop-shadow offset (down,right) in cells
+WIDTH_CELLS=300; ARC=0.034; PEAK=0.18; JIT_Y=0.035; JIT_ROT=2.6; JIT_SIZE=0.035; EXT=5; SHADOW=(8,5)               # extrusion depth, drop-shadow offset (down,right) in cells
 def shifted(m,dy,dx):
     o=np.zeros_like(m); H,W=m.shape
     ys=slice(max(dy,0),H+min(dy,0)); yd=slice(max(-dy,0),H+min(-dy,0)); xs=slice(max(dx,0),W+min(dx,0)); xd=slice(max(-dx,0),W+min(-dx,0))
@@ -16,12 +16,20 @@ adv=[f.getlength(c)+size*(0.04+(0.10 if i==SPLIT-1 else 0)) for i,c in enumerate
 PADPX=int(size*0.9); Wpx=int(L)+2*PADPX; Hpx=int(size*2.6)
 cx0=PADPX; base_y=int(size*1.5)
 layers={'y':Image.new('L',(Wpx,Hpx),0),'t':Image.new('L',(Wpx,Hpx),0)}
+import random
+rng=random.Random(7)
+def arc_y(u):                       # asymmetric hump: peak sits a little right of centre, falls off unevenly
+    t=(u-PEAK)/(1+abs(PEAK)); return -ARC*L*(1-t*t)
 x=0
 for i,ch in enumerate(TEXT):
-    xc=cx0+x+adv[i]/2; u=(x+adv[i]/2-L/2)/(L/2)
-    yb=base_y-ARC*L*(1-u*u); ang=-math.degrees(math.atan(4*ARC*u*(1)/1.0*0.5*0+ (2*ARC*L*u)/(L/2)*0.5)) if False else -math.degrees(math.atan((2*ARC*L*u)/(L/2)))
+    xc=cx0+x+adv[i]/2; u=(x+adv[i]/2-L/2)/(L/2); du=0.01
+    slope=(arc_y(u+du)-arc_y(u-du))/(du*L/2*2)          # dy/dx of the baseline
+    yb=base_y+arc_y(u)+rng.uniform(-JIT_Y,JIT_Y)*size
+    ang=-math.degrees(math.atan(slope))+rng.uniform(-JIT_ROT,JIT_ROT)
+    sc=1+rng.uniform(-JIT_SIZE,JIT_SIZE)
+    fs=ImageFont.truetype(FONT,int(size*sc))
     g=Image.new('L',(size*2,size*2),0); d=ImageDraw.Draw(g)
-    d.text((size-adv[i]/2,size),ch,font=f,fill=255,anchor='ls')
+    d.text((size-adv[i]/2,size),ch,font=fs,fill=255,anchor='ls')
     g=g.rotate(ang,resample=Image.BICUBIC,center=(size,size))
     lay=layers['y' if i<SPLIT else 't']
     tmp=Image.new('L',(Wpx,Hpx),0); tmp.paste(g,(int(xc-size),int(yb-size)))
