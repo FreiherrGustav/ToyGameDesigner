@@ -5,7 +5,8 @@ CELL=6; INK=(26,16,32)
 TONES={'y':dict(hi=(255,240,130),base=(255,210,31),sh=(245,160,10),deep=(214,110,8)),
        't':dict(hi=(130,238,234),base=(24,198,198),sh=(14,150,165),deep=(10,110,128))}
 FONT='fonts/LilitaOne-Regular.ttf'; TEXT='ThingamaBox'; SPLIT=8   # first 8 letters yellow
-WIDTH_CELLS=300; ARC=0.034; PEAK=0.18; JIT_Y=0.035; JIT_ROT=2.6; JIT_SIZE=0.035; EXT=5; SHADOW=(8,5)               # extrusion depth, drop-shadow offset (down,right) in cells
+import os
+WIDTH_CELLS=int(os.environ.get('WM_W','300')); OUT=os.environ.get('WM_OUT','wordmark_arc'); ARC=0.034; PEAK=0.18; JIT_Y=0.035; JIT_ROT=2.6; JIT_SIZE=0.035; EXT=5; SHADOW=(8,5)               # extrusion depth, drop-shadow offset (down,right) in cells
 def shifted(m,dy,dx):
     o=np.zeros_like(m); H,W=m.shape
     ys=slice(max(dy,0),H+min(dy,0)); yd=slice(max(-dy,0),H+min(-dy,0)); xs=slice(max(dx,0),W+min(dx,0)); xd=slice(max(-dx,0),W+min(-dx,0))
@@ -62,8 +63,8 @@ for m,fam in ((A,'y'),(B,'t')):
     out[m,:3]=T['base']; out[m,3]=255
     out[m&tl,:3]=T['hi']; out[m&br,:3]=T['sh']; out[m&tl&br,:3]=T['sh']
 ys,xs=np.where(out[...,3]>0); out=out[ys.min():ys.max()+1,xs.min():xs.max()+1]
-im=Image.fromarray(out,'RGBA'); im.save('wordmark_arc_1x.png')
-big=im.resize((im.width*CELL,im.height*CELL),Image.NEAREST); big.save('wordmark_arc.png')
+im=Image.fromarray(out,'RGBA'); im.save(OUT+'_1x.png')
+big=im.resize((im.width*CELL,im.height*CELL),Image.NEAREST); big.save(OUT+'.png')
 for n,bg in (('dark',(32,34,58,255)),('light',(255,255,255,255)),('box',(240,140,22,255))):
-    c=Image.new('RGBA',big.size,bg); c.alpha_composite(big); c.save(f'wordmark_arc_preview_{n}.png')
+    c=Image.new('RGBA',big.size,bg); c.alpha_composite(big); c.save(f'{OUT}_preview_{n}.png')
 print(big.size)
