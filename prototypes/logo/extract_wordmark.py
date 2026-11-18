@@ -17,7 +17,7 @@ shade=ndi.binary_dilation(M,iterations=2)                   # includes the orang
 ink=(g[...,0]==26)&(g[...,1]==16)&(g[...,2]==32)
 core=ndi.binary_fill_holes(M|(shade&~ink&a))
 ring=ndi.binary_dilation(core,structure=np.ones((3,3)),iterations=2)&~core
-keep=(core|ring)
+keep=(core|ring); np.save("oldtext_keep.npy",keep)
 # ---- rebuild the bevel from clean tones (yellow = brand sunshine #ffd21f) ----
 TONES={'y':dict(hi=(255,238,120),base=(255,210,31),sh=(245,160,10),deep=(214,110,8)),
        't':dict(hi=(120,236,232),base=(24,198,198),sh=(14,150,165),deep=(10,110,128))}
