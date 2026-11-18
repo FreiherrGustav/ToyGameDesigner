@@ -13,7 +13,8 @@ def shifted(m,dy,dx):
     o[ys,xs]=m[yd,xd]; return o
 f0=ImageFont.truetype(FONT,200); L0=sum(f0.getlength(c)+200*0.04 for c in TEXT)
 size=int(200*WIDTH_CELLS*CELL/L0); f=ImageFont.truetype(FONT,size)
-adv=[f.getlength(c)+size*(TRACK+(GAP if i==SPLIT-1 else 0)) for i,c in enumerate(TEXT)]; L=sum(adv)
+MIX=[0.04,0.04,0.04,0.04,0.0,-0.035,-0.035,0.04,0.04,0.04,0.0]   # T-h h-i i-n n-g | g-a | a-m m-a | a-B | B-o o-x  (Thing/current, ama/tight, Box/current, joins/snug)
+adv=[f.getlength(c)+size*(MIX[i] if os.environ.get('WM_MIX') else TRACK+(GAP if i==SPLIT-1 else 0)) for i,c in enumerate(TEXT)]; L=sum(adv)
 PADPX=int(size*0.9); Wpx=int(L)+2*PADPX; Hpx=int(size*2.6)
 cx0=PADPX; base_y=int(size*1.5)
 letters=[]
