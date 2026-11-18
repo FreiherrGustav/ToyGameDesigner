@@ -32,6 +32,19 @@ q=small.quantize(colors=NCOL,method=Image.Quantize.MEDIANCUT,dither=Image.Dither
 out=np.array(q); rgba=np.dstack([out,(alpha*255).astype(np.uint8)])
 # snap darkest colours to a single ink
 lum=out.sum(axis=2); ink=lum<110; rgba[ink,:3]=(26,16,32)
+# colour fixes (use the unboosted per-cell colours to find the cells)
+import colorsys
+hsv=np.array([[colorsys.rgb_to_hsv(*(p/255)) for p in row] for row in cell])
+hue=hsv[...,0]*360; sat=hsv[...,1]; val=hsv[...,2]
+yy,xx=np.mgrid[0:gh,0:gw]
+# (a) spring buddy's yellow-green band -> real green
+spring=(yy>40)&(yy<130)&(xx>40)&(xx<125)&(hue>62)&(hue<115)&(sat>0.55)&alpha
+g_shade=np.clip((val[spring]/0.85),0.4,1.0)
+rgba[spring,0]=(40*g_shade).astype(np.uint8); rgba[spring,1]=(205*g_shade).astype(np.uint8); rgba[spring,2]=(45*g_shade).astype(np.uint8)
+# (b) 'Box' lettering teal -> brand teal #18c6c6 (shift keeps the shading steps)
+box=(yy>=140)&(xx>=220)&(hue>165)&(hue<200)&(sat>0.5)&alpha
+src=out[box].astype(int); rgba[box,:3]=np.clip(src+np.array([24,198,198])-np.array([0,194,199]),0,255).astype(np.uint8)
+print('green cells',int(spring.sum()),'teal cells',int(box.sum()))
 g=Image.fromarray(rgba,'RGBA'); g.save('logo_ai_1x.png')
 g.resize((gw*CELL,gh*CELL),Image.NEAREST).save('logo_ai.png')
 bgc=Image.new('RGBA',(gw*CELL,gh*CELL),(32,34,58,255)); bgc.alpha_composite(g.resize((gw*CELL,gh*CELL),Image.NEAREST)); bgc.save('logo_ai_preview_dark.png')
