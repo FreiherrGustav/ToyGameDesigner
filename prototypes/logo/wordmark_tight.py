@@ -39,6 +39,15 @@ def grid(im):
     a=np.array(im).astype(float); gh,gw=Hpx//CELL,Wpx//CELL
     return a[:gh*CELL,:gw*CELL].reshape(gh,CELL,gw,CELL).mean(axis=(1,3))>110
 masks=[grid(t) for t in letters]
+SMUSH=[tuple(int(v) for v in g.split('-')) for g in os.environ.get('WM_SMUSH','').split(',') if g]   # e.g. 6-7 : letters drawn as one fused shape
+tone_idx=list(range(len(masks)))
+for grp in SMUSH:
+    m=np.zeros_like(masks[grp[0]])
+    for k in grp: m|=masks[k]
+    masks[grp[0]]=m
+    for k in grp[1:]: masks[k]=None
+tone_idx=[i for i,m in enumerate(masks) if m is not None]
+masks=[m for m in masks if m is not None]
 F=np.zeros_like(masks[0])
 for m in masks: F|=m
 ys,xs=np.where(F); sl=(slice(ys.min(),ys.max()+1),slice(xs.min(),xs.max()+1))
@@ -59,7 +68,7 @@ for k in range(1,SHADOW[0]+1): shadow|=shifted(allbody,k,round(k*SHADOW[1]/SHADO
 shadow&=~allbody
 out[shadow]=(26,16,32,95)
 for i,m in enumerate(masks):                      # each letter drawn whole, left to right, so a later letter overlaps the earlier one
-    T=TONES['y' if i<SPLIT else 't']; ext,solid,ring=body_of(m)
+    T=TONES['y' if tone_idx[i]<SPLIT else 't']; ext,solid,ring=body_of(m)
     lay=np.zeros((H,W,4),np.uint8)
     lay[ring]=INK+(255,); lay[ext,:3]=T['deep']; lay[ext,3]=255
     lay[m,:3]=T['base']; lay[m,3]=255
