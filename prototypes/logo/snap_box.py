@@ -1,10 +1,10 @@
-import sys, numpy as np
+import sys, os, json, numpy as np
 from PIL import Image, ImageEnhance
 from scipy import ndimage as ndi
 CELL=int(sys.argv[1]) if len(sys.argv)>1 else 6
 NCOL=int(sys.argv[2]) if len(sys.argv)>2 else 64
 SAT=float(sys.argv[3]) if len(sys.argv)>3 else 1.15
-im=np.array(Image.open('source_box.jpg').convert('RGB')).astype(np.int32); H,W,_=im.shape
+im=np.array(Image.open(os.environ.get('BOX_SRC','source_box.jpg')).convert('RGB')).astype(np.int32); H,W,_=im.shape
 near=(im.min(axis=2)>=225)&((im.max(axis=2)-im.min(axis=2))<18)
 lab,n=ndi.label(near); edge=set(np.unique(np.concatenate([lab[0],lab[-1],lab[:,0],lab[:,-1]])))-{0}
 fg=~np.isin(lab,list(edge)); fg=ndi.binary_opening(fg,iterations=2); fg=ndi.binary_fill_holes(fg)
@@ -33,4 +33,4 @@ for y,x in zip(*np.where(grn)): rgba[y,x,:3]=nearest(GRN,tuple(cell[y,x]*1.05))
 print('gem',int(gem.sum()),'green',int(grn.sum()))
 g=Image.fromarray(rgba,'RGBA'); g.save('box2_1x.png')
 big=g.resize((gw*CELL,gh*CELL),Image.NEAREST); big.save('box2.png')
-d=Image.new('RGBA',big.size,(32,34,58,255)); d.alpha_composite(big); d.save('box2_preview_dark.png'); print(gw,gh)
+d=Image.new('RGBA',big.size,(32,34,58,255)); d.alpha_composite(big); d.save('box2_preview_dark.png'); print(gw,gh); json.dump(dict(x0=int(x0),y0=int(y0),cell=CELL,gw=int(gw),gh=int(gh)),open(os.environ.get('BOX_OFF','box2_offset.json'),'w'))
