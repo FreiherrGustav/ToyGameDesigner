@@ -667,21 +667,19 @@
   @media (prefers-reduced-motion: reduce) { #tutLayer .tutRing, #tutLayer .tutArrow svg, #tutLayer .tutKeys { animation: none; } #tutLayer .tutDim, #tutLayer .tutRing, #tutLayer .tutArrow, #tutNote { transition: none; } }
 
   /* ===== BRAND PREVIEW (throwaway): delete this block + the script below + index.preview.html to undo ===== */
-  #homeLogo { display: inline-flex; align-items: center; min-height: 44px; margin-block: -6px; padding: 0 6px; border-radius: 8px; line-height: 0; }  /* 44px hit area, but only the 32px image takes layout space */
+  #homeLogo { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; border-radius: 8px; line-height: 0; }
   #homeLogo picture, #homeLogo img { display: block; }
-  #homeLogo img { height: 32px; width: auto; image-rendering: pixelated; transition: transform 0.12s ease-out; transform-origin: 50% 70%; }
+  #homeLogo img { height: 48px; width: auto; image-rendering: auto; transition: transform 0.12s ease-out; transform-origin: 50% 70%; }
   #homeLogo:hover { filter: none; }
   #homeLogo:hover img { transform: translateY(-1px) rotate(-2deg); }
   #homeLogo:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-  @media (max-width: 700px) { #homeLogo { margin-block: -4px; } #homeLogo img { height: 36px; width: 36px; } }
+  @media (max-width: 700px) { #homeLogo img { height: 36px; width: 36px; } }
   @media (prefers-reduced-motion: reduce) { #homeLogo img { transition: none; } #homeLogo:hover img { transform: none; } }
-  /* landing: logo replaces the text title, whole column centred */
-  #landingPanel { align-items: center; text-align: center; }
-  #landingPanel > .top, #landingPanel > .main { max-width: 640px; }
+  /* landing: logo replaces the text title; original left-justified column kept */
   #landingWordmark { font-size: 0; line-height: 0; text-shadow: none; }
-  #landingWordmark img { display: block; width: min(100%, 620px); height: auto; margin: 0 auto 6px; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)); }
-  #landingTagline { margin: 8px auto 24px; }
-  #landingButtons { margin: 0 auto; }
+  #landingWordmark img { display: block; width: min(100%, 440px); height: auto; margin: 0 0 8px 0; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.45)); }
+  /* header: larger wordmark, centred over the left control panel (Build mode; in Play the panel is hidden so it stays left) */
+  body:not(.play-mode) #topBar.aligned #homeLogo { grid-column: 1; justify-self: center; margin-right: var(--logoGap, 0px); }
   /* ===== END BRAND PREVIEW ===== */
 </style>
 </head>
@@ -17094,10 +17092,13 @@
       hl.textContent = "";
       hl.setAttribute("aria-label", "ThingamaBox, go home"); hl.title = "ThingamaBox: back to the front screen";
       hl.innerHTML = '<picture><source media="(max-width: 700px)" srcset="icon_36.png 1x, icon_72.png 2x, icon_108.png 3x">' +
-        '<img src="wordmark_h32_1x.png" srcset="wordmark_h32_1x.png 1x, wordmark_h32_2x.png 2x, wordmark_h32_3x.png 3x" height="32" alt="ThingamaBox"></picture>';
+        '<img src="wordmark_h32_3x.png" width="206" height="48" alt="ThingamaBox"></picture>';
     }
   }
+  function gap() { const pal = document.getElementById("paletteWrap"), cv = document.getElementById("gameCanvas"), bar = document.getElementById("topBar");
+    if (!pal || !cv || !pal.offsetParent) return; bar.style.setProperty("--logoGap", Math.max(0, Math.round(cv.getBoundingClientRect().left - pal.getBoundingClientRect().right)) + "px"); }
   apply(); window.addEventListener("load", apply);
+  setInterval(gap, 400);
 })();
 </script>
 </body>
