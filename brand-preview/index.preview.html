@@ -681,7 +681,7 @@
   /* header: larger wordmark, centred over the left control panel (Build mode; in Play the panel is hidden so it stays left) */
   body:not(.play-mode) #topBar.aligned #homeLogo { grid-column: 1; justify-self: center; margin-right: var(--logoGap, 0px); }
 
-  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c|d|e|f|g or the corner toggle; no value = the current look ===== */
+  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c|d|e|f|g|h or the corner toggle; no value = the current look ===== */
   #landingWordmark img { image-rendering: pixelated; }
   /* A: grounded: no glow/blur/soft shadow, only a hard offset shadow */
   body[data-logo="a"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #0d1530); }
@@ -695,16 +695,16 @@
   body[data-logo="b"] #landingTrust, body[data-logo="c"] #landingTrust { order: 3; }
 
   /* D: the buttons adopt the logo's language (ink outline, hard offset shadow, logo yellow, teal accent). E: D + the logo rests on the button stack */
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button, body[data-logo="e"] #landingButtons button {
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button, body[data-logo="e"] #landingButtons button {
     background: #262b44; color: #fff; border: 3px solid #1a1020; border-radius: 8px;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 4px 4px 0 #1a1020; transition: transform 0.08s ease-out, box-shadow 0.08s ease-out; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:first-child, body[data-logo="e"] #landingButtons button:first-child {
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:first-child, body[data-logo="e"] #landingButtons button:first-child {
     background: #ffd21f; color: #1a1020; border-color: #1a1020; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 4px 4px 0 #1a1020; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover { transform: translate(-1px, -1px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 5px 5px 0 #18c6c6; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:first-child:hover, body[data-logo="e"] #landingButtons button:first-child:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 5px 5px 0 #18c6c6; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: translate(3px, 3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 1px 1px 0 #1a1020; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:focus-visible, body[data-logo="e"] #landingButtons button:focus-visible { outline: 3px solid #18c6c6; outline-offset: 3px; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingWordmark img, body[data-logo="e"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #1a1020); }
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover { transform: translate(-1px, -1px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 5px 5px 0 #18c6c6; }
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:first-child:hover, body[data-logo="e"] #landingButtons button:first-child:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 5px 5px 0 #18c6c6; }
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: translate(3px, 3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 1px 1px 0 #1a1020; }
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:focus-visible, body[data-logo="e"] #landingButtons button:focus-visible { outline: 3px solid #18c6c6; outline-offset: 3px; }
+  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingWordmark img, body[data-logo="e"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #1a1020); }
   body[data-logo="e"] #landingPanel > .main { display: flex; flex-direction: column; align-items: flex-start; }
   body[data-logo="e"] #landingWordmark { order: 0; position: relative; z-index: 0; width: 100%; max-width: 360px; margin: 0 0 -13px 0; }
   body[data-logo="e"] #landingWordmark img { width: 100%; max-width: none; margin: 0; }
@@ -715,7 +715,7 @@
   body[data-logo="e"] #landingButtons { order: 1; }
   body[data-logo="e"] #landingTagline { order: 2; margin: 20px 0 14px; }
   body[data-logo="e"] #landingTrust { order: 3; }
-  @media (prefers-reduced-motion: reduce) { body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button, body[data-logo="e"] #landingButtons button { transition: none; } body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover, body:is([data-logo="d"],[data-logo="f"],[data-logo="g"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button, body[data-logo="e"] #landingButtons button { transition: none; } body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover, body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: none; } }
 
   /* ===== F = D + motion;  G = F + matching typography ===== */
   .lgWrap, .lgHover { display: contents; }                     /* inert for current / A-E */
@@ -758,6 +758,32 @@
   body[data-logo="g"] #landingButtons button { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: 21px; letter-spacing: 0.03em; }
   body[data-logo="g"] #landingTagline { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: clamp(17px, 2.1vw, 21px); letter-spacing: 0.025em; line-height: 1.32; }
   body[data-logo="g"] #landingTrust { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: 14px; letter-spacing: 0.03em; }
+
+  /* ===== H = D + the logo stands in the demo's world: cloud ledge (the demo's own cloud art), crisp backdrop, reacts to the hero ===== */
+  body[data-logo="h"] .lgWrap { display: block; position: relative; width: min(100%, 440px); transform-origin: 50% 92%; }
+  body[data-logo="h"] .lgHover { display: block; position: relative; z-index: 1; }
+  body[data-logo="h"] .lgHover img { width: 100%; max-width: none; margin: 0; }
+  .hLedge { display: none; }
+  body[data-logo="h"] .hLedge { display: block; position: absolute; z-index: 0; left: -3%; top: 91.5%; image-rendering: pixelated; pointer-events: none; }
+  /* backdrop: the dim wash gets a soft hole around the logo, and the demo's edge fade is much shorter, so the world behind the logo is crisp.
+     The wash stays full strength behind the tagline, buttons and small print. */
+  body[data-logo="h"] #landing { background: none; }
+  body[data-logo="h"] #landing::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.6) 34%, rgba(10,10,18,0) 66%, rgba(10,10,18,0) 100%);
+    -webkit-mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%);
+    mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%); }
+  body.landing[data-logo="h"] #gameCanvas {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+    -webkit-mask-composite: source-in; mask-composite: intersect; }
+  /* reactions (transform only, one at a time) */
+  body[data-logo="h"] .lgWrap.hLand { animation: hLand 0.42s ease-out 1; }
+  body[data-logo="h"] .lgWrap.hHop { animation: hHop 0.46s ease-out 1; }
+  body[data-logo="h"] .lgWrap.hWig { animation: hWig 0.5s ease-in-out 1; }
+  @keyframes hLand { 0% { transform: none; } 22% { transform: scale(1.045, 0.935); } 50% { transform: scale(0.99, 1.025); } 75% { transform: scale(1.01, 0.99); } 100% { transform: none; } }
+  @keyframes hHop  { 0% { transform: none; } 30% { transform: translateY(-6px) scale(0.985, 1.02); } 60% { transform: translateY(0) scale(1.03, 0.965); } 100% { transform: none; } }
+  @keyframes hWig  { 0% { transform: none; } 25% { transform: rotate(-1.3deg); } 60% { transform: rotate(1.1deg); } 100% { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { body[data-logo="h"] .lgWrap.hLand, body[data-logo="h"] .lgWrap.hHop, body[data-logo="h"] .lgWrap.hWig { animation: none; } }
   /* the preview-only switch */
   #logoToggle { position: fixed; top: 10px; left: 10px; z-index: 5000; display: flex; gap: 2px; align-items: center; padding: 3px 4px; border-radius: 8px;
     background: rgba(10,10,20,0.55); font: 11px/1 system-ui, sans-serif; color: #cfd2e6; opacity: 0.55; }
@@ -14610,6 +14636,10 @@
   // stretched (blurred by CSS) over the whole window behind it, and the demo fades into it at its edges.
   const LANDING_PICKS = ["cloud-hopper", "crossing-guard", "rock-bottom", "the-gravity-switcheroo", "sushi-train-panic", "dungeon-diving"];
   let landingBackdropRaf = 0;
+  /* BRAND PREVIEW (H): one read-only getter so the preview script can SEE the demo. It reads state; it changes nothing. */
+  window.__brandProbe = () => { if (!landingActive) return null; const h = actors.find(a => a.isPlayer);
+    return { room: currentRoomId, cameraX, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded } : null,
+             cloudArt: (groundTileDefs.chCloud && (groundTileDefs.chCloud.art || (groundTileDefs.chCloud.frames && groundTileDefs.chCloud.frames[0]))) ? (groundTileDefs.chCloud.art || groundTileDefs.chCloud.frames[0]).slice() : null }; };
   function landingBackdropLoop() {
     landingBackdropRaf = 0;
     if (!landingActive) return;
@@ -17214,14 +17244,65 @@
     setTimeout(done, 1000);                                     // safety net
   }
   function fxSync(v) {
-    stopIdle();
+    stopIdle(); stopH();
     if (v === "f" || v === "g") { buildFx(); playDrop(); startIdle(); }
+    if (v === "h") { buildFx(); startH(); }
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) stopIdle(); else if (/^[fg]$/.test(document.body.dataset.logo || "")) startIdle(); });
+  /* ----- H: ledge made from the demo's own cloud art + reactions to the hero (reads the demo through window.__brandProbe, read-only) ----- */
+  const H = { timer: 0, last: 0, prev: null, room: null, roomSince: 0 };
+  function layoutH() {
+    const wrap = document.querySelector(".lgWrap"), cv = document.getElementById("gameCanvas"); if (!wrap || !cv) return;
+    const r = wrap.getBoundingClientRect(), cr = cv.getBoundingClientRect(); if (!r.width || !cr.width) return;
+    const root = document.documentElement.style;
+    root.setProperty("--hx", Math.round(r.left + r.width / 2) + "px"); root.setProperty("--hy", Math.round(r.top + r.height * 0.42) + "px");
+    root.setProperty("--hrx", Math.round(r.width * 0.8) + "px"); root.setProperty("--hry", Math.round(r.height * 0.6) + "px");
+    const q = window.__brandProbe && window.__brandProbe(); const art = q && q.cloudArt;
+    let ledge = wrap.querySelector(".hLedge");
+    if (!ledge) { ledge = document.createElement("canvas"); ledge.className = "hLedge"; ledge.setAttribute("aria-hidden", "true"); wrap.insertBefore(ledge, wrap.firstChild); }
+    if (!art) { ledge.style.display = "none"; return; }      // the demo has no cloud tile: no ledge (the rest still works)
+    ledge.style.display = "";
+    const artPx = cr.width / 768 * 4;                          // screen px per art pixel in the demo: the ledge uses the same pixel size
+    const cssW = r.width * 1.06, nW = Math.max(8, Math.round(cssW / artPx)), rows = 4;
+    if (ledge.width !== nW || ledge.dataset.sig !== art.join("")) {
+      ledge.width = nW; ledge.height = rows; ledge.dataset.sig = art.join(""); const c = ledge.getContext("2d");
+      for (let y = 0; y < rows; y++) for (let x = 0; x < nW; x++) { const col = art[y * 8 + (x % 8)]; if (col) { c.fillStyle = col; c.fillRect(x, y, 1, 1); } }
+    }
+    ledge.style.width = nW * artPx + "px"; ledge.style.height = rows * artPx + "px"; ledge.style.left = -((nW * artPx - r.width) / 2) + "px";
+  }
+  function hReact(kind) {
+    const w = document.querySelector(".lgWrap"); if (!w || w.dataset.hBusy) return;
+    const now = performance.now(); if (now - H.last < 6000) return; H.last = now;
+    const cls = kind === "land" ? "hLand" : kind === "jump" ? "hHop" : "hWig";
+    w.dataset.hBusy = "1"; w.classList.add(cls);
+    w.addEventListener("animationend", () => { w.classList.remove(cls); delete w.dataset.hBusy; }, { once: true });
+    setTimeout(() => { w.classList.remove(cls); delete w.dataset.hBusy; }, 900);
+  }
+  function hPoll() {
+    if (document.hidden || reduce.matches || document.body.dataset.logo !== "h" || !document.body.classList.contains("landing")) return;
+    const q = window.__brandProbe && window.__brandProbe(); if (!q || !q.hero) { H.prev = null; return; }
+    const now = performance.now(), h = q.hero, p = H.prev;
+    if (q.room !== H.room) { H.room = q.room; H.roomSince = now; }
+    if (p && now - H.roomSince > 700 && Math.abs(h.x - p.x) < 120 && Math.abs(h.y - p.y) < 120) {   // ignore the jump at a restart / room change
+      if (p.grounded && !h.grounded && h.vy < -250) hReact("jump");
+      else if (!p.grounded && h.grounded && p.vy > 200) hReact("land");
+      else {
+        const wrap = document.querySelector(".lgWrap"), cv = document.getElementById("gameCanvas"); if (wrap && cv) {
+          const r = wrap.getBoundingClientRect(), cr = cv.getBoundingClientRect(), k = cr.width / 768;
+          const sx = cr.left + (h.x + h.w / 2 - q.cameraX) * k, sy = cr.top + (h.y + h.h / 2) * k;
+          if (sx > r.left - 160 && sx < r.right + 160 && sy > r.top - 160 && sy < r.bottom + 160) hReact("near");
+        }
+      }
+    }
+    H.prev = { x: h.x, y: h.y, vy: h.vy, grounded: h.grounded };
+  }
+  function startH() { stopH(); layoutH(); H.timer = setInterval(() => { hPoll(); }, 100); H.layout = setInterval(layoutH, 500); }
+  function stopH() { clearInterval(H.timer); clearInterval(H.layout); H.prev = null; }
+  window.addEventListener("resize", () => { if (document.body.dataset.logo === "h") layoutH(); });
   /* logo variants */
-  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"]];
+  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"]];
   function setVariant(v, push) {
-    if (!/^[a-g]$/.test(v || "")) v = "";
+    if (!/^[a-h]$/.test(v || "")) v = "";
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
