@@ -681,7 +681,7 @@
   /* header: larger wordmark, centred over the left control panel (Build mode; in Play the panel is hidden so it stays left) */
   body:not(.play-mode) #topBar.aligned #homeLogo { grid-column: 1; justify-self: center; margin-right: var(--logoGap, 0px); }
 
-  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c|d|e|f|g|h or the corner toggle; no value = the current look ===== */
+  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c|d|e|f|g|h|i or the corner toggle; no value = the current look ===== */
   #landingWordmark img { image-rendering: pixelated; }
   /* A: grounded: no glow/blur/soft shadow, only a hard offset shadow */
   body[data-logo="a"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #0d1530); }
@@ -695,16 +695,16 @@
   body[data-logo="b"] #landingTrust, body[data-logo="c"] #landingTrust { order: 3; }
 
   /* D: the buttons adopt the logo's language (ink outline, hard offset shadow, logo yellow, teal accent). E: D + the logo rests on the button stack */
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button, body[data-logo="e"] #landingButtons button {
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button, body[data-logo="e"] #landingButtons button {
     background: #262b44; color: #fff; border: 3px solid #1a1020; border-radius: 8px;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 4px 4px 0 #1a1020; transition: transform 0.08s ease-out, box-shadow 0.08s ease-out; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:first-child, body[data-logo="e"] #landingButtons button:first-child {
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:first-child, body[data-logo="e"] #landingButtons button:first-child {
     background: #ffd21f; color: #1a1020; border-color: #1a1020; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 4px 4px 0 #1a1020; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover { transform: translate(-1px, -1px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 5px 5px 0 #18c6c6; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:first-child:hover, body[data-logo="e"] #landingButtons button:first-child:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 5px 5px 0 #18c6c6; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: translate(3px, 3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 1px 1px 0 #1a1020; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:focus-visible, body[data-logo="e"] #landingButtons button:focus-visible { outline: 3px solid #18c6c6; outline-offset: 3px; }
-  body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingWordmark img, body[data-logo="e"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #1a1020); }
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover { transform: translate(-1px, -1px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 5px 5px 0 #18c6c6; }
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:first-child:hover, body[data-logo="e"] #landingButtons button:first-child:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 5px 5px 0 #18c6c6; }
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: translate(3px, 3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 1px 1px 0 #1a1020; }
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:focus-visible, body[data-logo="e"] #landingButtons button:focus-visible { outline: 3px solid #18c6c6; outline-offset: 3px; }
+  body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingWordmark img, body[data-logo="e"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #1a1020); }
   body[data-logo="e"] #landingPanel > .main { display: flex; flex-direction: column; align-items: flex-start; }
   body[data-logo="e"] #landingWordmark { order: 0; position: relative; z-index: 0; width: 100%; max-width: 360px; margin: 0 0 -13px 0; }
   body[data-logo="e"] #landingWordmark img { width: 100%; max-width: none; margin: 0; }
@@ -715,7 +715,7 @@
   body[data-logo="e"] #landingButtons { order: 1; }
   body[data-logo="e"] #landingTagline { order: 2; margin: 20px 0 14px; }
   body[data-logo="e"] #landingTrust { order: 3; }
-  @media (prefers-reduced-motion: reduce) { body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button, body[data-logo="e"] #landingButtons button { transition: none; } body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover, body:is([data-logo="d"],[data-logo="f"],[data-logo="g"],[data-logo="h"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button, body[data-logo="e"] #landingButtons button { transition: none; } body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover, body:is([data-logo=\"d\"],[data-logo=\"f\"],[data-logo=\"g\"],[data-logo=\"h\"],[data-logo=\"i\"]) #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: none; } }
 
   /* ===== F = D + motion;  G = F + matching typography ===== */
   .lgWrap, .lgHover { display: contents; }                     /* inert for current / A-E */
@@ -759,34 +759,34 @@
   body[data-logo="g"] #landingTagline { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: clamp(17px, 2.1vw, 21px); letter-spacing: 0.025em; line-height: 1.32; }
   body[data-logo="g"] #landingTrust { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: 14px; letter-spacing: 0.03em; }
 
-  /* ===== H = D + the logo stands in the demo's world: cloud ledge (the demo's own cloud art), crisp backdrop, reacts to the hero ===== */
-  body[data-logo="h"] .lgWrap { display: block; position: relative; width: min(100%, 440px); transform-origin: 50% 92%; }
-  body[data-logo="h"] .lgHover { display: block; position: relative; z-index: 1; }
-  body[data-logo="h"] .lgHover img { width: 100%; max-width: none; margin: 0; }
-  .hLedge { display: none; }
-  body[data-logo="h"] .hLedge { display: block; position: absolute; z-index: 0; left: -3%; top: 91.5%; image-rendering: pixelated; pointer-events: none; }
+  /* ===== H = D + crisp backdrop around the logo and reactions to the hero (the cloud ledge was removed);  I = H + Gary runs over the logo and jumps into the game ===== */
+  body:is([data-logo="h"],[data-logo="i"]) .lgWrap { display: block; position: relative; width: min(100%, 440px); transform-origin: 50% 92%; }
+  body:is([data-logo="h"],[data-logo="i"]) .lgHover { display: block; position: relative; z-index: 1; }
+  body:is([data-logo="h"],[data-logo="i"]) .lgHover img { width: 100%; max-width: none; margin: 0; }
   /* backdrop: the dim wash gets a soft hole around the logo, and the demo's edge fade is much shorter, so the world behind the logo is crisp.
      The wash stays full strength behind the tagline, buttons and small print. */
-  body[data-logo="h"] #landing { background: none; }
-  body[data-logo="h"] #landing::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  body:is([data-logo="h"],[data-logo="i"]) #landing { background: none; }
+  body:is([data-logo="h"],[data-logo="i"]) #landing::before { content: ""; position: absolute; inset: 0; pointer-events: none;
     background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.6) 34%, rgba(10,10,18,0) 66%, rgba(10,10,18,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%);
     mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%); }
-  body.landing[data-logo="h"] #gameCanvas {
+  body.landing:is([data-logo="h"],[data-logo="i"]) #gameCanvas {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
     mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
     -webkit-mask-composite: source-in; mask-composite: intersect; }
   /* reactions (transform only, one at a time) */
-  body[data-logo="h"] .lgWrap.hLand { animation: hLand 0.42s ease-out 1; }
-  body[data-logo="h"] .lgWrap.hHop { animation: hHop 0.46s ease-out 1; }
-  body[data-logo="h"] .lgWrap.hWig { animation: hWig 0.5s ease-in-out 1; }
+  body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hLand { animation: hLand 0.42s ease-out 1; }
+  body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hHop { animation: hHop 0.46s ease-out 1; }
+  body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hWig { animation: hWig 0.5s ease-in-out 1; }
   @keyframes hLand { 0% { transform: none; } 22% { transform: scale(1.045, 0.935); } 50% { transform: scale(0.99, 1.025); } 75% { transform: scale(1.01, 0.99); } 100% { transform: none; } }
   @keyframes hHop  { 0% { transform: none; } 30% { transform: translateY(-6px) scale(0.985, 1.02); } 60% { transform: translateY(0) scale(1.03, 0.965); } 100% { transform: none; } }
   @keyframes hWig  { 0% { transform: none; } 25% { transform: rotate(-1.3deg); } 60% { transform: rotate(1.1deg); } 100% { transform: none; } }
-  @media (prefers-reduced-motion: reduce) { body[data-logo="h"] .lgWrap.hLand, body[data-logo="h"] .lgWrap.hHop, body[data-logo="h"] .lgWrap.hWig { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hLand, body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hHop, body:is([data-logo="h"],[data-logo="i"]) .lgWrap.hWig { animation: none; } }
   /* landing tagline copy: headline + descriptor (preview) */
   #landingTagline .tgHead { display: block; font-weight: 800; font-size: clamp(20px, 2.5vw, 25px); line-height: 1.12; margin-bottom: 5px; }
   #landingTagline .tgDesc { display: block; font-size: clamp(14px, 1.7vw, 16px); line-height: 1.35; }
+  #garyIntro { position: fixed; z-index: 510; left: 0; top: 0; pointer-events: none; image-rendering: pixelated; will-change: transform; display: none; }
+  body:is([data-logo="i"]) #garyIntro.on { display: block; }
   /* the preview-only switch */
   #logoToggle { position: fixed; top: 10px; left: 10px; z-index: 5000; display: flex; gap: 2px; align-items: center; padding: 3px 4px; border-radius: 8px;
     background: rgba(10,10,20,0.55); font: 11px/1 system-ui, sans-serif; color: #cfd2e6; opacity: 0.55; }
@@ -14641,8 +14641,17 @@
   let landingBackdropRaf = 0;
   /* BRAND PREVIEW (H): one read-only getter so the preview script can SEE the demo. It reads state; it changes nothing. */
   window.__brandProbe = () => { if (!landingActive) return null; const h = actors.find(a => a.isPlayer);
-    return { room: currentRoomId, cameraX, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded } : null,
-             cloudArt: (groundTileDefs.chCloud && (groundTileDefs.chCloud.art || (groundTileDefs.chCloud.frames && groundTileDefs.chCloud.frames[0]))) ? (groundTileDefs.chCloud.art || groundTileDefs.chCloud.frames[0]).slice() : null }; };
+    const def = h && actorDefs[h.defId]; const poses = def && def.poses ? { stand: def.poses.stand && def.poses.stand.slice(), stride: def.poses.stride && def.poses.stride.slice(), air: def.poses.air && def.poses.air.slice(), crouch: def.poses.crouch && def.poses.crouch.slice() } : null;
+    return { room: currentRoomId, cameraX, cols: COLS, tile: TILE, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded } : null, heroPoses: poses, heroArt: def && def.art ? def.art.slice() : null }; };
+  /* BRAND PREVIEW (I, the Gary intro): the only WRITE hooks. hold = the landing autopilot stands still; hideHero = the hero is not drawn (an existing engine flag);
+     placeHero = put the hero somewhere; floorTop = read-only. The world (coins, clouds, enemies) keeps running the whole time. */
+  window.__brandHold = false;
+  window.__brandHooks = {
+    hold(on) { window.__brandHold = !!on; landingBotReset(); },
+    hideHero(on) { const h = actors.find(a => a.isPlayer); if (h) h.vortexHidden = !!on; },
+    placeHero(x, y) { const h = actors.find(a => a.isPlayer); if (!h) return; h.x = x; h.y = y; h.vx = 0; h.vy = 0; h.grounded = true; h.facingDir = 1; },
+    floorTop(col) { for (let cy = 0; cy < ROWS; cy++) if (isCellBlocking(col, cy, { isPlayer: false })) return cy * TILE; return null; }
+  };
   function landingBackdropLoop() {
     landingBackdropRaf = 0;
     if (!landingActive) return;
@@ -14748,6 +14757,7 @@
   }
   function landingAutoplay(dt) {
     if (!landingActive || appMode !== "play" || !landingHero || landingHero.id !== "cloud-hopper") return;
+    if (window.__brandHold) { landingBotRelease(); return; } // BRAND PREVIEW (I): the intro is running; the autopilot waits
     if (playSessionEnded) { // finished (or lost): let the beat play, then start over
       landingBotRelease(); landingBotEndT += dt;
       if (landingBotEndT > 2) { landingBotReset(); restartPlaySessionFromSnapshot(); playReadyUntil = null; }
@@ -17247,12 +17257,13 @@
     setTimeout(done, 1000);                                     // safety net
   }
   function fxSync(v) {
-    stopIdle(); stopH();
+    stopIdle(); stopH(); introFinish(false);
     if (v === "f" || v === "g") { buildFx(); playDrop(); startIdle(); }
-    if (v === "h") { buildFx(); startH(); }
+    if (v === "h" || v === "i") { buildFx(); startH(); }
+    if (v === "i") setTimeout(startIntro, 60);
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) stopIdle(); else if (/^[fg]$/.test(document.body.dataset.logo || "")) startIdle(); });
-  /* ----- H: ledge made from the demo's own cloud art + reactions to the hero (reads the demo through window.__brandProbe, read-only) ----- */
+  /* ----- H: backdrop opening + reactions to the hero (reads the demo through window.__brandProbe, read-only) ----- */
   const H = { timer: 0, last: 0, prev: null, room: null, roomSince: 0 };
   function layoutH() {
     const wrap = document.querySelector(".lgWrap"), cv = document.getElementById("gameCanvas"); if (!wrap || !cv) return;
@@ -17260,18 +17271,6 @@
     const root = document.documentElement.style;
     root.setProperty("--hx", Math.round(r.left + r.width / 2) + "px"); root.setProperty("--hy", Math.round(r.top + r.height * 0.42) + "px");
     root.setProperty("--hrx", Math.round(r.width * 0.8) + "px"); root.setProperty("--hry", Math.round(r.height * 0.6) + "px");
-    const q = window.__brandProbe && window.__brandProbe(); const art = q && q.cloudArt;
-    let ledge = wrap.querySelector(".hLedge");
-    if (!ledge) { ledge = document.createElement("canvas"); ledge.className = "hLedge"; ledge.setAttribute("aria-hidden", "true"); wrap.insertBefore(ledge, wrap.firstChild); }
-    if (!art) { ledge.style.display = "none"; return; }      // the demo has no cloud tile: no ledge (the rest still works)
-    ledge.style.display = "";
-    const artPx = cr.width / 768 * 4;                          // screen px per art pixel in the demo: the ledge uses the same pixel size
-    const cssW = r.width * 1.06, nW = Math.max(8, Math.round(cssW / artPx)), rows = 4;
-    if (ledge.width !== nW || ledge.dataset.sig !== art.join("")) {
-      ledge.width = nW; ledge.height = rows; ledge.dataset.sig = art.join(""); const c = ledge.getContext("2d");
-      for (let y = 0; y < rows; y++) for (let x = 0; x < nW; x++) { const col = art[y * 8 + (x % 8)]; if (col) { c.fillStyle = col; c.fillRect(x, y, 1, 1); } }
-    }
-    ledge.style.width = nW * artPx + "px"; ledge.style.height = rows * artPx + "px"; ledge.style.left = -((nW * artPx - r.width) / 2) + "px";
   }
   function hReact(kind) {
     const w = document.querySelector(".lgWrap"); if (!w || w.dataset.hBusy) return;
@@ -17282,7 +17281,7 @@
     setTimeout(() => { w.classList.remove(cls); delete w.dataset.hBusy; }, 900);
   }
   function hPoll() {
-    if (document.hidden || reduce.matches || document.body.dataset.logo !== "h" || !document.body.classList.contains("landing")) return;
+    if (document.hidden || reduce.matches || !/^[hi]$/.test(document.body.dataset.logo || "") || !document.body.classList.contains("landing")) return;
     const q = window.__brandProbe && window.__brandProbe(); if (!q || !q.hero) { H.prev = null; return; }
     const now = performance.now(), h = q.hero, p = H.prev;
     if (q.room !== H.room) { H.room = q.room; H.roomSince = now; }
@@ -17301,11 +17300,66 @@
   }
   function startH() { stopH(); layoutH(); H.timer = setInterval(() => { hPoll(); }, 100); H.layout = setInterval(layoutH, 500); }
   function stopH() { clearInterval(H.timer); clearInterval(H.layout); H.prev = null; }
-  window.addEventListener("resize", () => { if (document.body.dataset.logo === "h") layoutH(); });
+  window.addEventListener("resize", () => { if (/^[hi]$/.test(document.body.dataset.logo || "")) layoutH(); });
+  /* ----- I: Gary runs in from the left over the logo, jumps off its right side and lands in the demo, where the real hero takes over ----- */
+  const LOGO_TOPS = {"step": 6, "w": 1332, "h": 657, "y": [377, 373, 370, 368, 366, 364, 362, 361, 359, 292, 286, 145, 131, 120, 111, 108, 107, 108, 113, 117, 79, 75, 71, 68, 65, 61, 58, 59, 59, 64, 74, 87, 100, 114, 128, 155, 145, 134, 124, 114, 103, 94, 83, 71, 61, 50, 39, 28, 18, 6, 1, 0, 0, 0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 14, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27, 27, 29, 30, 31, 32, 34, 35, 36, 37, 39, 40, 41, 42, 44, 45, 46, 47, 42, 32, 27, 25, 25, 25, 25, 26, 26, 28, 30, 34, 39, 45, 49, 55, 60, 64, 7, 5, 3, 0, 0, 0, 1, 7, 23, 42, 40, 37, 14, 3, 0, 0, 0, 0, 3, 11, 21, 28, 27, 26, 25, 25, 25, 28, 35, 103, 101, 100, 99, 98, 96, 96, 96, 96, 96, 96, 96, 96, 96, 97, 103, 109, 114, 121, 128, 133, 208, 208, 158, 144, 135, 130, 124, 121, 118, 118, 118, 111, 107, 107, 98, 93, 88, 83, 83, 83, 83, 83, 85, 72, 72, 50, 48, 48, 48, 60, 34, 33, 33, 33, 61, 48, 49, 48, 49, 48, 48, 120, 123, 126, 130, 133, 139, 164, 163, 163, 163, 172, 184, 195, 397, 400, 404, 407, 410, 414, 418]};
+  const INTRO = { raf: 0, live: false };
+  function introCurve() {       // the logo's top edge as a line a character can stand on (image px): highest point under the feet, then smoothed
+    const a = LOGO_TOPS.y.map((v, i, arr) => v >= 0 ? v : (arr[i - 1] >= 0 ? arr[i - 1] : 400)), n = a.length, ft = 6, sm = 5, m = [], o = [];
+    for (let i = 0; i < n; i++) { let v = 1e9; for (let j = Math.max(0, i - ft); j <= Math.min(n - 1, i + ft); j++) v = Math.min(v, a[j]); m.push(v); }
+    for (let i = 0; i < n; i++) { let t = 0, c = 0; for (let j = Math.max(0, i - sm); j <= Math.min(n - 1, i + sm); j++) { t += m[j]; c++; } o.push(t / c); }
+    return x => { const f = Math.max(0, Math.min(n - 1, x / LOGO_TOPS.step)), i = Math.floor(f), j = Math.min(n - 1, i + 1); return o[i] + (o[j] - o[i]) * (f - i); };
+  }
+  function introFinish(handoff) {
+    if (!INTRO.live) return; INTRO.live = false; cancelAnimationFrame(INTRO.raf);
+    const hk = window.__brandHooks, g = document.getElementById("garyIntro");
+    if (handoff && hk && INTRO.land) { hk.placeHero(INTRO.land.x, INTRO.land.y); }
+    if (hk) { hk.hideHero(false); hk.hold(false); }
+    if (g) g.classList.remove("on");
+  }
+  function startIntro() {
+    introFinish(false);
+    const q = window.__brandProbe && window.__brandProbe(), hk = window.__brandHooks;
+    const wrap = document.querySelector(".lgWrap"), img = wrap && wrap.querySelector("img"), cv = document.getElementById("gameCanvas");
+    if (!q || !q.hero || !q.heroPoses || !hk || !img || !cv || reduce.matches || document.hidden || innerWidth < 900) return;   // no room / no motion: the demo just starts
+    const lr = img.getBoundingClientRect(), cr = cv.getBoundingClientRect(), btn = document.getElementById("landingButtons").getBoundingClientRect();
+    if (!lr.width || !cr.width) return;
+    const sc = cr.width / 768, artPx = sc * 4, size = Math.round(artPx * 8), k = lr.width / LOGO_TOPS.w, curve = introCurve();
+    // landing spot: flat ground right of the button column (world columns), found by reading the demo's floor
+    const cMin = Math.ceil(((Math.max(btn.right, lr.right - 40) + 60) - cr.left) / sc / q.tile);
+    const floors = []; for (let c = 0; c < q.cols; c++) floors.push(hk.floorTop(c));
+    const freq = {}; floors.forEach(f => { if (f != null) freq[f] = (freq[f] || 0) + 1; });
+    const main = +Object.keys(freq).sort((a, b) => freq[b] - freq[a])[0];            // the room's usual ground level (a dip or a step is not it)
+    let col = -1, floor = null;
+    for (let c = Math.max(1, cMin); c < q.cols - 2; c++) if (floors[c] === main && floors[c - 1] === main && floors[c + 1] === main) { col = c; floor = main; break; }
+    if (col < 0) return;
+    const xt = cr.left + (col * q.tile + q.tile / 2) * sc, yt = cr.top + floor * sc;       // screen feet position of the landing
+    const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = -size, speed = lr.width * 0.95;
+    const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
+    const yj = feetAt(xj), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
+    const tRun = (xj - x0) / speed;
+    INTRO.land = { x: (col * q.tile + q.tile / 2) - q.hero.w / 2, y: floor - q.hero.h };
+    const g_ = document.getElementById("garyIntro") || Object.assign(document.createElement("canvas"), { id: "garyIntro", width: 8, height: 8 }); if (!g_.parentNode) { g_.setAttribute("aria-hidden", "true"); document.body.appendChild(g_); }
+    g_.style.width = g_.style.height = size + "px"; const cx = g_.getContext("2d");
+    const draw = pose => { const art = q.heroPoses[pose] || q.heroPoses.stand; cx.clearRect(0, 0, 8, 8); for (let i = 0; i < 64; i++) if (art[i]) { cx.fillStyle = art[i]; cx.fillRect(i % 8, (i / 8) | 0, 1, 1); } };
+    let shown = ""; const set = pose => { if (pose !== shown) { shown = pose; draw(pose); } };
+    hk.hold(true); hk.hideHero(true); INTRO.live = true; g_.classList.add("on");
+    const t0 = performance.now(); const place = (x, y) => { g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)"; };
+    const step = now => {
+      if (!INTRO.live) return; const t = (now - t0) / 1000;
+      if (t < tRun) { const x = x0 + speed * t; place(x, x < lr.left ? feetAt(lr.left) : feetAt(x)); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
+      else if (t < tRun + tFall) { const u = t - tRun; place(xj + vx * u, yj + vy0 * u + 0.5 * g * u * u); set("air"); }
+      else { place(xt, yt); set("crouch"); if (t > tRun + tFall + 0.06) { introFinish(true); return; } }
+      INTRO.raf = requestAnimationFrame(step);
+    };
+    INTRO.raf = requestAnimationFrame(step);
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) introFinish(false); });
+  window.addEventListener("resize", () => introFinish(false));
   /* logo variants */
-  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"]];
+  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"], ["i", "I"]];
   function setVariant(v, push) {
-    if (!/^[a-h]$/.test(v || "")) v = "";
+    if (!/^[a-i]$/.test(v || "")) v = "";
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
