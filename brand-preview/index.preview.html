@@ -17305,7 +17305,7 @@
   const LOGO_TOPS = {"step": 6, "w": 1332, "h": 657, "y": [377, 373, 370, 368, 366, 364, 362, 361, 359, 292, 286, 145, 131, 120, 111, 108, 107, 108, 113, 117, 79, 75, 71, 68, 65, 61, 58, 59, 59, 64, 74, 87, 100, 114, 128, 155, 145, 134, 124, 114, 103, 94, 83, 71, 61, 50, 39, 28, 18, 6, 1, 0, 0, 0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 14, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27, 27, 29, 30, 31, 32, 34, 35, 36, 37, 39, 40, 41, 42, 44, 45, 46, 47, 42, 32, 27, 25, 25, 25, 25, 26, 26, 28, 30, 34, 39, 45, 49, 55, 60, 64, 7, 5, 3, 0, 0, 0, 1, 7, 23, 42, 40, 37, 14, 3, 0, 0, 0, 0, 3, 11, 21, 28, 27, 26, 25, 25, 25, 28, 35, 103, 101, 100, 99, 98, 96, 96, 96, 96, 96, 96, 96, 96, 96, 97, 103, 109, 114, 121, 128, 133, 208, 208, 158, 144, 135, 130, 124, 121, 118, 118, 118, 111, 107, 107, 98, 93, 88, 83, 83, 83, 83, 83, 85, 72, 72, 50, 48, 48, 48, 60, 34, 33, 33, 33, 61, 48, 49, 48, 49, 48, 48, 120, 123, 126, 130, 133, 139, 164, 163, 163, 163, 172, 184, 195, 397, 400, 404, 407, 410, 414, 418]};
   const INTRO = { raf: 0, live: false };
   function introCurve() {       // the logo's top edge as a line a character can stand on (image px): highest point under the feet, then smoothed
-    const a = LOGO_TOPS.y.map((v, i, arr) => v >= 0 ? v : (arr[i - 1] >= 0 ? arr[i - 1] : 400)), n = a.length, ft = 6, sm = 5, m = [], o = [];
+    const a = LOGO_TOPS.y.map((v, i, arr) => v >= 0 ? v : (arr[i - 1] >= 0 ? arr[i - 1] : 400)), n = a.length, ft = 2, sm = 1, m = [], o = [];
     for (let i = 0; i < n; i++) { let v = 1e9; for (let j = Math.max(0, i - ft); j <= Math.min(n - 1, i + ft); j++) v = Math.min(v, a[j]); m.push(v); }
     for (let i = 0; i < n; i++) { let t = 0, c = 0; for (let j = Math.max(0, i - sm); j <= Math.min(n - 1, i + sm); j++) { t += m[j]; c++; } o.push(t / c); }
     return x => { const f = Math.max(0, Math.min(n - 1, x / LOGO_TOPS.step)), i = Math.floor(f), j = Math.min(n - 1, i + 1); return o[i] + (o[j] - o[i]) * (f - i); };
@@ -17334,7 +17334,7 @@
     for (let c = Math.max(1, cMin); c < q.cols - 2; c++) if (floors[c] === main && floors[c - 1] === main && floors[c + 1] === main) { col = c; floor = main; break; }
     if (col < 0) return;
     const xt = cr.left + (col * q.tile + q.tile / 2) * sc, yt = cr.top + floor * sc;       // screen feet position of the landing
-    const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = -size, speed = lr.width * 0.95;
+    const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = lr.left - size * 0.7, speed = lr.width * 0.95;
     const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
     const yj = feetAt(xj), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
     const tRun = (xj - x0) / speed;
@@ -17344,7 +17344,9 @@
     const draw = pose => { const art = q.heroPoses[pose] || q.heroPoses.stand; cx.clearRect(0, 0, 8, 8); for (let i = 0; i < 64; i++) if (art[i]) { cx.fillStyle = art[i]; cx.fillRect(i % 8, (i / 8) | 0, 1, 1); } };
     let shown = ""; const set = pose => { if (pose !== shown) { shown = pose; draw(pose); } };
     hk.hold(true); hk.hideHero(true); INTRO.live = true; g_.classList.add("on");
-    const t0 = performance.now(); const place = (x, y) => { g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)"; };
+    let lowRow = 0; for (let i = 0; i < 64; i++) if (q.heroPoses.stand[i] && (i >> 3) > lowRow) lowRow = i >> 3;
+    const sink = (7 - lowRow) * artPx;           // transparent rows under the feet: push the sprite down so the feet themselves touch
+    const t0 = performance.now(); const place = (x, y) => { y += sink; g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)"; };
     const step = now => {
       if (!INTRO.live) return; const t = (now - t0) / 1000;
       if (t < tRun) { const x = x0 + speed * t; place(x, x < lr.left ? feetAt(lr.left) : feetAt(x)); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
