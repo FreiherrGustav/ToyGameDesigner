@@ -784,6 +784,9 @@
   @keyframes hHop  { 0% { transform: none; } 30% { transform: translateY(-6px) scale(0.985, 1.02); } 60% { transform: translateY(0) scale(1.03, 0.965); } 100% { transform: none; } }
   @keyframes hWig  { 0% { transform: none; } 25% { transform: rotate(-1.3deg); } 60% { transform: rotate(1.1deg); } 100% { transform: none; } }
   @media (prefers-reduced-motion: reduce) { body[data-logo="h"] .lgWrap.hLand, body[data-logo="h"] .lgWrap.hHop, body[data-logo="h"] .lgWrap.hWig { animation: none; } }
+  /* landing tagline copy: headline + descriptor (preview) */
+  #landingTagline .tgHead { display: block; font-weight: 800; font-size: clamp(20px, 2.5vw, 25px); line-height: 1.12; margin-bottom: 5px; }
+  #landingTagline .tgDesc { display: block; font-size: clamp(14px, 1.7vw, 16px); line-height: 1.35; }
   /* the preview-only switch */
   #logoToggle { position: fixed; top: 10px; left: 10px; z-index: 5000; display: flex; gap: 2px; align-items: center; padding: 3px 4px; border-radius: 8px;
     background: rgba(10,10,20,0.55); font: 11px/1 system-ui, sans-serif; color: #cfd2e6; opacity: 0.55; }
@@ -816,7 +819,7 @@
   <div id="landingPanel">
     <div class="main">
     <div id="landingWordmark">TinyGameMaker</div>
-    <div id="landingTagline">A toy for making games. Drop pieces on the board. They just work.</div>
+    <div id="landingTagline"><span class="tgHead">Make a game. Make a mess.</span><span class="tgDesc">A tiny game maker where every piece does something.</span></div>
     <div id="landingButtons">
       <button id="landingMakeBtn"><span class="ic" aria-hidden="true">✎</span>Make a game</button>
       <button id="landingSurpriseBtn"><span class="ic" aria-hidden="true">🎲</span>Surprise me</button>
