@@ -17316,6 +17316,7 @@
     if (handoff && hk && INTRO.land) { hk.placeHero(INTRO.land.x, INTRO.land.y); }
     if (hk) { hk.hideHero(false); hk.hold(false); }
     if (g) g.classList.remove("on");
+    const lw = document.querySelector(".lgWrap"); if (lw) lw.style.transform = "";
   }
   function startIntro() {
     introFinish(false);
@@ -17336,7 +17337,8 @@
     const xt = cr.left + (col * q.tile + q.tile / 2) * sc, yt = cr.top + floor * sc;       // screen feet position of the landing
     const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = lr.left - size * 0.7, speed = lr.width * 0.95;
     const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
-    const yj = feetAt(xj), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
+    const SQ = 0.9, ox = lr.top + lr.height * 0.92, sq = e => ox + (e - ox) * SQ;      // logo squish: how far it sinks under Gary's push-off
+    const yj = sq(feetAt(xj)), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
     const tRun = (xj - x0) / speed;
     INTRO.land = { x: (col * q.tile + q.tile / 2) - q.hero.w / 2, y: floor - q.hero.h };
     const g_ = document.getElementById("garyIntro") || Object.assign(document.createElement("canvas"), { id: "garyIntro", width: 8, height: 8 }); if (!g_.parentNode) { g_.setAttribute("aria-hidden", "true"); document.body.appendChild(g_); }
@@ -17347,9 +17349,15 @@
     let lowRow = 0; for (let i = 0; i < 64; i++) if (q.heroPoses.stand[i] && (i >> 3) > lowRow) lowRow = i >> 3;
     const sink = (7 - lowRow) * artPx;           // transparent rows under the feet: push the sprite down so the feet themselves touch
     const t0 = performance.now(); const place = (x, y) => { y += sink; g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)"; };
+    const lw = wrap, sqT = 0.14;
+    const squish = t => {            // 1 = rest. Sinks in the last 0.14s of the run, springs back with a small overshoot after take-off
+      let sy = 1; if (t > tRun - sqT && t < tRun) { const u = (t - (tRun - sqT)) / sqT; sy = 1 - (1 - SQ) * u * u; }
+      else if (t >= tRun) { const u = t - tRun; sy = 1 - (1 - SQ) * Math.exp(-u * 9) * Math.cos(u * 22) * 1.0 + 0; sy = Math.min(sy, 1.06); if (u > 0.7) sy = 1; }
+      lw.style.transform = sy === 1 ? "" : "scale(" + (1 + (1 - sy) * 0.5).toFixed(4) + "," + sy.toFixed(4) + ")"; return sy;
+    };
     const step = now => {
-      if (!INTRO.live) return; const t = (now - t0) / 1000;
-      if (t < tRun) { const x = x0 + speed * t; place(x, x < lr.left ? feetAt(lr.left) : feetAt(x)); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
+      if (!INTRO.live) { lw.style.transform = ""; return; } const t = (now - t0) / 1000, sy = squish(t);
+      if (t < tRun) { const x = x0 + speed * t, fy = x < lr.left ? feetAt(lr.left) : feetAt(x); place(x, ox + (fy - ox) * sy); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
       else if (t < tRun + tFall) { const u = t - tRun; place(xj + vx * u, yj + vy0 * u + 0.5 * g * u * u); set("air"); }
       else { place(xt, yt); set("crouch"); if (t > tRun + tFall + 0.06) { introFinish(true); return; } }
       INTRO.raf = requestAnimationFrame(step);
