@@ -681,7 +681,7 @@
   /* header: larger wordmark, centred over the left control panel (Build mode; in Play the panel is hidden so it stays left) */
   body:not(.play-mode) #topBar.aligned #homeLogo { grid-column: 1; justify-self: center; margin-right: var(--logoGap, 0px); }
 
-  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c or the corner toggle; no value = the current look ===== */
+  /* ===== LOGO VARIANTS (preview only): ?logo=a|b|c|d|e or the corner toggle; no value = the current look ===== */
   #landingWordmark img { image-rendering: pixelated; }
   /* A: grounded: no glow/blur/soft shadow, only a hard offset shadow */
   body[data-logo="a"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #0d1530); }
@@ -693,6 +693,29 @@
   body[data-logo="b"] #landingButtons, body[data-logo="c"] #landingButtons { order: 1; }
   body[data-logo="b"] #landingTagline, body[data-logo="c"] #landingTagline { order: 2; margin: 18px 0 14px; }
   body[data-logo="b"] #landingTrust, body[data-logo="c"] #landingTrust { order: 3; }
+
+  /* D: the buttons adopt the logo's language (ink outline, hard offset shadow, logo yellow, teal accent). E: D + the logo rests on the button stack */
+  body[data-logo="d"] #landingButtons button, body[data-logo="e"] #landingButtons button {
+    background: #262b44; color: #fff; border: 3px solid #1a1020; border-radius: 8px;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 4px 4px 0 #1a1020; transition: transform 0.08s ease-out, box-shadow 0.08s ease-out; }
+  body[data-logo="d"] #landingButtons button:first-child, body[data-logo="e"] #landingButtons button:first-child {
+    background: #ffd21f; color: #1a1020; border-color: #1a1020; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 4px 4px 0 #1a1020; }
+  body[data-logo="d"] #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover { transform: translate(-1px, -1px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 5px 5px 0 #18c6c6; }
+  body[data-logo="d"] #landingButtons button:first-child:hover, body[data-logo="e"] #landingButtons button:first-child:hover { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.5), 5px 5px 0 #18c6c6; }
+  body[data-logo="d"] #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: translate(3px, 3px); box-shadow: inset 0 0 0 2px rgba(255,255,255,0.16), 1px 1px 0 #1a1020; }
+  body[data-logo="d"] #landingButtons button:focus-visible, body[data-logo="e"] #landingButtons button:focus-visible { outline: 3px solid #18c6c6; outline-offset: 3px; }
+  body[data-logo="d"] #landingWordmark img, body[data-logo="e"] #landingWordmark img { filter: drop-shadow(4px 4px 0 #1a1020); }
+  body[data-logo="e"] #landingPanel > .main { display: flex; flex-direction: column; align-items: flex-start; }
+  body[data-logo="e"] #landingWordmark { order: 0; position: relative; z-index: 0; width: 100%; max-width: 360px; margin: 0 0 -13px 0; }
+  body[data-logo="e"] #landingWordmark img { width: 100%; max-width: none; margin: 0; }
+  /* the buttons sit in front of the logo's base, so the logo reads as standing on the top edge of the stack; a flat shadow falls on the first button */
+  body[data-logo="e"] #landingButtons { position: relative; z-index: 1; }
+  body[data-logo="e"] #landingButtons button { position: relative; }
+  body[data-logo="e"] #landingButtons button:first-child::before { content: ""; position: absolute; left: 5%; right: 4%; top: 0; height: 9px; background: rgba(26,16,32,0.38); pointer-events: none; }
+  body[data-logo="e"] #landingButtons { order: 1; }
+  body[data-logo="e"] #landingTagline { order: 2; margin: 20px 0 14px; }
+  body[data-logo="e"] #landingTrust { order: 3; }
+  @media (prefers-reduced-motion: reduce) { body[data-logo="d"] #landingButtons button, body[data-logo="e"] #landingButtons button { transition: none; } body[data-logo="d"] #landingButtons button:hover, body[data-logo="e"] #landingButtons button:hover, body[data-logo="d"] #landingButtons button:active, body[data-logo="e"] #landingButtons button:active { transform: none; } }
   /* the preview-only switch */
   #logoToggle { position: fixed; top: 10px; left: 10px; z-index: 5000; display: flex; gap: 2px; align-items: center; padding: 3px 4px; border-radius: 8px;
     background: rgba(10,10,20,0.55); font: 11px/1 system-ui, sans-serif; color: #cfd2e6; opacity: 0.55; }
@@ -17120,9 +17143,9 @@
     if (!pal || !cv || !pal.offsetParent) return; bar.style.setProperty("--logoGap", Math.max(0, Math.round(cv.getBoundingClientRect().left - pal.getBoundingClientRect().right)) + "px"); }
   apply(); window.addEventListener("load", apply);
   /* logo variants */
-  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"]];
+  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"]];
   function setVariant(v, push) {
-    if (!/^[abc]$/.test(v || "")) v = "";
+    if (!/^[a-e]$/.test(v || "")) v = "";
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
