@@ -17591,17 +17591,22 @@
       JR.muz = { x: m.X((c.x + 1) * 32 - 3), y: m.Y(c.y * 32 + 4) };            // the cannon's NE corner, i.e. where the shot leaves
       JR.fly = { dur: 1.5, S: 5 }; FX.on = true; FX.t = 0; FX.p = Math.max(3, Math.round(m.sc * 4)); sp.classList.add("on"); fx.classList.add("on"); jTo("fly");
     };
-    const flyPos = u => {                       // quadratic Bezier from the muzzle, up and over, ending large near the top of the screen
-      const m = jMap(), size = Math.round(m.sc * 4 * 8), P0 = [JR.muz.x, JR.muz.y], P2 = [m.X(14 * 32), m.rect.top + size * JR.fly.S * 0.55 + 10], C = [jLerp(P0[0], P2[0], 0.75), Math.min(P0[1], P2[1]) - m.rect.height * 0.05];
-      const v = easeInOut(u), a = (1 - v) * (1 - v), b = 2 * (1 - v) * v, d = v * v; return [a * P0[0] + b * C[0] + d * P2[0], a * P0[1] + b * C[1] + d * P2[1]]; };
+    const flyPos = u => {                       // quadratic Bezier from the muzzle, up and over to the RIGHT, leaving the screen (already large) on the right edge
+      const m = jMap(), size = Math.round(m.sc * 4 * 8), P0 = [JR.muz.x, JR.muz.y], P2 = [innerWidth + size * JR.fly.S * 0.52, m.rect.top + m.rect.height * 0.22], C = [jLerp(P0[0], P2[0], 0.5), Math.min(P0[1], P2[1]) - m.rect.height * 0.12];
+      const v = jLerp(u, easeInOut(u), 0.5), a = (1 - v) * (1 - v), b = 2 * (1 - v) * v, d = v * v; return [a * P0[0] + b * C[0] + d * P2[0], a * P0[1] + b * C[1] + d * P2[1]]; };
     const startFall = info => {                 // 3: the sprite arrives big at the top, shrinks and lands on the safe square
       const m = jMap(), box = { x: info.safe.x * 32 + 5, y: info.safe.y * 32 + 5, w: 22, h: 22 };
       JR.land = { box, fx: m.X(box.x + box.w / 2), fy: m.Y(box.y + box.h) };
       { let bd = 1e9; JR.target = info.holes[0]; info.holes.forEach(o => { if (o.x < 10) return; const d = Math.hypot(o.x - info.safe.x, o.y - info.safe.y); if (d < bd) { bd = d; JR.target = o; } }); }   /* the hole he will go down: nearest one on the visible side */
        const e = flyPos(1); JR.fallFrom = { x: e[0], y: e[1] }; sprPose("air"); jTo("fall");
     };
-    const toLamp = () => {                      // 3 -> 4: snap-cut; he drops in from the top of the lamp at normal size
-      loadScene("lavalamp"); hk.launch(13 * 32 + 5, 6 * 32, 0, 0); hk.hideHero(false); JR.lampDir = -1; JR.lampFlip = 0; jTo("lamp");
+    const toLamp = () => {                      // 3 -> 4: snap-cut. He comes out of the lamp's "black hole": enlarged, spinning, starting at the hole's spot and shrinking down into the lamp
+      const m0 = jMap(), hole = [m0.X(19 * 32 + 16), m0.Y(9 * 32 + 16)];
+      loadScene("lavalamp"); const q = jProbe();
+      if (q && q.heroPoses) {
+        sprInit(q); sprPose("air"); sp.classList.add("on"); const m = jMap(), to = feetToCenter(m.X(13 * 32 + 5 + 11), m.Y(6 * 32 + 22));
+        JR.lf = { from: hole, to }; jTo("lampfall");
+      } else { hk.launch(13 * 32 + 5, 6 * 32, 0, 0); hk.hideHero(false); JR.lampDir = -1; JR.lampFlip = 0; jTo("lamp"); }
     };
     JR.step = guard(now => {
       if (document.hidden) { JR.last = now; JR.raf = requestAnimationFrame(JR.step); return; }   // tab hidden: the whole journey stands still
@@ -17656,7 +17661,12 @@
           break; }
         case "dout": {                          // the engine's own spiral-and-shrink plays (0.56s); wait for Mousecop's too, then cut
           const f = q && q.foe;
-          if ((JR.t > 0.56 && (!f || f.hidden)) || JR.t > 1.4) toLamp();
+          if (JR.t > 0.58) toLamp();                       // cut before the engine's own retry (650ms after a capture) puts the hero back at its start
+          break; }
+        case "lampfall": {                      // from the hole's spot, big and spinning, shrinking as he falls into the lamp; then the real hero takes over at normal size
+          const u = Math.min(1, JR.t / 1.0), e = easeOut2(u), sc2 = 1 + (JR.fly.S - 1) * (1 - easeOut3(u)), m = jMap(), to = feetToCenter(m.X(13 * 32 + 5 + 11), m.Y(6 * 32 + 22));
+          sprAt(jLerp(JR.lf.from[0], to[0], e), jLerp(JR.lf.from[1], to[1], e), 6 * Math.PI * easeOut3(u), sc2);
+          if (u >= 1) { hk.launch(13 * 32 + 5, 6 * 32, 0, 0); hk.hideHero(false); sp.classList.remove("on"); JR.lampDir = -1; JR.lampFlip = 0; jTo("lamp"); }
           break; }
         case "lamp": {                          // 4: he lands on a trampoline and bounces from side to side (keys only); a timer ends it (back to scene 1 for now)
           if (h) { if (h.x > 14 * 32 && JR.lampDir > 0) { JR.lampDir = -1; JR.lampFlip = JR.t; } else if (h.x < 9.2 * 32 && JR.lampDir < 0) { JR.lampDir = 1; JR.lampFlip = JR.t; } else if (JR.t - (JR.lampFlip || 0) > 1.15) { JR.lampDir = -JR.lampDir; JR.lampFlip = JR.t; } keys(JR.lampDir > 0, JR.lampDir < 0, false, false, false); }
