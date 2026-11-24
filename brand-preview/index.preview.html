@@ -770,6 +770,8 @@
     background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.6) 34%, rgba(10,10,18,0) 66%, rgba(10,10,18,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%);
     mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%); }
+  /* J: the wash fades out sooner (full dark behind the logo/buttons/tagline, clear from ~48% across) so the hero and cannon in the middle of the screen are not dimmed */
+  body[data-logo="j"] #landing::before { background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.66) 26%, rgba(10,10,18,0) 46%, rgba(10,10,18,0) 100%); }
   body.landing:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) #gameCanvas {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
     mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
@@ -785,6 +787,10 @@
   /* landing tagline copy: headline + descriptor (preview) */
   #landingTagline .tgHead { display: block; font-weight: 800; font-size: clamp(20px, 2.5vw, 25px); line-height: 1.12; margin-bottom: 5px; }
   #landingTagline .tgDesc { display: block; font-size: clamp(14px, 1.7vw, 16px); line-height: 1.35; }
+  #garyFly { position: fixed; z-index: 515; left: 0; top: 0; pointer-events: none; image-rendering: pixelated; will-change: transform; display: none; }
+  #garyFly.on { display: block; }
+  #jFx { position: fixed; z-index: 520; left: 0; top: 0; pointer-events: none; display: none; }
+  #jFx.on { display: block; }
   #garyIntro { position: fixed; z-index: 510; left: 0; top: 0; pointer-events: none; image-rendering: pixelated; will-change: transform; display: none; }
   body:is([data-logo="i"],[data-logo="j"]) #garyIntro.on { display: block; }
   body[data-logo="j"] #gameCanvas, body[data-logo="j"] #landingBackdrop { transition: opacity 0.35s ease; }
@@ -14644,7 +14650,7 @@
   /* BRAND PREVIEW (H): one read-only getter so the preview script can SEE the demo. It reads state; it changes nothing. */
   window.__brandProbe = () => { if (!landingActive) return null; const h = actors.find(a => a.isPlayer);
     const def = h && actorDefs[h.defId]; const poses = def && def.poses ? { stand: def.poses.stand && def.poses.stand.slice(), stride: def.poses.stride && def.poses.stride.slice(), air: def.poses.air && def.poses.air.slice(), crouch: def.poses.crouch && def.poses.crouch.slice() } : null;
-    return { room: currentRoomId, cameraX, cols: COLS, tile: TILE, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded, hidden: !!h.vortexHidden, loaded: !!h.cannonLoad, ballistic: !!h.ballistic, cannonCd: h.cannonCooldown || 0 } : null, playing: appMode === "play", heroPoses: poses, heroArt: def && def.art ? def.art.slice() : null }; };
+    return { room: currentRoomId, cameraX, cols: COLS, tile: TILE, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded, hidden: !!h.vortexHidden, loaded: !!h.cannonLoad, ballistic: !!h.ballistic, cannonCd: h.cannonCooldown || 0 } : null, foe: (() => { const f = actors.find(a => !a.isPlayer && actorDefs[a.defId] && actorDefs[a.defId].temperament === "chaser"); return f ? { x: f.x, y: f.y, hidden: !!f.vortexHidden } : null; })(), playing: appMode === "play", heroPoses: poses, heroArt: def && def.art ? def.art.slice() : null }; };
   /* BRAND PREVIEW (I, the Gary intro): the only WRITE hooks. hold = the landing autopilot stands still; hideHero = the hero is not drawn (an existing engine flag);
      placeHero = put the hero somewhere; floorTop = read-only. The world (coins, clouds, enemies) keeps running the whole time. */
   window.__brandHold = false;
@@ -14652,6 +14658,7 @@
     hold(on) { window.__brandHold = on === 2 ? 2 : !!on; landingBotReset(); },
     setKey(k, on) { keys[k] = !!on; },
     freeze() { landingFrozen = true; },
+    spawnChaser(col, row) { const id = findDefaultActorDef("chaser"); spawnActorAt(id, col * TILE + TILE / 2, row * TILE + TILE / 2, null, { x: 1, y: 0 }); },
     launch(x, y, vx, vy) { const h = actors.find(a => a.isPlayer); if (!h) return; h.x = x; h.y = y; h.vx = vx; h.vy = vy; h.grounded = false; h.vortexHidden = false; h.facingDir = vx < 0 ? -1 : 1; },
     loadScene(id) { return journeyLoadScene(id); },
     hideHero(on) { const h = actors.find(a => a.isPlayer); if (h) h.vortexHidden = !!on; },
@@ -14660,7 +14667,7 @@
   };
   /* BRAND PREVIEW (J, Gary's journey): scene loader. Builds a scene as a real engine project (the same way a sample or a Surprise Me room is built),
      with the held-aside undo stacks swapped out so nothing that happens here can reach the project put away by the landing screen. */
-  const JOURNEY_NAMES = { grass: "Gary's meadow", drain: "Everything Goes Down The Drain", lavalamp: "The Lava Lamp" };
+  const JOURNEY_NAMES = { grass: "Gary's meadow", drain: "Everything Goes Down The Drain", chase: "Gary and the Drain", lavalamp: "The Lava Lamp" };
   function buildJourneyMeadow() {
     ensureSkyBackdropDefs();
     const room = createEmptyRoom("Gary's meadow");
@@ -14668,8 +14675,11 @@
     rooms.push(room); activateRoom(room.id);
     paintSkyBackdrop(backgroundBoard, COLS);
     for (let x = 0; x < COLS; x++) { [["gndGrass", 15], ["gndDirt", 16], ["gndDirt", 17]].forEach(([sk, y]) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = sk; groundSkinRotationBoard[y][x] = 0; }); }
-    [[2, "bgHill1"], [3, "bgHill2"], [4, "bgHill3"], [7, "bgBush"], [11, "bgBush"], [14, "bgHill1"], [15, "bgHill3"], [22, "bgBush"]].forEach(([x, id]) => { backgroundBoard[14][x] = id; });
-    board[14][20] = gameplayKey("cannon2-ne", "none");           // the one cannon, in plain sight: nothing else in the room does anything
+    [[2, "bgHill1"], [3, "bgHill2"], [4, "bgHill3"], [7, "bgBush"], [11, "bgBush"], [21, "bgHill1"], [22, "bgHill3"], [23, "bgBush"]].forEach(([x, id]) => { backgroundBoard[14][x] = id; });
+    // a raised grass ledge in the middle of the right two-thirds, the one cannon standing on it
+    for (let x = 15; x <= 19; x++) { [["gndGrass", 13], ["gndDirt", 14]].forEach(([sk, y]) => { board[y][x] = gameplayKey("solid", "none"); groundSkinBoard[y][x] = sk; groundSkinRotationBoard[y][x] = 0; }); }
+    backgroundBoard[14][14] = "bgBush";
+    board[12][18] = gameplayKey("cannon2-ne", "none");           // nothing else in the room does anything
     placeExampleActor(playerDefId, 3, 14);
     room.startPos = { x: 3 * TILE + 5, y: 14 * TILE + 5 };
     snapshotCurrentRoomState();
@@ -14679,22 +14689,111 @@
     rooms.push(room); activateRoom(room.id);
     snapshotCurrentRoomState();
   }
+  // Landing-only dressing for the drain room: bright pool-tile floor, glowing rings round each hole, soft foam instead of the teal wind lattice.
+  // Applied to the loaded copy of the room; the Surprise Me template itself is never touched.
+  function journeyDressDrain() {
+    const px = (rows, leg) => pat(rows, leg);
+    const tileA = px(["aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "bbbbbbbb"], { a: "#8fe3ee", b: "#c9f4f8" });
+    const tileB = px(["aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "bbbbbbbb"], { a: "#7fd6ea", b: "#c9f4f8" });
+    const ring = (inner, outer) => px(["oooooooo", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oooooooo"], { i: inner, o: outer });
+    const addBg = (id, name, frames, ms) => { backgroundTileDefs[id] = { name, art: frames[0].slice() }; if (frames.length > 1) { backgroundTileDefs[id].frames = frames.map(f => f.slice()); backgroundTileDefs[id].frameMs = ms; } };
+    addBg("jdA", "pool", [tileA]); addBg("jdB", "pool", [tileB]);
+    addBg("jdR1", "glow", [ring("#fff2a8", "#ffd84a"), ring("#ffe066", "#ffb02e")], 450);
+    addBg("jdR2", "glow", [ring("#ffb36b", "#ff8a4a"), ring("#ff9b7a", "#ff6f91")], 450);
+    addBg("jdR3", "glow", [ring("#d6a7ff", "#b583ff"), ring("#c18cff", "#9d6bff")], 450);
+    groundTileDefs.jdFoam = { name: "foam", frames: [px(["........", "..w.....", "........", ".....w..", "........", "w.......", "......w.", "........"], { w: "#ffffff", ".": null })], frameMs: 0, geometry: "none", modifier: "none" };
+    // holes and how far each one's wind disc reaches
+    const allHoles = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (geometryAt(x, y) === "gravitywell") allHoles.push({ x, y, r: 0 });
+    // landing-only change: the two holes on the far left sit behind the logo and buttons, and a fall into one of them can't be seen. They go, with the wind and spawners that served them.
+    const gone = allHoles.filter(h => h.x < 8), holes = allHoles.filter(h => h.x >= 8);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const near = o => o.length ? Math.min.apply(null, o.map(h => Math.hypot(h.x - x, h.y - y))) : 1e9;
+      const isWind = !!WIND_DIRECTIONS[modifierAt(x, y)], isSp = SPAWNER_ORDER.includes(geometryAt(x, y)), isHole = geometryAt(x, y) === "gravitywell";
+      if (isHole && x < 8) board[y][x] = null;
+      else if (isWind && near(gone) < near(holes)) { board[y][x] = null; groundSkinBoard[y][x] = null; }
+      else if (isSp && x < 9 && near(gone) < 6) board[y][x] = null;
+    }
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (WIND_DIRECTIONS[modifierAt(x, y)]) {
+      let best = null, bd = 1e9; holes.forEach(h => { const d = Math.hypot(h.x - x, h.y - y); if (d < bd) { bd = d; best = h; } });
+      if (best) best.r = Math.max(best.r, bd);
+    }
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      let id = (x + y) % 2 ? "jdA" : "jdB";
+      holes.forEach(h => { const d = Math.hypot(h.x - x, h.y - y); if (d <= 1.5) id = "jdR1"; else if (d <= 2.5 && id[2] !== "R") id = "jdR2"; else if (d <= 3.5 && h.r >= 4 && id[2] !== "R") id = "jdR3"; });
+      backgroundBoard[y][x] = id;
+      if (WIND_DIRECTIONS[modifierAt(x, y)]) { groundSkinBoard[y][x] = "jdFoam"; groundSkinRotationBoard[y][x] = 0; }
+    }
+    // the landing square: ~6 tiles from one hole (inside its pull, outside its wind, out of reach of every other hole), mid-room so in the right two-thirds, clear of the panel.
+    // The pull there is weak (~600 px/s2 against his 2200), so he can struggle, and it grows as he drifts in: he is never taken the moment he lands.
+    let safe = null, sd = 1e9;
+    for (let y = 1; y < ROWS - 2; y++) for (let x = 10; x < COLS - 2; x++) {
+      if (isCellBlocking(x, y, { isPlayer: false }) || WIND_DIRECTIONS[modifierAt(x, y)] || geometryAt(x, y) !== "none") continue;
+      const ds = holes.map(h => Math.hypot(h.x - x, h.y - y)).sort((m, n) => m - n); if (ds[1] < 6.8) continue;   /* only one hole can reach him */
+      const d = ds[0], sc = Math.abs(d - 6) * 3 + Math.abs(x - 12) * 0.3 + Math.abs(y - 3) * 0.3;
+      if (sc < sd) { sd = sc; safe = { x, y }; }
+    }
+    snapshotCurrentRoomState();
+    return { holes, safe };
+  }
+  // The landing's own drain room ("Gary and the Drain"): built here, from scratch, so the real "Everything Goes Down The Drain" design is never touched.
+  function journeyPoolKit() {
+    const ring = (inner, outer) => pat(["oooooooo", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oiiiiiio", "oooooooo"], { i: inner, o: outer });
+    const tile = (a, b) => pat(["aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "aaaaaaab", "bbbbbbbb"], { a, b });
+    const addBg = (id, name, frames, ms) => { backgroundTileDefs[id] = { name, art: frames[0].slice() }; if (frames.length > 1) { backgroundTileDefs[id].frames = frames.map(f => f.slice()); backgroundTileDefs[id].frameMs = ms; } };
+    addBg("jdA", "pool", [tile("#8fe3ee", "#c9f4f8")]); addBg("jdB", "pool", [tile("#7fd6ea", "#c9f4f8")]);
+    addBg("jdR1", "glow", [ring("#fff2a8", "#ffd84a"), ring("#ffe066", "#ffb02e")], 450);
+    addBg("jdR2", "glow", [ring("#ffb36b", "#ff8a4a"), ring("#ff9b7a", "#ff6f91")], 450);
+    addBg("jdR3", "glow", [ring("#d6a7ff", "#b583ff"), ring("#c18cff", "#9d6bff")], 450);
+    addBg("jdR4", "reach", [pat(["pppppppp", "p......p", "p......p", "p......p", "p......p", "p......p", "p......p", "pppppppp"], { p: "#b794f6", ".": "#8fe3ee" }), pat(["pppppppp", "p......p", "p......p", "p......p", "p......p", "p......p", "p......p", "pppppppp"], { p: "#d5c2fb", ".": "#7fd6ea" })], 600);
+    groundTileDefs.jdFoam = { name: "foam", frames: [pat(["........", "..w.....", "........", ".....w..", "........", "w.......", "......w.", "........"], { w: "#ffffff", ".": null })], frameMs: 0, geometry: "none", modifier: "none" };
+  }
+  function buildJourneyChase() {
+    const room = createEmptyRoom("Gary and the Drain");
+    room.gravityEnabled = false; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+    rooms.push(room); activateRoom(room.id);
+    journeyPoolKit();
+    actorDefs[findDefaultActorDef("chaser")].lethal = false;      // Mousecop only bumps: nothing here costs a life
+    const HX = 19, HY = 9, R = 3.6;                               // one big hole on the right, so the left and middle of the room are open for Gary to run in
+    board[HY][HX] = gameplayKey("gravitywell", "none");
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const dx = x - HX, dy = y - HY, d = Math.hypot(dx, dy);
+      let id = (x + y) % 2 ? "jdA" : "jdB";
+      if (d <= 1.5) id = "jdR1"; else if (d <= 2.5) id = "jdR2"; else if (d <= 3.5) id = "jdR3"; else if (d >= 5.5 && d <= 6.5) id = "jdR4";
+      backgroundBoard[y][x] = id;
+      if (d > 0.5 && d <= R) {                                    // a clockwise swirl round the hole, so anything that comes close orbits before it goes in
+        const tx = -dy, ty = dx, c = Math.abs(tx) > Math.abs(ty) ? (tx > 0 ? "e" : "w") : (ty > 0 ? "s" : "n");
+        board[y][x] = gameplayKey("none", "wind-" + c); groundSkinBoard[y][x] = "jdFoam"; groundSkinRotationBoard[y][x] = 0;
+      }
+    }
+    placeExampleActor(playerDefId, 11, 8);
+    room.startPos = { x: 11 * TILE + 5, y: 8 * TILE + 5 };
+    snapshotCurrentRoomState();
+  }
   function journeyLoadScene(id) {
     const keepUndo = undoStack, keepRedo = redoStack; undoStack = []; redoStack = [];
     try {
       landingBotReset(); landingFrozen = false;
       if (appMode === "play") exitToBuildMode();
       const name = JOURNEY_NAMES[id];
-      loadExampleGame(id === "grass" ? buildJourneyMeadow : buildJourneyBlank, name, { skipConfirm: true });
-      if (id !== "grass") surpriseMe(1, { templateId: id });
+      loadExampleGame(id === "grass" ? buildJourneyMeadow : id === "chase" ? buildJourneyChase : buildJourneyBlank, name, { skipConfirm: true });
+      if (id !== "grass" && id !== "chase") surpriseMe(1, { templateId: id });
+      let extra = {};
+      if (id === "drain") extra = journeyDressDrain();
+      if (id === "grass") extra = { cannon: { x: 18, y: 12 } };
+      if (id === "chase") extra = { hole: { x: 19, y: 9 }, safe: { x: 11, y: 8 }, holes: [{ x: 19, y: 9 }] };
       setGamePaused(false); buildPausedMemory = false;
       enterPlayMode();
       playReadyUntil = null;
+      if (id === "drain") {                    // the spawners start already part-way through their timers, so crates, bombs and pets are in the air within a second
+        let n = 0; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (SPAWNER_ORDER.includes(geometryAt(x, y))) {
+          spawnerRuntime[roomCellKey(currentRoomId, x, y)] = { clock: SPAWN_INTERVAL_MS - 150 - (n++ % 4) * 220, windUp: false, warnedBlocked: false }; }
+      }
       landingHero = { id: "journey-" + id, name };
       document.getElementById("landingNowName").textContent = name;
       const h = actors.find(a => a.isPlayer);
       if (h) h.vortexHidden = true;           // the journey decides when the hero shows
-      return { name, cols: COLS, tile: TILE, rows: ROWS };
+      return Object.assign({ name, cols: COLS, tile: TILE, rows: ROWS }, extra);
     } finally { undoStack = keepUndo; redoStack = keepRedo; }
   }
   function landingBackdropLoop() {
@@ -17370,9 +17469,9 @@
     introFinish(false); opts = opts || {}; INTRO.onDone = opts.onDone || null; INTRO.keepHold = !!opts.keepHold;
     const q = window.__brandProbe && window.__brandProbe(), hk = window.__brandHooks;
     const wrap = document.querySelector(".lgWrap"), img = wrap && wrap.querySelector("img"), cv = document.getElementById("gameCanvas");
-    if (!q || !q.hero || !q.heroPoses || !hk || !img || !cv || reduce.matches || document.hidden || innerWidth < 900) { const cb = INTRO.onDone; INTRO.onDone = null; if (cb) cb(false, null); return; }   // no room / no motion: the demo just starts
+    if (!q || !q.hero || !q.heroPoses || !hk || !img || !cv || reduce.matches || document.hidden || innerWidth < 900) { INTRO.fail = !q ? "no probe" : !q.hero ? "no hero" : !q.heroPoses ? "no poses" : !hk ? "no hooks" : !img || !cv ? "no logo/canvas" : reduce.matches ? "reduced motion" : document.hidden ? "tab hidden" : "width<900"; const cb = INTRO.onDone; INTRO.onDone = null; if (cb) cb(false, null); return; }   // no room / no motion: the demo just starts
     const lr = img.getBoundingClientRect(), cr = cv.getBoundingClientRect(), btn = document.getElementById("landingButtons").getBoundingClientRect();
-    if (!lr.width || !cr.width) return;
+    if (!lr.width || !cr.width) { INTRO.fail = "zero size"; const cb0 = INTRO.onDone; INTRO.onDone = null; if (cb0) cb0(false, null); return; }
     const sc = cr.width / 768, artPx = sc * 4, size = Math.round(artPx * 8), k = lr.width / LOGO_TOPS.w, curve = introCurve();
     // landing spot: flat ground right of the button column (world columns), found by reading the demo's floor
     const cMin = Math.ceil(((Math.max(btn.right, lr.right - 40) + 60) - cr.left) / sc / q.tile);
@@ -17381,7 +17480,7 @@
     const main = +Object.keys(freq).sort((a, b) => freq[b] - freq[a])[0];            // the room's usual ground level (a dip or a step is not it)
     let col = -1, floor = null;
     for (let c = Math.max(1, cMin); c < (opts.maxCol || q.cols - 2); c++) if (floors[c] === main && floors[c - 1] === main && floors[c + 1] === main) { col = c; floor = main; break; }
-    if (col < 0) { const cb = INTRO.onDone; INTRO.onDone = null; if (cb) cb(false, null); return; }
+    if (col < 0) { INTRO.fail = "no landing column (cMin=" + cMin + ", main=" + main + ")"; const cb = INTRO.onDone; INTRO.onDone = null; if (cb) cb(false, null); return; }
     const xt = cr.left + (col * q.tile + q.tile / 2) * sc, yt = cr.top + floor * sc;       // screen feet position of the landing
     const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = lr.left - size * 0.7, speed = lr.width * 0.95;
     const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
@@ -17404,7 +17503,9 @@
       lw.style.transform = sy === 1 ? "" : "scale(" + (1 + (1 - sy) * 0.5).toFixed(4) + "," + sy.toFixed(4) + ")"; return sy;
     };
     const step = now => {
-      if (!INTRO.live) { lw.style.transform = ""; return; } clk += Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now; const t = clk, sy = squish(t);
+      if (!INTRO.live) { lw.style.transform = ""; return; }
+      if (document.hidden) { last = now; INTRO.raf = requestAnimationFrame(step); return; }   // hidden tab: stand still
+      clk += Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now; const t = clk, sy = squish(t);
       if (t < tRun) { const x = x0 + speed * t, fy = x < lr.left ? feetAt(lr.left) : feetAt(x); place(x, ox + (fy - ox) * sy); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
       else if (t < tRun + tFall) { const u = t - tRun; place(xj + vx * u, yj + vy0 * u + 0.5 * g * u * u); set("air"); }
       else { place(xt, yt); set("crouch"); if (t > tRun + tFall + 0.06) { introFinish(true); return; } }
@@ -17420,14 +17521,27 @@
      Conventions: EXIT = leaves the right edge (cannon), is swallowed by a black hole, or a timer. ENTRY = appears at the top edge
      (x carried over from where he left), or, in the sealed lamp, inside it above the trampolines at the same x. Scene swaps happen while he
      is off-screen, under a 0.35s fade of the demo canvas. */
-  const JR = { on: false, raf: 0, gen: 0, last: 0, phase: "", t: 0, fx: 0.5, info: null, still: null };
+  const JR = { on: false, raf: 0, gen: 0, last: 0, phase: "", t: 0, info: null }; window.__JR = JR;   // (read-only handle for the preview test scripts)
   const jHk = () => window.__brandHooks, jProbe = () => window.__brandProbe && window.__brandProbe();
   const jFade = on => document.body.classList.toggle("jFade", !!on);
   function jTo(phase) { JR.phase = phase; JR.t = 0; }
+  /* Mapping between the engine's world (768x576 backing pixels) and the page: read from the canvas every frame, so a resize, 1024px or any
+     other size lands where the real thing is. screen = canvasRect.left + clientLeft + world * ((rect.width - 2*clientLeft) / 768). */
+  function jMap() { const cv = document.getElementById("gameCanvas"), r = cv.getBoundingClientRect(), bl = cv.clientLeft, bt = cv.clientTop, sc = (r.width - 2 * bl) / 768;
+    return { sc, rect: r, X: wx => r.left + bl + wx * sc, Y: wy => r.top + bt + wy * sc }; }
+  const easeOut3 = u => 1 - Math.pow(1 - u, 3), easeOut2 = u => 1 - (1 - u) * (1 - u), easeIn2 = u => u * u, easeInOut = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+  const jLerp = (a, b, u) => a + (b - a) * u;
+  function jEls() {
+    let sp = document.getElementById("garyFly"); if (!sp) { sp = document.createElement("canvas"); sp.id = "garyFly"; sp.width = sp.height = 8; sp.setAttribute("aria-hidden", "true"); document.body.appendChild(sp); }
+    let fx = document.getElementById("jFx"); if (!fx) { fx = document.createElement("canvas"); fx.id = "jFx"; fx.setAttribute("aria-hidden", "true"); document.body.appendChild(fx); }
+    fx.width = innerWidth; fx.height = innerHeight; return { sp, fx };
+  }
   function journeyStop() {
     if (!JR.on) return; JR.on = false; cancelAnimationFrame(JR.raf); JR.gen++; clearTimeout(JR.tm);
-    const hk = jHk(); if (hk) { hk.setKey("ArrowRight", false); hk.setKey("ArrowLeft", false); hk.setKey(" ", false); hk.hideHero(false); hk.hold(false); }
+    const hk = jHk(); if (hk) { hk.setKey("ArrowRight", false); hk.setKey("ArrowLeft", false); hk.setKey("ArrowUp", false); hk.setKey("ArrowDown", false); hk.setKey(" ", false); hk.hideHero(false); hk.hold(false); }
     jFade(false); introFinish(false);
+    ["garyFly", "jFx"].forEach(id => { const e = document.getElementById(id); if (e) { e.classList.remove("on"); } });
+    const cv = document.getElementById("gameCanvas"); if (cv) cv.style.translate = "";
     const lw = document.querySelector(".lgWrap"); if (lw) lw.style.transform = "";
   }
   function journeyResize() { if (!JR.on) return; clearTimeout(JR.rs); JR.rs = setTimeout(() => { if (JR.on) { journeyStop(); journeyStart(); } }, 300); }
@@ -17435,46 +17549,120 @@
     journeyStop();
     const hk = jHk();
     if (!hk || !document.body.classList.contains("landing") || document.body.dataset.logo !== "j") return;
+    if (document.hidden) { document.addEventListener("visibilitychange", function once() { if (!document.hidden) { document.removeEventListener("visibilitychange", once); journeyStart(); } }); return; }
     JR.on = true; const gen = ++JR.gen; JR.last = performance.now();
     const guard = fn => (...a) => { if (JR.on && JR.gen === gen) return fn(...a); };
-    // reduced motion: no Gary, no movement; stills of the three rooms crossfade slowly
+    // reduced motion: no Gary, no scaling arc, no shake, no fades: a plain cut between frozen stills of the three rooms
     if (reduce.matches) {
-      const ids = ["grass", "drain", "lavalamp"]; let i = 0;
-      const show = guard(() => {
-        jFade(true);
-        JR.tm = setTimeout(guard(() => { hk.loadScene(ids[i % 3]); hk.hold(true); i++; requestAnimationFrame(() => requestAnimationFrame(() => { hk.freeze(); jFade(false); JR.tm = setTimeout(show, 6000); })); }), 1300);
-      });
-      hk.loadScene("grass"); hk.hold(true); i = 1; requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); return;
+      const ids = ["grass", "chase", "lavalamp"]; let i = 1;
+      const show = guard(() => { hk.loadScene(ids[i % 3]); hk.hold(true); i++; requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); });
+      hk.loadScene("grass"); hk.hold(true); requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); return;
     }
-    const loadScene = id => { JR.info = hk.loadScene(id); hk.hold(2); };
-    // fade out, swap the scene while the screen is dark, fade in, then continue in `next`
-    const swap = (id, next, setup) => { jTo("out"); JR.after = guard(() => { loadScene(id); setup && setup(); jFade(false); JR.next = next; jTo("in"); }); jFade(true); };
+    const { sp, fx } = jEls(), fxc = fx.getContext("2d"), spc = sp.getContext("2d"), cv = document.getElementById("gameCanvas");
+    const loadScene = id => { JR.info = hk.loadScene(id); hk.hold(2); return JR.info; };
+    const keys = (r, l, u, d, j) => { hk.setKey("ArrowRight", r); hk.setKey("ArrowLeft", l); hk.setKey("ArrowUp", u); hk.setKey("ArrowDown", d); hk.setKey(" ", j); };
+    // ---- Gary as a free sprite above the page (faked 3D: position, scale, rotation, squash) ----
+    const S = { size: 0, sink: 0, pose: "" };
+    const sprInit = q => { const m = jMap(); S.size = Math.round(m.sc * 4 * 8); sp.style.width = sp.style.height = S.size + "px"; let low = 0; for (let k = 0; k < 64; k++) if (q.heroPoses.stand[k] && (k >> 3) > low) low = k >> 3; S.sink = (7 - low) * m.sc * 4; S.q = q; S.pose = ""; };
+    const sprPose = name => { if (name === S.pose) return; S.pose = name; const art = S.q.heroPoses[name] || S.q.heroPoses.stand; spc.clearRect(0, 0, 8, 8); for (let k = 0; k < 64; k++) if (art[k]) { spc.fillStyle = art[k]; spc.fillRect(k % 8, (k / 8) | 0, 1, 1); } };
+    const sprAt = (cx, cy, rot, sx, sy) => { sp.style.transform = "translate(" + Math.round(cx - S.size / 2) + "px," + Math.round(cy - S.size / 2) + "px) rotate(" + rot.toFixed(3) + "rad) scale(" + sx.toFixed(3) + "," + (sy == null ? sx : sy).toFixed(3) + ")"; };
+    const feetToCenter = (fx_, fy_) => [fx_, fy_ + S.sink - S.size / 2];
+    // ---- effects canvas: muzzle flash + smoke puffs (whole-pixel squares, no blinking) ----
+    const FX = { on: false, t: 0, mx: 0, my: 0, p: 6 };
+    const drawFx = () => {
+      fxc.clearRect(0, 0, fx.width, fx.height); if (!FX.on) return; const t = FX.t, p = FX.p, sq = (x, y, n) => fxc.fillRect(Math.round(x / p) * p, Math.round(y / p) * p, n * p, n * p);
+      if (t < 0.14) { const k = 1 - t / 0.14; fxc.fillStyle = "rgba(255,248,200," + (0.95 * k).toFixed(2) + ")"; const r = Math.ceil(4 + 3 * (1 - k)); sq(FX.mx - r * p / 2, FX.my - r * p / 2, r);
+        fxc.fillStyle = "rgba(255,196,64," + (0.9 * k).toFixed(2) + ")"; for (let a = 0; a < 8; a++) { const ang = a * Math.PI / 4 + 0.4, d = (2.5 + 2.5 * (1 - k)) * p; sq(FX.mx + Math.cos(ang) * d - p / 2, FX.my + Math.sin(ang) * d - p / 2, 1); } }
+      for (let n = 0; n < 9; n++) { const age = t - n * 0.05; if (age <= 0 || age > 0.9) continue; const u = age / 0.9, ang = -1.1 - n * 0.28, d = (2 + u * 10) * p * (0.7 + n * 0.12); const size = Math.max(2, Math.round(2 + 4 * u));
+        fxc.fillStyle = "rgba(240,240,248," + (0.8 * (1 - u)).toFixed(2) + ")"; sq(FX.mx + Math.cos(ang) * d - size * p / 2, FX.my + Math.sin(ang) * d - size * p / 2 - u * 2 * p, size); }
+    };
+    const shake = amp => { cv.style.translate = amp ? Math.round(Math.sin(JR.t * 44) * amp) + "px " + Math.round(Math.cos(JR.t * 37) * amp) + "px" : ""; };
+    // ---- scenes ----
     const scene1 = () => {                      // 1: the logo run, with the meadow already running behind the logo
       loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro");
-      startIntro({ keepHold: true, maxCol: 17, onDone: guard((ok) => {
-        if (!ok) hk.placeHero(8 * 32, 14 * 32 - 22 + 10);
-        hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.fired = false; jTo("walk");
+      startIntro({ keepHold: true, maxCol: 12, onDone: guard((ok) => {
+        if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10);
+        hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk");
       }) });
+    };
+    const swap = (id, next, setup) => { jTo("out"); JR.after = guard(() => { loadScene(id); setup && setup(); jFade(false); JR.next = next; jTo("in"); }); jFade(true); };
+    const startFlight = q => {                  // 2 -> 3: the shot. The real engine hero is hidden; Gary is the sprite from here.
+      const m = jMap(), c = JR.info.cannon; hk.hideHero(true); sprInit(q); sprPose("air");
+      JR.muz = { x: m.X((c.x + 1) * 32 - 3), y: m.Y(c.y * 32 + 4) };            // the cannon's NE corner, i.e. where the shot leaves
+      JR.fly = { dur: 1.5, S: 5 }; FX.on = true; FX.t = 0; FX.p = Math.max(3, Math.round(m.sc * 4)); sp.classList.add("on"); fx.classList.add("on"); jTo("fly");
+    };
+    const flyPos = u => {                       // quadratic Bezier from the muzzle, up and over, ending large near the top of the screen
+      const m = jMap(), size = Math.round(m.sc * 4 * 8), P0 = [JR.muz.x, JR.muz.y], P2 = [m.X(14 * 32), m.rect.top + size * JR.fly.S * 0.55 + 10], C = [jLerp(P0[0], P2[0], 0.75), Math.min(P0[1], P2[1]) - m.rect.height * 0.05];
+      const v = easeInOut(u), a = (1 - v) * (1 - v), b = 2 * (1 - v) * v, d = v * v; return [a * P0[0] + b * C[0] + d * P2[0], a * P0[1] + b * C[1] + d * P2[1]]; };
+    const startFall = info => {                 // 3: the sprite arrives big at the top, shrinks and lands on the safe square
+      const m = jMap(), box = { x: info.safe.x * 32 + 5, y: info.safe.y * 32 + 5, w: 22, h: 22 };
+      JR.land = { box, fx: m.X(box.x + box.w / 2), fy: m.Y(box.y + box.h) };
+      { let bd = 1e9; JR.target = info.holes[0]; info.holes.forEach(o => { if (o.x < 10) return; const d = Math.hypot(o.x - info.safe.x, o.y - info.safe.y); if (d < bd) { bd = d; JR.target = o; } }); }   /* the hole he will go down: nearest one on the visible side */
+       const e = flyPos(1); JR.fallFrom = { x: e[0], y: e[1] }; sprPose("air"); jTo("fall");
+    };
+    const toLamp = () => {                      // 3 -> 4: snap-cut; he drops in from the top of the lamp at normal size
+      loadScene("lavalamp"); hk.launch(13 * 32 + 5, 6 * 32, 0, 0); hk.hideHero(false); JR.lampDir = -1; JR.lampFlip = 0; jTo("lamp");
     };
     JR.step = guard(now => {
       if (document.hidden) { JR.last = now; JR.raf = requestAnimationFrame(JR.step); return; }   // tab hidden: the whole journey stands still
       const dt = Math.min(0.05, Math.max(0, (now - JR.last) / 1000)); JR.last = now; JR.t += dt;
       const q = jProbe(), h = q && q.hero;
       switch (JR.phase) {
-        case "walk": {                          // 2: the only scripted input is "hold Right toward the cannon" (plus a hop if something blocks him)
+        case "walk": {                          // 2: scripted: hold Right; jump up onto the ledge; walk into the cannon (it loads, then fires)
           if (!h) break;
-          if (h.loaded || h.ballistic || h.cannonCd > 0) { JR.fired = true; hk.setKey("ArrowRight", false); hk.setKey(" ", false); }
-          else { hk.setKey("ArrowRight", true); if (h.grounded && Math.abs(h.x - JR.lastX) < 0.3 && Math.abs(h.x - 640) > 70) { JR.stall += dt; if (JR.stall > 0.5) hk.setKey(" ", true); } else { JR.stall = 0; hk.setKey(" ", false); } JR.lastX = h.x; }
-          if ((JR.fired && (h.x > q.cols * q.tile - 40 || h.x < 40)) || JR.t > 12) { JR.fired = false; hk.setKey("ArrowRight", false); hk.setKey(" ", false); hk.hideHero(true); swap("drain", "drain", () => { JR.entered = false; }); }
+          if (h.loaded && !JR.winding) { JR.winding = true; JR.wt = 0; keys(false, false, false, false, false); }
+          if (JR.winding) {
+            JR.wt += dt; shake(JR.wt < 0.3 ? 1.5 : 0);                              // the wind-up beat: a small tremble while the cannon loads
+            if (!h.loaded || h.ballistic) { shake(0); startFlight(q); }
+          } else {
+            const nearLedge = (h.x + h.w) > 15 * 32 - 60 && h.x < 15 * 32 + 8, below = h.y > 13 * 32 - 22 - 4;
+            const jump = nearLedge && below;
+            keys(true, false, false, false, jump);
+            if (h.grounded && !jump && Math.abs(h.x - JR.lastX) < 0.3 && Math.abs(h.x - 18 * 32 + 22) > 40) { JR.stall += dt; if (JR.stall > 0.5) hk.setKey(" ", true); } else JR.stall = 0;
+            JR.lastX = h.x;
+          }
+          if (JR.t > 14) { keys(false, false, false, false, false); startFlight(q || { heroPoses: JR.lastPoses }); }
+          if (q && q.heroPoses) JR.lastPoses = q.heroPoses;
           break; }
-        case "drain": {                         // 3: no input at all: the holes do it
-          if (!JR.entered) { if (JR.t < 3.5) break; JR.entered = true; JR.et = JR.t; hk.launch(11 * 32, 2, 0, 90); hk.hideHero(false); break; }   // the room runs on its own for 3.5s first, then Gary drops in from the top
-          if (h) JR.lastHx = h.x;
-          if ((h && h.hidden) || JR.t - JR.et > 7) { JR.tm = setTimeout(guard(() => swap("lavalamp", "lamp", () => { hk.launch(13 * 32 + 5, 6 * 32, 0, 0);   /* inside the lamp, right half of the screen (the left third is behind the buttons) */ hk.hideHero(false); })), 250); jTo("drainwait"); }
+        case "fly": {                           // the faked-3D flight: curved path, growing scale, a little rotation. Hand-off: snap-cut into the drain.
+          FX.t += dt; drawFx(); const u = Math.min(1, JR.t / JR.fly.dur), pos = flyPos(u), s = 1 + (JR.fly.S - 1) * easeIn2(u);
+          shake(FX.t < 0.3 ? 4 * (1 - FX.t / 0.3) : 0);
+          const c = feetToCenter(pos[0], pos[1]); sprAt(pos[0], pos[1], -0.5 * Math.sin(Math.PI * u), s);
+          if (u >= 1) { shake(0); FX.on = false; drawFx(); const info = loadScene("chase"); startFall(info); }
           break; }
-        case "lamp":                            // 4: he lands on a trampoline and bounces; a timer ends it (back to scene 1 for now)
-          if (JR.t > 7.5) { jTo("lampwait"); jFade(true); JR.tm = setTimeout(guard(scene1), 400); }
-          break;
+        case "fall": {
+          const u = Math.min(1, JR.t / 0.8), e = easeOut2(u), s = 1 + (JR.fly.S - 1) * (1 - easeOut3(u));
+          const fy = jLerp(JR.fallFrom.y, JR.land.fy, e), fxp = jLerp(JR.fallFrom.x, JR.land.fx, e);
+          const m = jMap(); JR.land.fx = m.X(JR.land.box.x + 11); JR.land.fy = m.Y(JR.land.box.y + 22);                         // re-read every frame: follows any resize
+          sprAt(fxp, fy + S.sink * s - S.size * s / 2 + (S.size * s / 2 - S.size / 2) * 0, -0.5 * Math.sin(Math.PI * Math.min(1, JR.t / 0.5)) * (1 - u), s);
+          if (u >= 1) { JR.t2 = 0; jTo("squash"); }
+          break; }
+        case "squash": {                        // a short squash on touchdown, then the real hero takes over at normal scale
+          const u = Math.min(1, JR.t / 0.14), sy = 1 - 0.18 * Math.sin(Math.PI * u), sx = 1 + 0.15 * Math.sin(Math.PI * u);
+          const c = feetToCenter(JR.land.fx, JR.land.fy); sprAt(c[0], c[1] + (1 - sy) * S.size / 2, 0, sx, sy); sprPose("crouch");
+          if (u >= 1) { hk.placeHero(JR.land.box.x, JR.land.box.y); hk.hideHero(false); sp.classList.remove("on"); JR.foeIn = false; JR.wp = 0; JR.dashAt = 5.2; jTo("chase"); }
+          break; }
+        case "chase": {                         // 3: Mousecop comes in from the left and chases; Gary runs round the open middle; then the pull takes both down. Scripted: Gary's keys only.
+          if (!h) break;
+          if (!JR.foeIn && JR.t > 0.4) { JR.foeIn = true; hk.spawnChaser(0, 9); }
+          let tx, ty;
+          if (JR.t < 0.4) { keys(false, false, false, false, false); break; }
+          if (JR.t < JR.dashAt) {               // a loop round the open middle, all outside the hole's 7-tile reach
+            const way = [[11, 5], [12, 12], [8, 11], [9, 5], [12, 9]], w = way[JR.wp % way.length]; tx = w[0] * 32 + 16; ty = w[1] * 32 + 16;
+            if (Math.hypot(tx - (h.x + 11), ty - (h.y + 11)) < 28) JR.wp++;
+          } else { tx = 17 * 32 + 16; ty = 9 * 32 + 16; }     // out of room: he runs on toward the drain, Mousecop right behind him
+          const dx = tx - (h.x + 11), dy = ty - (h.y + 11); keys(dx > 10, dx < -10, dy < -10, dy > 10, false);
+          if (h.hidden || JR.t > 11) { keys(false, false, false, false, false); jTo("dout"); }
+          break; }
+        case "dout": {                          // the engine's own spiral-and-shrink plays (0.56s); wait for Mousecop's too, then cut
+          const f = q && q.foe;
+          if ((JR.t > 0.56 && (!f || f.hidden)) || JR.t > 1.4) toLamp();
+          break; }
+        case "lamp": {                          // 4: he lands on a trampoline and bounces from side to side (keys only); a timer ends it (back to scene 1 for now)
+          if (h) { if (h.x > 14 * 32 && JR.lampDir > 0) { JR.lampDir = -1; JR.lampFlip = JR.t; } else if (h.x < 9.2 * 32 && JR.lampDir < 0) { JR.lampDir = 1; JR.lampFlip = JR.t; } else if (JR.t - (JR.lampFlip || 0) > 1.15) { JR.lampDir = -JR.lampDir; JR.lampFlip = JR.t; } keys(JR.lampDir > 0, JR.lampDir < 0, false, false, false); }
+          if (JR.t > 7.5) { keys(false, false, false, false, false); jTo("lampwait"); jFade(true); }
+          break; }
+        case "lampwait": if (JR.t > 0.4) scene1(); break;            // (inside the frame loop, so a hidden tab cannot start scene 1 behind its back)
         case "in": if (JR.t > 0.4) jTo(JR.next); break;
         case "out": if (JR.t > 0.4) { const f = JR.after; JR.after = null; if (f) f(); } break;
       }
