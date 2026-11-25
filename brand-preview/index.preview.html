@@ -514,7 +514,7 @@
   #jSound { display: none; position: absolute; right: 24px; top: 72px; padding: 7px 14px; border-radius: 999px; border: 2px solid rgba(255,255,255,0.55); background: rgba(10,10,18,0.6); color: #fff; font: 700 13px system-ui, sans-serif; cursor: pointer; align-items: center; gap: 8px; }
   #jSound:hover { background: rgba(10,10,18,0.8); } #jSound:focus-visible { outline: 3px solid #ffd54a; outline-offset: 2px; }
   #jSound[aria-pressed="true"] { background: #ffd54a; color: #1a1a24; border-color: #ffd54a; }
-  body[data-logo="j"] #jSound { display: inline-flex; }
+  body:is([data-logo="j"],[data-logo="k"]) #jSound { display: inline-flex; }
   @media (max-width: 700px) { #jSound { top: 64px; right: 16px; } }
   #landingKeys { position: absolute; right: 24px; bottom: 56px; padding: 6px 12px; border-radius: 8px; font-size: 12px; color: #dde;
     background: rgba(20,21,30,0.75); border: 1px solid rgba(255,255,255,0.25); }
@@ -765,30 +765,30 @@
   body[data-logo="g"] #landingTrust { font-family: "BrandPlaceholder", system-ui, sans-serif; font-weight: 400; font-synthesis: none; font-size: 14px; letter-spacing: 0.03em; }
 
   /* ===== H = D + crisp backdrop around the logo and reactions to the hero (the cloud ledge was removed);  I = H + Gary runs over the logo and jumps into the game ===== */
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap { display: block; position: relative; width: min(100%, 440px); transform-origin: 50% 92%; }
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgHover { display: block; position: relative; z-index: 1; }
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgHover img { width: 100%; max-width: none; margin: 0; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap { display: block; position: relative; width: min(100%, 440px); transform-origin: 50% 92%; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgHover { display: block; position: relative; z-index: 1; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgHover img { width: 100%; max-width: none; margin: 0; }
   /* backdrop: the dim wash gets a soft hole around the logo, and the demo's edge fade is much shorter, so the world behind the logo is crisp.
      The wash stays full strength behind the tagline, buttons and small print. */
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) #landing { background: none; }
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) #landing::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) #landing { background: none; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) #landing::before { content: ""; position: absolute; inset: 0; pointer-events: none;
     background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.6) 34%, rgba(10,10,18,0) 66%, rgba(10,10,18,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%);
     mask-image: radial-gradient(ellipse var(--hrx, 330px) var(--hry, 150px) at var(--hx, 306px) var(--hy, 240px), rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.32) 35%, rgba(0,0,0,0.7) 70%, #000 100%); }
   /* J: the wash fades out sooner (full dark behind the logo/buttons/tagline, clear from ~48% across) so the hero and cannon in the middle of the screen are not dimmed */
-  body[data-logo="j"] #landing::before { background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.66) 26%, rgba(10,10,18,0) 46%, rgba(10,10,18,0) 100%); }
-  body.landing:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) #gameCanvas {
+  body:is([data-logo="j"],[data-logo="k"]) #landing::before { background: linear-gradient(90deg, rgba(10,10,18,0.88) 0%, rgba(10,10,18,0.66) 26%, rgba(10,10,18,0) 46%, rgba(10,10,18,0) 100%); }
+  body.landing:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) #gameCanvas {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
     mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
     -webkit-mask-composite: source-in; mask-composite: intersect; }
   /* reactions (transform only, one at a time) */
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hLand { animation: hLand 0.42s ease-out 1; }
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hHop { animation: hHop 0.46s ease-out 1; }
-  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hWig { animation: hWig 0.5s ease-in-out 1; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hLand { animation: hLand 0.42s ease-out 1; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hHop { animation: hHop 0.46s ease-out 1; }
+  body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hWig { animation: hWig 0.5s ease-in-out 1; }
   @keyframes hLand { 0% { transform: none; } 22% { transform: scale(1.045, 0.935); } 50% { transform: scale(0.99, 1.025); } 75% { transform: scale(1.01, 0.99); } 100% { transform: none; } }
   @keyframes hHop  { 0% { transform: none; } 30% { transform: translateY(-6px) scale(0.985, 1.02); } 60% { transform: translateY(0) scale(1.03, 0.965); } 100% { transform: none; } }
   @keyframes hWig  { 0% { transform: none; } 25% { transform: rotate(-1.3deg); } 60% { transform: rotate(1.1deg); } 100% { transform: none; } }
-  @media (prefers-reduced-motion: reduce) { body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hLand, body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hHop, body:is([data-logo="h"],[data-logo="i"],[data-logo="j"]) .lgWrap.hWig { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hLand, body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hHop, body:is([data-logo="h"],[data-logo="i"],[data-logo="j"],[data-logo="k"]) .lgWrap.hWig { animation: none; } }
   /* landing tagline copy: headline + descriptor (preview) */
   #landingTagline .tgHead { display: block; font-weight: 800; font-size: clamp(20px, 2.5vw, 25px); line-height: 1.12; margin-bottom: 5px; }
   #landingTagline .tgDesc { display: block; font-size: clamp(14px, 1.7vw, 16px); line-height: 1.35; }
@@ -797,9 +797,9 @@
   #jFx { position: fixed; z-index: 520; left: 0; top: 0; pointer-events: none; display: none; }
   #jFx.on { display: block; }
   #garyIntro { position: fixed; z-index: 510; left: 0; top: 0; pointer-events: none; image-rendering: pixelated; will-change: transform; display: none; }
-  body:is([data-logo="i"],[data-logo="j"]) #garyIntro.on { display: block; }
-  body[data-logo="j"] #gameCanvas, body[data-logo="j"] #landingBackdrop { transition: opacity 0.35s ease; }
-  body[data-logo="j"].jFade #gameCanvas, body[data-logo="j"].jFade #landingBackdrop { opacity: 0; }
+  body:is([data-logo="i"],[data-logo="j"],[data-logo="k"]) #garyIntro.on { display: block; }
+  body:is([data-logo="j"],[data-logo="k"]) #gameCanvas, body:is([data-logo="j"],[data-logo="k"]) #landingBackdrop { transition: opacity 0.35s ease; }
+  body:is([data-logo="j"],[data-logo="k"]).jFade #gameCanvas, body:is([data-logo="j"],[data-logo="k"]).jFade #landingBackdrop { opacity: 0; }
   /* the preview-only switch */
   #logoToggle { position: fixed; top: 10px; left: 10px; z-index: 5000; display: flex; gap: 2px; align-items: center; padding: 3px 4px; border-radius: 8px;
     background: rgba(10,10,20,0.55); font: 11px/1 system-ui, sans-serif; color: #cfd2e6; opacity: 0.55; }
@@ -17416,7 +17416,8 @@
   apply(); window.addEventListener("load", apply);
   /* ----- F/G effects: drop-in once, then small irregular idle details ----- */
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const fxState = { dropping: false, timers: {} };
+  const fxState = { dropping: false, timers: {}, kTok: 0 };
+  const K_PAUSE_MS = 700;   // variant K: the beat between the logo settling and Gary starting
   const rnd = (a, b) => a + Math.random() * (b - a);
   function buildFx() {
     const lw = document.getElementById("landingWordmark"); const img = lw && lw.querySelector("img");
@@ -17436,10 +17437,11 @@
     loop("eyes", 2800, 6500, () => { pulse(".lgEyes", 130); if (Math.random() < 0.25) setTimeout(() => { if (fxActive()) pulse(".lgEyes", 120); }, 300); });
   }
   function stopIdle() { Object.values(fxState.timers).forEach(clearTimeout); fxState.timers = {}; }
-  function playDrop() {
-    const w = document.querySelector(".lgWrap"); if (!w) return;
+  function playDrop(onDone) {
+    const w = document.querySelector(".lgWrap"); if (!w) { if (onDone) onDone(); return; }
     fxState.dropping = true; w.classList.remove("lgPlay"); void w.offsetWidth; w.classList.add("lgPlay");
-    const done = () => { w.classList.remove("lgPlay"); fxState.dropping = false; };
+    let fin = false;
+    const done = () => { if (fin) return; fin = true; w.classList.remove("lgPlay"); fxState.dropping = false; if (onDone) onDone(); };
     w.addEventListener("animationend", done, { once: true });
     setTimeout(done, 1000);                                     // safety net
   }
@@ -17447,9 +17449,14 @@
     stopIdle(); stopH(); journeyStop(); introFinish(false);
     if (v === "f" || v === "g") { buildFx(); playDrop(); startIdle(); }
     if (v === "h" || v === "i") { buildFx(); startH(); }
-    if (v === "j") buildFx();
+    if (v === "j" || v === "k") buildFx();
     if (v === "i") setTimeout(startIntro, 60);
     if (v === "j") { stopH(); layoutH(); H.layout = setInterval(layoutH, 500); setTimeout(journeyStart, 60); }
+    if (v === "k") {                       // K = J with F's drop-in: Gary's journey waits for the logo to land and squish, plus a short pause
+      stopH(); layoutH(); H.layout = setInterval(layoutH, 500);
+      const tok = ++fxState.kTok;
+      playDrop(() => setTimeout(() => { if (fxState.kTok === tok && document.body.dataset.logo === "k" && document.body.classList.contains("landing")) journeyStart(); }, K_PAUSE_MS));
+    }
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) stopIdle(); else if (/^[fg]$/.test(document.body.dataset.logo || "")) startIdle(); });
   /* ----- H: backdrop opening + reactions to the hero (reads the demo through window.__brandProbe, read-only) ----- */
@@ -17564,8 +17571,8 @@
     };
     INTRO.raf = requestAnimationFrame(step);
   }
-  document.addEventListener("visibilitychange", () => { if (document.hidden && document.body.dataset.logo !== "j") introFinish(false); });
-  window.addEventListener("resize", () => { if (document.body.dataset.logo === "j") journeyResize(); else introFinish(false); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden && !/^[jk]$/.test(document.body.dataset.logo || "")) introFinish(false); });
+  window.addEventListener("resize", () => { if (/^[jk]$/.test(document.body.dataset.logo || "")) journeyResize(); else introFinish(false); });
 
   /* ----- J: Gary's journey. A loop of real engine scenes; Gary only gets an entry position/velocity and (where noted) a held key. -----
      Scene order: 1 logo run -> 2 meadow + one cannon -> 3 Everything Goes Down The Drain -> 4 The Lava Lamp -> (back to 1 for now).
@@ -17599,7 +17606,7 @@
   function journeyStart() {
     journeyStop();
     const hk = jHk();
-    if (!hk || !document.body.classList.contains("landing") || document.body.dataset.logo !== "j") return;
+    if (!hk || !document.body.classList.contains("landing") || !/^[jk]$/.test(document.body.dataset.logo || "")) return;
     if (document.hidden) { document.addEventListener("visibilitychange", function once() { if (!document.hidden) { document.removeEventListener("visibilitychange", once); journeyStart(); } }); return; }
     JR.on = true; const gen = ++JR.gen; JR.last = performance.now();
     const guard = fn => (...a) => { if (JR.on && JR.gen === gen) return fn(...a); };
@@ -17856,13 +17863,13 @@
     else { stopIdle(); stopH(); journeyStop(); introFinish(false); }
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   /* logo variants */
-  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"], ["i", "I"], ["j", "J"]];
+  const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"], ["i", "I"], ["j", "J"], ["k", "K"]];
   function setVariant(v, push) {
-    if (!/^[a-j]$/.test(v || "")) v = "";
+    if (!/^[a-k]$/.test(v || "")) v = "";
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-    if (v !== "j") soundSet(false);
+    if (!/^[jk]$/.test(v)) soundSet(false);
     stopIdle(); stopH(); journeyStop(); introFinish(false);        // switching: stop whatever the last variant was doing at once
     whenLogoReady(() => { if ((document.body.dataset.logo || "") === v) fxSync(v); });
     if (push) { const u = new URL(location.href); if (v) u.searchParams.set("logo", v); else u.searchParams.delete("logo"); history.replaceState(null, "", u); }
