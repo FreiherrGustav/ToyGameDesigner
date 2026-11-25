@@ -17690,6 +17690,7 @@
     // screen-relative keys for each gravity direction (the engine keeps keys character-relative: on the right wall Right = up, Left = down)
     const upWall = () => hk.setKey("ArrowRight", true);
     JR.step = guard(now => {
+      if (!document.body.classList.contains("landing")) { journeyStop(); return; }                // the landing screen is gone: never keep driving the engine behind the editor
       if (document.hidden) { JR.last = now; JR.raf = requestAnimationFrame(JR.step); return; }   // tab hidden: the whole journey stands still
       const dt = Math.min(0.05, Math.max(0, (now - JR.last) / 1000)); JR.last = now; JR.t += dt;
       const q = jProbe(), h = q && q.hero;
@@ -17817,6 +17818,22 @@
     } else scene1();
     JR.raf = requestAnimationFrame(JR.step);
   }
+  /* Effects must not start until the logo image and fonts are really there (the first paint on a cold load had no logo height yet, so everything measured off it was wrong
+     until a refresh or a variant switch), and they follow the landing screen itself: shown again by the Home button = start again; closed = stop (never keep driving the engine
+     behind the editor). */
+  function whenLogoReady(cb) {
+    const img = document.querySelector("#landingWordmark img");
+    const imgP = new Promise(r => { if (!img || (img.complete && img.naturalWidth)) r(); else { img.addEventListener("load", r, { once: true }); img.addEventListener("error", r, { once: true }); setTimeout(r, 4000); } });
+    const fontP = (document.fonts && document.fonts.ready) || Promise.resolve();
+    Promise.all([imgP, fontP]).then(() => requestAnimationFrame(() => setTimeout(cb, 60)));
+  }
+  const landingIsOn = () => document.body.classList.contains("landing");
+  let landingWas = landingIsOn();
+  new MutationObserver(() => {
+    const on = landingIsOn(); if (on === landingWas) return; landingWas = on;
+    if (on) { const v = document.body.dataset.logo || ""; whenLogoReady(() => { if (landingIsOn() && (document.body.dataset.logo || "") === v) fxSync(v); }); }
+    else { stopIdle(); stopH(); journeyStop(); introFinish(false); }
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   /* logo variants */
   const VARS = [["", "current"], ["a", "A"], ["b", "B"], ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"], ["g", "G"], ["h", "H"], ["i", "I"], ["j", "J"]];
   function setVariant(v, push) {
@@ -17824,7 +17841,8 @@
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
-    fxSync(v);
+    stopIdle(); stopH(); journeyStop(); introFinish(false);        // switching: stop whatever the last variant was doing at once
+    whenLogoReady(() => { if ((document.body.dataset.logo || "") === v) fxSync(v); });
     if (push) { const u = new URL(location.href); if (v) u.searchParams.set("logo", v); else u.searchParams.delete("logo"); history.replaceState(null, "", u); }
   }
   const tg = document.createElement("div"); tg.id = "logoToggle"; tg.setAttribute("role", "group"); tg.setAttribute("aria-label", "Logo variant (preview only)");
