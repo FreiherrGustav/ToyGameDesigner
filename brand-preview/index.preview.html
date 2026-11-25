@@ -17463,6 +17463,7 @@
   const H = { timer: 0, last: 0, prev: null, room: null, roomSince: 0 };
   function layoutH() {
     const wrap = document.querySelector(".lgWrap"), cv = document.getElementById("gameCanvas"); if (!wrap || !cv) return;
+    if (fxState.dropping || wrap.classList.contains("lgPlay") || wrap.style.transform) return;   // the logo is mid-drop/squish: keep the spotlight where it is (measuring the moving, scaled box would drag it along)
     const r = wrap.getBoundingClientRect(), cr = cv.getBoundingClientRect(); if (!r.width || !cr.width) return;
     const root = document.documentElement.style;
     root.setProperty("--hx", Math.round(r.left + r.width / 2) + "px"); root.setProperty("--hy", Math.round(r.top + r.height * 0.42) + "px");
@@ -17535,7 +17536,8 @@
     const xj = Math.min(lr.left + LOGO_TOPS.w * k - 26, xt - 40), x0 = lr.left - size * 0.7, speed = lr.width * 0.95;
     const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
     const SQ = 0.9, ox = lr.top + lr.height * 0.92, sq = e => ox + (e - ox) * SQ;      // logo squish: how far it sinks under Gary's push-off
-    const yj = sq(feetAt(xj)), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
+    const yj = sq(feetAt(xj)), g = 1450 * sc, vy0 = opts.full ? -Math.sqrt(2 * g * Math.min(127 * sc, yj + 0.25 * size)) : -360 * sc / 1.5,   /* full: a real game jump (the hero's jump apex is ~127 world px); capped so his feet never rise more than a quarter-sprite above the screen top */
+     tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
     const drop = !!opts.drop, tD = drop ? 0.85 : 0, xs = drop ? lr.left + lr.width * 0.12 : x0;      // drop: the loop's closing move: he falls onto the logo from above, then runs on as usual
     const tRun = tD + (xj - xs) / speed;
     INTRO.land = { x: (col * q.tile + q.tile / 2) - q.hero.w / 2, y: floor - q.hero.h };
@@ -17639,7 +17641,8 @@
     // ---- scenes ----
     const scene1 = () => {                      // 1: the logo run, with the meadow already running behind the logo
       loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro");
-      startIntro({ keepHold: true, maxCol: 14, onDone: guard((ok) => {
+      const isK = document.body.dataset.logo === "k";
+      startIntro({ keepHold: true, maxCol: 14, drop: isK, full: isK, onDone: guard((ok) => {
         if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10);
         hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk");
       }) });
@@ -17703,7 +17706,7 @@
     };
     const afterIntro = guard(ok => { if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10); hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk"); });
     const scene1Drop = () => {                  // the loop's close: no fade, no cut he can be seen through (the swap happens while he is off the top); he drops onto the logo and runs
-      loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro"); startIntro({ keepHold: true, maxCol: 14, drop: true, onDone: afterIntro });
+      loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro"); startIntro({ keepHold: true, maxCol: 14, drop: true, full: document.body.dataset.logo === "k", onDone: afterIntro });
     };
     // screen-relative keys for each gravity direction (the engine keeps keys character-relative: on the right wall Right = up, Left = down)
     const upWall = () => hk.setKey("ArrowRight", true);
