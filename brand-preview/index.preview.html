@@ -14650,7 +14650,7 @@
   /* BRAND PREVIEW (H): one read-only getter so the preview script can SEE the demo. It reads state; it changes nothing. */
   window.__brandProbe = () => { if (!landingActive) return null; const h = actors.find(a => a.isPlayer);
     const def = h && actorDefs[h.defId]; const poses = def && def.poses ? { stand: def.poses.stand && def.poses.stand.slice(), stride: def.poses.stride && def.poses.stride.slice(), air: def.poses.air && def.poses.air.slice(), crouch: def.poses.crouch && def.poses.crouch.slice() } : null;
-    return { room: currentRoomId, cameraX, cols: COLS, tile: TILE, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded, hidden: !!h.vortexHidden, loaded: !!h.cannonLoad, ballistic: !!h.ballistic, cannonCd: h.cannonCooldown || 0 } : null, foe: (() => { const f = actors.find(a => !a.isPlayer && actorDefs[a.defId] && actorDefs[a.defId].temperament === "chaser"); return f ? { x: f.x, y: f.y, hidden: !!f.vortexHidden } : null; })(), playing: appMode === "play", heroPoses: poses, heroArt: def && def.art ? def.art.slice() : null }; };
+    return { room: currentRoomId, cameraX, cols: COLS, tile: TILE, hero: h ? { x: h.x, y: h.y, w: h.w, h: h.h, vx: h.vx, vy: h.vy, grounded: !!h.grounded, hidden: !!h.vortexHidden, loaded: !!h.cannonLoad, ballistic: !!h.ballistic, cannonCd: h.cannonCooldown || 0 } : null, foe: (() => { const f = actors.find(a => !a.isPlayer && actorDefs[a.defId] && actorDefs[a.defId].temperament === "chaser"); return f ? { x: f.x, y: f.y, hidden: !!f.vortexHidden } : null; })(), playing: appMode === "play", gdir: gravityDir, lives, ended: playSessionEnded, nActors: actors.length, acts: actors.map(a => [a.defId, a.x | 0, a.y | 0, a.vx | 0, a.vy | 0]), heroPoses: poses, heroArt: def && def.art ? def.art.slice() : null }; };
   /* BRAND PREVIEW (I, the Gary intro): the only WRITE hooks. hold = the landing autopilot stands still; hideHero = the hero is not drawn (an existing engine flag);
      placeHero = put the hero somewhere; floorTop = read-only. The world (coins, clouds, enemies) keeps running the whole time. */
   window.__brandHold = false;
@@ -14658,6 +14658,10 @@
     hold(on) { window.__brandHold = on === 2 ? 2 : !!on; landingBotReset(); },
     setKey(k, on) { keys[k] = !!on; },
     freeze() { landingFrozen = true; },
+    setGravity(d) { setGravityDir(d); },
+    clearCell(x, y) { board[y][x] = null; },
+    clearReady() { playReadyUntil = null; },
+    storm() { return window.chaosKit && window.chaosKit.storm; },
     spawnChaser(col, row) { const id = findDefaultActorDef("chaser"); spawnActorAt(id, col * TILE + TILE / 2, row * TILE + TILE / 2, null, { x: 1, y: 0 }); },
     launch(x, y, vx, vy) { const h = actors.find(a => a.isPlayer); if (!h) return; h.x = x; h.y = y; h.vx = vx; h.vy = vy; h.grounded = false; h.vortexHidden = false; h.facingDir = vx < 0 ? -1 : 1; },
     loadScene(id) { return journeyLoadScene(id); },
@@ -14667,7 +14671,7 @@
   };
   /* BRAND PREVIEW (J, Gary's journey): scene loader. Builds a scene as a real engine project (the same way a sample or a Surprise Me room is built),
      with the held-aside undo stacks swapped out so nothing that happens here can reach the project put away by the landing screen. */
-  const JOURNEY_NAMES = { grass: "Gary's meadow", drain: "Everything Goes Down The Drain", chase: "Gary and the Drain", lavalamp: "The Lava Lamp" };
+  const JOURNEY_NAMES = { grass: "Gary's meadow", drain: "Everything Goes Down The Drain", chase: "Gary and the Drain", dungeon: "Gary in the Dungeon", lavalamp: "The Lava Lamp" };
   function buildJourneyMeadow() {
     ensureSkyBackdropDefs();
     const room = createEmptyRoom("Gary's meadow");
@@ -14770,17 +14774,47 @@
     room.startPos = { x: 11 * TILE + 5, y: 8 * TILE + 5 };
     snapshotCurrentRoomState();
   }
+  // The landing's dungeon ("Gary in the Dungeon"): dark brick backdrop like Dungeon Diving, stone platforms over a lava lake, spikes, enemies, loose crates and a stone.
+  // Gravity is down. A gravity Button on the far platform (set to "right") is what turns the room sideways when Gary steps on it.
+  function buildJourneyDungeon() {
+    const room = createEmptyRoom("Gary in the Dungeon");
+    room.gravityEnabled = true; room.gravityDir = "down"; room.wrapHEnabled = false; room.wrapVEnabled = false; room.cameraMode = "fixed";
+    rooms.push(room); activateRoom(room.id);
+    ["chaser", "wanderer", "fleer"].forEach(k => { actorDefs[findDefaultActorDef(k)].lethal = false; });   // enemies only bump: nothing here costs a life
+    const put = (x, y, geo, mod, skin) => { board[y][x] = gameplayKey(geo, mod); groundSkinBoard[y][x] = skin; groundSkinRotationBoard[y][x] = 0; };
+    const plat = (x0, x1, y0, y1) => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(x, y, "solid", "none", "gndStone"); };
+    for (let y = 16; y <= 17; y++) for (let x = 0; x < COLS; x++) { if (x < 6) put(x, y, "solid", "none", "gndStone"); else put(x, y, "none", "lethal", "lthLava"); }   // a lava lake under everything
+    plat(8, 13, 13, 14);                                           // P1: where he lands
+    plat(17, 19, 13, 14);                                          // P2: across a 3-tile gap
+    plat(20, 21, 11, 12);                                          // P3: two up; the gravity Button stands on it
+    plat(22, 23, 0, 15);                                           // the dungeon's right wall, set in from the screen edge so the room 'falls' to a wall that is fully visible
+    plat(9, 13, 6, 7); plat(16, 19, 6, 7);                         // two ledges up top, holding crates, a stone and enemies for later
+    put(11, 12, "solid", "lethal", "lthSpike");                    // a spike on P1 to hop
+    board[10][20] = gameplayKey("pushbutton", "none"); groundSkinBoard[10][20] = null;
+    room.gravButtons = room.gravButtons || {}; room.gravButtons["20,10"] = "right";
+    placeExampleActor(playerDefId, 9, 12);
+    placeExampleActor(findDefaultActorDef("wanderer"), 18, 12);    // paces P2
+    placeExampleActor(findDefaultActorDef("fleer"), 8, 12);        // wobbles about on P1
+    placeExampleActor(findDefaultActorDef("chaser"), 12, 5);
+    placeExampleActor(PUSHABLE_DEF_ID, 10, 5); placeExampleActor(PUSHABLE_DEF_ID, 11, 5); placeExampleActor(PUSHABLE_DEF_ID, 17, 5); placeExampleActor(PUSHABLE_DEF_ID, 18, 5); placeExampleActor(PUSHABLE_DEF_ID, 18, 4);
+    placeExampleActor(LARGE_STONE_DEF_ID, 13, 5);
+    room.startPos = { x: 9 * TILE + 5, y: 12 * TILE + 5 };
+    snapshotCurrentRoomState();
+    decorateBackdrop({ rooms: [room], backgroundTileDefs }, "dungeon");   // the same dark brick, torches and moss Dungeon Diving uses
+    activateRoom(room.id);
+  }
   function journeyLoadScene(id) {
     const keepUndo = undoStack, keepRedo = redoStack; undoStack = []; redoStack = [];
     try {
       landingBotReset(); landingFrozen = false;
       if (appMode === "play") exitToBuildMode();
       const name = JOURNEY_NAMES[id];
-      loadExampleGame(id === "grass" ? buildJourneyMeadow : id === "chase" ? buildJourneyChase : buildJourneyBlank, name, { skipConfirm: true });
-      if (id !== "grass" && id !== "chase") surpriseMe(1, { templateId: id });
+      loadExampleGame(id === "grass" ? buildJourneyMeadow : id === "chase" ? buildJourneyChase : id === "dungeon" ? buildJourneyDungeon : buildJourneyBlank, name, { skipConfirm: true });
+      if (id !== "grass" && id !== "chase" && id !== "dungeon") surpriseMe(1, { templateId: id });
       let extra = {};
       if (id === "drain") extra = journeyDressDrain();
       if (id === "grass") extra = { cannon: { x: 18, y: 12 } };
+      if (id === "dungeon") extra = { land: { x: 9, y: 12 }, button: { x: 20, y: 10 } };
       if (id === "chase") extra = { hole: { x: 19, y: 9 }, safe: { x: 11, y: 8 }, holes: [{ x: 19, y: 9 }] };
       setGamePaused(false); buildPausedMemory = false;
       enterPlayMode();
@@ -16815,7 +16849,7 @@
       });
     });
 
-    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, teleDump: () => messLog.slice(), ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone, pool: gmBgPool }, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
+    try { window.chaosKit = { version: CHAOS_KIT_VERSION, showTab, teleDump: () => messLog.slice(), ov: { draw: ovDraw }, gm: { GM, press: gmPress, stampAlone: gmStampAlone, pool: gmBgPool }, storm: stormHooks, endSession: why => endSession(why || "stop"), active: () => sess && sess.kind }; } catch (e) { /* console view only */ }
   })();
   // ===== END CHAOS KIT =====
 
@@ -17449,7 +17483,7 @@
   window.addEventListener("resize", () => { if (/^[hij]$/.test(document.body.dataset.logo || "")) layoutH(); });
   /* ----- I: Gary runs in from the left over the logo, jumps off its right side and lands in the demo, where the real hero takes over ----- */
   const LOGO_TOPS = {"step": 6, "w": 1332, "h": 657, "y": [377, 373, 370, 368, 366, 364, 362, 361, 359, 292, 286, 145, 131, 120, 111, 108, 107, 108, 113, 117, 79, 75, 71, 68, 65, 61, 58, 59, 59, 64, 74, 87, 100, 114, 128, 155, 145, 134, 124, 114, 103, 94, 83, 71, 61, 50, 39, 28, 18, 6, 1, 0, 0, 0, 1, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 14, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27, 27, 29, 30, 31, 32, 34, 35, 36, 37, 39, 40, 41, 42, 44, 45, 46, 47, 42, 32, 27, 25, 25, 25, 25, 26, 26, 28, 30, 34, 39, 45, 49, 55, 60, 64, 7, 5, 3, 0, 0, 0, 1, 7, 23, 42, 40, 37, 14, 3, 0, 0, 0, 0, 3, 11, 21, 28, 27, 26, 25, 25, 25, 28, 35, 103, 101, 100, 99, 98, 96, 96, 96, 96, 96, 96, 96, 96, 96, 97, 103, 109, 114, 121, 128, 133, 208, 208, 158, 144, 135, 130, 124, 121, 118, 118, 118, 111, 107, 107, 98, 93, 88, 83, 83, 83, 83, 83, 85, 72, 72, 50, 48, 48, 48, 60, 34, 33, 33, 33, 61, 48, 49, 48, 49, 48, 48, 120, 123, 126, 130, 133, 139, 164, 163, 163, 163, 172, 184, 195, 397, 400, 404, 407, 410, 414, 418]};
-  const INTRO = { raf: 0, live: false };
+  const INTRO = { raf: 0, live: false }; window.__INTRO = INTRO;
   function introCurve() {       // the logo's top edge as a line a character can stand on (image px): highest point under the feet, then smoothed
     const a = LOGO_TOPS.y.map((v, i, arr) => v >= 0 ? v : (arr[i - 1] >= 0 ? arr[i - 1] : 400)), n = a.length, ft = 2, sm = 1, m = [], o = [];
     for (let i = 0; i < n; i++) { let v = 1e9; for (let j = Math.max(0, i - ft); j <= Math.min(n - 1, i + ft); j++) v = Math.min(v, a[j]); m.push(v); }
@@ -17486,7 +17520,8 @@
     const feetAt = x => lr.top + curve(Math.max(0, Math.min(LOGO_TOPS.w, (x - lr.left) / k))) * k;
     const SQ = 0.9, ox = lr.top + lr.height * 0.92, sq = e => ox + (e - ox) * SQ;      // logo squish: how far it sinks under Gary's push-off
     const yj = sq(feetAt(xj)), g = 1450 * sc, vy0 = -360 * sc / 1.5, tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
-    const tRun = (xj - x0) / speed;
+    const drop = !!opts.drop, tD = drop ? 0.85 : 0, xs = drop ? lr.left + lr.width * 0.12 : x0;      // drop: the loop's closing move: he falls onto the logo from above, then runs on as usual
+    const tRun = tD + (xj - xs) / speed;
     INTRO.land = { x: (col * q.tile + q.tile / 2) - q.hero.w / 2, y: floor - q.hero.h };
     const g_ = document.getElementById("garyIntro") || Object.assign(document.createElement("canvas"), { id: "garyIntro", width: 8, height: 8 }); if (!g_.parentNode) { g_.setAttribute("aria-hidden", "true"); document.body.appendChild(g_); }
     g_.style.width = g_.style.height = size + "px"; const cx = g_.getContext("2d");
@@ -17495,10 +17530,11 @@
     hk.hold(true); hk.hideHero(true); INTRO.live = true; g_.classList.add("on");
     let lowRow = 0; for (let i = 0; i < 64; i++) if (q.heroPoses.stand[i] && (i >> 3) > lowRow) lowRow = i >> 3;
     const sink = (7 - lowRow) * artPx;           // transparent rows under the feet: push the sprite down so the feet themselves touch
-    let clk = 0, last = performance.now(); const place = (x, y) => { y += sink; g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)"; };
+    let clk = 0, last = performance.now(); g_.style.transformOrigin = "50% 100%"; const place = (x, y, sc2) => { y += sink; g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)" + (sc2 && sc2 !== 1 ? " scale(" + sc2.toFixed(3) + ")" : ""); };
     const lw = wrap, sqT = 0.14;
     const squish = t => {            // 1 = rest. Sinks in the last 0.14s of the run, springs back with a small overshoot after take-off
-      let sy = 1; if (t > tRun - sqT && t < tRun) { const u = (t - (tRun - sqT)) / sqT; sy = 1 - (1 - SQ) * u * u; }
+      let sy = 1; if (tD && t >= 0.7 && t < tD) { sy = 1 - 0.07 * Math.sin(Math.PI * (t - 0.7) / (tD - 0.7)); }
+      else if (t > tRun - sqT && t < tRun) { const u = (t - (tRun - sqT)) / sqT; sy = 1 - (1 - SQ) * u * u; }
       else if (t >= tRun) { const u = t - tRun; sy = 1 - (1 - SQ) * Math.exp(-u * 9) * Math.cos(u * 22) * 1.0 + 0; sy = Math.min(sy, 1.06); if (u > 0.7) sy = 1; }
       lw.style.transform = sy === 1 ? "" : "scale(" + (1 + (1 - sy) * 0.5).toFixed(4) + "," + sy.toFixed(4) + ")"; return sy;
     };
@@ -17506,7 +17542,11 @@
       if (!INTRO.live) { lw.style.transform = ""; return; }
       if (document.hidden) { last = now; INTRO.raf = requestAnimationFrame(step); return; }   // hidden tab: stand still
       clk += Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now; const t = clk, sy = squish(t);
-      if (t < tRun) { const x = x0 + speed * t, fy = x < lr.left ? feetAt(lr.left) : feetAt(x); place(x, ox + (fy - ox) * sy); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
+      if (drop && t < tD) {                       // falls from above the top edge, big, shrinking to normal as it lands on the logo; a short squash
+        const fy0 = feetAt(xs), u = Math.min(1, t / 0.7);
+        if (t < 0.7) { place(xs, jLerp(-size * 2.8, fy0, easeOut2(u)), 1 + 1.5 * (1 - easeOut3(u))); set("air"); } else { place(xs, fy0 + 0.04 * size * Math.sin(Math.PI * (t - 0.7) / (tD - 0.7))); set("crouch"); }
+      }
+      else if (t < tRun) { const x = xs + speed * (t - tD), fy = x < lr.left ? feetAt(lr.left) : feetAt(x); place(x, ox + (fy - ox) * sy); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
       else if (t < tRun + tFall) { const u = t - tRun; place(xj + vx * u, yj + vy0 * u + 0.5 * g * u * u); set("air"); }
       else { place(xt, yt); set("crouch"); if (t > tRun + tFall + 0.06) { introFinish(true); return; } }
       INTRO.raf = requestAnimationFrame(step);
@@ -17554,8 +17594,8 @@
     const guard = fn => (...a) => { if (JR.on && JR.gen === gen) return fn(...a); };
     // reduced motion: no Gary, no scaling arc, no shake, no fades: a plain cut between frozen stills of the three rooms
     if (reduce.matches) {
-      const ids = ["grass", "chase", "lavalamp"]; let i = 1;
-      const show = guard(() => { hk.loadScene(ids[i % 3]); hk.hold(true); i++; requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); });
+      const ids = ["grass", "chase", "lavalamp", "dungeon"]; let i = 1;
+      const show = guard(() => { hk.loadScene(ids[i % 4]); hk.hold(true); i++; requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); });
       hk.loadScene("grass"); hk.hold(true); requestAnimationFrame(() => requestAnimationFrame(hk.freeze)); JR.tm = setTimeout(show, 6000); return;
     }
     const { sp, fx } = jEls(), fxc = fx.getContext("2d"), spc = sp.getContext("2d"), cv = document.getElementById("gameCanvas");
@@ -17575,12 +17615,13 @@
         fxc.fillStyle = "rgba(255,196,64," + (0.9 * k).toFixed(2) + ")"; for (let a = 0; a < 8; a++) { const ang = a * Math.PI / 4 + 0.4, d = (2.5 + 2.5 * (1 - k)) * p; sq(FX.mx + Math.cos(ang) * d - p / 2, FX.my + Math.sin(ang) * d - p / 2, 1); } }
       for (let n = 0; n < 9; n++) { const age = t - n * 0.05; if (age <= 0 || age > 0.9) continue; const u = age / 0.9, ang = -1.1 - n * 0.28, d = (2 + u * 10) * p * (0.7 + n * 0.12); const size = Math.max(2, Math.round(2 + 4 * u));
         fxc.fillStyle = "rgba(240,240,248," + (0.8 * (1 - u)).toFixed(2) + ")"; sq(FX.mx + Math.cos(ang) * d - size * p / 2, FX.my + Math.sin(ang) * d - size * p / 2 - u * 2 * p, size); }
+      if (FX.stars) { fxc.fillStyle = "#ffe14d"; for (let i = 0; i < 5; i++) { const ang = i * 1.2566 + FX.t * 5, r = S.size * 0.6 * (FX.ss || 1); sq(FX.sx + Math.cos(ang) * r, FX.sy + Math.sin(ang) * r, 1); } }     // a ring of little stars circling him, steady (no blinking)
     };
     const shake = amp => { cv.style.translate = amp ? Math.round(Math.sin(JR.t * 44) * amp) + "px " + Math.round(Math.cos(JR.t * 37) * amp) + "px" : ""; };
     // ---- scenes ----
     const scene1 = () => {                      // 1: the logo run, with the meadow already running behind the logo
       loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro");
-      startIntro({ keepHold: true, maxCol: 12, onDone: guard((ok) => {
+      startIntro({ keepHold: true, maxCol: 14, onDone: guard((ok) => {
         if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10);
         hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk");
       }) });
@@ -17608,6 +17649,46 @@
         JR.lf = { from: hole, to }; jTo("lampfall");
       } else { hk.launch(13 * 32 + 5, 6 * 32, 0, 0); hk.hideHero(false); JR.lampDir = -1; JR.lampFlip = 0; jTo("lamp"); }
     };
+    // ---- the dungeon bot: a little script of walk/hop steps (position in, keys out). Used only in scene 5, to reach the gravity Button. ----
+    const botWait = sec => { let t = 0; return (h, dt) => { t += dt; keys(false, false, false, false, false); return t >= sec; }; };
+    const botWalk = px => { let t = 0; return (h, dt) => { t += dt; const d = px - h.x, vel = h.vx, err = d - vel * Math.abs(vel) / (2 * 1700);
+      if ((Math.abs(d) <= 3 && Math.abs(vel) < 25) || t > 5 || !h.grounded) { keys(false, false, false, false, false); return true; }
+      keys(err > 1.5, err < -1.5, false, false, false); return false; }; };
+    const botHop = (dir, until) => { let t = 0, air = false, settle = 0; return (h, dt) => { t += dt;
+      if (t < 0.26) { keys(dir > 0 && !JR.hopStop, dir < 0 && !JR.hopStop, false, false, true); if (until(h)) { hk.setKey("ArrowRight", false); hk.setKey("ArrowLeft", false); } if (!h.grounded) air = true; return false; }      // jump held through the climb = a full-height hop
+      hk.setKey(" ", false);
+      if (settle > 0) { settle -= dt; if (settle <= 0) { keys(false, false, false, false, false); return true; } return false; }
+      if (until(h)) { hk.setKey("ArrowRight", false); hk.setKey("ArrowLeft", false); }
+      if (!h.grounded) air = true;
+      if ((air && h.grounded) || t > 2) { keys(false, false, false, false, false); settle = 0.25; }
+      return false; }; };
+    const botClimb = () => { let t = 0; return (h, dt) => { t += dt; if ((h.y < 360 && h.grounded) || t > 4) { keys(false, false, false, false, false); return true; } keys(true, false, false, false, h.grounded && (t % 0.5) < 0.3); return false; }; };   // up onto the far platform: hold Right, jump whenever he is on the ground
+    const botRun = (h, dt) => { if (!JR.bot && JR.dq.length) JR.bot = JR.dq.shift(); if (JR.bot && JR.bot(h, dt)) JR.bot = null; };
+    const heroFeet = h => { const m = jMap(); return [m.X(h.x + 11), m.Y(h.y + 22)]; };
+    // ---- scene 4 -> 5: he jumps clean out of the lamp (up through the lid, growing), cut, then drops into the dungeon from above ----
+    const startLampJump = q => {
+      const m = jMap(), h = q.hero; hk.hideHero(true); sprInit(q); sprPose("air"); sp.classList.add("on");
+      const f = heroFeet(h), c0 = feetToCenter(f[0], f[1]), size = S.size;
+      JR.lj = { from: c0, S: 2.5, dur: 1.0, to: [c0[0] + 70, m.rect.top - size * 2.5 * 0.7], lid: [m.X(11.5 * 32 + 16), m.Y(3 * 32)] };
+      FX.on = false; JR.lj.puff = false; jTo("lampjump");
+    };
+    const startDunFall = info => {
+      const m = jMap(), box = { x: info.land.x * 32 + 5, y: (info.land.y + 1) * 32 - 22 }; JR.land = { box, fx: m.X(box.x + 11), fy: m.Y(box.y + 22) };
+      JR.fallFrom = { x: JR.land.fx, y: m.rect.top - S.size * 2.5 * 0.7 }; sprPose("air"); jTo("dfall");
+    };
+    // ---- scene 7 -> 8: the storm's last boom blows Gary up and off the top of the screen (a comic blast-off, Team-Rocket style), then he drops onto the logo ----
+    const startBlast = q => {
+      const h = q && q.hero; hk.hideHero(true); if (q && q.heroPoses) sprInit(q); sprPose("air"); sp.classList.add("on"); fx.classList.add("on");
+      const m = jMap(), f = h ? heroFeet(h) : [m.X(23 * 32), m.Y(11 * 32)], c0 = feetToCenter(f[0], f[1]);
+      JR.bl = { from: c0, S: 3.2, dur: 1.25, to: [c0[0] - 90, m.rect.top - S.size * 3.2 * 0.7] };
+      FX.on = true; FX.t = 0; FX.mx = c0[0]; FX.my = c0[1]; FX.p = Math.max(3, Math.round(m.sc * 4)); jTo("blast");
+    };
+    const afterIntro = guard(ok => { if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10); hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk"); });
+    const scene1Drop = () => {                  // the loop's close: no fade, no cut he can be seen through (the swap happens while he is off the top); he drops onto the logo and runs
+      loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro"); startIntro({ keepHold: true, maxCol: 14, drop: true, onDone: afterIntro });
+    };
+    // screen-relative keys for each gravity direction (the engine keeps keys character-relative: on the right wall Right = up, Left = down)
+    const upWall = () => hk.setKey("ArrowRight", true);
     JR.step = guard(now => {
       if (document.hidden) { JR.last = now; JR.raf = requestAnimationFrame(JR.step); return; }   // tab hidden: the whole journey stands still
       const dt = Math.min(0.05, Math.max(0, (now - JR.last) / 1000)); JR.last = now; JR.t += dt;
@@ -17670,15 +17751,70 @@
           break; }
         case "lamp": {                          // 4: he lands on a trampoline and bounces from side to side (keys only); a timer ends it (back to scene 1 for now)
           if (h) { if (h.x > 14 * 32 && JR.lampDir > 0) { JR.lampDir = -1; JR.lampFlip = JR.t; } else if (h.x < 9.2 * 32 && JR.lampDir < 0) { JR.lampDir = 1; JR.lampFlip = JR.t; } else if (JR.t - (JR.lampFlip || 0) > 1.15) { JR.lampDir = -JR.lampDir; JR.lampFlip = JR.t; } keys(JR.lampDir > 0, JR.lampDir < 0, false, false, false); }
-          if (JR.t > 7.5) { keys(false, false, false, false, false); jTo("lampwait"); jFade(true); }
+          if (JR.t > 7.5 && h) { keys(false, false, false, false, false); startLampJump(q); }
           break; }
-        case "lampwait": if (JR.t > 0.4) scene1(); break;            // (inside the frame loop, so a hidden tab cannot start scene 1 behind its back)
+        case "lampjump": {                      // out of the lamp: a big arc up through the lid, growing, spinning a little, off the top of the screen
+          const u = Math.min(1, JR.t / JR.lj.dur), L = JR.lj, e = easeInOut(u) * 0.35 + u * 0.65, m = jMap(), size = S.size;
+          const P0 = L.from, P2 = [L.to[0], m.rect.top - size * L.S * 0.7], C = [P0[0] - 20, P0[1] - m.rect.height * 0.35];
+          const a = (1 - e) * (1 - e), b = 2 * (1 - e) * e, d = e * e, x = a * P0[0] + b * C[0] + d * P2[0], y = a * P0[1] + b * C[1] + d * P2[1];
+          sprAt(x, y, 0.5 * Math.sin(Math.PI * u * 2), 1 + (L.S - 1) * easeIn2(u));
+          if (!L.puff && y < L.lid[1]) { L.puff = true; FX.on = true; FX.t = 0; FX.mx = L.lid[0]; FX.my = L.lid[1]; FX.p = Math.max(3, Math.round(m.sc * 4)); fx.classList.add("on"); }
+          if (L.puff) { FX.t += dt; drawFx(); }
+          if (u >= 1) { FX.on = false; drawFx(); const info = loadScene("dungeon"); hk.clearReady(); startDunFall(info); }
+          break; }
+        case "dfall": {                         // from above the top edge, big, shrinking as he drops onto the first platform; the real hero takes over
+          const u = Math.min(1, JR.t / 0.75), e = easeOut2(u), m = jMap(); JR.land.fx = m.X(JR.land.box.x + 11); JR.land.fy = m.Y(JR.land.box.y + 22);
+          const s2 = 1 + 1.5 * (1 - easeOut3(u)), c = feetToCenter(JR.land.fx, jLerp(m.rect.top - S.size * 2.5 * 0.7 - S.size, JR.land.fy, e));
+          sprAt(c[0], c[1], 0, s2);
+          if (u >= 1) { JR.t2 = 0; jTo("dsquash"); }
+          break; }
+        case "dsquash": {
+          const u = Math.min(1, JR.t / 0.14), sy = 1 - 0.18 * Math.sin(Math.PI * u), sx = 1 + 0.15 * Math.sin(Math.PI * u);
+          const c = feetToCenter(JR.land.fx, JR.land.fy); sprAt(c[0], c[1] + (1 - sy) * S.size / 2, 0, sx, sy); sprPose("crouch");
+          if (u >= 1) { hk.placeHero(JR.land.box.x, JR.land.box.y); hk.hideHero(false); sp.classList.remove("on");
+            JR.dq = [botWait(0.5), botHop(1, hh => hh.x >= 382), botWalk(412), botHop(1, hh => hh.x >= 600), botWalk(618), botClimb()]; JR.bot = null; jTo("dun"); }
+          break; }
+        case "dun": {                           // 5: he hops the spike and the lava gap, climbs to the far platform and steps on the gravity Button (the engine does the flip)
+          hk.clearReady(); if (!h) break;
+          if (q.gdir !== "down") { keys(false, false, false, false, false); jTo("flipR"); break; }
+          botRun(h, dt);
+          if (JR.t > 7.5) { keys(false, false, false, false, false); hk.setGravity("right"); }     // (safety net: if he missed the Button, the flip happens anyway)
+          break; }
+        case "flipR": {                         // 6: gravity is on its side: he lands on the right wall and runs up it while the room tumbles to that side
+          hk.clearReady();
+          if (JR.t < 1.6) { keys(false, false, false, false, false); upWall(); } else keys(false, false, false, false, false);
+          if (JR.t > 2.3) { hk.setGravity("up"); jTo("flipU"); }
+          break; }
+        case "flipU": {                         // ...then to the ceiling: he hops about up there
+          hk.clearReady(); if (h && h.x > 380 && JR.t < 2.0) { keys(false, false, false, false, false); hk.setKey("ArrowRight", true); } else keys(false, false, false, false, (JR.t % 0.9) < 0.18);   // under gravity up Right = screen-left: he scuttles along the ceiling, away from the pile, so he comes down on a platform
+          if (JR.t > 2.2) { keys(false, false, false, false, false); hk.clearCell(20, 10); hk.setGravity("down"); jTo("flipD"); }   /* the Button goes first, so nothing falling can turn gravity again */
+          break; }
+        case "flipD": hk.clearReady(); if (JR.t > 1.6) { hk.clearCell(20, 10); JR.st = {}; JR.storm = hk.storm(); JR.peak = 0; if (JR.storm) { JR.storm.start(JR.st); JR.st.t2 = 1300; JR.st.t3 = 3300; } jTo("storm"); } break;
+        case "storm": {                         // 7: the existing Bomb Storm: bombs rain across the room, then every free tile gets one and they all go off together
+          hk.clearReady(); keys(false, false, false, false, (JR.t % 0.8) < 0.16);
+          if (JR.storm) JR.storm.tick(JR.t * 1000, JR.st);
+          JR.peak = Math.max(JR.peak || 0, q ? q.nActors : 0);
+          if ((JR.st && JR.st.filled && (JR.t * 1000 >= JR.st.fillAt + 1150 || (q && q.nActors < JR.peak * 0.85))) || JR.t > 8.5 || !JR.storm) { keys(false, false, false, false, false); startBlast(q); }
+          break; }
+        case "blast": {                         // the last boom blows him off the top: big, spinning, with a puff and stars; then a swap while he is off-screen and he drops onto the logo
+          const B = JR.bl, u = Math.min(1, JR.t / B.dur), e = easeIn2(u) * 0.6 + u * 0.4, m = jMap();
+          const P2 = [B.to[0], m.rect.top - S.size * B.S * 0.7], P0 = B.from, C = [P0[0] + 40, P0[1] - m.rect.height * 0.25];
+          const a = (1 - e) * (1 - e), b = 2 * (1 - e) * e, d = e * e, x = a * P0[0] + b * C[0] + d * P2[0], y = a * P0[1] + b * C[1] + d * P2[1];
+          hk.hideHero(true); FX.stars = true; FX.sx = x; FX.sy = y; FX.ss = 1 + (B.S - 1) * easeIn2(u);
+          sprAt(x, y, 8 * Math.PI * u, 1 + (B.S - 1) * easeIn2(u)); FX.t += dt; drawFx();
+          if (u >= 1) { FX.on = false; FX.stars = false; drawFx(); fx.classList.remove("on"); sp.classList.remove("on"); if (JR.storm) { try { JR.storm.end("done", JR.st, false); } catch (e2) { /* ending must never throw */ } } scene1Drop(); }
+          break; }
         case "in": if (JR.t > 0.4) jTo(JR.next); break;
         case "out": if (JR.t > 0.4) { const f = JR.after; JR.after = null; if (f) f(); } break;
       }
       JR.raf = requestAnimationFrame(JR.step);
     });
-    scene1();
+    const js = new URLSearchParams(location.search).get("jstart");     // (preview-only shortcut for testing: ?logo=j&jstart=dungeon | storm)
+    if (js === "dungeon" || js === "storm") {
+      const info = loadScene("dungeon"); hk.clearReady(); const q0 = jProbe(); if (q0 && q0.heroPoses) { S.q = q0; }
+      if (js === "dungeon") { hk.placeHero(info.land.x * 32 + 5, (info.land.y + 1) * 32 - 22); hk.hideHero(false); JR.dq = [botWait(0.5), botHop(1, hh => hh.x >= 382), botWalk(412), botHop(1, hh => hh.x >= 600), botWalk(618), botClimb()]; JR.bot = null; jTo("dun"); }
+      else { hk.placeHero(590, 13 * 32 - 22); hk.hideHero(false); JR.st = {}; JR.storm = hk.storm(); if (JR.storm) { JR.storm.start(JR.st); JR.st.t2 = 1300; JR.st.t3 = 3300; } jTo("storm"); }
+    } else scene1();
     JR.raf = requestAnimationFrame(JR.step);
   }
   /* logo variants */
