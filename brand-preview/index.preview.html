@@ -511,6 +511,11 @@
   #landingNow button { font: inherit; font-size: 13px; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0 2px; }
   #landingNow button:hover { text-decoration: underline; }
   #landingTrust { margin-top: 16px; font-size: 13px; color: #fff; text-shadow: 0 1px 4px #000; }
+  #jSound { display: none; position: absolute; right: 24px; top: 72px; padding: 7px 14px; border-radius: 999px; border: 2px solid rgba(255,255,255,0.55); background: rgba(10,10,18,0.6); color: #fff; font: 700 13px system-ui, sans-serif; cursor: pointer; align-items: center; gap: 8px; }
+  #jSound:hover { background: rgba(10,10,18,0.8); } #jSound:focus-visible { outline: 3px solid #ffd54a; outline-offset: 2px; }
+  #jSound[aria-pressed="true"] { background: #ffd54a; color: #1a1a24; border-color: #ffd54a; }
+  body[data-logo="j"] #jSound { display: inline-flex; }
+  @media (max-width: 700px) { #jSound { top: 64px; right: 16px; } }
   #landingKeys { position: absolute; right: 24px; bottom: 56px; padding: 6px 12px; border-radius: 8px; font-size: 12px; color: #dde;
     background: rgba(20,21,30,0.75); border: 1px solid rgba(255,255,255,0.25); }
   #teleNote { position: absolute; left: 6vw; bottom: 46px; max-width: 420px; font-size: 11px; color: #9aa; text-shadow: 0 1px 4px #000; }
@@ -842,6 +847,7 @@
     <div id="landingFoot"><a id="landingCredits" href="#" hidden>Credits</a><a id="landingPrivacy" href="#">Privacy</a><a id="landingContact" href="#">Contact</a></div>
     <div id="teleNote" hidden>This test counts anonymous clicks, such as which buttons get pressed. It never records names, drawings or anything personal. Add ?nostats to the web address to turn it off.</div>
     <div id="landingBest">Best on a computer or Chromebook</div>
+    <button id="jSound" type="button" aria-pressed="false" aria-label="Sound off. Press to turn sound on."><span class="ic" aria-hidden="true">🔇</span><span class="tx">Sound off</span></button>
   </div>
 </div>
 
@@ -1982,6 +1988,7 @@
   // v2.47: true while the landing screen is up (the backdrop is the real engine running a sample with no input).
   // Mutes sound, blocks game keys and autosave, and (landingFrozen) freezes the backdrop for reduced-motion.
   let landingActive = false, landingFrozen = false;
+  let brandSoundOn = false;   // preview only: the landing sound toggle (off by default; Chrome needs a click before audio can start)
   const APP_NAME = "TinyGameMaker"; // the one name constant (see also the static <head> tags)
   let keyHintFirstKeyAt = null, keyHintCacheAt = -1e9, keyHintCacheText = "", keyHintAnyKey = false; // Play key-hint pill (drawKeyHint): fades a few seconds after the first key, stays out for the session
   let cloudDriftT0 = 0; // gameNow() when the current Play session began (clouds drift from here)
@@ -4562,7 +4569,7 @@
   }
   // Returns a loudness multiplier for this trigger: 0 = skip it, 1 = normal, less = an overlapping copy.
   function claimVoice(key, durationMs) {
-    if (landingActive || gamePaused) return 0; // the landing backdrop is silent; a paused game makes no sound
+    if ((landingActive && !brandSoundOn) || gamePaused) return 0; // the landing backdrop is silent unless the visitor switched sound on; a paused game makes no sound
     const now = performance.now();
     activeVoices = activeVoices.filter(v => v.endAt > now);
     if (activeVoices.length >= SOUND_MAX_TOTAL) return 0;
@@ -14655,6 +14662,8 @@
      placeHero = put the hero somewhere; floorTop = read-only. The world (coins, clouds, enemies) keeps running the whole time. */
   window.__brandHold = false;
   window.__brandHooks = {
+    sound(on) { brandSoundOn = !!on; try { const c = getAudioCtx(); if (on && c.state !== "running") c.resume(); } catch (e) {} return brandSoundOn; },
+    sfx(name, a) { if (brandSoundOn && landingActive && sounds[name]) { try { sounds[name](a); } catch (e) {} } },
     hold(on) { window.__brandHold = on === 2 ? 2 : !!on; landingBotReset(); },
     setKey(k, on) { keys[k] = !!on; },
     freeze() { landingFrozen = true; },
@@ -17527,7 +17536,7 @@
     g_.style.width = g_.style.height = size + "px"; const cx = g_.getContext("2d");
     const draw = pose => { const art = q.heroPoses[pose] || q.heroPoses.stand; cx.clearRect(0, 0, 8, 8); for (let i = 0; i < 64; i++) if (art[i]) { cx.fillStyle = art[i]; cx.fillRect(i % 8, (i / 8) | 0, 1, 1); } };
     let shown = ""; const set = pose => { if (pose !== shown) { shown = pose; draw(pose); } };
-    hk.hold(true); hk.hideHero(true); INTRO.live = true; g_.classList.add("on");
+    INTRO.sLand = 0; INTRO.sJump = 0; hk.hold(true); hk.hideHero(true); INTRO.live = true; g_.classList.add("on");
     let lowRow = 0; for (let i = 0; i < 64; i++) if (q.heroPoses.stand[i] && (i >> 3) > lowRow) lowRow = i >> 3;
     const sink = (7 - lowRow) * artPx;           // transparent rows under the feet: push the sprite down so the feet themselves touch
     let clk = 0, last = performance.now(); g_.style.transformOrigin = "50% 100%"; const place = (x, y, sc2) => { y += sink; g_.style.transform = "translate(" + Math.round(x - size / 2) + "px," + Math.round(y - size) + "px)" + (sc2 && sc2 !== 1 ? " scale(" + sc2.toFixed(3) + ")" : ""); };
@@ -17542,6 +17551,8 @@
       if (!INTRO.live) { lw.style.transform = ""; return; }
       if (document.hidden) { last = now; INTRO.raf = requestAnimationFrame(step); return; }   // hidden tab: stand still
       clk += Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now; const t = clk, sy = squish(t);
+      if (drop && t >= 0.7 && !INTRO.sLand) { INTRO.sLand = 1; jSfx("thud", 0.7); }
+      if (t >= tRun && !INTRO.sJump) { INTRO.sJump = 1; jSfx("jump"); jSfx("boing"); }
       if (drop && t < tD) {                       // falls from above the top edge, big, shrinking to normal as it lands on the logo; a short squash
         const fy0 = feetAt(xs), u = Math.min(1, t / 0.7);
         if (t < 0.7) { place(xs, jLerp(-size * 2.8, fy0, easeOut2(u)), 1 + 1.5 * (1 - easeOut3(u))); set("air"); } else { place(xs, fy0 + 0.04 * size * Math.sin(Math.PI * (t - 0.7) / (tD - 0.7))); set("crouch"); }
@@ -17821,6 +17832,16 @@
   /* Effects must not start until the logo image and fonts are really there (the first paint on a cold load had no logo height yet, so everything measured off it was wrong
      until a refresh or a variant switch), and they follow the landing screen itself: shown again by the Home button = start again; closed = stop (never keep driving the engine
      behind the editor). */
+  // landing sound toggle (variant J only, off by default; the click is the user gesture Chrome needs to start audio)
+  const jSnd = document.getElementById("jSound");
+  function soundSet(on) {
+    const hk = window.__brandHooks; if (hk) hk.sound(on);
+    if (!jSnd) return; jSnd.setAttribute("aria-pressed", on ? "true" : "false");
+    jSnd.setAttribute("aria-label", on ? "Sound on. Press to turn sound off." : "Sound off. Press to turn sound on.");
+    jSnd.querySelector(".ic").textContent = on ? "🔊" : "🔇"; jSnd.querySelector(".tx").textContent = on ? "Sound on" : "Sound off";
+  }
+  if (jSnd) jSnd.addEventListener("click", () => { soundSet(jSnd.getAttribute("aria-pressed") !== "true"); });
+  const jSfx = (n, a) => { const hk = window.__brandHooks; if (hk && hk.sfx) hk.sfx(n, a); };
   function whenLogoReady(cb) {
     const img = document.querySelector("#landingWordmark img");
     const imgP = new Promise(r => { if (!img || (img.complete && img.naturalWidth)) r(); else { img.addEventListener("load", r, { once: true }); img.addEventListener("error", r, { once: true }); setTimeout(r, 4000); } });
@@ -17841,6 +17862,7 @@
     if (v) document.body.dataset.logo = v; else delete document.body.dataset.logo;
     const im = document.querySelector("#landingWordmark img"); if (im) im.src = v === "c" ? "logo_muted.png" : "logo_clean.png";
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+    if (v !== "j") soundSet(false);
     stopIdle(); stopH(); journeyStop(); introFinish(false);        // switching: stop whatever the last variant was doing at once
     whenLogoReady(() => { if ((document.body.dataset.logo || "") === v) fxSync(v); });
     if (push) { const u = new URL(location.href); if (v) u.searchParams.set("logo", v); else u.searchParams.delete("logo"); history.replaceState(null, "", u); }
