@@ -17538,7 +17538,9 @@
     const SQ = 0.9, ox = lr.top + lr.height * 0.92, sq = e => ox + (e - ox) * SQ;      // logo squish: how far it sinks under Gary's push-off
     const yj = sq(feetAt(xj)), g = 1450 * sc, vy0 = opts.full ? -Math.sqrt(2 * g * Math.min(127 * sc, yj + 0.25 * size)) : -360 * sc / 1.5,   /* full: a real game jump (the hero's jump apex is ~127 world px); capped so his feet never rise more than a quarter-sprite above the screen top */
      tFall = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * (yt - yj))) / g, vx = (xt - xj) / tFall;
-    const drop = !!opts.drop, tD = drop ? 0.85 : 0, xs = drop ? lr.left + lr.width * 0.12 : x0;      // drop: the loop's closing move: he falls onto the logo from above, then runs on as usual
+    const arc = !!opts.arc, drop = !!opts.drop || arc, tD = drop ? 0.85 : 0, xs = drop ? lr.left + lr.width * 0.12 : x0;      // drop: the loop's closing move: he falls onto the logo from above, then runs on as usual
+    // arc entrance (K, first start): from off the left edge, a rising-then-falling projectile arc that lands on the logo at xs
+    const aT = 0.7, aX0 = -size, aFy = arc ? feetAt(xs) : 0, aYs = Math.max(size * 1.1, aFy - 0.3 * innerHeight), aVy = 0, aG = 2 * ((aFy - aYs) - aVy * aT) / (aT * aT);
     const tRun = tD + (xj - xs) / speed;
     INTRO.land = { x: (col * q.tile + q.tile / 2) - q.hero.w / 2, y: floor - q.hero.h };
     const g_ = document.getElementById("garyIntro") || Object.assign(document.createElement("canvas"), { id: "garyIntro", width: 8, height: 8 }); if (!g_.parentNode) { g_.setAttribute("aria-hidden", "true"); document.body.appendChild(g_); }
@@ -17564,7 +17566,8 @@
       if (t >= tRun && !INTRO.sJump) { INTRO.sJump = 1; jSfx("jump"); jSfx("boing"); }
       if (drop && t < tD) {                       // falls from above the top edge, big, shrinking to normal as it lands on the logo; a short squash
         const fy0 = feetAt(xs), u = Math.min(1, t / 0.7);
-        if (t < 0.7) { place(xs, jLerp(-size * 2.8, fy0, easeOut2(u)), 1 + 1.5 * (1 - easeOut3(u))); set("air"); } else { place(xs, fy0 + 0.04 * size * Math.sin(Math.PI * (t - 0.7) / (tD - 0.7))); set("crouch"); }
+        if (arc && t < 0.7) { const tt = Math.min(aT, t); place(aX0 + (xs - aX0) * (tt / aT), aYs + aVy * tt + 0.5 * aG * tt * tt, 1 + 0.5 * (1 - easeOut2(u))); set("air"); }
+        else if (t < 0.7) { place(xs, jLerp(-size * 2.8, fy0, easeOut2(u)), 1 + 1.5 * (1 - easeOut3(u))); set("air"); } else { place(xs, fy0 + 0.04 * size * Math.sin(Math.PI * (t - 0.7) / (tD - 0.7))); set("crouch"); }
       }
       else if (t < tRun) { const x = xs + speed * (t - tD), fy = x < lr.left ? feetAt(lr.left) : feetAt(x); place(x, ox + (fy - ox) * sy); set(Math.floor(t / 0.11) % 2 ? "stride" : "stand"); }
       else if (t < tRun + tFall) { const u = t - tRun; place(xj + vx * u, yj + vy0 * u + 0.5 * g * u * u); set("air"); }
@@ -17642,7 +17645,7 @@
     const scene1 = () => {                      // 1: the logo run, with the meadow already running behind the logo
       loadScene("grass"); jFade(false); JR.next = "intro"; jTo("intro");
       const isK = document.body.dataset.logo === "k";
-      startIntro({ keepHold: true, maxCol: 14, drop: isK, full: isK, onDone: guard((ok) => {
+      startIntro({ keepHold: true, maxCol: 14, arc: isK, full: isK, onDone: guard((ok) => {
         if (!ok) hk.placeHero(10 * 32, 14 * 32 - 22 + 10);
         hk.hideHero(false); JR.stall = 0; JR.lastX = -1; JR.winding = false; JR.fired = false; JR.jumpHold = false; jTo("walk");
       }) });
@@ -17852,6 +17855,13 @@
   }
   if (jSnd) jSnd.addEventListener("click", () => { soundSet(jSnd.getAttribute("aria-pressed") !== "true"); });
   const jSfx = (n, a) => { const hk = window.__brandHooks; if (hk && hk.sfx) hk.sfx(n, a); };
+  // K: the journey starts only after the logo has dropped, so until then the landing demo must not show its own (real) Gary:
+  // put the meadow up with the hero hidden and held the moment K is chosen or the landing screen appears
+  function kPrep() {
+    if (document.body.dataset.logo !== "k" || !landingIsOn() || reduce.matches) return;
+    const hk = window.__brandHooks; if (!hk) return;
+    try { hk.loadScene("grass"); hk.hold(true); hk.hideHero(true); } catch (e) { /* the journey sets this up itself a moment later */ }
+  }
   function whenLogoReady(cb) {
     const img = document.querySelector("#landingWordmark img");
     const imgP = new Promise(r => { if (!img || (img.complete && img.naturalWidth)) r(); else { img.addEventListener("load", r, { once: true }); img.addEventListener("error", r, { once: true }); setTimeout(r, 4000); } });
@@ -17862,7 +17872,7 @@
   let landingWas = landingIsOn();
   new MutationObserver(() => {
     const on = landingIsOn(); if (on === landingWas) return; landingWas = on;
-    if (on) { const v = document.body.dataset.logo || ""; whenLogoReady(() => { if (landingIsOn() && (document.body.dataset.logo || "") === v) fxSync(v); }); }
+    if (on) { const v = document.body.dataset.logo || ""; kPrep(); whenLogoReady(() => { if (landingIsOn() && (document.body.dataset.logo || "") === v) fxSync(v); }); }
     else { stopIdle(); stopH(); journeyStop(); introFinish(false); }
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   /* logo variants */
@@ -17874,6 +17884,7 @@
     document.querySelectorAll("#logoToggle button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
     if (!/^[jk]$/.test(v)) soundSet(false);
     stopIdle(); stopH(); journeyStop(); introFinish(false);        // switching: stop whatever the last variant was doing at once
+    kPrep();
     whenLogoReady(() => { if ((document.body.dataset.logo || "") === v) fxSync(v); });
     if (push) { const u = new URL(location.href); if (v) u.searchParams.set("logo", v); else u.searchParams.delete("logo"); history.replaceState(null, "", u); }
   }
