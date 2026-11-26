@@ -7986,3 +7986,36 @@ The eight explosion-like booms are gone. `sfxQuakeStart` now layers a sustained,
 - **Scenery pool** (`gmBgPool`, all inside the kit): Paint tiles already committed to other games, read as they are and never generated: the embedded sample projects' `backgroundTileDefs` (Crystal Cave, Bomb Factory, Escape, Vault, Garden...), the procedural `BD_THEMES` backdrops, and every Surprise room's `exact.bgs`. Flat single-colour tiles and duplicates are skipped; tiles are grouped by source (groups under three tiles join a "mixed" group), 14 groups today (about 190 tiles). Seven new scenery vignettes (backdrop patch, band, blob, stripes, speckle, block, pillar) each draw from one random group, three tiles per stamp (`bg:@a/@b/@c`); the old "texture patch" (own Paint tiles) is gone, the sky/cloud/hill/bush ones stay.
 - **They do not enter the Paint tab.** Borrowed tiles are copied into the project as `mx~<hash>` defs with `hidden: true`, so they draw, save and export but are not listed. This needed two one-line edits outside the kit block: `renderBackgroundSwatches` skips `def.hidden`, and `isRealBackground` treats `mx~` ids as empty (so a board with only borrowed scenery still counts as blank). Animated tiles keep their frames; cloud overlays are not borrowed. Coded samples built by functions (Cloud Hopper, Rock Bottom...) are not in the pool, since their art is only created when they are built.
 - Tests: stage 3 gate and 60 presses per button, 0 problems (tramptower first did nothing: the crate started resting on the trampoline); three scenery presses screenshotted (mixed crystal, garden, ice, sand, cave tiles); Paint tab lists only its 11 own tiles after 64 borrowed ones were placed.
+
+## Editor UI refinement: Room Rules, placement categories, terminology, Ground Effect art (v2.75)
+
+An evolutionary pass over the Make a Game palette (no data, physics, save-format or export change; the export has none of these controls).
+Before/after screenshots at 1440x900 and 1366x768 and side-by-side comparisons are in `brand-preview/editor-ui/`.
+
+- **Room Rules** (`#rulesBlock`, always visible): three labelled groups. **Gravity** is one connected group: the on/off chip (`#gravOnRow`) next to the four
+  direction chips (`#gravityDirRow`, always shown so the block never changes height; dimmed while gravity is off, and clicking a direction then turns gravity on
+  pointing that way). **Edges** (`#gameRuleSwatches`: the two loop chips) and **Screen** (`#cameraSwatches`). All chips are 8x8 pixel icons drawn with
+  `drawArtToCtx` (`RULE_ICON_ROWS`/`ruleIconArt`/`makeRuleChip`; arrows are one drawing rotated with `rotateArt90CW/CCW`). On = yellow fill with a dark icon,
+  off = dark fill with a yellow icon; inactive camera chips are desaturated. `GAME_RULES` keys and the `gravityEnabled/gravityDir/wrapH/wrapV` state are unchanged.
+  Cost: the block is about 141px tall (was 78 with gravity off, 110 with it on).
+- **Placement categories**: Characters, Objects and Ground are three large icon buttons in a grid (`#placeTabs`); **Paint** and **Erase** are compact tool buttons
+  on the same line as the "What to place" heading (`#toolTabs`), so the arrangement costs about 29px more than the old single row. Button ids (`modeCharacter`...)
+  and `updateModeButtons` are unchanged. Icons are `PX_ICON_ROWS.tabChar/tabObj/tabGround/tabPaint/tabErase`, drawn by the existing `data-px`/`pxIconSVG` mechanism.
+  Under 860px of viewport height the category buttons are 46px tall, otherwise 54px.
+- **Caption bar** is a fixed single line (`#captionBar`, ellipsis if ever longer) and captions were shortened to fit ~42 characters, so hovering never moves anything.
+  `geo-none`, `geo-solid` and `grav-*` captions were added; the Lethal caption now says it costs a life (it no longer ends the game).
+- **Terminology** (display only; ids, save fields and `title`-based test selectors for pieces are unchanged): Fixtures -> Game pieces, Lethals -> Deadly stuff,
+  Grab a sprite -> Pick a look, My sprites -> My looks, "Pixel art (8x8) - editing: X" -> "Draw your hero" / "Draw X" (`#editingVerb`, `updateEditingLabel`),
+  Gravity & looping -> Gravity + Edges, the flat ground swatches none/solid -> "open"/"plain" (`GROUND_FLAT_LABELS`; titles "open space"/"plain block"),
+  pose tabs Stride/Air/Crouch -> Run/In air/Landing. **"Air" was deliberately not renamed "Jump"**: `currentPoseFor` uses it for any airborne state, rising or falling.
+  "Stride" became "Run" (it is used for any horizontal movement on the ground) and "Crouch" became "Landing" (it is the landing squash).
+- **Ground Effects** swatches now carry an 8x8 symbol (`GROUND_EFFECT_ROWS`, `groundEffectIcon`): dashed tile, ice streaks, spring, warning triangle, skull, goo,
+  shovel in dirt, crumbling floor, bricks, airflow lines (the wind symbol turns to the selected wind direction). White shapes plus one accent colour on a dark plate
+  over the unchanged effect colour, with the text label kept. Swatch size and selection behaviour are unchanged.
+- **Palette consistency**: swatch hover and keyboard-focus rings, `.swatch` elements get `tabindex`/`role=button` (a `MutationObserver` on `#paletteWrap`) and Enter/Space press
+  them (the swatch rows are re-rendered after a click, so keyboard focus returns to the start of the page: a known limit), `#paletteWrap > *` never shrink, readable
+  secondary labels (12px).
+- Verified at 1920x1080, 1440x900, 1366x768 and 1280x720: the canvas size is identical on every tab and is the same as before the change, hovering every swatch in every tab
+  moves nothing, switching gravity on/off keeps the Room Rules height. Updated test: `tests/gravdir_ui.test.js` (the direction buttons are now always shown).
+  Suites run: layout, stage1, v251s2, breathe, jump, landing, gravbutton, gravdir_ui, enemypanel, mysprites, roomname, tutorial. `stage2` ("Play started") and `v251` ("close x deletes its room")
+  fail identically before the change.
