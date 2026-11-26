@@ -729,7 +729,7 @@
   body:is([data-logo="f"],[data-logo="g"]) .lgHover { display: block; position: relative; transition: transform 0.16s ease-out; }
   body:is([data-logo="f"],[data-logo="g"]) .lgHover img { width: 100%; max-width: none; margin: 0; }
   body:is([data-logo="f"],[data-logo="g"]) #landingWordmark:hover .lgHover { transform: translateY(-3px) rotate(-0.8deg); }
-  body:is([data-logo="f"],[data-logo="g"]) .lgFx { display: block; position: absolute; pointer-events: none; background-size: 100% 100%; background-repeat: no-repeat; image-rendering: pixelated; }
+  body:is([data-logo="f"],[data-logo="g"],[data-logo="k"]) .lgFx { display: block; position: absolute; pointer-events: none; background-size: 100% 100%; background-repeat: no-repeat; image-rendering: pixelated; }
   /* positions are the art's own pixel boxes inside logo_clean.png (1332x657), as percentages */
   .lgSpark { left: 83.183%; top: 5.023%; width: 7.508%; height: 15.677%; background-image: url(fx/spark.png); transform-origin: 50% 50%; opacity: 0; transition: opacity 0.06s linear, transform 0.06s linear; }
   .lgSpark.on { opacity: 1; transform: scale(1.16); filter: brightness(1.45) saturate(1.1); }
@@ -753,7 +753,7 @@
   @keyframes lgFade { from { opacity: 0; } to { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {
     .lgWrap.lgPlay { animation: lgFade 0.22s both; }
-    body:is([data-logo="f"],[data-logo="g"]) .lgFx { display: none !important; }
+    body:is([data-logo="f"],[data-logo="g"],[data-logo="k"]) .lgFx { display: none !important; }
     body:is([data-logo="f"],[data-logo="g"]) #landingWordmark:hover .lgHover { transform: none; }
     body:is([data-logo="f"],[data-logo="g"]) .lgHover { transition: none; }
   }
@@ -17428,7 +17428,7 @@
     const mk = (cls, inner) => { const e = document.createElement("i"); e.className = "lgFx " + cls; e.setAttribute("aria-hidden", "true"); if (inner) e.appendChild(document.createElement("i")); hov.appendChild(e); return e; };
     mk("lgSpark"); mk("lgCoin", true); mk("lgEyes");
   }
-  const fxActive = () => /^[fg]$/.test(document.body.dataset.logo || "") && document.body.classList.contains("landing") && !document.hidden && !reduce.matches && !fxState.dropping;
+  const fxActive = () => /^[fgk]$/.test(document.body.dataset.logo || "") && document.body.classList.contains("landing") && !document.hidden && !reduce.matches && !fxState.dropping;
   function pulse(sel, ms) { const e = document.querySelector(sel); if (!e) return; e.classList.add("on"); setTimeout(() => e.classList.remove("on"), ms); }
   function loop(name, lo, hi, fn) { clearTimeout(fxState.timers[name]); fxState.timers[name] = setTimeout(() => { if (fxActive()) fn(); loop(name, lo, hi, fn); }, rnd(lo, hi)); }
   function startIdle() {
@@ -17452,13 +17452,14 @@
     if (v === "j" || v === "k") buildFx();
     if (v === "i") setTimeout(startIntro, 60);
     if (v === "j") { stopH(); layoutH(); H.layout = setInterval(layoutH, 500); setTimeout(journeyStart, 60); }
+    if (v === "k") startIdle();           // F's idle details (spark on the fuse, coin glint, Spring Buddy's blink); they pause while the logo is dropping
     if (v === "k") {                       // K = J with F's drop-in: Gary's journey waits for the logo to land and squish, plus a short pause
       stopH(); layoutH(); H.layout = setInterval(layoutH, 500);
       const tok = ++fxState.kTok;
       playDrop(() => setTimeout(() => { if (fxState.kTok === tok && document.body.dataset.logo === "k" && document.body.classList.contains("landing")) journeyStart(); }, K_PAUSE_MS));
     }
   }
-  document.addEventListener("visibilitychange", () => { if (document.hidden) stopIdle(); else if (/^[fg]$/.test(document.body.dataset.logo || "")) startIdle(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stopIdle(); else if (/^[fgk]$/.test(document.body.dataset.logo || "")) startIdle(); });
   /* ----- H: backdrop opening + reactions to the hero (reads the demo through window.__brandProbe, read-only) ----- */
   const H = { timer: 0, last: 0, prev: null, room: null, roomSince: 0 };
   function layoutH() {
