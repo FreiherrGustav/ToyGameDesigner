@@ -159,8 +159,23 @@
       }
     }
   }
-  #placeTabs { flex-wrap: nowrap; }
-  #placeTabs button { flex: 1 1 auto; min-width: 0; padding: 8px 3px; font-size: 11px; overflow-wrap: normal; white-space: nowrap; }
+  /* editor refinement: three big placement categories, with the two editing tools (Paint, Erase) beside the heading */
+  #placeHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  #placeHead .section-title { margin: 0; white-space: nowrap; }
+  #toolTabs { display: flex; gap: 4px; }
+  #toolTabs button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px 0 7px; font-size: 12px; font-weight: 600; font-family: inherit; background: var(--panel-light); color: var(--text); border: none; border-radius: 6px; cursor: pointer; }
+  #toolTabs button.active { background: var(--accent); color: #222; font-weight: 700; }
+  #toolTabs button:hover:not(.active), #placeTabs button:hover:not(.active) { background: #3b3f56; }
+  #placeTabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex-wrap: nowrap; }
+  #placeTabs button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 54px; padding: 6px 2px; font-size: 13px; font-weight: 700; overflow-wrap: normal; white-space: nowrap; }
+  .catIc { display: block; width: 22px; height: 22px; }
+  #toolTabs .catIc { width: 16px; height: 16px; }
+  .catIc svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+  #placeTabs button:focus-visible, #toolTabs button:focus-visible, .swatch:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  #paletteWrap > * { flex-shrink: 0; }
+  .swatch:hover { box-shadow: 0 0 0 2px rgba(255,209,102,0.55) inset; }
+  .swatch.selected:hover { box-shadow: 0 0 0 2px var(--accent) inset; }
+  @media (max-height: 860px) { #placeTabs button { min-height: 46px; gap: 2px; font-size: 13px; } .catIc { width: 18px; height: 18px; } #toolTabs button { min-height: 26px; } #paletteWrap { gap: 9px; } }
   #editingNameRow { position: relative; width: 128px; }
   #editingNameInput { width: 100%; box-sizing: border-box; text-align: center; padding: 3px 20px 3px 20px; background: transparent; color: #fff; border: 0; border-bottom: 2px dashed #555; border-radius: 0; font-family: inherit; font-size: 15px; font-weight: bold; text-transform: none; letter-spacing: normal; cursor: text; transition: background .15s, border-color .15s; }
   #editingNameRow:hover #editingNameInput { border-bottom-color: #888; }
@@ -196,8 +211,8 @@
      retires — see CAPTION_TEXT/wireCaption/setCaption. Fixed height/position so it never reflows
      the palette around it as text changes length. */
   #captionBar {
-    min-height: 16px; font-size: 12px; color: #9aa0b4; font-style: italic;
-    padding: 2px 2px 8px 2px; border-bottom: 1px solid #2a2c3a; margin-bottom: 4px;
+    height: 16px; box-sizing: content-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 16px; font-size: 12px; color: #a9afc4; font-style: italic;
+    padding: 2px 2px 6px 2px; border-bottom: 1px solid #2a2c3a; margin-bottom: 2px;
   }
 
   /* Game rules are one of the two headline features (alongside placing a character), not just
@@ -206,18 +221,23 @@
     font-size: 15px; text-transform: none; letter-spacing: normal;
     color: var(--accent); font-weight: bold; margin-bottom: 8px;
   }
-  /* stage 4: game-rule and camera chips, one compact row */
+  /* room rules: Gravity (on/off + the four directions, one connected group), Edges, Screen. Always the same height. */
   #rulesBlock { display: flex; flex-direction: column; gap: 4px; }
   .rulesRow { display: flex; align-items: flex-end; gap: 10px; }
   .rulesGroup { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .rulesGroup .swatch-row { flex-wrap: nowrap; }
-  .rulesLbl { font-size: 11px; color: #9aa0b4; white-space: nowrap; }
+  .rulesLbl { font-size: 12px; line-height: 14px; font-weight: 600; color: #b4bad0; white-space: nowrap; }
   .rulesRow .swatch-row { flex: none; gap: 4px; }
-  .rulesSep { width: 1px; align-self: stretch; background: #2a2c3a; }
+  .rulesSep { width: 1px; align-self: stretch; background: #2f3245; }
+  .rulesLine { display: flex; align-items: center; gap: 5px; align-self: flex-start; padding: 2px; background: #1c1e2a; border: 1px solid #2f3245; border-radius: 9px; }
+  .rulesLine .swatch-row { flex: none; flex-wrap: nowrap; gap: 4px; }
   .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
   .swatch.chip canvas { width: 24px; height: 24px; }
+  .camChip:not(.selected) { filter: saturate(0.45) brightness(0.8); }
   .swatch.big { width: 60px; height: 60px; border-width: 3px; border-radius: 8px; }
   .swatch.big .lbl { font-size: 11px; bottom: 3px; }
+  /* ground effects: a small pixel symbol on a dark plate, so the effect colour stays but is never the only cue */
+  .fxSwatch canvas { background: rgba(8,8,18,0.62); border-radius: 4px; }
 
   .presetSwatch {
     width: 36px; height: 36px;
@@ -382,7 +402,10 @@
     #app { gap: 20px; padding: 10px 28px 12px; }
     #paletteWrap { width: 320px; flex: 0 0 320px; gap: 14px; padding: 16px; }
     #paletteWrap .section-title { font-size: 13px; margin-bottom: 8px; }
-    #placeTabs button { font-size: 12px; padding: 10px 2px; }
+    #placeTabs button { font-size: 14px; min-height: 60px; }
+    .catIc { width: 26px; height: 26px; }
+    #toolTabs button { min-height: 32px; font-size: 13px; }
+    #toolTabs .catIc { width: 18px; height: 18px; }
     .swatch { width: 52px; height: 52px; }
     .swatch canvas { width: 40px; height: 40px; }
     .swatch .lbl { font-size: 12px; }
@@ -392,7 +415,7 @@
     .presetSwatch { width: 44px; height: 44px; }
     .presetSwatch canvas { width: 40px; height: 40px; }
     .swatch-row { gap: 8px; }
-    #captionBar { font-size: 13px; }
+    #captionBar { font-size: 13px; height: 18px; line-height: 18px; }
     #gameWrap { gap: 10px; padding: 8px 16px; }
     #gameWrap .toolbar { gap: 12px; }
     #gameWrap button.tbtn { padding: 8px 16px; font-size: 14px; min-height: 36px; }
@@ -874,25 +897,31 @@
   <div class="panel" id="paletteWrap">
     <h1 id="appTitle" style="display:none">TinyGameMaker</h1>
     <div>
-      <div class="section-title">What to place</div>
+      <div id="placeHead">
+        <div class="section-title">What to place</div>
+        <div id="toolTabs">
+          <button id="modePaint" title="Paint: decorate the background"><span class="catIc" data-px="tabPaint"></span>Paint</button>
+          <button id="modeErase" title="Erase: remove whatever you click"><span class="catIc" data-px="tabErase"></span>Erase</button>
+        </div>
+      </div>
       <div class="mode-toggle" id="placeTabs">
-        <button id="modeCharacter" class="active">Characters</button>
-        <button id="modeObject">Objects</button>
-        <button id="modeGround">Ground</button>
-        <button id="modePaint">Paint</button>
-        <button id="modeErase">Erase</button>
+        <button id="modeCharacter" class="active" title="Characters: your hero and enemies"><span class="catIc" data-px="tabChar"></span>Characters</button>
+        <button id="modeObject" title="Objects: crates, bombs, cannons, flags and more"><span class="catIc" data-px="tabObj"></span>Objects</button>
+        <button id="modeGround" title="Ground: blocks, textures and ground effects"><span class="catIc" data-px="tabGround"></span>Ground</button>
       </div>
     </div>
 
     <!-- Aesthetics stage 4: Game rules + Camera collapsed into one compact row of icon chips -->
     <div id="rulesBlock">
       <div class="section-title">Room rules</div>
+      <div class="rulesGroup"><div class="rulesLbl">Gravity</div>
+        <div class="rulesLine"><div class="swatch-row" id="gravOnRow" aria-label="Gravity on or off"></div><div class="rulesSep"></div><div class="swatch-row" id="gravityDirRow" aria-label="Gravity direction"></div></div>
+      </div>
       <div class="rulesRow">
-        <div class="rulesGroup"><div class="rulesLbl">Gravity &amp; looping</div><div class="swatch-row" id="gameRuleSwatches" aria-label="Game rules"></div></div>
+        <div class="rulesGroup"><div class="rulesLbl">Edges</div><div class="swatch-row" id="gameRuleSwatches" aria-label="Edges"></div></div>
         <div class="rulesSep"></div>
         <div class="rulesGroup"><div class="rulesLbl">Screen</div><div class="swatch-row" id="cameraSwatches" aria-label="Camera"></div></div>
       </div>
-      <div class="swatch-row" id="gravityDirRow" style="display:none;"></div>
     </div>
 
     <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
@@ -926,7 +955,7 @@
       <button id="tryThisBtn" type="button" aria-label="Try the selected piece">🎲 Try me</button>
       <div class="section-title">Pick an object</div>
       <div class="swatch-row" id="objectSwatches"></div>
-      <div class="section-title" style="margin-top:10px;">Fixtures</div>
+      <div class="section-title" style="margin-top:10px;">Game pieces</div>
       <div class="swatch-row" id="fixtureSwatches"></div>
       <div class="section-title" style="margin-top:10px;">Collectibles</div>
       <div class="swatch-row" id="collectibleSwatches"></div>
@@ -949,7 +978,7 @@
       <div class="section-title" style="margin-top:10px;">Ground Effects</div>
       <div class="swatch-row" id="surfaceSwatches"></div>
 
-      <div class="section-title" style="margin-top:10px;">Lethals</div>
+      <div class="section-title" style="margin-top:10px;">Deadly stuff</div>
       <div class="swatch-row" id="lethalSwatches"></div>
 
       <div id="groundColorBlock" style="display:none;">
@@ -957,7 +986,7 @@
         <div class="swatch-row" id="groundColorSwatches"></div>
         <div class="hint" style="margin-top:2px;">
           None: this wall always blocks, same as ever. Pick a color and it only blocks while
-          nothing of that color is currently on — a matching Switch over in Fixtures, or a plate
+          nothing of that color is currently on — a matching Switch over in Game pieces, or a plate
           over in Objects, is what turns it off.
         </div>
       </div>
@@ -973,20 +1002,20 @@
     </div>
 
     <div id="presetsBlock">
-      <div class="section-title">Grab a sprite</div>
+      <div class="section-title">Pick a look</div>
       <div class="swatch-row" id="presetSwatches"></div>
       <div class="hint" style="margin-top:2px;">
-        Starter art for whatever's selected above — grab one, then keep editing it below.
+        Starter looks for whatever's selected above. Pick one, then keep drawing on it below.
       </div>
     </div>
 
     <div id="mySpritesBlock" style="display:none;">
-      <div class="section-title">My sprites</div>
+      <div class="section-title">My looks</div>
       <div class="swatch-row" id="mySpriteSwatches"></div>
     </div>
 
     <div id="pixelEditorBlock">
-      <div class="section-title">Pixel art (8×8)<span id="editingPrefix"> — editing: </span><span id="editingLabel">player</span></div>
+      <div class="section-title"><span id="editingVerb">Draw</span><span id="editingPrefix"> </span><span id="editingLabel">your hero</span></div>
       <div id="poseTabRow" class="mode-toggle" style="display:none; margin-bottom:6px;"></div>
       <div id="pixelEditor">
         <div id="editingNameRow" style="display:none;"><input id="editingNameInput" type="text" maxlength="20" spellcheck="false" title="Click to name your character"><span class="nameEditIcon">✎</span></div>
@@ -1633,9 +1662,11 @@
   // the "immediate and plainly visible, no decision to front-load" case the palette's own prose
   // reduction already covers by just deleting those sections' hints outright, no caption needed).
   const CAPTION_TEXT = {
-    "rule-gravity": "Things fall. Click to turn gravity on or off.",
-    "rule-wrapH": "Walk off one side, come back on the other.",
-    "rule-wrapV": "Fall off the bottom, come back at the top.",
+    "rule-gravity": "Things fall. Click to switch it.",
+    "grav-down": "Gravity pulls down.", "grav-up": "Gravity pulls up.", "grav-left": "Gravity pulls left.", "grav-right": "Gravity pulls right.",
+    "geo-none": "Open space. Effects still work.", "geo-solid": "A plain block. Solid, nothing special.",
+    "rule-wrapH": "Walk off one side, come back the other.",
+    "rule-wrapV": "Fall off the bottom, come back on top.",
     // Power-ups (v2.42) — keyed by their collectible defId, wired in renderCollectibleSwatches
     colHeart: "Takes a hit for you.",
     colKey: "Opens gates of its color.",
@@ -1648,14 +1679,14 @@
     cannon2: "Shoots things.",
     [BOMB2_GEOMETRY]: "Boom. Eventually.",
     fan: "Blows you around.",
-    magnet: "Pulls stuff your way, and hangs on to it.",
+    magnet: "Pulls stuff your way, and holds on.",
     spawner: "Makes more of something.",
     trampoline: "Launches you skyward.",
     barrier: "Opens for its color.",
     [PUSHABLE_KIND]: "Push it. Stacks, too.",
     [LARGE_STONE_KIND]: "Heavy. Lava-proof.",
-    [MOVING_PLATFORM_KIND]: "Rides back and forth. Click to go up and down instead.",
-    moverFloats: "Carries you. Water can't get you while you're on it.",
+    [MOVING_PLATFORM_KIND]: "Slides side to side. Click: up and down.",
+    moverFloats: "Carries you. Safe from the water.",
     moverHurts: "Knocks you back. Look both ways.",
     // Fixtures row (FIXTURE_GEOMETRIES)
     goal: "Touch it, you win.",
@@ -1663,7 +1694,7 @@
     door: "Leads somewhere new.",
     [LOCKED_DOOR_GEOMETRY]: "Only a key of its color opens it.",
     warp: "Zap. You're elsewhere.",
-    gravitywell: "A black hole. Walk close and it sucks you in.",
+    gravitywell: "A black hole. It sucks you in.",
     [PUSH_BUTTON_GEOMETRY]: "Flips a color on — for good.",
     // Ground Effects row (PALETTE_MODIFIERS) — this is the direct replacement for the retired
     // "Hazard costs one life... Lethal costs every life... Diggable blocks... Trap looks solid"
@@ -1672,10 +1703,10 @@
     slippery: "Zero grip.",
     bouncy: "Boing.",
     hazard: "Stings a little.",
-    lethal: "That's it, game over.",
+    lethal: "Costs a life, then starts over.",
     sticky: "Slows you to a crawl.",
     diggable: "Dig in. Hold on.",
-    trap: "Looks solid. Crumbles a moment after you step on it.",
+    trap: "Looks solid. Crumbles under you.",
     indestructible: "Bombs can't touch it.",
     wind: "Pushes you along.",
     // Lethals row — only the four built-in groundTileDefs ids; a kid's own custom Lethal (drawn by
@@ -5350,6 +5381,8 @@
   // colored square; every named texture (grass/brick/crystal/a kid's own...) shows its own real
   // art, same as it always did in the old separate row — see selectGroundSkin/renderGroundSkin
   // below, shared unchanged with the Lethals row.
+  // kid-facing names of the two flat ground swatches (the ids stay none/solid everywhere else)
+  const GROUND_FLAT_LABELS = { none: { label: "open", title: "open space" }, solid: { label: "plain", title: "plain block" } };
   function renderGroundSwatches() {
     const container = document.getElementById("groundSwatches");
     container.innerHTML = "";
@@ -5358,11 +5391,12 @@
       const sw = document.createElement("div");
       sw.className = "swatch" + (isSelected ? " selected" : "");
       sw.style.background = GEOMETRY_SWATCH_COLORS[geometry];
-      sw.title = geometry;
+      sw.title = GROUND_FLAT_LABELS[geometry] ? GROUND_FLAT_LABELS[geometry].title : geometry;
       const label = document.createElement("div");
       label.className = "lbl";
-      label.textContent = dispName(geometry);
+      label.textContent = GROUND_FLAT_LABELS[geometry] ? GROUND_FLAT_LABELS[geometry].label : dispName(geometry);
       sw.appendChild(label);
+      wireCaption(sw, CAPTION_TEXT["geo-" + geometry]);
       sw.addEventListener("click", () => selectGeometry(geometry));
       container.appendChild(sw);
     });
@@ -5411,6 +5445,26 @@
     updateModeButtons();
     renderAll();
   }
+  // Ground Effect symbols: 8x8, white shapes with one accent colour, drawn on a dark plate behind the (kept) effect colour
+  const GROUND_EFFECT_ROWS = {
+    none:     ["WW.WW.WW", "W......W", "........", "W......W", "W......W", "........", "W......W", "WW.WW.WW"],
+    slippery: ["......C.", ".....CCC", "......C.", "WWWWW...", "........", ".WWWWWW.", "........", "..WWWW.."],
+    bouncy:   ["...CC...", "..CCCC..", "...CC...", ".WWWWWW.", "..W..W..", ".WWWWWW.", "..W..W..", ".WWWWWW."],
+    hazard:   ["...CC...", "..CCCC..", "..CWWC..", ".CCWWCC.", ".CCWWCC.", "CCCCCCCC", "CCCWWCCC", "CCCCCCCC"],
+    lethal:   [".WWWWWW.", "WWWWWWWW", "W..WW..W", "W..WW..W", "WWW..WWW", ".WWWWWW.", ".WCWCWC.", "........"],
+    sticky:   ["CCCCCCCC", "CCCCCCCC", "CC.WW.CC", ".C.WW.C.", ".W.WW.W.", "...WW...", "...WW...", "....W..."],
+    diggable: ["......WW", ".....WW.", "....WW..", "...WW...", "..WWW...", ".WWWWW..", "CCCCCCCC", "CCCCCCCC"],
+    trap:     ["CCCCCCCC", "CCCCCCCC", "C.CC.CC.", "........", ".WW..W..", ".WW..W..", "......W.", "..W....."],
+    indestructible: ["WWW.WWWW", "WWW.WWWW", "........", "WWWW.WWW", "WWWW.WWW", "........", "WWW.WWWW", "WWW.WWWW"],
+    wind:     ["..WWWW..", "........", "WWWWWWC.", "......CC", "WWWWWWC.", "........", "..WWWW..", "........"]
+  };
+  const GROUND_EFFECT_ACCENT = { slippery: "#7fe0ff", bouncy: "#ffb74d", hazard: "#ff8a80", lethal: "#ff5252", sticky: "#d4e157", diggable: "#e0c2b0", trap: "#c9a99a", indestructible: "#b0bec5", wind: "#7de3f0", none: "#9aa0b4" };
+  function groundEffectIcon(modifier, windValue) {
+    const key = GROUND_EFFECT_ROWS[modifier] ? modifier : "none";
+    let art = pat(GROUND_EFFECT_ROWS[key], { W: "#ffffff", C: GROUND_EFFECT_ACCENT[key] || "#ffffff" });
+    if (key === "wind") { const turns = { "wind-e": 0, "wind-s": 1, "wind-w": 2, "wind-n": 3 }[windValue] || 0; for (let i = 0; i < turns; i++) art = rotateArt90CW(art); }
+    return art;
+  }
   function renderSurfaceSwatches() {
     const container = document.getElementById("surfaceSwatches");
     container.innerHTML = "";
@@ -5418,10 +5472,14 @@
       const isWind = modifier === "wind";
       const isSelected = paintMode === "tile" && (isWind ? WIND_ORDER.includes(selectedModifier) : selectedModifier === modifier);
       const sw = document.createElement("div");
-      sw.className = "swatch" + (isSelected ? " selected" : "");
+      sw.className = "swatch fxSwatch" + (isSelected ? " selected" : "");
       sw.style.background = MODIFIER_SWATCH_COLORS[modifier];
       const displayName = MODIFIER_LABELS[modifier] || modifier;
       sw.title = displayName;
+      const fxc = document.createElement("canvas");
+      fxc.width = ART; fxc.height = ART;
+      drawArtToCtx(fxc.getContext("2d"), groundEffectIcon(modifier, isWind && isSelected ? selectedModifier : "wind-e"), ART);
+      sw.appendChild(fxc);
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = dispName(displayName);
@@ -6082,58 +6140,74 @@
   // in this toy takes effect on the next frame with no play/edit split.
   const GAME_RULES = [
     { key: "gravity", label: "gravity", glyph: "▼", get: () => gravityEnabled, set: (v) => { gravityEnabled = v; } },
-    { key: "wrapH", label: "h-wrap", glyph: "↔", get: () => wrapHEnabled, set: (v) => { wrapHEnabled = v; } },
-    { key: "wrapV", label: "v-wrap", glyph: "↕", get: () => wrapVEnabled, set: (v) => { wrapVEnabled = v; } }
+    { key: "wrapH", label: "sides loop", glyph: "↔", get: () => wrapHEnabled, set: (v) => { wrapHEnabled = v; } },
+    { key: "wrapV", label: "top & bottom loop", glyph: "↕", get: () => wrapVEnabled, set: (v) => { wrapVEnabled = v; } }
   ];
+  // 8x8 pixel icons for the room-rule chips (same pat() convention as CAMERA_ICONS); ink colour is set per state
+  const RULE_ICON_ROWS = {
+    gravity: ["........", "..WWWW..", ".WWWWWW.", ".WWWWWW.", "..WWWW..", "........", "........", "WWWWWWWW"],
+    wrapH:   ["........", "W......W", "W.W..W.W", "WWWWWWWW", "WWWWWWWW", "W.W..W.W", "W......W", "........"],
+    arrow:   ["...WW...", "...WW...", "...WW...", "...WW...", "W..WW..W", ".WWWWWW.", "..WWWW..", "...WW..."]
+  };
+  function ruleIconArt(key, ink) {
+    const L = { W: ink };
+    if (key === "gravity") return pat(RULE_ICON_ROWS.gravity, L);
+    if (key === "wrapH") return pat(RULE_ICON_ROWS.wrapH, L);
+    if (key === "wrapV") return rotateArt90CW(pat(RULE_ICON_ROWS.wrapH, L));
+    const down = pat(RULE_ICON_ROWS.arrow, L);          // points down
+    if (key === "down") return down;
+    if (key === "up") return rotateArt90CW(rotateArt90CW(down));
+    if (key === "left") return rotateArt90CW(down);
+    return rotateArt90CCW(down);                          // right
+  }
+  // One chip of the room-rules block: a pixel icon, on a yellow fill when it is on and a dark fill when it is off.
+  function makeRuleChip(iconKey, on, title, caption) {
+    const sw = document.createElement("div");
+    sw.className = "swatch chip" + (on ? " selected" : "");
+    sw.style.background = on ? PLAYER_COLOR : "#2f3140";
+    sw.title = title;
+    const c = document.createElement("canvas");
+    c.width = ART; c.height = ART;
+    drawArtToCtx(c.getContext("2d"), ruleIconArt(iconKey, on ? "#222222" : PLAYER_COLOR), ART);
+    sw.appendChild(c);
+    if (caption) wireCaption(sw, caption);
+    return sw;
+  }
   function renderGameRuleSwatches() {
-    const container = document.getElementById("gameRuleSwatches");
-    container.innerHTML = "";
+    const gravRow = document.getElementById("gravOnRow"), edges = document.getElementById("gameRuleSwatches");
+    gravRow.innerHTML = ""; edges.innerHTML = "";
     GAME_RULES.forEach(rule => {
       const on = rule.get();
-      const sw = document.createElement("div");
-      sw.className = "swatch chip" + (on ? " selected" : "");
-      sw.style.background = on ? PLAYER_COLOR : "#2f3140";
-      sw.title = rule.label + (on ? " (on — click to turn off)" : " (off — click to turn on)");
-      const glyph = document.createElement("div");
-      glyph.style.fontSize = "20px";
-      glyph.style.color = on ? "#222" : PLAYER_COLOR;
-      glyph.textContent = rule.glyph;
-      sw.appendChild(glyph);
-      wireCaption(sw, CAPTION_TEXT["rule-" + rule.key]);
+      const sw = makeRuleChip(rule.key, on, rule.label + (on ? " (on — click to turn off)" : " (off — click to turn on)"), CAPTION_TEXT["rule-" + rule.key]);
       sw.addEventListener("click", () => {
         rule.set(!on);
         log(rule.label + (rule.get() ? " on." : " off."));
         renderGameRuleSwatches();
       });
-      container.appendChild(sw);
+      (rule.key === "gravity" ? gravRow : edges).appendChild(sw);
     });
     renderGravityDirSwatches();
   }
-  // Which way gravity pulls (a per-room rule like the switches above). Only shown while gravity is on;
-  // a click applies instantly to everything in the room.
+  // Which way gravity pulls (a per-room rule). Always shown, so the rules block never changes height; dimmed while gravity is off,
+  // and clicking a direction then turns gravity on pointing that way.
   const GRAVITY_DIR_BUTTONS = [
-    { dir: "down", glyph: "↓", label: "down" }, { dir: "up", glyph: "↑", label: "up" },
-    { dir: "left", glyph: "←", label: "left" }, { dir: "right", glyph: "→", label: "right" }
+    { dir: "down", label: "down" }, { dir: "up", label: "up" },
+    { dir: "left", label: "left" }, { dir: "right", label: "right" }
   ];
   function renderGravityDirSwatches() {
     const row = document.getElementById("gravityDirRow");
     if (!row) return;
-    row.style.display = gravityEnabled ? "" : "none";
     row.innerHTML = "";
-    if (!gravityEnabled) return;
     GRAVITY_DIR_BUTTONS.forEach(b => {
-      const usable = GRAVITY_DIRS.includes(b.dir), on = gravityDir === b.dir;
-      const sw = document.createElement("div");
-      sw.className = "swatch chip";
+      const usable = GRAVITY_DIRS.includes(b.dir), on = gravityEnabled && gravityDir === b.dir;
+      const sw = makeRuleChip(b.dir, on, "Gravity pulls " + b.label + (gravityEnabled ? "" : " (gravity is off: click to turn it on)"), CAPTION_TEXT["grav-" + b.dir]);
       sw.dataset.dir = b.dir;
-      sw.style.background = on ? PLAYER_COLOR : "#2f3140";
-      sw.style.opacity = usable ? "1" : "0.35";
+      sw.style.opacity = !usable ? "0.35" : (gravityEnabled ? "1" : "0.5");
       sw.style.cursor = usable ? "pointer" : "not-allowed";
-      sw.title = "Gravity pulls " + b.label;
-      const g = document.createElement("div");
-      g.style.fontSize = "22px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = b.glyph;
-      sw.appendChild(g);
-      if (usable) sw.addEventListener("click", () => setGravityDir(b.dir));
+      if (usable) sw.addEventListener("click", () => {
+        if (!gravityEnabled) { gravityEnabled = true; log("Gravity on."); }
+        if (b.dir !== gravityDir) setGravityDir(b.dir); else renderGameRuleSwatches();
+      });
       row.appendChild(sw);
     });
   }
@@ -6199,7 +6273,7 @@
     CAMERA_MODES.forEach(mode => {
       const isSelected = cameraMode === mode.key;
       const sw = document.createElement("div");
-      sw.className = "swatch chip" + (isSelected ? " selected" : "");
+      sw.className = "swatch chip camChip" + (isSelected ? " selected" : "");
       sw.style.background = mode.color;
       sw.title = mode.label;
       const c = document.createElement("canvas");
@@ -6373,8 +6447,8 @@
   });
 
   const POSE_TABS = [
-    { key: "stand", label: "Stand" }, { key: "stride", label: "Stride" },
-    { key: "air", label: "Air" }, { key: "crouch", label: "Crouch" }
+    { key: "stand", label: "Stand" }, { key: "stride", label: "Run" },
+    { key: "air", label: "In air" }, { key: "crouch", label: "Landing" }
   ];
   function renderPoseTabs() {
     const row = document.getElementById("poseTabRow");
@@ -6424,13 +6498,14 @@
     if (editingActorOrBg || editingGroundSkin) {
       const actorDef = actorDefs[selectedActorDefId];
       const groundDef = groundTileDefs[selectedGroundSkinId];
-      document.getElementById("editingLabel").textContent = paintMode === "actor" ? (actorDef ? actorDef.name : selectedActorKind)
+      document.getElementById("editingLabel").textContent = paintMode === "actor" ? (selectedActorDefId === playerDefId ? "your hero" : (actorDef ? actorDef.name : selectedActorKind))
         : editingGroundSkin ? (groundDef ? groundDef.name : selectedGroundSkinId)
-        : "background";
+        : "your paint tile";
       const nameInput = document.getElementById("editingNameInput");
       const renamable = paintMode === "actor" && !!actorDef && customActorSlotIds.includes(selectedActorDefId) && !actorDef.enemyType && selectedActorDefId !== playerDefId;
       document.getElementById("editingNameRow").style.display = renamable ? "block" : "none";
       document.getElementById("editingLabel").style.display = renamable ? "none" : "";
+      document.getElementById("editingVerb").textContent = renamable ? "Draw your character" : "Draw";
       document.getElementById("editingPrefix").style.display = renamable ? "none" : "";
       if (renamable && document.activeElement !== nameInput) nameInput.value = actorDef.name;
     }
@@ -12108,7 +12183,13 @@
     load:   ["###.....", "#.#.....", "########", "#......#", "#......#", "#......#", "########", "........"],
     export: ["...##...", "...##...", ".######.", "..####..", "...##...", "........", "#......#", "########"],
     pause:  ["........", ".##..##.", ".##..##.", ".##..##.", ".##..##.", ".##..##.", ".##..##.", "........"],
-    play:   ["........", ".#......", ".###....", ".#####..", ".#####..", ".###....", ".#......", "........"]
+    play:   ["........", ".#......", ".###....", ".#####..", ".#####..", ".###....", ".#......", "........"],
+    // placement categories and editing tools
+    tabChar:   ["..####..", ".######.", ".#.##.#.", ".######.", "..####..", ".######.", "..####..", "..#..#.."],
+    tabObj:    ["########", "##....##", "#.#..#.#", "#..##..#", "#..##..#", "#.#..#.#", "##....##", "########"],
+    tabGround: ["#.#.##.#", "########", "########", "##.####.", "######.#", "#.##.###", "########", "########"],
+    tabPaint:  ["......#.", ".....##.", "....##..", "...##...", "..##....", ".###....", "###.....", "##......"],
+    tabErase:  ["....####", "...#...#", "..#...#.", ".#...#..", "#...#...", "#####...", "........", "########"]
   };
   PX_ICON_ROWS.redo = PX_ICON_ROWS.undo.map(r => r.split("").reverse().join(""));
   function pxIconSVG(name) {
@@ -12131,6 +12212,18 @@
   document.getElementById("samplesModalOverlay").addEventListener("click", (e) => {
     if (e.target.id === "samplesModalOverlay") closeSamplesModal();
   });
+
+  // keyboard access: swatches are plain divs, so give them a tab stop and let Enter/Space press them
+  (function swatchKeyboard() {
+    const pal = document.getElementById("paletteWrap");
+    const mark = el => { if (el.classList && el.classList.contains("swatch") && !el.hasAttribute("tabindex")) { el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); } };
+    const sweep = root => { if (!root || root.nodeType !== 1) return; mark(root); root.querySelectorAll(".swatch").forEach(mark); };
+    sweep(pal);
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(sweep))).observe(pal, { childList: true, subtree: true });
+    pal.addEventListener("keydown", e => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("swatch")) { e.preventDefault(); e.stopPropagation(); e.target.click(); }
+    });
+  })();
 
   updateModeButtons();
 
