@@ -142,8 +142,10 @@
       background: color-mix(in srgb, var(--accent) 38%, var(--panel-light)); border-radius: 4px; border: 1px solid transparent; background-clip: padding-box; }
     #paletteWrap::-webkit-scrollbar-thumb:hover, #samplesModalCard::-webkit-scrollbar-thumb:hover, #landing::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
   }
-  /* A soft fade at the top/bottom edge of the panel while there is more to scroll that way (scroll-driven, no extra
-     elements; engines without scroll timelines, and reduced-motion users, simply get no fade) */
+  /* A thin line at the top/bottom edge of the panel while there is more to scroll that way. It is the panel's own
+     background (drawn under the content), so it never dims a tile or a label, hovered or not (the earlier version masked
+     the last 22px of the panel and faded whatever sat there). Scroll-driven; engines without scroll timelines and
+     reduced-motion users just get the scrollbar. */
   @property --fadeT { syntax: "<length>"; inherits: false; initial-value: 0px; }
   @property --fadeB { syntax: "<length>"; inherits: false; initial-value: 0px; }
   @keyframes paletteFadeT { from { --fadeT: 0px; } to { --fadeT: 22px; } }
@@ -151,8 +153,9 @@
   @supports (animation-timeline: scroll()) {
     @media (prefers-reduced-motion: no-preference) {
       #paletteWrap {
-        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fadeT), #000 calc(100% - var(--fadeB)), transparent 100%);
-        mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fadeT), #000 calc(100% - var(--fadeB)), transparent 100%);
+        background-image: linear-gradient(#5a6082, #5a6082), linear-gradient(#5a6082, #5a6082);
+        background-repeat: no-repeat; background-position: top left, bottom left;
+        background-size: 100% calc(var(--fadeT) / 11), 100% calc(var(--fadeB) / 11);
         animation: paletteFadeT linear both, paletteFadeB linear both;
         animation-timeline: scroll(self block), scroll(self block);
         animation-range: 0 22px, calc(100% - 22px) 100%;
@@ -833,6 +836,21 @@
   #logoToggle button[aria-pressed="true"] { background: #ffd166; color: #222; }
   body:not(.landing) #logoToggle { display: none; }
   /* ===== END BRAND PREVIEW ===== */
+  /* controls use line icons (2px stroke, round caps); pixel art is for game pieces, ground and effects only */
+  svg.vec { fill: none !important; stroke: currentColor; stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision !important; }
+  svg.vec * { vector-effect: non-scaling-stroke; }
+  .ic svg.vec, .pxi svg.vec { stroke-width: 1.8px; }
+  .swatch.chip svg.vec { width: 24px; height: 24px; pointer-events: none; }
+  .swatch.chip { color: #dfe2ee; }
+  .swatch.chip.selected { color: #222; }
+  .camChip:not(.selected) { filter: none; }
+  /* tile labels: a solid dark chip, medium weight, never ellipsized for the shipped names */
+  .swatch:not(.big):has(> .lbl) .lbl { left: 0; right: 0; bottom: 0; width: auto; height: 20px; line-height: 20px; padding: 0 1px; font-size: 12px; font-weight: 500; letter-spacing: 0.2px; background: #12131c; color: #f2f2f6; text-shadow: none; }
+  @media (min-width: 1500px) and (min-height: 820px) {
+    .swatch.chip svg.vec { width: 26px; height: 26px; }
+    .swatch:not(.big):has(> .lbl) .lbl { font-size: 13px; }
+    .swatch:not(.big):has(> .lbl) { width: 66px; }
+  }
 </style>
 </head>
 <body>
@@ -1246,7 +1264,7 @@
   // "barrier-*" for the same reason cannon2/bomb2 kept their own internal ids after their rename.
   // Short palette names for swatch label bands; the swatch title/caption keeps the full name.
   const DISPLAY_SHORT = { "large stone": "stone", "moving platform": "platform", "trampoline": "bouncer", "locked door": "lock", "black hole": "hole",
-    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "wanderer": "wander", "McDinglechud": "McDing", "Mousecop": "Mouse", "Wheebuns": "Wheebs", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine" };
+    "crystal (pink)": "crystal", "crystal (cyan)": "crystal 2", "indestructible": "tough", "stationary": "statue", "wanderer": "wander", "McDinglechud": "McDing", "Mousecop": "Mouse", "Wheebuns": "Wheebs", "shopping cart": "cart", "rubber duck": "duck", "sleeping crocodile": "croc", "spiked mine": "mine", "snow/ice": "snow" };
   function dispName(n) { return DISPLAY_SHORT[n] || n; }
   // Kid-facing names of the built-in characters. Display only: behavior lives in the temperament, and a built-in
   // def keeps def.name === temperament (findDefaultActorDef, saved projects and samples all rely on that).
@@ -6145,33 +6163,40 @@
     { key: "wrapH", label: "sides loop", glyph: "↔", get: () => wrapHEnabled, set: (v) => { wrapHEnabled = v; } },
     { key: "wrapV", label: "top & bottom loop", glyph: "↕", get: () => wrapVEnabled, set: (v) => { wrapVEnabled = v; } }
   ];
-  // 8x8 pixel icons for the room-rule chips (same pat() convention as CAMERA_ICONS); ink colour is set per state
-  const RULE_ICON_ROWS = {
-    gravity: ["...WW...", "...WW...", ".WWWWWW.", "..WWWW..", "...WW...", "........", "WWWWWWWW", "WWWWWWWW"],
-    wrapH:   ["........", "W......W", "W.W..W.W", "WWWWWWWW", "WWWWWWWW", "W.W..W.W", "W......W", "........"],
-    arrow:   ["...WW...", "...WW...", "...WW...", "...WW...", "W..WW..W", ".WWWWWW.", "..WWWW..", "...WW..."]
+  // Line icons for every control (24x24 grid, drawn with a 2px round stroke in CSS). Game pieces, ground and effects stay pixel art.
+  const VEC_ICONS = {
+    gravity: '<rect x="7" y="16" width="10" height="5" rx="1.5"/><path d="M12 3v9M8 8.5l4 4 4-4"/>',
+    down: '<path d="M12 5v14M6 13l6 6 6-6"/>', up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    left: '<path d="M19 12H5M11 6l-6 6 6 6"/>', right: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    wrapH: '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
+    wrapV: '<path d="M8 20V6M4 10l4-4 4 4M16 4v14M12 14l4 4 4-4"/>',
+    fixed: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12" r="0.6"/>',
+    follow: '<path d="M3 9V6.5A2.5 2.5 0 0 1 5.5 4H9M15 4h3.5A2.5 2.5 0 0 1 21 6.5V9M21 15v2.5a2.5 2.5 0 0 1-2.5 2.5H15M9 20H5.5A2.5 2.5 0 0 1 3 17.5V15"/><circle cx="12" cy="12" r="0.6"/>',
+    runner: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 12h9M13 8.5l3.5 3.5-3.5 3.5"/>',
+    undo: '<path d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/>',
+    redo: '<path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/>',
+    reset: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v5h5"/>',
+    clear: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+    new: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M12 11v6M9 14h6"/>',
+    save: '<path d="M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7"/>',
+    load: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    export: '<path d="M12 15V3M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
+    pause: '<path d="M8 5v14M16 5v14"/>', play: '<path d="M7 4l13 8-13 8z"/>',
+    tabChar: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    tabObj: '<path d="M12 3l8 4v10l-8 4-8-4V7zM4 7l8 4 8-4M12 11v10"/>',
+    tabGround: '<path d="M3 11h18v10H3zM3 16h18M9 11v5M15 16v5"/>',
+    tabPaint: '<path d="M4 20l1-4L16 5l3 3L8 19zM14 7l3 3"/>',
+    tabErase: '<path d="M4 16l9-9a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-7 7H8zM8 20h12M10 10l6 6"/>'
   };
-  function ruleIconArt(key, ink) {
-    const L = { W: ink };
-    if (key === "gravity") return pat(RULE_ICON_ROWS.gravity, L);
-    if (key === "wrapH") return pat(RULE_ICON_ROWS.wrapH, L);
-    if (key === "wrapV") return rotateArt90CW(pat(RULE_ICON_ROWS.wrapH, L));
-    const down = pat(RULE_ICON_ROWS.arrow, L);          // points down
-    if (key === "down") return down;
-    if (key === "up") return rotateArt90CW(rotateArt90CW(down));
-    if (key === "left") return rotateArt90CW(down);
-    return rotateArt90CCW(down);                          // right
-  }
+  function vecIconSVG(name) { return VEC_ICONS[name] ? '<svg class="vec" viewBox="0 0 24 24" aria-hidden="true">' + VEC_ICONS[name] + '</svg>' : ""; }
+  // (old pixel versions of the rule chips removed)
   // One chip of the room-rules block: a pixel icon, on a yellow fill when it is on and a dark fill when it is off.
   function makeRuleChip(iconKey, on, title, caption) {
     const sw = document.createElement("div");
     sw.className = "swatch chip" + (on ? " selected" : " off");
     sw.style.background = on ? PLAYER_COLOR : "#242736";
     sw.title = title;
-    const c = document.createElement("canvas");
-    c.width = ART; c.height = ART;
-    drawArtToCtx(c.getContext("2d"), ruleIconArt(iconKey, on ? "#222222" : "#ffe9a8"), ART);
-    sw.appendChild(c);
+    sw.innerHTML = vecIconSVG(iconKey);
     if (caption) wireCaption(sw, caption);
     return sw;
   }
@@ -6275,13 +6300,10 @@
     CAMERA_MODES.forEach(mode => {
       const isSelected = cameraMode === mode.key;
       const sw = document.createElement("div");
-      sw.className = "swatch chip camChip" + (isSelected ? " selected" : "");
-      sw.style.background = mode.color;
+      sw.className = "swatch chip camChip" + (isSelected ? " selected" : " off");
+      sw.style.background = isSelected ? PLAYER_COLOR : "#242736";
       sw.title = mode.label;
-      const c = document.createElement("canvas");
-      c.width = ART; c.height = ART;
-      drawArtToCtx(c.getContext("2d"), CAMERA_ICONS[mode.key], ART);
-      sw.appendChild(c);
+      sw.innerHTML = vecIconSVG(mode.key);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
       wireCaption(sw, CAPTION_TEXT[mode.key]);
       container.appendChild(sw);
@@ -12195,6 +12217,7 @@
   };
   PX_ICON_ROWS.redo = PX_ICON_ROWS.undo.map(r => r.split("").reverse().join(""));
   function pxIconSVG(name) {
+    if (VEC_ICONS[name]) return vecIconSVG(name);
     const rows = PX_ICON_ROWS[name];
     if (!rows) return "";
     let r = "";
