@@ -211,7 +211,7 @@
      retires — see CAPTION_TEXT/wireCaption/setCaption. Fixed height/position so it never reflows
      the palette around it as text changes length. */
   #captionBar {
-    height: 16px; box-sizing: content-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 16px; font-size: 12px; color: #a9afc4; font-style: italic;
+    height: 18px; box-sizing: content-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 18px; font-size: 12px; color: #a9afc4; font-style: italic;
     padding: 2px 2px 6px 2px; border-bottom: 1px solid #2a2c3a; margin-bottom: 2px;
   }
 
@@ -226,11 +226,13 @@
   .rulesRow { display: flex; align-items: flex-end; gap: 10px; }
   .rulesGroup { display: flex; flex-direction: column; gap: 3px; flex: none; }
   .rulesGroup .swatch-row { flex-wrap: nowrap; }
-  .rulesLbl { font-size: 12px; line-height: 14px; font-weight: 600; color: #b4bad0; white-space: nowrap; }
-  .rulesRow .swatch-row { flex: none; gap: 4px; }
+  .rulesLbl { font-size: 11px; line-height: 13px; font-weight: 600; color: #b4bad0; white-space: nowrap; }
+  .rulesRow .swatch-row { flex: none; gap: 3px; }
+  .rulesRow > .rulesSep { display: none; } /* labels do the grouping; the extra rule would push the Screen chips off the panel */
   .rulesSep { width: 1px; align-self: stretch; background: #2f3245; }
   .rulesLine { display: flex; align-items: center; gap: 5px; align-self: flex-start; padding: 2px; background: #1c1e2a; border: 1px solid #2f3245; border-radius: 9px; }
   .rulesLine .swatch-row { flex: none; flex-wrap: nowrap; gap: 4px; }
+  .swatch.chip.off { border-color: #6d7396; }
   .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
   .swatch.chip canvas { width: 24px; height: 24px; }
   .camChip:not(.selected) { filter: saturate(0.45) brightness(0.8); }
@@ -914,14 +916,14 @@
     <!-- Aesthetics stage 4: Game rules + Camera collapsed into one compact row of icon chips -->
     <div id="rulesBlock">
       <div class="section-title">Room rules</div>
-      <div class="rulesGroup"><div class="rulesLbl">Gravity</div>
-        <div class="rulesLine"><div class="swatch-row" id="gravOnRow" aria-label="Gravity on or off"></div><div class="rulesSep"></div><div class="swatch-row" id="gravityDirRow" aria-label="Gravity direction"></div></div>
-      </div>
       <div class="rulesRow">
+        <div class="rulesGroup"><div class="rulesLbl">Gravity</div><div class="swatch-row" id="gravOnRow" aria-label="Gravity on or off"></div></div>
+        <div class="rulesSep"></div>
         <div class="rulesGroup"><div class="rulesLbl">Edges</div><div class="swatch-row" id="gameRuleSwatches" aria-label="Edges"></div></div>
         <div class="rulesSep"></div>
         <div class="rulesGroup"><div class="rulesLbl">Screen</div><div class="swatch-row" id="cameraSwatches" aria-label="Camera"></div></div>
       </div>
+      <div class="swatch-row" id="gravityDirRow" aria-label="Gravity direction" style="display:none;"></div>
     </div>
 
     <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
@@ -5448,15 +5450,15 @@
   // Ground Effect symbols: 8x8, white shapes with one accent colour, drawn on a dark plate behind the (kept) effect colour
   const GROUND_EFFECT_ROWS = {
     none:     ["WW.WW.WW", "W......W", "........", "W......W", "W......W", "........", "W......W", "WW.WW.WW"],
-    slippery: ["......C.", ".....CCC", "......C.", "WWWWW...", "........", ".WWWWWW.", "........", "..WWWW.."],
-    bouncy:   ["...CC...", "..CCCC..", "...CC...", ".WWWWWW.", "..W..W..", ".WWWWWW.", "..W..W..", ".WWWWWW."],
+    slippery: ["........", "...WWWWW", "WW.WWWCW", "...WWCCW", "WW.WCCCW", "...WWWWW", "........", "........"],
+    bouncy:   ["...CC...", "..CCCC..", "...CC...", ".WWWWWW.", "W.......", ".WWWWWW.", ".......W", ".WWWWWW."],
     hazard:   ["...CC...", "..CCCC..", "..CWWC..", ".CCWWCC.", ".CCWWCC.", "CCCCCCCC", "CCCWWCCC", "CCCCCCCC"],
     lethal:   [".WWWWWW.", "WWWWWWWW", "W..WW..W", "W..WW..W", "WWW..WWW", ".WWWWWW.", ".WCWCWC.", "........"],
-    sticky:   ["CCCCCCCC", "CCCCCCCC", "CC.WW.CC", ".C.WW.C.", ".W.WW.W.", "...WW...", "...WW...", "....W..."],
-    diggable: ["......WW", ".....WW.", "....WW..", "...WW...", "..WWW...", ".WWWWW..", "CCCCCCCC", "CCCCCCCC"],
-    trap:     ["CCCCCCCC", "CCCCCCCC", "C.CC.CC.", "........", ".WW..W..", ".WW..W..", "......W.", "..W....."],
-    indestructible: ["WWW.WWWW", "WWW.WWWW", "........", "WWWW.WWW", "WWWW.WWW", "........", "WWW.WWWW", "WWW.WWWW"],
-    wind:     ["..WWWW..", "........", "WWWWWWC.", "......CC", "WWWWWWC.", "........", "..WWWW..", "........"]
+    sticky:   ["CCCCCCCC", "CWCCCCWC", ".C.CC.C.", ".C.CC.C.", ".W.CC.W.", "...CC...", "...WW...", "........"],
+    diggable: ["..W..W..", "....W...", "CCC...CC", "CCCC.CCC", "CCCCCCCC", "CCWCCCCC", "CCCCCCCC", "CCCCCCCC"],
+    trap:     ["CCC..CCC", "CC....CC", "...WW...", "...WW...", "...WW...", ".WWWWWW.", "..WWWW..", "...WW..."],
+    indestructible: ["WWWWWWWW", "W......W", "W..CC..W", "W.CCCC.W", "W..CC..W", ".W....W.", "..W..W..", "...WW..."],
+    wind:     ["....WWW.", "WWWW...W", "......C.", "WWWWWWCC", "......C.", "........", "WWWW...W", "....WWW."]
   };
   const GROUND_EFFECT_ACCENT = { slippery: "#7fe0ff", bouncy: "#ffb74d", hazard: "#ff8a80", lethal: "#ff5252", sticky: "#d4e157", diggable: "#e0c2b0", trap: "#c9a99a", indestructible: "#b0bec5", wind: "#7de3f0", none: "#9aa0b4" };
   function groundEffectIcon(modifier, windValue) {
@@ -6145,7 +6147,7 @@
   ];
   // 8x8 pixel icons for the room-rule chips (same pat() convention as CAMERA_ICONS); ink colour is set per state
   const RULE_ICON_ROWS = {
-    gravity: ["........", "..WWWW..", ".WWWWWW.", ".WWWWWW.", "..WWWW..", "........", "........", "WWWWWWWW"],
+    gravity: ["...WW...", "...WW...", ".WWWWWW.", "..WWWW..", "...WW...", "........", "WWWWWWWW", "WWWWWWWW"],
     wrapH:   ["........", "W......W", "W.W..W.W", "WWWWWWWW", "WWWWWWWW", "W.W..W.W", "W......W", "........"],
     arrow:   ["...WW...", "...WW...", "...WW...", "...WW...", "W..WW..W", ".WWWWWW.", "..WWWW..", "...WW..."]
   };
@@ -6163,12 +6165,12 @@
   // One chip of the room-rules block: a pixel icon, on a yellow fill when it is on and a dark fill when it is off.
   function makeRuleChip(iconKey, on, title, caption) {
     const sw = document.createElement("div");
-    sw.className = "swatch chip" + (on ? " selected" : "");
-    sw.style.background = on ? PLAYER_COLOR : "#2f3140";
+    sw.className = "swatch chip" + (on ? " selected" : " off");
+    sw.style.background = on ? PLAYER_COLOR : "#242736";
     sw.title = title;
     const c = document.createElement("canvas");
     c.width = ART; c.height = ART;
-    drawArtToCtx(c.getContext("2d"), ruleIconArt(iconKey, on ? "#222222" : PLAYER_COLOR), ART);
+    drawArtToCtx(c.getContext("2d"), ruleIconArt(iconKey, on ? "#222222" : "#ffe9a8"), ART);
     sw.appendChild(c);
     if (caption) wireCaption(sw, caption);
     return sw;
@@ -6188,8 +6190,7 @@
     });
     renderGravityDirSwatches();
   }
-  // Which way gravity pulls (a per-room rule). Always shown, so the rules block never changes height; dimmed while gravity is off,
-  // and clicking a direction then turns gravity on pointing that way.
+  // Which way gravity pulls (a per-room rule). The row only shows while gravity is on; the on/off chip is the only gravity control otherwise.
   const GRAVITY_DIR_BUTTONS = [
     { dir: "down", label: "down" }, { dir: "up", label: "up" },
     { dir: "left", label: "left" }, { dir: "right", label: "right" }
@@ -6198,11 +6199,12 @@
     const row = document.getElementById("gravityDirRow");
     if (!row) return;
     row.innerHTML = "";
+    row.style.display = gravityEnabled ? "" : "none";
     GRAVITY_DIR_BUTTONS.forEach(b => {
       const usable = GRAVITY_DIRS.includes(b.dir), on = gravityEnabled && gravityDir === b.dir;
       const sw = makeRuleChip(b.dir, on, "Gravity pulls " + b.label + (gravityEnabled ? "" : " (gravity is off: click to turn it on)"), CAPTION_TEXT["grav-" + b.dir]);
       sw.dataset.dir = b.dir;
-      sw.style.opacity = !usable ? "0.35" : (gravityEnabled ? "1" : "0.5");
+      sw.style.opacity = usable ? "1" : "0.35";
       sw.style.cursor = usable ? "pointer" : "not-allowed";
       if (usable) sw.addEventListener("click", () => {
         if (!gravityEnabled) { gravityEnabled = true; log("Gravity on."); }
@@ -12213,15 +12215,47 @@
     if (e.target.id === "samplesModalOverlay") closeSamplesModal();
   });
 
-  // keyboard access: swatches are plain divs, so give them a tab stop and let Enter/Space press them
+  // keyboard access: swatches are plain divs, so give them a tab stop, a button role, an on/off state for assistive tech
+  // (aria-pressed follows the "selected" class) and let Enter/Space press them. The palette rows are rebuilt after a
+  // press, so focus is put back on the swatch at the same place in the same row (looked up by the row's id + index,
+  // falling back to the title when the row now holds a different number of swatches).
   (function swatchKeyboard() {
     const pal = document.getElementById("paletteWrap");
-    const mark = el => { if (el.classList && el.classList.contains("swatch") && !el.hasAttribute("tabindex")) { el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); } };
+    const sync = el => {
+      el.setAttribute("aria-pressed", el.classList.contains("selected") ? "true" : "false");
+      if (!el.getAttribute("aria-label") && el.title) el.setAttribute("aria-label", el.title);
+    };
+    const mark = el => {
+      if (!el.classList || !el.classList.contains("swatch")) return;
+      if (!el.hasAttribute("tabindex")) { el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); }
+      sync(el);
+    };
     const sweep = root => { if (!root || root.nodeType !== 1) return; mark(root); root.querySelectorAll(".swatch").forEach(mark); };
     sweep(pal);
-    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(sweep))).observe(pal, { childList: true, subtree: true });
+    new MutationObserver(ms => ms.forEach(m => {
+      if (m.type === "attributes") { if (m.target.classList.contains("swatch")) sync(m.target); }
+      else m.addedNodes.forEach(sweep);
+    })).observe(pal, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    const swatchesOf = host => Array.from(host.querySelectorAll(".swatch"));
     pal.addEventListener("keydown", e => {
-      if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("swatch")) { e.preventDefault(); e.stopPropagation(); e.target.click(); }
+      if (!((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("swatch"))) return;
+      e.preventDefault(); e.stopPropagation();
+      const el = e.target, host = el.parentElement.closest("[id]");
+      const hostId = host && host.id, index = host ? swatchesOf(host).indexOf(el) : -1, count = host ? swatchesOf(host).length : 0, title = el.title;
+      el.click();
+      const restore = () => {
+        const a = document.activeElement;
+        if (a && a !== document.body && pal.contains(a)) return true;
+        const h = hostId && document.getElementById(hostId);
+        if (!h) return false;
+        const list = swatchesOf(h);
+        const t = (list.length === count && list[index]) || list.find(x => x.title === title) || list[Math.min(index, list.length - 1)];
+        if (!t) return false;
+        mark(t); // the observer adds the tab stop a moment later; a div can't take focus without it
+        t.focus({ preventScroll: true });
+        return document.activeElement === t;
+      };
+      if (!restore()) requestAnimationFrame(() => { if (!restore()) setTimeout(restore, 60); });
     });
   })();
 
@@ -16916,9 +16950,9 @@
       el.addEventListener("touchstart", () => capNow(text), { passive: true });
       el.title = text;
     }
-    wireAny($("messTabGame"), "Build your game: pick pieces and place them.");
-    wireAny($("messTabMess"), "Tear it down: random piles, and chaos buttons that shake everything up.");
-    wireAny($("mkStop"), "Stops right now and keeps whatever has happened so far.");
+    wireAny($("messTabGame"), "Build a game, piece by piece.");
+    wireAny($("messTabMess"), "Make a mess: random piles and chaos.");
+    wireAny($("mkStop"), "Stop now and keep what has happened.");
     wireAny($("mkToastUndo"), "Takes back everything that last button just did.");
 
     // the build/chaos buttons: tumble and bombs are live, the rest are placeholders until their stages
