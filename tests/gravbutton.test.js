@@ -43,23 +43,23 @@ const state = pg => ev(pg, "()=>({on:gravityEnabled,dir:gravityDir})");
   // ---- 1. the palette picker (real clicks) ----
   await page.click("#placeTabs [data-tab=object], #placeTabs button:has-text('Objects')").catch(() => {});
   await ev(page, "()=>{ activeTab='object'; renderAll(); }");
-  await page.click("#fixtureSwatches .swatch[title=switch]");
+  await page.click("#fixtureSwatches .swatch[data-name=switch]");
   ok(await ev(page, "()=>document.getElementById('buttonOptBlock').style.display!=='none'"), "picking the Switch shows the 'when touched' row");
   const opts = await ev(page, "()=>[...document.querySelectorAll('#buttonOptSwatches .swatch')].map(s=>s.dataset.opt)");
   ok(opts.join() === "toggle,down,up,left,right,random", "six options: " + opts.join());
   ok(await ev(page, "()=>document.querySelector('#buttonOptSwatches .swatch.selected').dataset.opt==='toggle'"), "toggle is the default");
   await page.click("#buttonOptSwatches .swatch[data-opt=left]");
   ok(await ev(page, "()=>selectedButtonOpt==='left'"), "clicking an option selects it");
-  await page.click("#fixtureSwatches .swatch[title=plate]");
+  await page.click("#fixtureSwatches .swatch[data-name=plate]");
   ok(await ev(page, "()=>document.getElementById('buttonOptBlock').style.display==='none'"), "the row hides for other pieces");
-  await page.click("#fixtureSwatches .swatch[title=switch]");
+  await page.click("#fixtureSwatches .swatch[data-name=switch]");
   await ev(page, "()=>{ selectedChannelColor='red'; renderAll(); }");
   ok(await ev(page, "()=>document.getElementById('buttonOptBlock').style.display==='none'"), "a colored Switch has no gravity options");
   await ev(page, "()=>{ selectedChannelColor=null; renderAll(); }");
 
   // paint through the canvas
   await scene(page, []);
-  await page.click("#fixtureSwatches .swatch[title=switch]");
+  await page.click("#fixtureSwatches .swatch[data-name=switch]");
   await page.click("#buttonOptSwatches .swatch[data-opt=up]");
   const box = await page.locator("#gameCanvas").boundingBox();
   const cellPx = (gx, gy) => { const sc = (box.width - 6) / 768; return [box.x + 3 + (gx * 32 + 16) * sc, box.y + 3 + (gy * 32 + 16) * sc]; };

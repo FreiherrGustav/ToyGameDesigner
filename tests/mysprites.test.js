@@ -38,7 +38,7 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   ok(!(await p.isVisible('#editingNameInput')),'no name box for an enemy');
   await p.click('#playerSwatchRow .swatch');
   ok(!(await p.isVisible('#editingNameInput')),'no name box for the player');
-  await p.click('#customActorSwatches .swatch:not([title^="Create"])');
+  await p.click('#customActorSwatches .swatch:not([data-name^="Create"])');
   ok(await p.isVisible('#editingNameInput'),'name box for a custom character');
   ok(await p.inputValue('#editingNameInput')==='Actor A','shows its name');
   await p.fill('#editingNameInput','Zorp');
@@ -52,12 +52,12 @@ const fs=require('fs');const { chromium } = require('/opt/node22/lib/node_module
   await p.press('#editingNameInput','Enter');
   ok(await p.evaluate(c=>__t.d[c].name==='Zorp',cid),'empty name keeps old');
   // box follows a sprite grab on the custom character? (names stay put) and a different selection
-  await p.click('#customActorSwatches .swatch[title="Create a new custom actor"]');
+  await p.click('#customActorSwatches .swatch[data-name="Create a new custom actor"]');
   ok(/^Actor [A-Z]$/.test(await p.inputValue('#editingNameInput')),'box updates for a new selection: '+await p.inputValue('#editingNameInput'));
-  await p.click('#customActorSwatches .swatch[title="Zorp"]');
+  await p.click('#customActorSwatches .swatch[data-name="Zorp"]');
   ok(await p.inputValue('#editingNameInput')==='Zorp','box updates when going back');
   await p.click('#modeObject');
-  await p.click('#objectSwatches .swatch[title="crate"]');
+  await p.click('#objectSwatches .swatch[data-name="crate"]');
   ok(!(await p.isVisible('#editingNameInput')),'no name box for a crate');
   ok(errs.length===0,'no errors '+errs);
   await b.close();process.exit(f?1:0);
