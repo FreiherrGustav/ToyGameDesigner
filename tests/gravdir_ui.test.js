@@ -27,7 +27,7 @@ const key = (pg, type, k) => pg.evaluate(([t, k]) => window.dispatchEvent(new Ke
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   let { ctx, page, errors } = await open(browser);
   // ---- 1. the rule buttons ----
-  ok(await ev(page, "()=>document.querySelectorAll('#gravityDirRow .swatch').length===4 && [...document.querySelectorAll('#gravityDirRow .swatch')].every(s=>s.style.opacity==='0.5')"), "direction buttons stay visible (dimmed) while gravity is off");
+  ok(await ev(page, "()=>getComputedStyle(document.getElementById('gravityDirRow')).display==='none'"), "direction buttons are hidden while gravity is off (only the on/off chip shows)");
   await page.click("#gravOnRow .swatch");
   ok(await ev(page, "()=>gravityEnabled===true && document.querySelectorAll('#gravityDirRow .swatch').length===4"), "turning gravity on lights the four direction buttons");
   const btns = await ev(page, "()=>[...document.querySelectorAll('#gravityDirRow .swatch')].map(s=>[s.dataset.dir,s.title,s.style.opacity])");
