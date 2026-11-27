@@ -21,7 +21,7 @@ const ok = (c, m) => { if (c) { pass++; console.log("ok  ", m); } else { fails.p
   await page.click("#modePaint");
   const names = await ev(`[...document.querySelectorAll("#presetSwatches .presetSwatch")].map(e=>e.title)`);
   ok(names.includes("sky") && names.includes("cloud") && names.includes("ground"), "Paint presets: " + names);
-  await page.click('#presetSwatches .presetSwatch[title="cloud"]');
+  await page.click('#presetSwatches .presetSwatch[data-name="cloud"]');
   ok(await ev(`selectedBackgroundId==="bgCloud" && !!backgroundTileDefs.bgCloud.overlay && backgroundTileDefs.bgSky`), "cloud preset selects bgCloud with overlay, creates bgSky");
   if (shotDir) await page.screenshot({ path: shotDir + "/paint-presets.png", clip: { x: 0, y: 0, width: 420, height: 768 } });
   // paint sky then one cloud on a blank room

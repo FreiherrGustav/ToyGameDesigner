@@ -18,7 +18,7 @@ src = src.replace(anchor, `  window.__t = { start: (n) => startTutorial(TESTSTEP
   function TESTSTEPS(n) {
     const all = [
       { name: "player", done: () => actors.some(a => a.isPlayer),
-        target: () => ({ sel: '#playerSwatchRow .swatch[title="player"]', prep: () => { document.getElementById("modeCharacter").click(); const e = document.querySelector('#playerSwatchRow .swatch'); if (e) e.scrollIntoView({ block: "center" }); } }) },
+        target: () => ({ sel: '#playerSwatchRow .swatch[data-name="player"]', prep: () => { document.getElementById("modeCharacter").click(); const e = document.querySelector('#playerSwatchRow .swatch'); if (e) e.scrollIntoView({ block: "center" }); } }) },
       { name: "ground", done: () => !!board[14][3], target: () => ({ cell: { x: 3, y: 14, w: 1, h: 1 } }) },
       { name: "play", done: () => appMode === "play", target: () => ({ sel: '#modePlayBtn' }) }
     ];
@@ -53,7 +53,7 @@ fs.writeFileSync(tmp, src);
     await p.waitForTimeout(300);
     ok(await p.evaluate(() => __t.active()), w + ': tutorial active');
     // step 1 targets the player swatch in a scrolled panel
-    const sel = '#playerSwatchRow .swatch[title="player"]';
+    const sel = '#playerSwatchRow .swatch[data-name="player"]';
     let g = await geom(p); ok(near(g, await targetRect(p, sel)), w + ': ring on swatch');
     ok(await p.evaluate(() => { const r = document.querySelector('#tutLayer .tutRing').getBoundingClientRect(); return Number.isInteger(r.left) && Number.isInteger(r.top); }), w + ': ring pixel-aligned');
     // scroll the palette: ring must follow or hide, never point at the wrong place

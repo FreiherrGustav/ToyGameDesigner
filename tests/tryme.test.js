@@ -36,7 +36,7 @@ const ok = (c, m) => { c ? pass++ : fail++; console.log((c ? "ok   " : "FAIL ") 
   const tr = await p.evaluate(() => window.__t.rooms().filter(r => r.tryMe)); ok(ow.rooms >= 3 && tr.length >= 2 && tr.every(r => r.surprises >= 1), "repeat presses keep earlier scenes and add rooms when full (" + JSON.stringify(tr.map(r => r.surprises)) + ")");
   // selection mapping through the real palette + the real button
   await p.click("#modeObject");
-  await p.click('.swatch[title="black hole"]');
+  await p.click('.swatch[data-name="black hole"]');
   ok(await p.evaluate(() => window.__t.sel()) === "hole", "clicking the black hole swatch selects the hole scene");
   const before = await p.evaluate(() => window.__t.rooms().length);
   await p.click("#tryThisBtn");

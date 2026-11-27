@@ -36,7 +36,7 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     let n = await note(p);
     ok(n && n.on && /grass/i.test(n.text) && n.fs >= 15, w + ': ground note is on and readable ' + JSON.stringify(n && [n.text, n.fs]));
     ok(n && n.r[0] >= 0 && n.r[1] >= 0 && n.r[2] <= w && n.r[3] <= h, w + ': note inside the window');
-    await p.click('#groundSwatches .swatch[title="grass"]'); await p.waitForTimeout(900);
+    await p.click('#groundSwatches .swatch[data-name="grass"]'); await p.waitForTimeout(900);
     ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': ring on the whole floor');
     n = await note(p); ok(n && /drag/i.test(n.text), w + ': floor note says what to do');
     { const rg = await ring(p); ok(disjoint(n.r.slice(0, 2).concat([n.r[2] - n.r[0], n.r[3] - n.r[1]]), rg), w + ': note does not sit on the ring'); }
@@ -65,11 +65,11 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     ok(await p.evaluate(() => __t.stepName()) === 'ledge', w + ': a part-built step stays the ledge step');
     await clickCell(p, 12, 12); await clickCell(p, 12, 13); await p.waitForTimeout(1800);
     ok(await p.evaluate(() => __t.stepName()) === 'player', w + ': whole step drawn -> player');
-    await p.click('#playerSwatchRow .swatch[title="player"]'); await p.waitForTimeout(700); await clickCell(p, 6, 13); await p.waitForTimeout(1800);
+    await p.click('#playerSwatchRow .swatch[data-name="player"]'); await p.waitForTimeout(700); await clickCell(p, 6, 13); await p.waitForTimeout(1800);
     await p.click('#characterSwatches .swatch:first-child'); await p.waitForTimeout(700);
     ok(near(await ring(p), (await cellRect(p, 2, 13)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': enemy ring at the far left of the floor');
     await clickCell(p, 2, 13); await p.waitForTimeout(1800);
-    await p.click('#fixtureSwatches .swatch[title="goal"]'); await p.waitForTimeout(900);
+    await p.click('#fixtureSwatches .swatch[data-name="goal"]'); await p.waitForTimeout(900);
     ok(near(await ring(p), (await cellRect(p, 12, 11)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), w + ': goal ring on top of the step');
     await clickCell(p, 12, 11); await p.waitForTimeout(1800);
     n = await note(p); ok(n && /play/i.test(n.text), w + ': play note');
@@ -108,7 +108,7 @@ fs.writeFileSync('/tmp/tut3_hooked.html', src);
     ok(p.errs.length === 0, 'skip: no errors'); await p.close(); }
   // reduced motion: the ring snaps, no fade
   { const p = await open(1366, 635, { reducedMotion: 'reduce' }); await p.click('#landingShowBtn'); await p.waitForTimeout(600);
-    await p.click('#groundSwatches .swatch[title="grass"]'); await p.waitForTimeout(150);
+    await p.click('#groundSwatches .swatch[data-name="grass"]'); await p.waitForTimeout(150);
     ok(near(await ring(p), (await cellRect(p, 2, 14, 11, 1)).map((v, i) => i < 2 ? v - 6 : v + 12), 3), 'reduced motion: ring is on the target within 150 ms');
     ok(p.errs.length === 0, 'reduced: no errors'); await p.close(); }
   await b.close();

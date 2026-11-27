@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TinyGameMaker — a toy for making games</title>
 <!-- Static copies of APP_NAME: crawlers/link previews don't run JS, so a rename is APP_NAME plus these head tags. -->
-<meta name="description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta name="description" content="A tiny game maker where every piece does something.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="TinyGameMaker — a toy for making games">
-<meta property="og:description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta property="og:description" content="A tiny game maker where every piece does something.">
 <meta property="og:image" content="og-image.png"><!-- PLACEHOLDER: replace with the real preview image path/URL -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="TinyGameMaker — a toy for making games">
-<meta name="twitter:description" content="A toy for making games. Drop pieces on the board. They just work.">
+<meta name="twitter:description" content="A tiny game maker where every piece does something.">
 <meta name="twitter:image" content="og-image.png"><!-- PLACEHOLDER: same as og:image -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%231e1f26'/%3E%3Crect x='2' y='2' width='12' height='12' fill='%238d6e63'/%3E%3Crect x='2' y='2' width='12' height='2' fill='%23ffd166'/%3E%3Crect x='2' y='12' width='12' height='2' fill='%23ffd166'/%3E%3Crect x='2' y='2' width='2' height='12' fill='%23ffd166'/%3E%3Crect x='12' y='2' width='2' height='12' fill='%23ffd166'/%3E%3Cpath d='M4 4h2v2H4zM6 6h4v4H6zM10 10h2v2h-2zM10 4h2v2h-2zM4 10h2v2H4z' fill='%235d4037'/%3E%3C/svg%3E">
 <style>
@@ -212,10 +212,16 @@
   /* v2.41: the one fixed caption line replacing every per-section hint paragraph this patch
      retires — see CAPTION_TEXT/wireCaption/setCaption. Fixed height/position so it never reflows
      the palette around it as text changes length. */
+  /* the description line: sits last in the palette, pinned to the bottom of the panel, "Name - description" for the piece that is
+     hovered, keyboard-focused or last selected (else the idle hint). Wraps to as many lines as it needs, never clipped. */
   #captionBar {
-    height: 18px; box-sizing: content-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 18px; font-size: 12px; color: #a9afc4; font-style: italic;
-    padding: 2px 2px 6px 2px; border-bottom: 1px solid #2a2c3a; margin-bottom: 2px;
+    position: sticky; bottom: -12px; z-index: 3; margin-top: auto; margin-bottom: -12px; box-sizing: border-box; min-height: 56px;
+    padding: 8px 6px 20px; background: var(--panel); border-top: 1px solid #454963;
+    font-size: 13px; line-height: 18px; color: #d9dcea; white-space: normal; overflow-wrap: anywhere;
   }
+  #captionBar b { font-weight: 700; color: #fff; }
+  #captionBar.idle { color: #a9afc4; font-style: italic; }
+  .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
   /* Game rules are one of the two headline features (alongside placing a character), not just
      one more section — bigger swatches and a louder title so it reads as "this matters". */
@@ -418,7 +424,7 @@
     .presetSwatch { width: 44px; height: 44px; }
     .presetSwatch canvas { width: 40px; height: 40px; }
     .swatch-row { gap: 8px; }
-    #captionBar { font-size: 13px; height: 18px; line-height: 18px; }
+    #captionBar { font-size: 14px; line-height: 20px; min-height: 64px; bottom: -16px; margin-bottom: -16px; padding-bottom: 24px; }
     #gameWrap { gap: 10px; padding: 8px 16px; }
     #gameWrap .toolbar { gap: 12px; }
     #gameWrap button.tbtn { padding: 8px 16px; font-size: 14px; min-height: 36px; }
@@ -731,7 +737,7 @@
   <div id="landingPanel">
     <div class="main">
     <div id="landingWordmark">TinyGameMaker</div>
-    <div id="landingTagline">A toy for making games. Drop pieces on the board. They just work.</div>
+    <div id="landingTagline">A tiny game maker where every piece does something.</div>
     <div id="landingButtons">
       <button id="landingMakeBtn"><span class="ic" aria-hidden="true">✎</span>Make a game</button>
       <button id="landingSurpriseBtn"><span class="ic" aria-hidden="true">🎲</span>Surprise me</button>
@@ -802,7 +808,7 @@
     <!-- v2.41: the one fixed caption line replacing nearly every per-section hint paragraph that
          used to live in this panel — see CAPTION_TEXT/wireCaption/setCaption. Updates on hover
          (desktop) or last tap (touch) of whatever swatch has something worth saying. -->
-    <div id="captionBar">Hover (or tap) a piece to see what it does.</div>
+    <div id="captionBar">Pick something. See what it does.</div>
 
     <div id="characterPropertiesBlock">
       <div class="section-title">Pick a character</div>
@@ -1539,13 +1545,26 @@
   const CAPTION_TEXT = {
     "rule-gravity": "Things fall. Click to switch it.",
     "grav-down": "Gravity pulls down.", "grav-up": "Gravity pulls up.", "grav-left": "Gravity pulls left.", "grav-right": "Gravity pulls right.",
-    "geo-none": "Open space. Effects still work.", "geo-solid": "A plain block. Solid, nothing special.",
+    "geo-none": "Nothing here. Effects still work.", "geo-solid": "Solid. Plain. Reliable.",
     "rule-wrapH": "Walk off one side, come back the other.",
     "rule-wrapV": "Fall off the bottom, come back on top.",
     // Power-ups (v2.42) — keyed by their collectible defId, wired in renderCollectibleSwatches
     colHeart: "Takes a hit for you.",
     colKey: "Opens gates of its color.",
     colStar: "Nothing can hurt you. For a bit.",
+    // Collectibles that had no line (heart/key/star are above)
+    colCheese: "Cheese. For reasons.", colGem: "Shiny. Collect it.", colCoin: "Counts toward your score.",
+    // Ground textures (all plain solid ground; the look is the only difference)
+    gndGrass: "Walkable. Mostly.", gndStone: "Hard. Very.", gndDirt: "It's dirt.", gndSnow: "Cold, and quiet.",
+    gndRubble: "What's left after something big.", gndBrick: "Someone built this. Be nice.", gndSand: "Gets everywhere.",
+    gndCrystalPink: "Shiny. Solid.", gndCrystalCyan: "Shiny. Solid.",
+    // Characters
+    "pl-player": "That's you. Only one allowed.", "pl-enemy": "The troublemaker.", "pl-addEnemy": "Another troublemaker.",
+    "beh-chaser": "Comes straight for you.", "beh-wanderer": "Goes where it likes.", "beh-fleer": "Runs away. Smart, honestly.", "beh-stationary": "Doesn't move. Still counts.",
+    "draw-own": "Draw your own.",
+    // Traffic and floaters, one line each
+    mvCroc: "Carries you. Teeth are asleep.", mvDuck: "Carries you. Squeaks, probably.", mvTurtle: "Carries you. Shell included.", mvLog: "Carries you. Floats.",
+    mvScooter: "Knocks you back. Look both ways.", mvCart: "Knocks you back. Nobody's driving.",
     // Camera (CAMERA_MODES)
     fixed: "Shows the whole room.",
     follow: "Keeps you in view.",
@@ -1580,7 +1599,7 @@
     hazard: "Stings a little.",
     lethal: "Costs a life, then starts over.",
     sticky: "Slows you to a crawl.",
-    diggable: "Dig in. Hold on.",
+    diggable: "Lean on it and hold Down. Gone in a second.",
     trap: "Looks solid. Crumbles under you.",
     indestructible: "Bombs can't touch it.",
     wind: "Pushes you along.",
@@ -1596,16 +1615,17 @@
   // to keep in sync. Deliberately NOT a floating/positioned tooltip (no placement or collision
   // math needed) and deliberately NOT cleared on touchend — "last tapped" is meant to persist
   // until something else is tapped, same as the spec that asked for this asked for explicitly.
-  const CAPTION_IDLE_TEXT = "Hover (or tap) a piece to see what it does.";
-  function wireCaption(el, text) {
+  const CAPTION_IDLE_TEXT = "Pick something. See what it does.";
+  // wireCaption only records the description on the element; the description line (see swatchKeyboard below) shows it for
+  // whichever piece is hovered, keyboard-focused, tapped or last selected, so it works the same with mouse, touch and keyboard.
+  function wireCaption(el, text, name) {
     if (!text) return;
-    el.addEventListener("mouseenter", () => setCaption(text));
-    el.addEventListener("mouseleave", () => setCaption(""));
-    el.addEventListener("touchstart", () => setCaption(text), { passive: true });
+    el._cap = text;
+    if (name) el._pname = name;
   }
-  function setCaption(text) {
-    document.getElementById("captionBar").textContent = text || CAPTION_IDLE_TEXT;
-  }
+  let descPlain = null, descRefresh = () => {};
+  // a plain message for the line (a Surprise Me caption, "Place a player first."); pointing at a piece replaces it
+  function setCaption(text) { descPlain = text || null; descRefresh(); }
   // v2.9: color-coded switch/plate channels. A small fixed palette, same "pick one" pattern as
   // any other swatch row — "none" (the default) means a switch keeps its original v2.2 behavior
   // (flip the shared gravity toggle) and a door/solid tile is unconditional, exactly as before.
@@ -2735,8 +2755,8 @@
     const reader = new FileReader();
     reader.onload = () => {
       let parsed;
-      try { parsed = JSON.parse(reader.result); } catch (err) { log("That file isn't a project this tool can read."); return; }
-      if (!isValidProjectFile(parsed)) { log("That file isn't a project this tool can read."); return; }
+      try { parsed = JSON.parse(reader.result); } catch (err) { log("Nope, that file isn't one of mine."); return; }
+      if (!isValidProjectFile(parsed)) { log("Nope, that file isn't one of mine."); return; }
       askConfirm("Open this saved game?", "What you're making now gets put away. Undo (Ctrl+Z) can bring it back while this page stays open.", "Open it", "Keep mine").then(ok => {
         if (!ok) return;
         pushUndoSnapshot();
@@ -2782,8 +2802,8 @@
       // every 4 seconds for as long as the tab stays open over the cap.
       if (!autosaveQuotaWarned) {
         autosaveQuotaWarned = true;
-        setAutosaveHint("⚠ Running low on browser storage — auto-save has stopped. Export your game or save a project file as backup.");
-        log("Auto-save is low on space and has stopped — export your game or save a project file as backup.");
+        setAutosaveHint("⚠ Running low on browser storage — auto-save has stopped. Share your game or save a project file as backup.");
+        log("Auto-save is low on space and has stopped — share your game or save a project file as backup.");
       }
     }
   }
@@ -5207,6 +5227,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Draw a new background tile";
+    wireCaption(plus, CAPTION_TEXT["draw-own"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5278,6 +5299,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Create a new ground tile";
+    wireCaption(plus, CAPTION_TEXT["draw-own"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5424,6 +5446,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Create a new lethal tile";
+    wireCaption(plus, CAPTION_TEXT["draw-own"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5574,7 +5597,7 @@
       label.textContent = dispName(def.name);
       sw.appendChild(label);
       sw.addEventListener("click", () => selectCollectible(id));
-      wireCaption(sw, def.moverKind === "floats" ? CAPTION_TEXT.moverFloats : CAPTION_TEXT.moverHurts);
+      wireCaption(sw, CAPTION_TEXT[id] || (def.moverKind === "floats" ? CAPTION_TEXT.moverFloats : CAPTION_TEXT.moverHurts));
       container.appendChild(sw);
     });
   }
@@ -5605,6 +5628,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Create a new collectible";
+    wireCaption(plus, CAPTION_TEXT["draw-own"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5648,6 +5672,8 @@
       sw.className = "swatch" + (selectedChannelColor === color ? " selected" : "") + (full ? " full" : "");
       sw.style.background = color ? CHANNEL_COLOR_HEX[color] : "#2f3140";
       sw.title = (color || "none") + (full ? " — already used by two doors" : "");
+      // wall colours: a coloured wall opens while a switch or plate of its colour is on (keys do nothing here)
+      if (containerId === "groundColorSwatches") wireCaption(sw, color ? "Opens while " + (/^[aeiou]/.test(color) ? "an " : "a ") + color + " switch or plate is on." : "Always blocks.");
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = dispName(color || "none");
@@ -5726,6 +5752,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Add another enemy";
+    wireCaption(plus, CAPTION_TEXT["pl-addEnemy"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5735,6 +5762,7 @@
       e.className = "swatch" + (selected ? " selected" : "");
       e.style.background = "#111";
       e.title = title;
+      wireCaption(e, CAPTION_TEXT["pl-enemy"]);
       const ec = document.createElement("canvas");
       ec.width = ART; ec.height = ART;
       drawArtToCtx(ec.getContext("2d"), art, ART);
@@ -5769,6 +5797,7 @@
     sw.className = "swatch" + (selectedActorKind === "player" ? " selected" : "");
     sw.style.background = "#111";
     sw.title = "player";
+    wireCaption(sw, CAPTION_TEXT["pl-player"]);
     const c = document.createElement("canvas");
     c.width = ART; c.height = ART;
     drawArtToCtx(c.getContext("2d"), activeArtFor(def), ART);
@@ -5854,6 +5883,7 @@
     const plus = document.createElement("div");
     plus.className = "swatch";
     plus.title = "Create a new custom actor";
+    wireCaption(plus, CAPTION_TEXT["draw-own"]);
     plus.style.fontSize = "22px";
     plus.style.fontWeight = "bold";
     plus.textContent = "+";
@@ -5899,6 +5929,7 @@
       sw.style.background = isPlayerOption ? PLAYER_COLOR : TEMPERAMENT_COLORS[temp];
       const name = isPlayerOption ? "Player" : BEHAVIOR_LABELS[temp];
       sw.title = name;
+      if (CAPTION_TEXT["beh-" + temp]) wireCaption(sw, CAPTION_TEXT["beh-" + temp]);
       const label = document.createElement("div");
       label.className = "lbl";
       label.textContent = name;
@@ -6046,6 +6077,7 @@
   // (old pixel versions of the rule chips removed)
   // One chip of the room-rules block: a pixel icon, on a yellow fill when it is on and a dark fill when it is off.
   const RULE_GLYPHS = { gravity: "▼", wrapH: "↔", wrapV: "↕", down: "↓", up: "↑", left: "←", right: "→" };
+  const RULE_NAMES = { gravity: "Gravity", wrapH: "Sides loop", wrapV: "Top & bottom loop", down: "Gravity down", up: "Gravity up", left: "Gravity left", right: "Gravity right" };
   function makeRuleChip(iconKey, on, title, caption) {
     const sw = document.createElement("div");
     sw.className = "swatch chip" + (on ? " selected" : "");
@@ -6055,7 +6087,7 @@
     const g = document.createElement("div");
     g.style.fontSize = "20px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = RULE_GLYPHS[iconKey] || "";
     sw.appendChild(g);
-    if (caption) wireCaption(sw, caption);
+    if (caption) wireCaption(sw, caption, RULE_NAMES[iconKey]);
     return sw;
   }
   function renderGameRuleSwatches() {
@@ -6166,7 +6198,7 @@
       drawArtToCtx(c.getContext("2d"), CAMERA_ICONS[mode.key], ART);
       sw.appendChild(c);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
-      wireCaption(sw, CAPTION_TEXT[mode.key]);
+      wireCaption(sw, CAPTION_TEXT[mode.key], mode.label);
       container.appendChild(sw);
     });
   }
@@ -10828,8 +10860,8 @@
     actor.moverT = 0;
     moverPlaceAt(actor);
     const d = MOVER_DIRS[actor.moverDir];
-    if (d.y !== 0 && !wrapVEnabled) log("A mover needs v-wrap on to carry things around its lane. Turn it on in Game Rules.");
-    else if (d.x !== 0 && !wrapHEnabled) log("A mover needs h-wrap on to carry things around its lane. Turn it on in Game Rules.");
+    if (d.y !== 0 && !wrapVEnabled) log("Turn on Top & bottom loop (under Edges in Room Rules) so it can carry you all the way round.");
+    else if (d.x !== 0 && !wrapHEnabled) log("Turn on Sides loop (under Edges in Room Rules) so it can carry you all the way round.");
   }
 
   function placeNewActor(px, py) {
@@ -10874,7 +10906,7 @@
       actor.spawnY = actor.y = Math.floor(py / TILE) * TILE;
       actor.moverDir = "s"; actor.moverT = 0;
       moverSetDims(actor);
-      if (!wrapVEnabled) log("Tip: turn on v-wrap in Game Rules so a mover can carry things all the way around its lane.");
+      if (!wrapVEnabled) log("Tip: turn on Top & bottom loop (under Edges in Room Rules) so it can carry you all the way round.");
     }
     actors.push(actor);
     // Mutated in place, never reassigned — startPos is shared by reference with the hot room's own
@@ -12099,33 +12131,102 @@
     if (e.target.id === "samplesModalOverlay") closeSamplesModal();
   });
 
-  // keyboard access: swatches are plain divs, so give them a tab stop, a button role, an on/off state for assistive tech
-  // (aria-pressed follows the "selected" class) and let Enter/Space press them. The palette rows are rebuilt after a
-  // press, so focus is put back on the swatch at the same place in the same row (looked up by the row's id + index,
-  // falling back to the title when the row now holds a different number of swatches).
+  // Palette accessibility and the description line.
+  // - swatches are plain divs, so each gets a tab stop, a button role and aria-pressed (follows the "selected" class);
+  // - Enter/Space press them, and focus is put back on the same position after the row is rebuilt;
+  // - every piece with a description gets "Name — description" as its native tooltip (the plain name stays in data-name,
+  //   which is what the tutorial and tests look pieces up by), plus a hidden description for screen readers (aria-describedby);
+  // - the description line (#captionBar, pinned to the bottom of the panel) shows the piece that is hovered, keyboard-focused,
+  //   tapped or last selected, else the idle hint. It reads the DOM state every time, so it survives the rows being rebuilt.
   (function swatchKeyboard() {
     const pal = document.getElementById("paletteWrap");
+    const bar = document.getElementById("captionBar");
+    pal.appendChild(bar);
+    const PIECE = ".swatch, .presetSwatch";
+    const cap1 = t => t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+    let uid = 0, lastPicked = null;
+    const isChip = el => el.classList.contains("chip");
+    const pieceName = el => el._pname || (isChip(el) ? "" : (el.dataset.name || el.title || ""));
+    const describe = el => {
+      if (el._described) return;
+      el._described = true;
+      if (!el.dataset.name && el.title) el.dataset.name = el.title;
+      if (el._cap) {
+        const nm = el._pname || el.dataset.name;
+        if (!isChip(el) && nm) el.title = cap1(nm) + " — " + el._cap;
+        const sr = document.createElement("span"); sr.className = "srOnly"; sr.id = "pd" + (++uid); sr.textContent = el._cap;
+        el.appendChild(sr); el.setAttribute("aria-describedby", sr.id);
+      }
+    };
     const sync = el => {
       el.setAttribute("aria-pressed", el.classList.contains("selected") ? "true" : "false");
-      if (!el.getAttribute("aria-label") && el.title) el.setAttribute("aria-label", el.title);
+      const nm = el.dataset.name || el.title;
+      if (nm && !el.getAttribute("aria-label")) el.setAttribute("aria-label", nm);
     };
     const mark = el => {
-      if (!el.classList || !el.classList.contains("swatch")) return;
+      if (!el.classList || !(el.classList.contains("swatch") || el.classList.contains("presetSwatch"))) return;
       if (!el.hasAttribute("tabindex")) { el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); }
-      sync(el);
+      describe(el); sync(el);
     };
-    const sweep = root => { if (!root || root.nodeType !== 1) return; mark(root); root.querySelectorAll(".swatch").forEach(mark); };
+    const sweep = root => { if (!root || root.nodeType !== 1) return; mark(root); root.querySelectorAll(PIECE).forEach(mark); };
+    const usable = el => el && el.matches && el.matches(PIECE) && !el.closest("#messPanel") && pal.contains(el);
+    const show = (el) => {
+      describe(el);
+      const nm = pieceName(el), cap = el._cap;
+      bar.classList.remove("idle"); bar.textContent = "";
+      if (nm) { const b = document.createElement("b"); b.textContent = cap1(nm); bar.appendChild(b); }
+      if (cap) bar.appendChild(document.createTextNode((nm ? " — " : "") + cap));
+    };
+    const selectedPiece = () => {
+      const all = [...pal.querySelectorAll(".swatch.selected, .presetSwatch.selected")].filter(e => usable(e) && !isChip(e) && e.offsetParent);
+      if (!all.length) return null;
+      const hit = lastPicked && all.find(e => (e.parentElement.closest("[id]") || {}).id === lastPicked.host && pieceName(e) === lastPicked.name);
+      return hit || all[0];
+    };
+    // On touch screens the browser leaves :hover on whatever was last under a finger (and the layout can shift after a tap),
+    // so once a finger has been used, :hover is ignored until a real mouse moves, and the tapped piece is the one shown.
+    let useHover = true, touchPick = null;
+    const keyOf = e => ({ host: (e.parentElement.closest("[id]") || {}).id, name: pieceName(e) });
+    const byPick = pk => pk && [...pal.querySelectorAll(PIECE)].find(e => usable(e) && keyOf(e).host === pk.host && keyOf(e).name === pk.name);
+    function refresh() {
+      const hov = useHover ? pal.querySelector(".swatch:hover, .presetSwatch:hover") : null;
+      const tp = !useHover ? byPick(touchPick) : null;
+      const foc = document.activeElement;
+      const el = (usable(tp) && tp) || (usable(hov) && hov) || (usable(foc) && foc) || null;
+      if (el) { descPlain = null; show(el); return; }
+      if (descPlain) { bar.classList.remove("idle"); bar.textContent = descPlain; return; }
+      const sel = selectedPiece();
+      if (sel) { show(sel); return; }
+      bar.classList.add("idle"); bar.textContent = CAPTION_IDLE_TEXT;
+    }
+    descRefresh = refresh;
+    let pending = false;
+    const later = () => { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; refresh(); }); };
     sweep(pal);
-    new MutationObserver(ms => ms.forEach(m => {
-      if (m.type === "attributes") { if (m.target.classList.contains("swatch")) sync(m.target); }
-      else m.addedNodes.forEach(sweep);
-    })).observe(pal, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-    const swatchesOf = host => Array.from(host.querySelectorAll(".swatch"));
+    new MutationObserver(ms => {
+      let rebuilt = false;
+      ms.forEach(m => {
+        if (m.type === "attributes") { if (m.target.classList.contains("swatch")) sync(m.target); }
+        else { m.addedNodes.forEach(sweep); if (m.addedNodes.length || m.removedNodes.length) rebuilt = true; }
+      });
+      if (rebuilt) later();
+    }).observe(pal, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    pal.addEventListener("mouseover", later); pal.addEventListener("mouseout", later);
+    pal.addEventListener("focusin", later); pal.addEventListener("focusout", later);
+    pal.addEventListener("touchstart", e => { const el = e.target.closest && e.target.closest(PIECE); useHover = false; if (usable(el)) { touchPick = keyOf(el); descPlain = null; show(el); } }, { passive: true });
+    pal.addEventListener("pointermove", e => { if (e.pointerType === "mouse" && !useHover) { useHover = true; touchPick = null; later(); } });
+    pal.addEventListener("click", e => {
+      const el = e.target.closest && e.target.closest(PIECE);
+      if (usable(el) && !isChip(el)) lastPicked = { host: (el.parentElement.closest("[id]") || {}).id, name: pieceName(el) };
+      later(); setTimeout(later, 60);
+    }, true);
+    refresh();
+    const swatchesOf = host => Array.from(host.querySelectorAll(PIECE));
     pal.addEventListener("keydown", e => {
-      if (!((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("swatch"))) return;
+      if (!((e.key === "Enter" || e.key === " ") && e.target.classList && (e.target.classList.contains("swatch") || e.target.classList.contains("presetSwatch")))) return;
       e.preventDefault(); e.stopPropagation();
       const el = e.target, host = el.parentElement.closest("[id]");
-      const hostId = host && host.id, index = host ? swatchesOf(host).indexOf(el) : -1, count = host ? swatchesOf(host).length : 0, title = el.title;
+      const hostId = host && host.id, index = host ? swatchesOf(host).indexOf(el) : -1, count = host ? swatchesOf(host).length : 0, title = el.dataset.name || el.title;
       el.click();
       const restore = () => {
         const a = document.activeElement;
@@ -12133,7 +12234,7 @@
         const h = hostId && document.getElementById(hostId);
         if (!h) return false;
         const list = swatchesOf(h);
-        const t = (list.length === count && list[index]) || list.find(x => x.title === title) || list[Math.min(index, list.length - 1)];
+        const t = (list.length === count && list[index]) || list.find(x => (x.dataset.name || x.title) === title) || list[Math.min(index, list.length - 1)];
         if (!t) return false;
         mark(t); // the observer adds the tab stop a moment later; a div can't take focus without it
         t.focus({ preventScroll: true });
@@ -15337,15 +15438,15 @@
     { name: "ground", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Drag across the glowing squares to draw the ground." } : { b: "Pick the grass tile to start building." }), done: () => tutGroundDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid")
         ? { cell: tutLayout().floor }
-        : tutSwatchTarget('#groundSwatches .swatch[title="grass"]', "modeGround", "ground") },
+        : tutSwatchTarget('#groundSwatches .swatch[data-name="grass"]', "modeGround", "ground") },
     { name: "ledge", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Now add a step up. Fill in the glowing block." } : { b: "Pick the grass tile again." }), done: () => tutLedgeDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "solid")
         ? { cell: tutLayout().ledge }
-        : tutSwatchTarget('#groundSwatches .swatch[title="grass"]', "modeGround", "ground") },
+        : tutSwatchTarget('#groundSwatches .swatch[data-name="grass"]', "modeGround", "ground") },
     { name: "player", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click the glowing square to put your hero there." } : { b: "Now pick your hero." }), done: () => actors.some(a => a.isPlayer),
       target: () => (paintMode === "actor" && selectedActorKind === "player")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().player) }
-        : tutSwatchTarget('#playerSwatchRow .swatch[title="player"]', "modeCharacter", "character") },
+        : tutSwatchTarget('#playerSwatchRow .swatch[data-name="player"]', "modeCharacter", "character") },
     { name: "enemy", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to drop an enemy. It roams around." } : { b: "Pick the Enemy to add some trouble." }), done: () => tutHasEnemy(),
       target: () => (paintMode === "actor" && ((TEMPERAMENTS.includes(selectedActorKind) && selectedActorKind !== "stationary") || (actorDefs[selectedActorKind] && actorDefs[selectedActorKind].enemyType && actorDefs[selectedActorKind].temperament !== "stationary")))
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().enemy) }
@@ -15353,7 +15454,7 @@
     { name: "goal", applies: () => appMode === "build", say: (t) => (t && t.cell ? { b: "Click to plant the flag on top of the step." } : { b: "Pick the goal flag." }), done: () => tutGoalDone(),
       target: () => (paintMode === "tile" && selectedGeometry === "goal")
         ? { cell: Object.assign({ w: 1, h: 1 }, tutLayout().goal) }
-        : tutSwatchTarget('#fixtureSwatches .swatch[title="goal"]', "modeObject", "object") },
+        : tutSwatchTarget('#fixtureSwatches .swatch[data-name="goal"]', "modeObject", "object") },
     { name: "play", say: (t) => ({ b: "All set! Press Play." }), done: () => appMode === "play" || !!(tutorial && (tutorial.lostRun || tutorial.won)), target: () => ({ sel: "#modePlayBtn" }) },
     // In Play: ring on the goal; if the run was lost (no lives left) point at Play again, the existing restart.
     { name: "win", say: (t) => (appMode === "play" ? { t: "Reach the flag!", b: "Walk, jump past the enemy and climb the step." } : (tutorial && tutorial.lostRun ? { b: "Not this time. Press Play to try again." } : { b: "Press Play." })), done: () => !!(tutorial && tutorial.won) || (appMode === "play" && playSessionEnded === "win"),
@@ -15628,7 +15729,7 @@
         '<button class="mkBtn mkChaos" data-mk="lava" type="button">Rising Lava</button>' +
       '</div>' +
       '<div id="mkSession"><span id="mkSessLabel"></span><button id="mkStop" type="button">Stop</button></div></div>' +
-      '<div id="messCaption">Hover (or tap) a button to see what it does.</div>';
+      '<div id="messCaption">Pick a button. See what it does.</div>';
     pal.insertBefore(tabs, pal.firstChild);
     pal.insertBefore(panel, tabs.nextSibling);
 
@@ -16726,7 +16827,7 @@
   // live tool (triggerFlip, beginRoomTransition) — those two calls are stubbed to no-ops in the
   // export, since there's no palette to refresh.
   function exportStandaloneGame() {
-    if (playerRoomId == null) { log("Place a player first — nothing to export yet."); return; }
+    if (playerRoomId == null) { log("Place a player first — nothing to share yet."); return; }
     restoreCollectedPowerups(); // same reason as enterPlayMode: never bake a build-time pickup's absence into a shipped game
 
     // v2.17: gravity/wrap/camera/pan live on each room object now, not as separate top-level
@@ -16932,7 +17033,7 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    log("Exported! Check your downloads for my-game.html");
+    log("Ready to share! Look for my-game.html in your downloads.");
   }
 
   function buildExportHTMLDocument(gameData, constantsSource, soundsSource, functionSource) {
