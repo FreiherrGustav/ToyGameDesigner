@@ -234,7 +234,6 @@
   .rulesSep { width: 1px; align-self: stretch; background: #2f3245; }
   .rulesLine { display: flex; align-items: center; gap: 5px; align-self: flex-start; padding: 2px; background: #1c1e2a; border: 1px solid #2f3245; border-radius: 9px; }
   .rulesLine .swatch-row { flex: none; flex-wrap: nowrap; gap: 4px; }
-  .swatch.chip.off { border-color: #6d7396; }
   .swatch.chip, .swatch.chip:not(.big):has(> .lbl) { width: 36px; height: 36px; border-radius: 6px; }
   .swatch.chip canvas { width: 24px; height: 24px; }
   .camChip:not(.selected) { filter: saturate(0.45) brightness(0.8); }
@@ -6046,12 +6045,16 @@
   function vecIconSVG(name) { return VEC_ICONS[name] ? '<svg class="vec" viewBox="0 0 24 24" aria-hidden="true">' + VEC_ICONS[name] + '</svg>' : ""; }
   // (old pixel versions of the rule chips removed)
   // One chip of the room-rules block: a pixel icon, on a yellow fill when it is on and a dark fill when it is off.
+  const RULE_GLYPHS = { gravity: "▼", wrapH: "↔", wrapV: "↕", down: "↓", up: "↑", left: "←", right: "→" };
   function makeRuleChip(iconKey, on, title, caption) {
     const sw = document.createElement("div");
-    sw.className = "swatch chip" + (on ? " selected" : " off");
-    sw.style.background = on ? PLAYER_COLOR : "#242736";
+    sw.className = "swatch chip" + (on ? " selected" : "");
+    sw.style.background = on ? PLAYER_COLOR : "#2f3140";
     sw.title = title;
-    sw.innerHTML = vecIconSVG(iconKey);
+    // the original text glyphs (kept for the Room Rules chips): gold on dark when off, dark on yellow when on
+    const g = document.createElement("div");
+    g.style.fontSize = "20px"; g.style.color = on ? "#222" : PLAYER_COLOR; g.textContent = RULE_GLYPHS[iconKey] || "";
+    sw.appendChild(g);
     if (caption) wireCaption(sw, caption);
     return sw;
   }
@@ -6155,10 +6158,13 @@
     CAMERA_MODES.forEach(mode => {
       const isSelected = cameraMode === mode.key;
       const sw = document.createElement("div");
-      sw.className = "swatch chip camChip" + (isSelected ? " selected" : " off");
-      sw.style.background = isSelected ? PLAYER_COLOR : "#242736";
+      sw.className = "swatch chip camChip" + (isSelected ? " selected" : "");
+      sw.style.background = mode.color;
       sw.title = mode.label;
-      sw.innerHTML = vecIconSVG(mode.key);
+      const c = document.createElement("canvas");
+      c.width = ART; c.height = ART;
+      drawArtToCtx(c.getContext("2d"), CAMERA_ICONS[mode.key], ART);
+      sw.appendChild(c);
       sw.addEventListener("click", () => selectCameraMode(mode.key));
       wireCaption(sw, CAPTION_TEXT[mode.key]);
       container.appendChild(sw);
