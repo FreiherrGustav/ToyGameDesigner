@@ -1906,6 +1906,8 @@
   let lastHeartCount = 1;          // HUD only: detects a heart being spent so it can pop
   let collectedPowerups = [];      // Build-only: {roomId, actor} so "Reset to start" can bring them back
   let playSessionEnded = null; // null while playing; "win" or "lose" once a session resolves — freezes the frame loop
+  let endShownAt = null; // gameNow() when the win / game over screen began (drives the confetti, title pop and button fade-in)
+  const END_ACTIONS_DELAY_MS = 900; // the beat before the buttons (and any-key restart) work, so a mashed key cannot skip the celebration
   // How long a fresh Play session (or a retry after game-over) holds everything still before the
   // action actually starts — the genre-standard "READY!" beat (Pac-Man, most arcade games) rather
   // than dropping a kid straight into a moving hazard (e.g. Runner mode's own camera) with zero
@@ -2246,7 +2248,7 @@
     rooms.forEach(r => { purgeSpawnedActors(r.actors); resetActorsToSpawn(r.actors, r.startPos); });
     activateRoom(playerRoomId);
     lives = DEFAULT_LIVES;
-    playSessionEnded = null;
+    playSessionEnded = null; endShownAt = null;
     resetScoreAndIntensity();
     clearTransientRuntimeState();
     // Direct feedback: the action used to start the instant Play was pressed, giving a kid zero
@@ -2327,7 +2329,7 @@
     activateRoom(buildSnapshot.currentRoomId);
     buildSnapshot = null;
     appMode = "build";
-    playSessionEnded = null;
+    playSessionEnded = null; endShownAt = null;
     clearTransientRuntimeState();
     setGamePaused(buildPausedMemory);
     keyHintFirstKeyAt = null; keyHintAnyKey = false;
@@ -4430,7 +4432,7 @@
   // not just felt" distinction v2.20.1 gave it, rather than losing it to consolidation; kaboom is
   // the one fixed, non-parametric entry (the author's own hand-designed chip data, unchanged by
   // any knob). ----
-  const CHIP_DESIGNS = {"blackHole":{"ch":[{"t":"p1","n":[56,54,53,52,51,50,49,47,46,45,45,44,43,43,42,41,41,40,38,37,36,35,35,34,34,33,32,27,26,25,25,24,23,22,22,21,21,21,21,21,21,21,21,21],"v":[5,8,11,14,15,15,15,15,15,15,15,14,13,11,10,9,9,8,7,7,7,7,7,7,7,7,6,7,7,6,5,5,3,2,2,1,1,1,1,3,3,2,1,0],"d":2},{"t":"p2","n":[53,50,49,49,49,48,48,47,47,46,46,46,45,45,44,44,58,58,57,57,56,55,54,53,52,51,49,47,45,44,42,41,40,39,38,37,36,34,33,32,29,28,27,21],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,4,5,7,9,10,12,15,15,15,15,15,15,15,12,11,9,8,8,7,6,5,3,2,1,1,1,0],"d":3},{"t":"tr","n":[65,64,63,63,62,61,61,60,60,59,58,58,57,57,56,56,55,55,54,53,53,52,51,51,50,50,49,48,47,47,45,45,44,43,43,42,41,41,46,45,44,44,43,36],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0],"d":0}]},"heartUp":{"ch":[{"t":"p1","n":[64,64,64,64,68,68,68,68,71,71,71,71,71,71,71,71],"v":[12,12,12,11,12,12,12,11,13,12,11,10,8,6,4,2],"d":2},{"t":"p2","n":[52,52,52,52,56,56,56,56,59,59,59,59,59,59,59,59],"v":[6,6,6,5,6,6,6,5,7,6,5,5,4,3,2,1],"d":1}]},"keyGet":{"ch":[{"t":"p1","n":[76,76,76,76,83,83,83,83,83,83,83,83],"v":[12,12,11,10,13,13,12,11,9,7,4,2],"d":1},{"t":"tr","n":[52,52,52,52,59,59,59,59,59,59,59,59],"v":[15,15,15,15,15,15,15,15,15,15,0,0],"d":0}]},"starPower":{"ch":[{"t":"p1","n":[72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96,96,96],"v":[12,12,12,12,12,12,12,12,12,12,12,12,11,11,10,10,9,8,7,6,5,4,2,1],"d":2},{"t":"p2","n":[0,0,72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96],"v":[0,0,6,6,6,6,6,6,6,6,6,6,5,5,5,4,4,3,3,2,2,1,1,0],"d":0}]},"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904],"v":[8,8,7,6,5,4,3,2,1,0],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[29,27,26,24,23,35,34,34,33,32,32,32,31,30,29,28,25,22,21,21,21,21,21,21,21,30,30,30],"v":[15,15,15,15,10,8,7,4,2,2,5,5,4,4,3,3,2,2,2,2,2,3,0,0,0,0,0,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,6,6,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"v":[0,0,15,15,15,15,15,15,9,9,10,10,5,6,6,6,6,5,1,1,1,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]}};
+  const CHIP_DESIGNS = {"blackHole":{"ch":[{"t":"p1","n":[56,54,53,52,51,50,49,47,46,45,45,44,43,43,42,41,41,40,38,37,36,35,35,34,34,33,32,27,26,25,25,24,23,22,22,21,21,21,21,21,21,21,21,21],"v":[5,8,11,14,15,15,15,15,15,15,15,14,13,11,10,9,9,8,7,7,7,7,7,7,7,7,6,7,7,6,5,5,3,2,2,1,1,1,1,3,3,2,1,0],"d":2},{"t":"p2","n":[53,50,49,49,49,48,48,47,47,46,46,46,45,45,44,44,58,58,57,57,56,55,54,53,52,51,49,47,45,44,42,41,40,39,38,37,36,34,33,32,29,28,27,21],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,4,5,7,9,10,12,15,15,15,15,15,15,15,12,11,9,8,8,7,6,5,3,2,1,1,1,0],"d":3},{"t":"tr","n":[65,64,63,63,62,61,61,60,60,59,58,58,57,57,56,56,55,55,54,53,53,52,51,51,50,50,49,48,47,47,45,45,44,43,43,42,41,41,46,45,44,44,43,36],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0],"d":0}]},"heartUp":{"ch":[{"t":"p1","n":[64,64,64,64,68,68,68,68,71,71,71,71,71,71,71,71],"v":[12,12,12,11,12,12,12,11,13,12,11,10,8,6,4,2],"d":2},{"t":"p2","n":[52,52,52,52,56,56,56,56,59,59,59,59,59,59,59,59],"v":[6,6,6,5,6,6,6,5,7,6,5,5,4,3,2,1],"d":1}]},"keyGet":{"ch":[{"t":"p1","n":[76,76,76,76,83,83,83,83,83,83,83,83],"v":[12,12,11,10,13,13,12,11,9,7,4,2],"d":1},{"t":"tr","n":[52,52,52,52,59,59,59,59,59,59,59,59],"v":[15,15,15,15,15,15,15,15,15,15,0,0],"d":0}]},"starPower":{"ch":[{"t":"p1","n":[72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96,96,96],"v":[12,12,12,12,12,12,12,12,12,12,12,12,11,11,10,10,9,8,7,6,5,4,2,1],"d":2},{"t":"p2","n":[0,0,72,76,79,84,76,79,84,88,79,84,88,91,84,88,91,96,91,96,96,96,96,96],"v":[0,0,6,6,6,6,6,6,6,6,6,6,5,5,5,4,4,3,3,2,2,1,1,0],"d":0}]},"thunk":{"ch":[{"t":"tr","n":[45,36.901,32.255,29.589,28.059,27.181,26.678],"v":[15,15,15,15,15,15,0],"d":0},{"t":"nz","n":[6,6,6,6,6,6,6],"v":[10,5,2,1,0,0,0],"d":0}]},"boing":{"ch":[{"t":"p1","n":[49.598,51.367,50.369,49.155,49.463,51.173,52.968,53.677,53.101,51.904],"v":[8,8,7,6,5,4,3,2,1,0],"d":2}]},"trampolineBoing":{"ch":[{"t":"p1","n":[46.598,48.367,47.369,46.155,46.463,48.173,49.968,50.677,50.101,48.904,47.96,47.758,48.223,48.921,49.402,49.436,49.067,48.507,47.996,47.687,47.614,47.716,47.888,48.033,48.09,48.04,47.899,47.702],"v":[12,12,12,12,11,10,9,9,8,7,7,6,6,5,5,5,4,4,4,3,3,3,3,2,2,1,1,0],"d":2},{"t":"tr","n":[34.598,36.367,35.369,34.155,34.463,36.173,37.968,38.677,38.101,36.904,35.96,35.758,36.223,36.921,37.402,37.436,37.067,36.507,35.996,35.687,35.614,35.716,35.888,36.033,36.09,36.04,35.899,35.702],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"pop":{"ch":[{"t":"p1","n":[60,63.111,68.889,72,72,72],"v":[15,15,10,7,5,2],"d":2}]},"splat":{"ch":[{"t":"nz","n":[14,13,11,10,9,7,6,4,3,3,3,3,3,3],"v":[15,15,11,9,6,5,4,3,3,2,2,1,1,0],"d":0},{"t":"tr","n":[40,35.384,32.291,30.217,28.827,27.895,27.27,26.851,26.571,26.383,26.256,26.172,26.115,26.077],"v":[15,15,15,15,15,15,0,0,0,0,0,0,0,0],"d":0},{"t":"p1","n":[52,51.286,50.571,49.857,49.143,48.429,47.714,47,46.286,45.571,44.857,44.143,43.429,42.714],"v":[4,3,3,2,2,1,1,1,1,1,1,0,0,0],"d":0}]},"ding":{"ch":[{"t":"p1","n":[71,71,71,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76,76],"v":[13,13,13,15,13,12,10,9,8,7,6,6,5,4,4,3,3,3,2,2,2,2,1,1,1,1,0,0],"d":1},{"t":"p2","n":[83,83,83,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[0,0,0,6,5,4,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]},"creak":{"gain":1.4,"ch":[{"t":"tr","n":[30.5,30.5,30.5,30.5,30.5,32.8,32.8,32.8,33.8,33.8],"v":[15,0,0,0,0,15,0,0,15,0],"d":0},{"t":"p1","n":[42.5,42.5,42.5,42.5,42.5,44.8,44.8,44.8,45.8,45.8],"v":[8,0,0,0,0,8,0,0,8,0],"d":2}]},"wind":{"gain":0.55,"ch":[{"t":"nz","n":[10.245,10.49,10.734,10.975,11.215,11.451,11.684,11.913,12.138,12.357,12.571,12.778,12.978,13.172,13.358,13.536,13.705,13.865,14.016,14.157,14.289,14.41,14.52,14.619,14.708,14.785,14.85,14.904,14.946,14.976,14.994,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15],"v":[1,1,1,1,2,2,2,3,3,3,5,5,6,6,6,8,9,9,10,10,10,11,14,14,14,14,15,15,15,15,15,15,15,14,13,11,10,10,9,8,7,7,6,6,5,5,4,4,4,3,3,3,2,2,2,2,2,2,1,1,1,0],"d":0},{"t":"p1","n":[72.687,73.372,74.054,74.731,75.402,76.064,76.716,77.358,77.986,78.6,79.197,79.778,80.34,80.882,81.402,81.899,82.373,82.822,83.245,83.641,84.008,84.347,84.656,84.934,85.182,85.397,85.58,85.731,85.848,85.933,85.983,86,86,84.792,83.688,82.679,81.757,80.915,80.145,79.442,78.8,78.213,77.677,77.187,76.739,76.33,75.956,75.615,75.303,75.018,74.757,74.519,74.302,74.103,73.922,73.756,73.604,73.466,73.339,73.224,73.118,72],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":2}]},"swoosh":{"ch":[{"t":"nz","n":[14,12,11,10,9,8,7,7,6,5,5,4],"v":[15,15,15,12,9,8,7,6,5,4,3,3],"d":0}]},"zip":{"ch":[{"t":"p1","n":[48,48.993,50.62,52.621,54.913,57.448,60.195,63.133,66.243,69.514,72.933,76.493,80.184,84],"v":[12,11,11,10,10,9,8,8,7,6,5,4,3,0],"d":1},{"t":"p2","n":[55,55.993,57.62,59.621,61.913,64.448,67.195,70.133,73.243,76.514,79.933,83.493,87.184,91],"v":[0,0,6,6,6,5,5,4,4,3,3,2,2,0],"d":0},{"t":"nz","n":[15,12,15,12,15,12,15,12,15,12,15,12,15,12],"v":[11,5,8,4,8,3,5,3,5,1,3,1,0,0],"d":1}]},"cat":{"ch":[{"t":"p1","n":[57,57.535,58.929,60.872,63.049,65.148,66.856,67.785,67.765,67.763,68,68.265,68.428,68.428,68.253,67.726,66.903,65.955,65.009,64.135,63.336,62.579,61.831,61.097,60.443,60],"v":[5,7,9,11,14,14,14,14,14,14,14,14,14,14,14,9,8,7,6,5,4,4,2,2,1,1],"d":[1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,2]},{"t":"p2","n":[69,69.535,70.929,72.872,75.049,77.148,78.856,79.785,79.765,79.763,80,80.265,80.428,80.428,80.253,79.726,78.903,77.955,77.009,76.135,75.336,74.579,73.831,73.097,72.443,72],"v":[0,0,0,0,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],"v":[5,5,5,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":1}]},"kaboom":{"fps":60,"ch":[{"t":"p1","n":[29,27,26,24,23,35,34,34,33,32,32,32,31,30,29,28,25,22,21,21,21,21,21,21,21,30,30,30],"v":[15,15,15,15,10,8,7,4,2,2,5,5,4,4,3,3,2,2,2,2,2,3,0,0,0,0,0,0],"d":[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]},{"t":"nz","n":[0,0,6,6,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"v":[0,0,15,15,15,15,15,15,9,9,10,10,5,6,6,6,6,5,1,1,1,2,2,0,0,0,0,0],"d":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}]},"fanfare":{"ch":[{"t":"p1","n":[72,72,72,72,72,76,76,76,76,76,79,79,79,79,79,84,84,84,84,84,72,72,72,79,79,79,79,79,79,84,84,84,84,84,84,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88,88],"v":[13,13,13,12,12,13,13,13,12,12,13,13,13,12,12,13,13,13,12,12,0,0,0,13,13,13,13,12,12,13,13,13,13,12,12,13,13,13,13,13,13,13,13,13,12,12,11,11,10,10,9,9,8,7,7,6,6,5,5,4,4,3,2,2,1,1,0,0,0],"d":2},{"t":"p2","n":[60,60,60,60,60,64,64,64,64,64,67,67,67,67,67,72,72,72,72,72,60,60,60,67,67,67,67,67,67,72,72,72,72,72,72,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84,84],"v":[6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,0,0,0,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,5,5,5,5,4,4,4,3,3,3,3,2,2,2,2,1,1,1,0,0,0,0,0],"d":1},{"t":"tr","n":[60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,55,55,55,55,55,55,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60,60],"v":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,0,0,0,0,0,0,0,0,0,0,0],"d":0},{"t":"nz","n":[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],"v":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,9,8,7,7,6,5,5,4,4,3,3,2,2,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"d":0}]}};
   // Movers: hand-written like every other design here, never listened to — retune in the sound designer.
   // honk = two short square-wave beeps (a hurts mover's hit); splash = a noise burst over a falling pulse
   // (dropping into water instead of onto a log).
@@ -4468,7 +4470,7 @@
   const SOUND_LIMITS = {
     boing: { gap: 250, max: 1 }, trampolineBoing: { gap: 250, max: 1 },
     thunk: { gap: 90, max: 2 }, splat: { gap: 150, max: 1 },
-    kaboom: { gap: 100, max: 2 }, cat: { gap: 120, max: 2 },
+    kaboom: { gap: 100, max: 2 }, cat: { gap: 120, max: 2 }, fanfare: { gap: 1500, max: 1 },
     honk: { gap: 250, max: 1 }, splash: { gap: 250, max: 1 }, blackHole: { gap: 200, max: 1 }
   };
   const SOUND_MAX_TOTAL = 10;
@@ -4576,7 +4578,7 @@
     pop: () => playChip("pop"), spawn: () => playChip("pop"),
     splat: () => playChip("splat"), gotcha: () => playChip("splat"),
     boom: () => playChip("kaboom"), shot: () => playChip("kaboom"),
-    celebrate: () => playChip("ding"),
+    celebrate: () => playChip("ding"), victory: () => playChip("fanfare"),
     honk: () => playChip("honk"), splash: () => playChip("splash"), blackHole: () => playChip("blackHole"),
     heartUp: () => playChip("heartUp"), keyGet: () => playChip("keyGet"),
     starPower: () => playChip("starPower"), starEnd: () => playChip("starPower", 0.5, 0.6),
@@ -6452,6 +6454,7 @@
   document.getElementById("modePlayBtn").addEventListener("click", () => {
     // clicking Play while already playing is "try again" — restart fresh from the same snapshot
     if (appMode === "build") enterPlayMode();
+    else if (playSessionEnded && endShownAt != null && gameNow() - endShownAt < END_ACTIONS_DELAY_MS) return; // let the win / game over beat play
     else restartPlaySessionFromSnapshot();
   });
 
@@ -7718,8 +7721,8 @@
   // until the kid presses Play again.
   function triggerWin() {
     if (playSessionEnded) return;
-    playSessionEnded = "win";
-    sounds.celebrate();
+    playSessionEnded = "win"; endShownAt = gameNow();
+    sounds.victory();
     const player = actors.find(a => a.isPlayer);
     if (player) playRecipe(player, "celebrationBurst");
     log("You win!");
@@ -7777,7 +7780,7 @@
   // triggerLethalHazard, which fires them itself after its own splat animation finishes instead).
   function triggerGameOver(silent) {
     if (playSessionEnded) return;
-    playSessionEnded = "lose";
+    playSessionEnded = "lose"; endShownAt = gameNow();
     renderPlayHUD();
     if (!silent) { sounds.gameOver(); log("Game over!"); }
   }
@@ -13263,7 +13266,9 @@
     const scPlayer = actors.find(a => a.isPlayer);
     const midSplat = (scPlayer && animState[scPlayer.id] && animState[scPlayer.id].recipe === "splatDisintegrate") ||
       fxGhosts.some(g => g.recipe === "blackHoleSuck" && g.holdOverlay);
-    if (appMode === "play" && playSessionEnded && !midSplat && !landingActive) drawPlaySessionEndOverlay();
+    const endShown = appMode === "play" && playSessionEnded && !midSplat && !landingActive;
+    updateEndActions(!!endShown);
+    if (endShown) drawPlaySessionEndOverlay();
     else if (appMode === "play" && playReadyUntil != null) drawReadyOverlay();
     if (appMode === "play" && !landingActive && !playSessionEnded) drawKeyHint();
     else if (appMode === "build" && !landingActive) drawKeyHint();
@@ -13451,21 +13456,94 @@
   // Win and game-over both get a real screen — distinct from a mid-game reset, per the point
   // of tracking lives at all. Drawn straight on the canvas, matching how every other piece of
   // feedback in this toy already works, rather than a separate DOM overlay.
+  // Pixel confetti: a pure function of the time since the win began (no particle state to keep, so it freezes with the game clock
+  // and replays identically). Two waves of whole-pixel squares and short streamers burst up from behind the title, then fall.
+  const CONFETTI_COLORS = ["#ffd166", "#ef476f", "#06d6a0", "#118ab2", "#ff9f1c", "#ffffff", "#c77dff", "#f94144"];
+  function confettiHash(i, k) { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); }
+  function drawConfetti(t) {
+    const W = gameCanvas.width, H = gameCanvas.height, N = 210;
+    for (let i = 0; i < N; i++) {
+      const delay = (i % 2) * 0.35 * confettiHash(i, 9) * 1.4;
+      const age = t / 1000 - delay;
+      const life = 2.6 + confettiHash(i, 5) * 1.1;
+      if (age < 0 || age > life) continue;
+      const ang = -Math.PI / 2 + (confettiHash(i, 1) - 0.5) * 2.7;
+      const sp = 170 + confettiHash(i, 2) * 420;
+      const x = W / 2 + Math.cos(ang) * sp * age * (1 - 0.35 * Math.min(1, age)) + Math.sin(age * (3 + confettiHash(i, 6) * 4) + i) * 10;
+      const y = H * 0.4 + Math.sin(ang) * sp * age + 0.5 * 760 * age * age;
+      if (y > H + 10 || x < -10 || x > W + 10) continue;
+      if (age > life - 0.4 && Math.floor(age * 18) % 2 === 0) continue; // blink out
+      const big = confettiHash(i, 3) > 0.55, stream = confettiHash(i, 4) > 0.8;
+      const w = stream ? 12 : (big ? 8 : 5), h = stream ? 5 : w;
+      gctx.fillStyle = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+      gctx.fillRect(Math.round(x), Math.round(y), w, h);
+    }
+  }
+  // The two actions under the win / game over text. Real buttons (keyboard, touch and screen reader friendly), made once.
+  // They stay disabled for a beat so a key mashed at the moment of winning cannot skip the celebration.
+  function ensureEndActions() {
+    let box = document.getElementById("endActions");
+    if (box) return box;
+    const st = document.createElement("style");
+    st.textContent = "#endActions{position:fixed;z-index:40;display:none;gap:12px;transform:translateX(-50%);align-items:center;justify-content:center}" +
+      "#endActions button{font:700 18px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',Verdana,sans-serif;padding:13px 22px;border-radius:10px;border:2px solid #ffd166;background:#2a2c37;color:#f2f2f2;cursor:pointer}" +
+      "#endActions button.primary{background:#ffd166;color:#222}" +
+      "#endActions button:hover:not(:disabled){filter:brightness(1.12)}" +
+      "#endActions button:focus-visible{outline:3px solid #fff;outline-offset:2px}" +
+      "#endActions button:disabled{cursor:default}";
+    document.head.appendChild(st);
+    box = document.createElement("div"); box.id = "endActions"; box.setAttribute("role", "group"); box.setAttribute("aria-label", "What next?");
+    const again = document.createElement("button"); again.id = "endAgainBtn"; again.type = "button"; again.className = "primary"; again.textContent = "Play again";
+    again.addEventListener("click", () => { if (IS_STANDALONE_EXPORT) restartStandaloneGame(); else restartPlaySessionFromSnapshot(); });
+    box.appendChild(again);
+    if (!IS_STANDALONE_EXPORT) { // an exported game has no editor to go back to
+      const apart = document.createElement("button"); apart.id = "endApartBtn"; apart.type = "button"; apart.textContent = "Take it apart";
+      apart.addEventListener("click", () => exitToBuildMode());
+      box.appendChild(apart);
+    }
+    document.body.appendChild(box);
+    document.addEventListener("keydown", e => { // Enter plays again once the beat is over
+      if (e.key !== "Enter" || box.style.display === "none" || again.disabled) return;
+      if (document.activeElement && document.activeElement.tagName === "BUTTON" && document.activeElement.parentElement === box) return;
+      e.preventDefault(); again.click();
+    });
+    return box;
+  }
+  function updateEndActions(show) {
+    const box = show ? ensureEndActions() : document.getElementById("endActions");
+    if (!box) return;
+    if (!show) { if (box.style.display !== "none") box.style.display = "none"; return; }
+    const r = gameCanvas.getBoundingClientRect();
+    const t = endShownAt == null ? 0 : gameNow() - endShownAt;
+    const ready = t >= END_ACTIONS_DELAY_MS;
+    box.style.display = "flex";
+    box.style.left = (r.left + r.width / 2) + "px";
+    box.style.top = (r.top + r.height * 0.64) + "px";
+    box.style.opacity = reducedMotion() ? "1" : String(Math.max(0, Math.min(1, (t - 500) / 400)));
+    box.querySelectorAll("button").forEach(b => { b.disabled = !ready; });
+  }
   function drawPlaySessionEndOverlay() {
     const isWin = playSessionEnded === "win";
+    const t = endShownAt == null ? 9999 : gameNow() - endShownAt;
     gctx.save();
     gctx.fillStyle = "rgba(10,10,14,0.78)";
     gctx.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+    if (isWin && !reducedMotion()) drawConfetti(t);
     gctx.textAlign = "center";
+    // the title pops in with a little overshoot, then settles (a win only; skipped for reduced motion)
+    const pop = isWin && !reducedMotion() && t < 520 ? (() => { const k = t / 520, c1 = 2.2, c3 = c1 + 1; return 0.35 + 0.65 * (1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2)); })() : 1;
+    gctx.translate(gameCanvas.width / 2, gameCanvas.height / 2 - 12);
+    gctx.scale(pop, pop);
+    gctx.font = "bold 52px sans-serif";
+    if (isWin) { gctx.lineWidth = 8; gctx.lineJoin = "round"; gctx.strokeStyle = "#3a2a00"; gctx.strokeText("YOU WIN!", 0, 0); }
     gctx.fillStyle = isWin ? "#ffd166" : "#ef5350";
-    gctx.font = "bold 42px sans-serif";
-    gctx.fillText(isWin ? "YOU WIN!" : "GAME OVER", gameCanvas.width / 2, gameCanvas.height / 2 - 12);
+    if (!isWin) gctx.font = "bold 42px sans-serif";
+    gctx.fillText(isWin ? "YOU WIN!" : "GAME OVER", 0, 0);
+    gctx.setTransform(1, 0, 0, 1, 0, 0);
+    gctx.textAlign = "center";
     gctx.fillStyle = "#f2f2f2";
     gctx.font = "18px sans-serif";
-    gctx.fillText("Score: " + score, gameCanvas.width / 2, gameCanvas.height / 2 + 26);
-    gctx.font = "14px sans-serif";
-    gctx.fillStyle = "#bbb";
-    gctx.fillText(IS_STANDALONE_EXPORT ? "Press any key or tap to play again" : "Press ▶ Play to try again", gameCanvas.width / 2, gameCanvas.height / 2 + 52);
+    gctx.fillText("Score: " + score, gameCanvas.width / 2, gameCanvas.height / 2 + 30);
     gctx.restore();
   }
 
@@ -16876,7 +16954,7 @@
       spawnActorAt, tickSpawners, cellOccupiedByActor, spawnCellHeldByStone, ejectFromSpawnCell, despawnSpawnedActor,
       stepActor, tick,
       drawArtScaled, drawArtScaledLive, artCacheCanvas, drawWindArrow, drawRotatedArt, drawGameplayTile, drawFanStream, renderRoomContents, renderActors, actorLiftShown, pictureOverhang, artEmptyEdges,
-      currentPoseFor, drawPlaySessionEndOverlay, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
+      currentPoseFor, drawPlaySessionEndOverlay, drawConfetti, ensureEndActions, updateEndActions, confettiHash, drawReadyOverlay, keyHintText, drawKeyHint, renderGame, renderPlayHUD,
       playRecipe, sampleRecipe, actorArtNow, spawnFxGhost, renderFxGhosts, swallowIntoBlackHole,
       getAudioCtx, getMasterBus, claimVoice, centsToRatio, getNoiseBuffer, velAmpScale, velCutoffScale, velEnvAmountScale, velVibratoScale,
       playPatch, playActorSound,
@@ -17002,6 +17080,7 @@
       `const ACTOR_CONTACT_COOLDOWN_MS = ${ACTOR_CONTACT_COOLDOWN_MS};`,
       `const DEFAULT_LIVES = ${DEFAULT_LIVES};`,
       `const POWERUP_DEF_IDS = ${JSON.stringify(POWERUP_DEF_IDS)}, MAX_SPARE_HEARTS = ${MAX_SPARE_HEARTS}, HIT_INVULN_MS = ${HIT_INVULN_MS}, STAR_DURATION_MS = ${STAR_DURATION_MS}, STAR_WARNING_MS = ${STAR_WARNING_MS}, KEY_TINT_FROM = ${JSON.stringify(KEY_TINT_FROM)};`,
+      `const END_ACTIONS_DELAY_MS = ${END_ACTIONS_DELAY_MS}, CONFETTI_COLORS = ${JSON.stringify(CONFETTI_COLORS)};`,
       `const READY_DURATION_MS = ${READY_DURATION_MS}, CLOUD_DRIFT_PX_S = ${CLOUD_DRIFT_PX_S}, SKY_CLIP_IDS = ${JSON.stringify(SKY_CLIP_IDS)};`,
       `const IDLE_BREATH_STEPS = ${JSON.stringify(IDLE_BREATH_STEPS)}, IDLE_BREATH_MS = ${IDLE_BREATH_MS}, IDLE_STRETCH_ROW = ${IDLE_STRETCH_ROW};`,
       `const LEVEL_RESET_DELAY_MS = ${LEVEL_RESET_DELAY_MS};`,
@@ -17135,6 +17214,7 @@
   let lives = DEFAULT_LIVES;
   let spareHearts = 0, starTimer = 0, keyChannelsUnlocked = {}, lockedDoorsOpen = {}, collectedPowerups = [], lastHeartCount = 1;
   let playSessionEnded = null;
+  let endShownAt = null;
   let cloudDriftT0 = 0;
   let tickFrameCounter = 0;
   let playReadyUntil = null;
@@ -17195,7 +17275,7 @@
     score = 0; intensity = 0;
     lives = DEFAULT_LIVES;
     spareHearts = 0; starTimer = 0; keyChannelsUnlocked = {}; lockedDoorsOpen = {};
-    playSessionEnded = null;
+    playSessionEnded = null; endShownAt = null;
     clearGameTimers();
     levelResetTimer = null; levelResetPending = false;
     setGamePaused(false);
@@ -17210,7 +17290,7 @@
 
   const keys = {};
   window.addEventListener("keydown", (e) => {
-    if (playSessionEnded) { restartStandaloneGame(); return; }
+    if (playSessionEnded) { if (gameNow() - endShownAt >= END_ACTIONS_DELAY_MS && !(e.target && e.target.tagName === "BUTTON")) restartStandaloneGame(); return; }
     keyHintAnyKey = true;
     if ((e.key === "p" || e.key === "P") && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); if (!e.repeat) togglePause(); return; }
     const map = ["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," ","w","W","a","A","s","S","d","D"];
@@ -17242,8 +17322,8 @@
   });
   // a hidden tab pauses the game (a kid switching tabs must not come back to a dead character)
   document.addEventListener("visibilitychange", () => { if (document.hidden && !playSessionEnded) setGamePaused(true); });
-  gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded) restartStandaloneGame(); });
-  gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
+  gameCanvas.addEventListener("mousedown", () => { if (playSessionEnded && gameNow() - endShownAt >= END_ACTIONS_DELAY_MS) restartStandaloneGame(); });
+  gameCanvas.addEventListener("touchstart", (e) => { if (playSessionEnded) { if (gameNow() - endShownAt >= END_ACTIONS_DELAY_MS) restartStandaloneGame(); e.preventDefault(); } }, { passive: false });
 
   // Basic error boundary, same as the live builder's (see handleFatalError, shared verbatim via
   // functionSource): catches anything uncaught anywhere, not just inside the frame loop. Resets
