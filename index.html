@@ -6109,8 +6109,8 @@
   }
   // Which way gravity pulls (a per-room rule). The row only shows while gravity is on; the on/off chip is the only gravity control otherwise.
   const GRAVITY_DIR_BUTTONS = [
-    { dir: "down", label: "down" }, { dir: "up", label: "up" },
-    { dir: "left", label: "left" }, { dir: "right", label: "right" }
+    { dir: "down", glyph: "↓", label: "down" }, { dir: "up", glyph: "↑", label: "up" },
+    { dir: "left", glyph: "←", label: "left" }, { dir: "right", glyph: "→", label: "right" }
   ];
   function renderGravityDirSwatches() {
     const row = document.getElementById("gravityDirRow");
